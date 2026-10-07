@@ -1,4 +1,4 @@
-# magic OS build script   (run from an ADMIN PowerShell - diskpart builds the ESP image)
+# magic OS build script   (run from an ADMIN PowerShell - diskpart builds the system disk)
 #   .\scripts\build.ps1                 build only
 #   .\scripts\build.ps1 -Run            build, then launch QEMU
 #   .\scripts\build.ps1 -KeepFallback   bootuni will NOT delete EFI\BOOT\BOOTX64.EFI
@@ -11,9 +11,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $b    = "$root\build"
 $edk2 = if ($env:EDK2) { $env:EDK2 } else { "C:\edk2" }
 $mke2fs = "C:\msys64\usr\bin\mke2fs.exe"
-$vhd    = "$b\esp.vhd"
-$espimg = "$b\esp.img"
-$mnt    = "$b\espmnt"
+$vhd    = "$b\magic-disk.vhd"
+$diskimg = "$b\magic-disk.img"
 
 function Run-Diskpart($text, [switch]$IgnoreErrors) {
     $f = "$b\dp.txt"
@@ -77,43 +76,58 @@ Invoke-Tool clang @common -c "$root\kernel\kernel.c" -o "$b\obj\kernel.o"
 Invoke-Tool lld-link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase `
     "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\hal.lib"
 
-# ---- rootfs -> ext4 image (no mounting, no admin needed) ----
-$img   = "$b\magic.img"
+# ---- build one GPT disk: FAT32 ESP + ext4 system partition ----
 $feats = "^has_journal,^metadata_csum,^64bit,^resize_inode"   # keep it simple for the loader
-Remove-Item $img -ErrorAction SilentlyContinue
-if (Test-Path $mke2fs) {
-    Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats -d (Fwd "$b\rootfs") (Fwd $img) 64M
-} else {
-    $wr = (wsl wslpath -a (Fwd "$b\rootfs")).Trim()
-    $wi = (wsl wslpath -a (Fwd $img)).Trim()
-    Invoke-Tool wsl mke2fs -t ext4 -b 4096 -L magic -O $feats -d $wr $wi 64M
-}
-
-# ---- esp folder -> GPT disk with a FAT32 partition, mounted into a folder (no drive letter) ----
+$usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
+$espLetter = @("Z", "Y", "X", "W", "V", "U", "T", "S") |
+    Where-Object { $_ -notin $usedLetters } | Select-Object -First 1
+if (-not $espLetter) { throw "no free drive letter is available to stage the EFI System Partition" }
+$espRoot = "$($espLetter):\"
 Detach-Vhd                                   # a failed earlier run may have left it attached
-Remove-Item $vhd, $espimg -ErrorAction SilentlyContinue
-try { [IO.Directory]::Delete($mnt) } catch {}          # only succeeds if empty / dangling
-New-Item -ItemType Directory -Force $mnt | Out-Null
+Remove-Item $vhd, $diskimg -ErrorAction SilentlyContinue
 
 try {
     [void](Run-Diskpart @"
-create vdisk file="$vhd" maximum=64 type=fixed
+create vdisk file="$vhd" maximum=256 type=fixed
 select vdisk file="$vhd"
 attach vdisk
 convert gpt
-create partition primary
+select partition 1
+delete partition override
+create partition efi size=128
 format fs=fat32 quick label=MAGICESP
-assign mount="$mnt"
+assign letter=$espLetter
+create partition primary size=96
 "@)
-    $item = Get-Item $mnt -Force
-    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "the FAT volume did not get mounted at $mnt"
+    if (-not (Test-Path $espRoot)) { throw "the EFI System Partition was not mounted at $espRoot" }
+    Copy-Item "$b\esp\*" $espRoot -Recurse -Force
+
+    $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
+    $partitions = @(Get-Partition -DiskNumber $disk.Number)
+    if ($partitions.Count -ne 2) {
+        throw "expected exactly two GPT partitions, found $($partitions.Count)"
     }
-    Copy-Item "$b\esp\*" $mnt -Recurse -Force
+    $rootPartition = $partitions |
+        Where-Object { $_.Size -eq 96MB } | Select-Object -First 1
+    if (-not $rootPartition) { throw "the ext4 partition was not created" }
+    $extOffset = [uint64]$rootPartition.Offset
+    $extBlocks = [uint64][Math]::Floor($rootPartition.Size / 4096)
 } finally {
-    Detach-Vhd                               # also unmounts the folder
+    Detach-Vhd                               # also unmounts the ESP folder
 }
-Invoke-Tool qemu-img convert -f vpc -O raw $vhd $espimg
+
+# Format ext4 directly inside partition 2 of the detached VHD.
+if (Test-Path $mke2fs) {
+    Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
+        -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $vhd) "$extBlocks"
+} else {
+    $wr = (wsl wslpath -a (Fwd "$b\rootfs")).Trim()
+    $wi = (wsl wslpath -a (Fwd $vhd)).Trim()
+    Invoke-Tool wsl mke2fs -t ext4 -b 4096 -L magic -O $feats `
+        -d $wr -E "offset=$extOffset" $wi "$extBlocks"
+}
+
+Invoke-Tool qemu-img convert -f vpc -O raw $vhd $diskimg
 Remove-Item $vhd
 
 Write-Host "build ok" -ForegroundColor Green

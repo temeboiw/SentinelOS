@@ -1,6 +1,6 @@
 # magic OS
 
-magic OS is an experimental x86-64 operating system project. It boots through UEFI, loads its kernel and HAL from an ext4 volume, and runs in QEMU for development and testing.
+magic OS is an experimental x86-64 operating system project. It boots through UEFI from a single GPT disk with a FAT32 EFI System Partition and an ext4 system partition, and runs in QEMU for development and testing.
 
 ## Current features
 
@@ -9,6 +9,7 @@ magic OS is an experimental x86-64 operating system project. It boots through UE
 - Kernel and `hal.dll` loaded from `magic/System32` on ext4.
 - Kernel initialization for CPU tables and exceptions, physical and virtual memory, and the kernel heap.
 - HAL and kernel-thread scheduler self-tests, with serial diagnostics.
+- Single-disk GPT image with a FAT32 EFI System Partition and ext4 system partition.
 - QEMU run configuration with persistent UEFI variables under `build/`.
 
 This is an early development project, not a general-purpose operating system. The kernel currently runs its tests, paints the framebuffer, and halts.
@@ -17,7 +18,7 @@ This is an early development project, not a general-purpose operating system. Th
 
 The build scripts target Windows and expect:
 
-- Administrator PowerShell for `scripts/build.ps1` (`diskpart` creates the EFI disk image).
+- Administrator PowerShell for `scripts/build.ps1` (`diskpart` creates the GPT disk and FAT32 EFI System Partition).
 - `clang`, `lld-link`, `qemu-img`, and `qemu-system-x86_64` available on `PATH`.
 - EDK II headers in `C:\edk2`, or set the `EDK2` environment variable to their location.
 - `mke2fs.exe` at `C:\msys64\usr\bin\mke2fs.exe`, or WSL with `mke2fs` installed.
@@ -63,14 +64,13 @@ For example, rebuild with the fallback loader retained:
 1. Firmware starts `EFI\BOOT\BOOTX64.EFI` from the FAT EFI System Partition.
 2. `bootx64.efi` starts `EFI\magic\bootuni.efi`.
 3. `bootuni.efi` registers the `magic OS` UEFI boot entry and starts `EFI\magic\loadufi.efi`.
-4. `loadufi.efi` reads `hal.dll` and `krnl.exe` from `magic/System32` on the ext4 volume, exits UEFI boot services, and transfers control to the kernel.
+4. `loadufi.efi` scans UEFI block devices for the ext4 partition, reads `magic/System32/hal.dll` and `krnl.exe`, exits UEFI boot services, and transfers control to the kernel.
 
 ## Generated files
 
 Build artifacts are written under `build/`:
 
-- `esp.img`: FAT EFI System Partition disk image.
-- `magic.img`: ext4 volume containing `magic/System32/hal.dll` and `krnl.exe`.
+- `magic-disk.img`: GPT disk image with the FAT32 EFI System Partition and ext4 system partition.
 - `vars.fd`: persistent QEMU UEFI variables.
 - `esp/`, `rootfs/`, and `obj/`: staged files and intermediate objects.
 

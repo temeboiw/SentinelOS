@@ -7,6 +7,7 @@
 #include "heap.h"
 #include "ke.h"
 #include "bootcheck.h"
+#include "user.h"
 
 // Edit and rebuild to exercise the exception handler:
 //   0 = normal boot   1 = #UD (ud2)   2 = #GP (non-canonical access)   3 = #PF (unmapped address)
@@ -70,6 +71,10 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     (void)*bad;
 #endif
 
+    // ---- usermode demo ----
+    user_enter(bi);   // does not return on success (exit syscall → halt)
+
+    // Unreachable under normal operation; kept for the TEST_FAULT paths
     uint32_t *fb = (uint32_t *)bi->fb_base;
     for (uint32_t y = 0; y < bi->height; y++)
         for (uint32_t x = 0; x < bi->width; x++)
@@ -90,6 +95,3 @@ void kmain(BootInfo *bi) {
         :: "a"(top), "c"(bi) : "memory");
     __builtin_unreachable();
 }
-
-
-

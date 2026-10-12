@@ -3,18 +3,18 @@
 
 #define BOOT_MAX_MODULES 16
 
-// one image loaded by loadufi (like an entry of PsLoadedModuleList)
 typedef struct {
     char     name[32];
-    uint64_t base, size, entry;
+    uint64_t base;    /* virtual (higher-half preferred) */
+    uint64_t phys;    /* physical load address */
+    uint64_t size, entry;
 } BootModule;
 
-// Handed from the bootloader to the kernel (pointer arrives in RCX).
 typedef struct {
     uint64_t fb_base;
     uint32_t width, height;
-    uint32_t pitch;                 // bytes per scanline
-    uint64_t mmap;                  // EFI_MEMORY_DESCRIPTOR array
+    uint32_t pitch;
+    uint64_t mmap;
     uint64_t mmap_size;
     uint64_t desc_size;
     uint32_t module_count, pad;

@@ -1,6 +1,4 @@
-// loadufi.efi - stage 2 (the winload equivalent).  Lives at \EFI\magic\loadufi.efi on the ESP.
-// Loads hal.dll and krnl.exe from magic/System32 on the ext4 volume, binds their imports
-// against each other's export tables, exits boot services and jumps into the kernel.
+// loadufi.efi - stage 2. Loads HAL+kernel, higher-half maps, jumps to high kmain.
 #include "common.h"
 #include <Protocol/GraphicsOutput.h>
 #include <IndustryStandard/PeImage.h>
@@ -15,7 +13,13 @@ typedef struct {
     UINT32 Name, Base, NumberOfFunctions, NumberOfNames, AddressOfFunctions, AddressOfNames, AddressOfNameOrdinals;
 } EXPORT_DIR;
 
-typedef struct { char name[32]; UINT8 *base; UINT64 size, entry; EFI_IMAGE_NT_HEADERS64 *nt; } Module;
+typedef struct {
+    char name[32];
+    UINT8 *base;          /* physical while loading */
+    UINT64 phys, size, entry;
+    EFI_IMAGE_NT_HEADERS64 *nt;
+} Module;
+
 static Module mods[BOOT_MAX_MODULES];
 static int nmods;
 
@@ -28,11 +32,11 @@ static void die(const char *a, const char *b, const char *c) {
 }
 static CHAR8 lc(CHAR8 c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
 static int streq(const char *a, const char *b, int nocase) {
-    for (; *a && *b; a++, b++) if ((nocase ? lc(*a) : *a) != (nocase ? lc(*b) : *b)) return 0;
+    for (; *a && *b; a++, b++)
+        if ((nocase ? lc(*a) : *a) != (nocase ? lc(*b) : *b)) return 0;
     return *a == *b;
 }
 
-// map one PE image (EXE or DLL): headers + sections, then apply base relocations
 static EFI_STATUS map_image(VOID *file, Module *m) {
     EFI_IMAGE_DOS_HEADER *dos = file;
     if (dos->e_magic != EFI_IMAGE_DOS_SIGNATURE) return EFI_LOAD_ERROR;
@@ -45,7 +49,7 @@ static EFI_STATUS map_image(VOID *file, Module *m) {
     UINTN  pages = EFI_SIZE_TO_PAGES(nt->OptionalHeader.SizeOfImage);
     EFI_PHYSICAL_ADDRESS base = want;
     EFI_STATUS s = bs->AllocatePages(AllocateAddress, EfiLoaderData, pages, &base);
-    if (EFI_ERROR(s)) {                             // preferred address busy: load anywhere, relocate
+    if (EFI_ERROR(s)) {
         s = bs->AllocatePages(AllocateAnyPages, EfiLoaderData, pages, &base);
         if (EFI_ERROR(s)) return s;
     }
@@ -57,18 +61,20 @@ static EFI_STATUS map_image(VOID *file, Module *m) {
     for (UINT16 i = 0; i < nt->FileHeader.NumberOfSections; i++) {
         UINTN n = sec[i].SizeOfRawData;
         if (sec[i].Misc.VirtualSize && sec[i].Misc.VirtualSize < n) n = sec[i].Misc.VirtualSize;
-        memcpy((VOID *)(base + sec[i].VirtualAddress), (UINT8 *)file + sec[i].PointerToRawData, n);
+        memcpy((VOID *)(base + sec[i].VirtualAddress),
+               (UINT8 *)file + sec[i].PointerToRawData, n);
     }
 
     INT64 delta = (INT64)(base - want);
-    EFI_IMAGE_DATA_DIRECTORY *rd = &nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    EFI_IMAGE_DATA_DIRECTORY *rd =
+        &nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_BASERELOC];
     if (delta && rd->Size) {
         UINT8 *p = (UINT8 *)base + rd->VirtualAddress, *end = p + rd->Size;
         while (p < end) {
             EFI_IMAGE_BASE_RELOCATION *b = (VOID *)p;
             if (!b->SizeOfBlock) break;
             UINT16 *e = (UINT16 *)(b + 1);
-            UINTN   n = (b->SizeOfBlock - sizeof *b) / 2;
+            UINTN n = (b->SizeOfBlock - sizeof *b) / 2;
             for (UINTN i = 0; i < n; i++)
                 if ((e[i] >> 12) == EFI_IMAGE_REL_BASED_DIR64)
                     *(UINT64 *)(base + b->VirtualAddress + (e[i] & 0xFFF)) += delta;
@@ -76,16 +82,19 @@ static EFI_STATUS map_image(VOID *file, Module *m) {
         }
     }
     m->base  = (UINT8 *)base;
+    m->phys  = (UINT64)base;
     m->size  = nt->OptionalHeader.SizeOfImage;
-    m->nt    = (EFI_IMAGE_NT_HEADERS64 *)(m->base + dos->e_lfanew);   // the mapped copy of the headers
-    m->entry = nt->OptionalHeader.AddressOfEntryPoint ? base + nt->OptionalHeader.AddressOfEntryPoint : 0;
+    m->nt    = (EFI_IMAGE_NT_HEADERS64 *)(m->base + dos->e_lfanew);
+    m->entry = nt->OptionalHeader.AddressOfEntryPoint
+             ? base + nt->OptionalHeader.AddressOfEntryPoint : 0;
     return EFI_SUCCESS;
 }
 
 static Module *load_module(const char *name) {
     const char *path[3] = { "magic", "System32", name };
     VOID *file; UINTN fsize;
-    if (EFI_ERROR(ext_load_file(path, 3, &file, &fsize))) die("cannot read magic/System32/", name, "");
+    if (EFI_ERROR(ext_load_file(path, 3, &file, &fsize)))
+        die("cannot read magic/System32/", name, "");
     if (nmods >= BOOT_MAX_MODULES) die("too many modules", "", "");
     Module *m = &mods[nmods];
     int i = 0; for (; name[i] && i < 31; i++) m->name[i] = name[i];
@@ -95,67 +104,222 @@ static Module *load_module(const char *name) {
     return m;
 }
 
-// look a symbol up in a loaded module's export table (by name or ordinal)
 static UINT64 find_export(Module *m, const char *name, UINT16 ordinal, int by_ordinal) {
-    EFI_IMAGE_DATA_DIRECTORY *dd = &m->nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_EXPORT];
+    EFI_IMAGE_DATA_DIRECTORY *dd =
+        &m->nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_EXPORT];
     if (!dd->Size) return 0;
-    EXPORT_DIR *e = (EXPORT_DIR *)(m->base + dd->VirtualAddress);
-    UINT32 *fn = (UINT32 *)(m->base + e->AddressOfFunctions);
-    UINT32 *nm = (UINT32 *)(m->base + e->AddressOfNames);
-    UINT16 *od = (UINT16 *)(m->base + e->AddressOfNameOrdinals);
-    UINT32 idx = 0;
+    EXPORT_DIR *exp = (VOID *)(m->base + dd->VirtualAddress);
+    UINT32 *funcs = (VOID *)(m->base + exp->AddressOfFunctions);
     if (by_ordinal) {
-        if (ordinal < e->Base) return 0;
-        idx = ordinal - e->Base;
-    } else {
-        int found = 0;
-        for (UINT32 i = 0; i < e->NumberOfNames; i++)
-            if (streq((const char *)(m->base + nm[i]), name, 0)) { idx = od[i]; found = 1; break; }
-        if (!found) return 0;
+        if (ordinal < exp->Base || ordinal - exp->Base >= exp->NumberOfFunctions) return 0;
+        return (UINT64)(m->base + funcs[ordinal - exp->Base]);
     }
-    if (idx >= e->NumberOfFunctions) return 0;
-    UINT32 rva = fn[idx];
-    if (rva >= dd->VirtualAddress && rva < dd->VirtualAddress + dd->Size) return 0;   // forwarders: not supported yet
-    return (UINT64)(m->base + rva);
+    UINT32 *names = (VOID *)(m->base + exp->AddressOfNames);
+    UINT16 *ords  = (VOID *)(m->base + exp->AddressOfNameOrdinals);
+    for (UINT32 i = 0; i < exp->NumberOfNames; i++)
+        if (streq((const char *)(m->base + names[i]), name, 0))
+            return (UINT64)(m->base + funcs[ords[i]]);
+    return 0;
 }
 
-// fill in the import address table of `m` from the other loaded modules
 static void resolve_imports(Module *m) {
-    EFI_IMAGE_DATA_DIRECTORY *dd = &m->nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_IMPORT];
+    EFI_IMAGE_DATA_DIRECTORY *dd =
+        &m->nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (!dd->Size) return;
     for (IMPORT_DESC *d = (IMPORT_DESC *)(m->base + dd->VirtualAddress); d->Name; d++) {
         const char *dll = (const char *)(m->base + d->Name);
         Module *src = NULL;
         for (int i = 0; i < nmods; i++) if (streq(mods[i].name, dll, 1)) src = &mods[i];
-        if (!src) die(m->name, " imports from a module that is not loaded: ", dll);
-
+        if (!src) die(m->name, " imports from unloaded: ", dll);
         UINT64 *look = (UINT64 *)(m->base + (d->OriginalFirstThunk ? d->OriginalFirstThunk : d->FirstThunk));
         UINT64 *iat  = (UINT64 *)(m->base + d->FirstThunk);
         for (; *look; look++, iat++) {
             UINT64 addr; const char *sym = "(ordinal)";
-            if (*look >> 63) {
+            if (*look >> 63)
                 addr = find_export(src, NULL, (UINT16)*look, 1);
-            } else {
-                sym  = (const char *)(m->base + (UINT32)*look + 2);        // skip the 2-byte hint
+            else {
+                sym  = (const char *)(m->base + (UINT32)*look + 2);
                 addr = find_export(src, sym, 0, 0);
             }
-            if (!addr) { say(L"loadufi: unresolved import: "); say_a(m->name); say_a(" -> "); say_a(dll); say_a("!"); say_a(sym); say(L"\r\n"); for (;;) {} }
+            if (!addr) die(m->name, " unresolved ", sym);
             *iat = addr;
+        }
+    }
+}
+
+/* ---- higher-half page tables ---- */
+#define HH_PTE_P    (1ULL << 0)
+#define HH_PTE_RW   (1ULL << 1)
+#define HH_PTE_PS   (1ULL << 7)
+#define HH_PTE_ADDR 0x000FFFFFFFFFF000ULL
+#define HH_LARGE    (2ULL << 20)
+#define HH_HHDM     0xFFFF800000000000ULL
+
+static UINT64 *hh_alloc_page(void) {
+    EFI_PHYSICAL_ADDRESS pa = 0;
+    if (EFI_ERROR(bs->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &pa)))
+        die("hh: out of PT pages", "", "");
+    memset((VOID *)pa, 0, 4096);
+    return (UINT64 *)(UINTN)pa;
+}
+
+static void hh_map_2m(UINT64 *pml4, UINT64 virt, UINT64 phys, UINT64 attr) {
+    UINTN i4 = (virt >> 39) & 511, i3 = (virt >> 30) & 511, i2 = (virt >> 21) & 511;
+    if (!(pml4[i4] & HH_PTE_P)) {
+        UINT64 *x = hh_alloc_page();
+        pml4[i4] = (UINT64)(UINTN)x | HH_PTE_P | HH_PTE_RW;
+    }
+    UINT64 *pdpt = (UINT64 *)(UINTN)(pml4[i4] & HH_PTE_ADDR);
+    if (!(pdpt[i3] & HH_PTE_P)) {
+        UINT64 *x = hh_alloc_page();
+        pdpt[i3] = (UINT64)(UINTN)x | HH_PTE_P | HH_PTE_RW;
+    }
+    UINT64 *pd = (UINT64 *)(UINTN)(pdpt[i3] & HH_PTE_ADDR);
+    if (!(pd[i2] & HH_PTE_P))
+        pd[i2] = (phys & ~(HH_LARGE - 1)) | HH_PTE_P | HH_PTE_RW | HH_PTE_PS | attr;
+}
+
+static void hh_map_4k(UINT64 *pml4, UINT64 virt, UINT64 phys, UINT64 attr) {
+    UINTN i4 = (virt >> 39) & 511, i3 = (virt >> 30) & 511, i2 = (virt >> 21) & 511, i1 = (virt >> 12) & 511;
+    if (!(pml4[i4] & HH_PTE_P)) {
+        UINT64 *x = hh_alloc_page();
+        pml4[i4] = (UINT64)(UINTN)x | HH_PTE_P | HH_PTE_RW;
+    }
+    UINT64 *pdpt = (UINT64 *)(UINTN)(pml4[i4] & HH_PTE_ADDR);
+    if (!(pdpt[i3] & HH_PTE_P)) {
+        UINT64 *x = hh_alloc_page();
+        pdpt[i3] = (UINT64)(UINTN)x | HH_PTE_P | HH_PTE_RW;
+    }
+    UINT64 *pd = (UINT64 *)(UINTN)(pdpt[i3] & HH_PTE_ADDR);
+    UINT64 *pt;
+    if (pd[i2] & HH_PTE_P) {
+        if (pd[i2] & HH_PTE_PS) die("hh: 2M clash", "", "");
+        pt = (UINT64 *)(UINTN)(pd[i2] & HH_PTE_ADDR);
+    } else {
+        pt = hh_alloc_page();
+        pd[i2] = (UINT64)(UINTN)pt | HH_PTE_P | HH_PTE_RW;
+    }
+    pt[i1] = (phys & HH_PTE_ADDR) | HH_PTE_P | HH_PTE_RW | attr;
+}
+
+static void hh_map_range_2m(UINT64 *pml4, UINT64 voff, UINT64 s, UINT64 e) {
+    s &= ~(HH_LARGE - 1);
+    e = (e + HH_LARGE - 1) & ~(HH_LARGE - 1);
+    for (UINT64 p = s; p < e; p += HH_LARGE)
+        hh_map_2m(pml4, voff + p, p, 0);
+}
+
+static void hh_apply_relocs(UINT8 *base, INT64 delta) {
+    EFI_IMAGE_DOS_HEADER *dos = (VOID *)base;
+    EFI_IMAGE_NT_HEADERS64 *nt = (VOID *)(base + dos->e_lfanew);
+    EFI_IMAGE_DATA_DIRECTORY *rd =
+        &nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    if (!delta || !rd->Size) return;
+    UINT8 *p = base + rd->VirtualAddress, *end = p + rd->Size;
+    while (p < end) {
+        EFI_IMAGE_BASE_RELOCATION *b = (VOID *)p;
+        if (!b->SizeOfBlock) break;
+        UINT16 *e = (UINT16 *)(b + 1);
+        UINTN n = (b->SizeOfBlock - sizeof *b) / 2;
+        for (UINTN i = 0; i < n; i++)
+            if ((e[i] >> 12) == EFI_IMAGE_REL_BASED_DIR64)
+                *(UINT64 *)(base + b->VirtualAddress + (e[i] & 0xFFF)) += delta;
+        p += b->SizeOfBlock;
+    }
+}
+
+static UINT64 bi_prefer(Module *m) {
+    UINT64 prefer = m->nt->OptionalHeader.ImageBase;
+    if (prefer < 0xFFFF800000000000ULL) prefer = HH_HHDM + m->phys;
+    return prefer;
+}
+
+static UINT64 *hh_build_tables(void) {
+    UINT64 *pml4 = hh_alloc_page();
+    hh_map_range_2m(pml4, 0, 0, 4ULL << 30);
+    hh_map_range_2m(pml4, HH_HHDM, 0, 4ULL << 30);
+    hh_map_range_2m(pml4, 0, 0x80000000ULL, 0x90000000ULL);
+    hh_map_range_2m(pml4, HH_HHDM, 0x80000000ULL, 0x90000000ULL);
+    hh_map_range_2m(pml4, 0, 0xFEC00000ULL, 0x100000000ULL);
+    hh_map_range_2m(pml4, HH_HHDM, 0xFEC00000ULL, 0x100000000ULL);
+    return pml4;
+}
+
+static void resolve_imports_hh(int mi) {
+    Module *m = &mods[mi];
+    UINT8 *phys = (UINT8 *)(UINTN)m->phys;
+    EFI_IMAGE_DATA_DIRECTORY *dd =
+        &m->nt->OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dd->Size) return;
+    for (IMPORT_DESC *d = (IMPORT_DESC *)(phys + dd->VirtualAddress); d->Name; d++) {
+        const char *dll = (const char *)(phys + d->Name);
+        Module *src = NULL;
+        for (int j = 0; j < nmods; j++)
+            if (streq(mods[j].name, dll, 1)) { src = &mods[j]; break; }
+        if (!src) die(m->name, " imports missing ", dll);
+        UINT64 *look = (UINT64 *)(phys + (d->OriginalFirstThunk ? d->OriginalFirstThunk : d->FirstThunk));
+        UINT64 *iat  = (UINT64 *)(phys + d->FirstThunk);
+        for (; *look; look++, iat++) {
+            UINT64 abs_phys;
+            if (*look >> 63)
+                abs_phys = find_export(src, NULL, (UINT16)*look, 1);
+            else {
+                const char *sym = (const char *)(phys + (UINT32)*look + 2);
+                abs_phys = find_export(src, sym, 0, 0);
+            }
+            if (!abs_phys) die(m->name, " unresolved import", "");
+            *iat = bi_prefer(src) + (abs_phys - src->phys);
         }
     }
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     st = sys; bs = sys->BootServices;
-    say(L"loadufi: loading hal.dll and krnl.exe from magic/System32\r\n");
+    say(L"loadufi: loading hal.dll and krnl.exe\r\n");
 
-    // 1. read + map every module, 2. then bind imports (so modules may import from each other)
     load_module("hal.dll");
     Module *krnl = load_module("krnl.exe");
-    for (int i = 0; i < nmods; i++) resolve_imports(&mods[i]);
+
+    {
+        static const char *users[] = {
+            "smss.exe", "explorer.exe", "fileexplorer.exe", "taskbar.dll", "hello.exe"
+        };
+        int nusers = 5;
+        for (int u = 0; u < nusers; u++) {
+            const char *path[3] = { "magic", "System32", users[u] };
+            VOID *file; UINTN fsize;
+            EFI_STATUS st = ext_load_file(path, 3, &file, &fsize);
+            if (EFI_ERROR(st)) {
+                say(L"loadufi: missing user image ");
+                say_a(users[u]);
+                say(L"\r\n");
+                continue;
+            }
+            if (nmods >= BOOT_MAX_MODULES) break;
+            Module *m = &mods[nmods];
+            int i = 0;
+            for (; users[u][i] && i < 31; i++) m->name[i] = users[u][i];
+            m->name[i] = 0;
+            st = map_image(file, m);
+            if (EFI_ERROR(st)) {
+                say(L"loadufi: bad PE ");
+                say_a(users[u]);
+                say(L"\r\n");
+                continue;
+            }
+            nmods++;
+            say(L"loadufi: loaded user image ");
+            say_a(users[u]);
+            say(L"\r\n");
+        }
+    }
+
+for (int i = 0; i < nmods; i++) {
+        if (!streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1)) continue;
+        resolve_imports(&mods[i]);
+    }
     if (!krnl->entry) die("krnl.exe has no entry point", "", "");
 
-    // 3. boot info: framebuffer + module list
     BootInfo *bi;
     bs->AllocatePool(EfiLoaderData, sizeof *bi, (VOID **)&bi);
     memset(bi, 0, sizeof *bi);
@@ -166,25 +330,60 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         bi->height  = gop->Mode->Info->VerticalResolution;
         bi->pitch   = gop->Mode->Info->PixelsPerScanLine * 4;
     }
-    bi->module_count = (UINT32)nmods;
+
+    UINT64 *hh_pml4 = hh_build_tables();
+    
     for (int i = 0; i < nmods; i++) {
+        UINT64 phys = mods[i].phys;
+        UINT64 size = mods[i].size;
+        int is_user = !streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1);
+        UINT64 prefer = mods[i].nt->OptionalHeader.ImageBase;
+
+        if (is_user) {
+            if (!prefer) prefer = 0x40000000ULL;
+            say(L"loadufi: user image ");
+            say_a(mods[i].name);
+            say(L"\r\n");
+            UINT64 rva = mods[i].entry - phys;
+            bi->modules[i].base = prefer;
+            bi->modules[i].phys = phys;
+            bi->modules[i].entry = prefer + rva;
+            bi->modules[i].size = size;
+        } else {
+            if (prefer < 0xFFFF800000000000ULL)
+                prefer = HH_HHDM + phys;
+            say(L"loadufi: higher-half ");
+            say_a(mods[i].name);
+            say(L"\r\n");
+            for (UINT64 off = 0; off < size; off += 4096)
+                hh_map_4k(hh_pml4, prefer + off, phys + off, 0);
+            hh_apply_relocs((UINT8 *)(UINTN)phys, (INT64)(prefer - phys));
+            mods[i].entry = prefer + (mods[i].entry - phys);
+            bi->modules[i].base = prefer;
+            bi->modules[i].phys = phys;
+            bi->modules[i].entry = mods[i].entry;
+            bi->modules[i].size = size;
+        }
         for (int k = 0; k < 32; k++) bi->modules[i].name[k] = mods[i].name[k];
-        bi->modules[i].base = (UINT64)mods[i].base;
-        bi->modules[i].size = mods[i].size;
-        bi->modules[i].entry = mods[i].entry;
     }
 
-    // 4. memory map + ExitBootServices (slack: the allocation itself changes the map)
+    bi->module_count = (UINT32)nmods;
+
+    for (int i = 0; i < nmods; i++) {
+        if (!streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1)) continue;
+        resolve_imports_hh(i);
+    }
+
     UINTN msz = 0, key, dsz; UINT32 dver; EFI_MEMORY_DESCRIPTOR *map;
     bs->GetMemoryMap(&msz, NULL, &key, &dsz, &dver);
-    msz += 4 * dsz;
+    msz += 8 * dsz;
     bs->AllocatePool(EfiLoaderData, msz, (VOID **)&map);
-    bs->GetMemoryMap(&msz, map, &key, &dsz, &dver);
-    bi->mmap = (UINT64)map; bi->mmap_size = msz; bi->desc_size = dsz;
+    if (EFI_ERROR(bs->GetMemoryMap(&msz, map, &key, &dsz, &dver))) for (;;) {}
+    bi->mmap = (UINT64)(UINTN)map; bi->mmap_size = msz; bi->desc_size = dsz;
 
-    if (EFI_ERROR(bs->ExitBootServices(image, key))) { for (;;) {} }
+    if (EFI_ERROR(bs->ExitBootServices(image, key))) for (;;) {}
 
-    // 5. jump: both sides use the Win64 ABI, so BootInfo* arrives in RCX
-    ((void (*)(BootInfo *))krnl->entry)(bi);
+    __asm__ __volatile__("mov %0, %%cr3" :: "r"((UINT64)(UINTN)hh_pml4) : "memory");
+    ((void (*)(BootInfo *))(UINTN)krnl->entry)(bi);
     for (;;) {}
 }

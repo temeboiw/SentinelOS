@@ -71,10 +71,10 @@ Build-Efi loadufi "$b\esp\EFI\magic\loadufi.efi"
 
 # ---- the kernel goes to the ext4 volume (magic\System32) ----
 Invoke-Tool clang @common -DHAL_BUILD -c "$root\hal\hal.c" -o "$b\obj\hal.o"
-Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\obj\hal.lib" "/out:$sys32\hal.dll" "$b\obj\hal.o"
+Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\obj\hal.lib" /base:0xFFFFFFFF81000000 /fixed:no "/out:$sys32\hal.dll" "$b\obj\hal.o"
 Invoke-Tool clang @common -c "$root\kernel\kernel.c" -o "$b\obj\kernel.o"
 Invoke-Tool lld-link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase `
-    "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\hal.lib"
+    /base:0xFFFFFFFF80200000 /fixed:no "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\hal.lib"
 
 # ---- build one GPT disk: FAT32 ESP + ext4 system partition ----
 $feats = "^has_journal,^metadata_csum,^64bit,^resize_inode"   # keep it simple for the loader

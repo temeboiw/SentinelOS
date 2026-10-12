@@ -20,8 +20,25 @@ typedef struct { uint16_t lo; uint16_t sel; uint8_t ist; uint8_t type; uint16_t 
 typedef struct { uint32_t r0; uint64_t rsp[3]; uint64_t r1; uint64_t ist[7]; uint64_t r2; uint16_t r3; uint16_t iomap; } Tss;   // 104 bytes
 #pragma pack(pop)
 
-// 0x08 = 64-bit kernel code, 0x10 = kernel data, 0x18 = TSS (16-byte descriptor)
-static uint64_t gdt[5] = { 0, 0x00AF9A000000FFFFULL, 0x00CF92000000FFFFULL, 0, 0 };
+// Selectors:
+//   0x08 kernel code, 0x10 kernel data
+//   0x18 user code (DPL3), 0x20 user data (DPL3)
+//   0x28 TSS (16-byte descriptor at indices 5+6)
+// User CS = 0x1B (0x18|3), User SS = 0x23 (0x20|3)
+#define KERNEL_CS  0x08
+#define KERNEL_DS  0x10
+#define USER_CS    0x1B
+#define USER_DS    0x23
+#define TSS_SEL    0x28
+
+static uint64_t gdt[7] = {
+    0,                                  // 0 null
+    0x00AF9A000000FFFFULL,              // 1 kernel code  (L=1, P=1, DPL=0, exec/read)
+    0x00CF92000000FFFFULL,              // 2 kernel data  (P=1, DPL=0, write)
+    0x00AFFA000000FFFFULL,              // 3 user code    (L=1, P=1, DPL=3, exec/read)
+    0x00CFF2000000FFFFULL,              // 4 user data    (P=1, DPL=3, write)
+    0, 0                                // 5+6 TSS (filled by set_tss_descriptor)
+};
 static IdtEntry idt[256];
 static Tss tss;
 static uint8_t ist_stack[3][8192] __attribute__((aligned(16)));   // IST1 = #DF, IST2 = NMI, IST3 = #MC
@@ -100,7 +117,15 @@ static void KeConnectInterrupt(ULONG Vector, KINTERRUPT_ROUTINE Routine) { irq_h
 
 // called from isr_common; returns the frame to resume.  Breakpoint returns, other exceptions dump state and halt,
 // vectors >= 32 are dispatched (then the scheduler may hand back a different thread's frame).
+// Forward decls for usermode (defined in user.h)
+static Frame *syscall_handler(Frame *f);
+static void user_set_kernel_stack(uint64_t rsp0);
+
 __attribute__((used)) Frame *isr_handler(Frame *f) {
+    // Syscall via int 0x80 – must run before the generic vector>=32 path
+    if (f->vector == 0x80) {
+        return syscall_handler(f);
+    }
     if (f->vector >= 32) {
         if (f->vector == 0xFF) return f;                        // APIC spurious interrupt: no EOI
         if (irq_handler[f->vector]) irq_handler[f->vector](f);
@@ -138,11 +163,27 @@ static void set_gate(int v, uint64_t a, int ist) {
     idt[v].zero = 0;
 }
 
+// DPL=3 interrupt gate (user-callable, e.g. syscall via int 0x80)
+static void set_user_gate(int v, uint64_t a) {
+    idt[v].lo   = (uint16_t)a;
+    idt[v].sel  = 0x08;
+    idt[v].ist  = 0;
+    idt[v].type = 0xEE;                             // present, ring 3, interrupt gate
+    idt[v].mid  = (uint16_t)(a >> 16);
+    idt[v].hi   = (uint32_t)(a >> 32);
+    idt[v].zero = 0;
+}
+
 static void set_tss_descriptor(void) {
     uint64_t base = (uint64_t)&tss, limit = sizeof(Tss) - 1;
-    gdt[3] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) | (0x89ULL << 40) |
-             (((limit >> 16) & 0xF) << 48) | (((base >> 24) & 0xFF) << 56);          // 0x89 = present, 64-bit TSS (available)
-    gdt[4] = base >> 32;
+    gdt[5] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) | (0x89ULL << 40) |
+             (((limit >> 16) & 0xF) << 48) | (((base >> 24) & 0xFF) << 56);          // 0x89 = present, 64-bit TSS
+    gdt[6] = base >> 32;
+}
+
+// Keep TSS.RSP0 pointing at a valid kernel stack so interrupts from ring 3 land safely.
+static void user_set_kernel_stack(uint64_t rsp0) {
+    tss.rsp[0] = rsp0;
 }
 
 static void cpu_init(void) {
@@ -164,7 +205,7 @@ static void cpu_init(void) {
         "movw %%ax, %%ss\n"
         "movw %%ax, %%fs\n"
         "movw %%ax, %%gs\n"
-        "movw $0x18, %%ax\n"
+        "movw $0x28, %%ax\n"
         "ltr %%ax\n"                                // load the task register: makes the IST stacks live
         ::: "rax", "memory");
 
@@ -172,6 +213,8 @@ static void cpu_init(void) {
         set_gate(i, (uint64_t)isr_table[i], i == 8 ? 1 : i == 2 ? 2 : i == 18 ? 3 : 0);
     for (int i = 32; i < 256; i++)
         set_gate(i, (uint64_t)isr_irq_base + (uint64_t)(i - 32) * 16, 0);
+    // Syscall vector 0x80 – DPL 3 so user code can execute `int 0x80`
+    set_user_gate(0x80, (uint64_t)isr_irq_base + (uint64_t)(0x80 - 32) * 16);
     DescPtr d = { sizeof idt - 1, (uint64_t)idt };
     __asm__ volatile("lidt %0" :: "m"(d));
 }

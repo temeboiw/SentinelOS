@@ -18,11 +18,12 @@
 typedef enum { ThreadReady, ThreadRunning, ThreadWaiting, ThreadTerminated } KTHREAD_STATE;
 
 typedef struct _KTHREAD {
-    Frame *frame;                                   // saved context while the thread is not running
-    uint8_t *stack;                                 // NULL for the boot thread
-    struct _KTHREAD *next;                          // run-queue link
+    Frame *frame;
+    uint8_t *stack;
+    struct _KTHREAD *next;
+    struct _KPROCESS *Process;
     ULONGLONG wake_tick;
-    ULONGLONG runs, ticks;                          // times scheduled / clock ticks spent running
+    ULONGLONG runs, ticks;
     ULONG id;
     KTHREAD_STATE state;
     char name[16];
@@ -62,6 +63,8 @@ static Frame *KiSchedule(Frame *f) {
     next->state = ThreadRunning;
     next->runs++;
     if (next != cur) ki_switches++;
+    if (next->Process && next->Process != cur->Process)
+        MmSwitchToProcess(next->Process);
     ki_current = next;
     ki_quantum_left = QUANTUM_TICKS;
     return next->frame;
@@ -136,6 +139,7 @@ static KTHREAD *ki_make_thread(const char *name, void (*entry)(PVOID), PVOID arg
     f->cs = 0x08; f->ss = 0x10; f->rflags = 0x202; f->rsp = rsp0;           // kernel segments, interrupts enabled
 
     t->frame = f; t->stack = stack; t->id = ki_next_id++;
+    t->Process = PspSystemProcess;
     for (int i = 0; i < 15 && name[i]; i++) t->name[i] = name[i];
     return t;
 }
@@ -173,6 +177,7 @@ static void KiIdleThread(PVOID arg) { (void)arg; for (;;) __asm__ volatile("sti;
 static void KiInitializeScheduler(void) {
     KTHREAD *boot = kzalloc(sizeof *boot);
     boot->id = ki_next_id++; boot->state = ThreadRunning;
+    boot->Process = PspSystemProcess;
     boot->name[0] = 'M'; boot->name[1] = 'a'; boot->name[2] = 'i'; boot->name[3] = 'n';
     ki_threads[0] = boot; ki_current = boot;
 

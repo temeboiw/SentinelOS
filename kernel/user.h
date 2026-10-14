@@ -6,6 +6,7 @@
 #include "pmm.h"
 #include "heap.h"
 #include "bootinfo.h"
+#include "ps2.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -17,6 +18,7 @@
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
 #define SYS_NtGetProcAddress        9
+#define SYS_NtGetInput              10
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
 static uint64_t user_saved_ksp, user_saved_rip;
@@ -75,7 +77,24 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
     }
     for (uint64_t off = 0; off < size; off += 0x1000)
         map_4k_in(proc->Pml4, prefer + off, phys + off, PTE_U | PTE_RW);
-    MmMapUserPage(proc, USER_STACK_TOP - 0x1000, 1);
+    /* map user stack only if missing – remapping zeroes it and breaks GetProcAddress */
+    {
+        uint64_t va = USER_STACK_TOP - 0x1000;
+        int need = 1;
+        uint64_t *pml4 = proc->Pml4;
+        int i4=(va>>39)&511, i3=(va>>30)&511, i2=(va>>21)&511, i1=(va>>12)&511;
+        if ((pml4[i4] & 1) && !(pml4[i4] & 0x80)) {
+            uint64_t *pdpt = (uint64_t *)(pml4[i4] & ~0xFFFULL);
+            if ((pdpt[i3] & 1) && !(pdpt[i3] & 0x80)) {
+                uint64_t *pd = (uint64_t *)(pdpt[i3] & ~0xFFFULL);
+                if ((pd[i2] & 1) && !(pd[i2] & 0x80)) {
+                    uint64_t *pt = (uint64_t *)(pd[i2] & ~0xFFFULL);
+                    if (pt[i1] & 1) need = 0;
+                }
+            }
+        }
+        if (need) MmMapUserPage(proc, va, 1);
+    }
     return 0;
 }
 
@@ -233,6 +252,21 @@ static Frame *syscall_handler(Frame *f) {
             uint64_t pa = (user_fb_base + off) & ~0xFFFULL;
             map_4k_in(proc->Pml4, uva + off, pa, PTE_U | PTE_RW);
         }
+        {
+            uint32_t *fb = (uint32_t *)(void *)user_fb_base;
+            uint32_t pitch = user_fb_pitch / 4;
+            uint32_t w = user_fb_w, h = user_fb_h;
+            for (uint32_t y = 0; y < h; y++)
+                for (uint32_t x = 0; x < w; x++)
+                    fb[y * pitch + x] = 0xFF1A1A2E;
+            uint32_t y0 = h > 56 ? h - 56 : 0;
+            for (uint32_t y = y0; y < h; y++)
+                for (uint32_t x = 0; x < w; x++)
+                    fb[y * pitch + x] = 0xFF16213E;
+            for (uint32_t x = 0; x < w; x++)
+                fb[y0 * pitch + x] = 0xFFE94560;
+            DbgPrint("user: FB mapped %ux%u @%p\n", w, h, (void *)user_fb_base);
+        }
         MmSwitchToProcess(proc);
         *(uint64_t *)f->rdi = uva;
         *(uint32_t *)(f->rdi + 8) = user_fb_w;
@@ -256,6 +290,45 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = addr;
         return f;
     }
+
+    case SYS_NtGetInput: {
+        for (int i = 0; i < 64; i++) {
+            if (!(ps2_inb(0x64) & 1)) break;
+            ps2_handle_byte(ps2_inb(0x60));
+        }
+        int *out = (int *)f->rdi;
+        if (!out) { f->rax = 0; return f; }
+        while (kbd_r != kbd_w) {
+            uint8_t sc = kbd_buf[kbd_r++ % 64];
+            if (sc & 0x80) continue;
+            int step = 24;
+            if (sc == 0x48 || sc == 0x11) { mouse_y -= step; if (mouse_y < 0) mouse_y = 0; }
+            else if (sc == 0x50 || sc == 0x1F) { mouse_y += step; if (mouse_y > 799) mouse_y = 799; }
+            else if (sc == 0x4B || sc == 0x1E) { mouse_x -= step; if (mouse_x < 0) mouse_x = 0; }
+            else if (sc == 0x4D || sc == 0x20) { mouse_x += step; if (mouse_x > 1279) mouse_x = 1279; }
+            else if (sc == 0x1C || sc == 0x39) {
+                out[0] = 3; out[1] = mouse_x; out[2] = mouse_y; out[3] = 1;
+                f->rax = 1; return f;
+            } else {
+                char key = ps2_scancode_to_ascii(sc);
+                if (key) {
+                    out[0] = 1; out[1] = mouse_x; out[2] = mouse_y; out[3] = mouse_btn;
+                    ((char *)out)[16] = key;
+                    f->rax = 1; return f;
+                }
+            }
+        }
+        static int last_mx = -1, last_my = -1, last_btn = -1;
+        if (mouse_x != last_mx || mouse_y != last_my || mouse_btn != last_btn) {
+            int down = (mouse_btn & 1) && !(last_btn & 1);
+            out[0] = down ? 3 : 2;
+            out[1] = mouse_x; out[2] = mouse_y; out[3] = mouse_btn;
+            last_mx = mouse_x; last_my = mouse_y; last_btn = mouse_btn;
+            f->rax = 1; return f;
+        }
+        f->rax = 0;
+        return f;
+    }
     default:
         DbgPrint("[user] unknown syscall %llu\n", f->rax);
         f->rax = (uint64_t)-1LL;
@@ -264,6 +337,7 @@ static Frame *syscall_handler(Frame *f) {
 }
 
 static void user_enter(BootInfo *bi) {
+    ps2_init();
     DbgPrint("\n-- usermode (smss) --\n");
     user_bootinfo = (BootInfo *)(HHDM_BASE + (uint64_t)bi);
     user_fb_base = bi->fb_base;

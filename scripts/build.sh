@@ -111,12 +111,30 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
   /export:TaskbarDraw \
   "/out:$SYS32/taskbar.dll" "$B/obj/taskbar.o"
 
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/kernel32.c" -o "$B/obj/kernel32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41000000 \
+  /export:ExitProcess /export:GetStdHandle /export:WriteFile /export:VirtualAlloc \
+  /export:CreateFileA /export:ReadFile /export:CloseHandle /export:QueryDirectoryA \
+  /export:GetLastError /export:SetLastError /export:PeekInput /export:GetTickCount64 /export:Sleep \
+  "/implib:$B/obj/kernel32.lib" "/out:$SYS32/kernel32.dll" "$B/obj/kernel32.o"
+
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/user32.c" -o "$B/obj/user32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41100000 \
+  /export:MessageBoxA /export:CreateWindowExA /export:ShowWindow /export:UpdateWindow \
+  /export:TextOutA /export:InvalidateRect /export:GetMessageA /export:TranslateMessage \
+  /export:DispatchMessageA /export:DestroyWindow /export:PostQuitMessage \
+  "/implib:$B/obj/user32.lib" "/out:$SYS32/user32.dll" "$B/obj/user32.o"
+test -f "$SYS32/kernel32.dll" || { echo FATAL: kernel32.dll missing; exit 1; }
+test -f "$SYS32/user32.dll" || { echo FATAL: user32.dll missing; exit 1; }
+echo "Win32 DLLs:" && ls -la "$SYS32/kernel32.dll" "$SYS32/user32.dll"
+
+
 clang "${USER_CFLAGS[@]}" -c "$ROOT/user/explorer.c" -o "$B/obj/explorer.o"
 lld -flavor link /subsystem:native /entry:explorer_main /nodefaultlib /fixed:no /base:0x40000000 \
   "/out:$SYS32/explorer.exe" "$B/obj/explorer.o"
 
 clang "${USER_CFLAGS[@]}" -c "$ROOT/user/fileexplorer.c" -o "$B/obj/fileexplorer.o"
-lld -flavor link /subsystem:native /entry:fileexplorer_main /nodefaultlib /fixed:no /base:0x40100000 \
+lld -flavor link /subsystem:native /entry:mainCRTStartup /nodefaultlib /fixed:no /base:0x40100000 \
   "/out:$SYS32/fileexplorer.exe" "$B/obj/fileexplorer.o"
 
 ls -la "$SYS32"/smss.exe "$SYS32"/explorer.exe "$SYS32"/fileexplorer.exe "$SYS32"/taskbar.dll

@@ -26,22 +26,28 @@ static int gi(char c){
 }
 static void draw_char(u32 *fb,u32 pitch,u32 x,u32 y,char ch,u32 col){
   const unsigned char *g=FONT[gi(ch)];
-  for(int r=0;r<7;r++)for(int c=0;c<5;c++)if(g[r]&(0x10>>c))fb[(y+r)*pitch+(x+c)]=col;
+  for(int r=0;r<7;r++)for(int c=0;c<5;c++)
+    if(g[r]&(0x10>>c)) fb[(y+r)*pitch+(x+c)]=col;
 }
 static void draw_text(u32 *fb,u32 pitch,u32 x,u32 y,const char *s,u32 col){
   for(;*s;s++){draw_char(fb,pitch,x,y,*s,col);x+=6;}
 }
 static void fill(u32 *fb,u32 pitch,u32 x,u32 y,u32 w,u32 h,u32 col){
-  for(u32 yy=y;yy<y+h;yy++)for(u32 xx=x;xx<x+w;xx++)fb[yy*pitch+xx]=col;
+  for(u32 yy=y;yy<y+h;yy++)
+    for(u32 xx=x;xx<x+w;xx++)
+      fb[yy*pitch+xx]=col;
 }
 void TaskbarDraw(u32 *fb, u32 width, u32 height, u32 pitch_px) {
-  if(!fb||width<160||height<48)return;
-  u32 bar_h=48, y0=height-bar_h;
-  fill(fb,pitch_px,0,y0,width,bar_h,0xFF1F1F1F);
-  fill(fb,pitch_px,0,y0,width,1,0xFF3F3F3F);
-  fill(fb,pitch_px,8,y0+8,72,32,0xFF0078D7);
-  draw_text(fb,pitch_px,22,y0+18,"START",0xFFFFFFFF);
-  fill(fb,pitch_px,88,y0+8,72,32,0xFF2D2D2D);
-  draw_text(fb,pitch_px,100,y0+18,"FILES",0xFFFFFFFF);
-  draw_text(fb,pitch_px,width-80,y0+18,"C:",0xFFAAAAAA);
+  if(!fb || width < 64 || height < 64 || pitch_px < width) return;
+  fill(fb, pitch_px, 0, 0, width, height, 0xFF1A1A2E);
+  fill(fb, pitch_px, 0, 0, width, 28, 0xFF0F3460);
+  draw_text(fb, pitch_px, 12, 10, "MAGIC OS", 0xFFE94560);
+  u32 bar_h = 56, y0 = height - bar_h;
+  fill(fb, pitch_px, 0, y0, width, bar_h, 0xFF16213E);
+  fill(fb, pitch_px, 0, y0, width, 3, 0xFFE94560);
+  fill(fb, pitch_px, 8, y0 + 10, 88, 36, 0xFF0F4C75);
+  draw_text(fb, pitch_px, 28, y0 + 22, "START", 0xFFFFFFFF);
+  fill(fb, pitch_px, 104, y0 + 10, 88, 36, 0xFF533483);
+  draw_text(fb, pitch_px, 122, y0 + 22, "FILES", 0xFFFFFFFF);
+  draw_text(fb, pitch_px, width - 60, y0 + 22, "C:", 0xFFAAAAAA);
 }

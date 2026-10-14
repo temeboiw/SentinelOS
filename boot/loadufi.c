@@ -281,15 +281,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     Module *krnl = load_module("krnl.exe");
 
     {
-        static const char *users[] = {
-            "smss.exe", "explorer.exe", "fileexplorer.exe", "taskbar.dll", "hello.exe"
-        };
-        int nusers = 5;
+        static const char *users[] = { "smss.exe", "explorer.exe", "fileexplorer.exe", "taskbar.dll", "kernel32.dll", "user32.dll", "hello.exe" };
+        int nusers = 7;
         for (int u = 0; u < nusers; u++) {
             const char *path[3] = { "magic", "System32", users[u] };
             VOID *file; UINTN fsize;
-            EFI_STATUS st = ext_load_file(path, 3, &file, &fsize);
-            if (EFI_ERROR(st)) {
+            EFI_STATUS st2 = ext_load_file(path, 3, &file, &fsize);
+            if (EFI_ERROR(st2)) {
                 say(L"loadufi: missing user image ");
                 say_a(users[u]);
                 say(L"\r\n");
@@ -297,11 +295,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             }
             if (nmods >= BOOT_MAX_MODULES) break;
             Module *m = &mods[nmods];
-            int i = 0;
-            for (; users[u][i] && i < 31; i++) m->name[i] = users[u][i];
-            m->name[i] = 0;
-            st = map_image(file, m);
-            if (EFI_ERROR(st)) {
+            int ii = 0;
+            for (; users[u][ii] && ii < 31; ii++) m->name[ii] = users[u][ii];
+            m->name[ii] = 0;
+            st2 = map_image(file, m);
+            if (EFI_ERROR(st2)) {
                 say(L"loadufi: bad PE ");
                 say_a(users[u]);
                 say(L"\r\n");
@@ -314,7 +312,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         }
     }
 
-for (int i = 0; i < nmods; i++) {
+    for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1)) continue;
         resolve_imports(&mods[i]);
     }

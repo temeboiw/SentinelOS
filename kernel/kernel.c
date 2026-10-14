@@ -74,14 +74,9 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     // ---- usermode demo ----
     user_enter(bi);   // does not return on success (exit syscall → halt)
 
-    // Unreachable under normal operation; kept for the TEST_FAULT paths
-    uint32_t *fb = (uint32_t *)bi->fb_base;
-    for (uint32_t y = 0; y < bi->height; y++)
-        for (uint32_t x = 0; x < bi->width; x++)
-            fb[y * (bi->pitch / 4) + x] = 0x00FF2080;       // pink
-    DbgPrint("framebuffer painted, halting.\n");
-
-    for (;;) __asm__ volatile("cli; hlt");
+    /* Usermode returned – leave the framebuffer alone (taskbar stays). */
+    DbgPrint("kernel: idle\n");
+    for (;;) __asm__ volatile("sti; hlt");
 }
 
 // entry point: interrupts off, move to our own stack, continue in kmain2

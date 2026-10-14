@@ -32,6 +32,11 @@ From the repository root in an Administrator PowerShell:
 .\scripts\build.ps1
 ```
 
+# Build Prerequisites for linux
+
+./scripts/build.sh
+./scripts/run.sh
+
 Build and launch the result in QEMU:
 
 ```powershell
@@ -52,6 +57,13 @@ QEMU connects the guest serial port to the PowerShell terminal. Kernel diagnosti
 - `-KeepFallback`: do not remove `EFI\BOOT\BOOTX64.EFI` after registering the UEFI boot entry.
 - `-ResetNvram`: remove the saved `build\vars.fd` before rebuilding, resetting QEMU's UEFI boot variables.
 - `-Clean`: detach the generated virtual disk if needed and remove `build\`.
+
+## Options for linux
+
+--run
+--keepfallback
+--resetnvram
+--clean
 
 For example, rebuild with the fallback loader retained:
 

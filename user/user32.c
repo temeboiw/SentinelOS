@@ -304,29 +304,35 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     (void)hwnd;(void)min;(void)max;
     if (!g_front) ensure_fb();
     for (;;) {
+        typedef struct { int type, x, y, btn; char key; } InputEvent;
         InputEvent ev = {0};
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
             if (ev.type == 1) {
                 msg->message = 0x0100;
                 msg->wParam = (u64)(unsigned char)ev.key;
+                msg->pt_x = g_mx; msg->pt_y = g_my;
                 return 1;
             }
             if (ev.type == 2 || ev.type == 3) {
-                int moved = (ev.x != g_mx || ev.y != g_my);
-                g_mx = ev.x; g_my = ev.y;
+                g_mx = ev.x;
+                g_my = ev.y;
                 msg->message = (ev.type == 3) ? 0x0201 : 0x0200;
-                msg->pt_x = ev.x; msg->pt_y = ev.y;
-                if (g_drag && (ev.type == 2 || (ev.btn & 1))) {
+                msg->pt_x = ev.x;
+                msg->pt_y = ev.y;
+                if (g_drag && (ev.btn & 1)) {
                     g_wnd.x = ev.x - g_drag_ox;
                     g_wnd.y = ev.y - g_drag_oy;
                     if (g_wnd.x < 0) g_wnd.x = 0;
                     if (g_wnd.y < 0) g_wnd.y = 0;
                     compose();
-                    if (ev.type == 3 && !(ev.btn & 1)) g_drag = 0;
                     return 1;
                 }
-                if (ev.type == 3) { g_drag = 0; on_click(ev.x, ev.y); }
-                else if (moved) present_cursor_only();
+                if (ev.type == 3) {
+                    g_drag = 0;
+                    on_click(ev.x, ev.y);
+                } else {
+                    present_cursor_only();
+                }
                 return 1;
             }
         }

@@ -1,5 +1,9 @@
 #pragma once
+/* PS/2 keyboard + mouse – status sampled BEFORE data (AUX bit). */
 #include "serial.h"
+
+#define PS2_DATA 0x60
+#define PS2_STAT 0x64
 
 static inline uint8_t ps2_inb(uint16_t p) {
     uint8_t v; __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p)); return v;
@@ -8,9 +12,6 @@ static inline void ps2_outb(uint16_t p, uint8_t v) {
     __asm__ volatile("outb %0, %1" :: "a"(v), "Nd"(p));
 }
 
-#define PS2_DATA 0x60
-#define PS2_STAT 0x64
-
 static uint8_t  kbd_buf[64];
 static unsigned kbd_r, kbd_w;
 static int mouse_x = 640, mouse_y = 400;
@@ -18,13 +19,7 @@ static int mouse_btn;
 static uint8_t mouse_pkt[3];
 static int mouse_idx;
 static int ps2_ready;
-static uint64_t mouse_last_tsc;
-
-static inline uint64_t ps2_rdtsc(void) {
-    uint32_t lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
-}
+static int mouse_pkt_count;
 
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++)
@@ -40,59 +35,39 @@ static void ps2_data(uint8_t c) { ps2_wait_write(); ps2_outb(PS2_DATA, c); }
 static void ps2_handle_byte(uint8_t b, int is_mouse) {
     if (is_mouse) {
         if (mouse_idx == 0) {
-            if (!(b & 0x08)) return;
-            if (b & 0xC0) return;
+            /* bit3 must be 1 in first byte of a valid 3-byte packet */
+            if ((b & 0x08) == 0) return;
             mouse_pkt[0] = b;
             mouse_idx = 1;
             return;
         }
         mouse_pkt[mouse_idx++] = b;
         if (mouse_idx < 3) return;
-
         mouse_idx = 0;
+
         int dx = (int8_t)mouse_pkt[1];
         int dy = (int8_t)mouse_pkt[2];
-        if (dx > 25) dx = 25;
-        if (dx < -25) dx = -25;
-        if (dy > 25) dy = 25;
-        if (dy < -25) dy = -25;
+        /* overflow bits */
+        if (mouse_pkt[0] & 0x40) dx = 0;
+        if (mouse_pkt[0] & 0x80) dy = 0;
 
-        mouse_btn = mouse_pkt[0] & 7;
-        if (dx || dy) {
-            /*
-             * Velocity from real motion: distance / TSC time.
-             * Slow glide → 1:1. Fast flick → mild boost. No runaway.
-             */
-            uint64_t now = ps2_rdtsc();
-            uint64_t dt = now - mouse_last_tsc;
-            mouse_last_tsc = now;
-            if (dt < 1) dt = 1;
+        /* VNC deltas are tiny – scale up */
+        int scale = 3;
+        mouse_x += dx * scale;
+        mouse_y -= dy * scale; /* PS/2 Y is opposite screen Y */
+        if (mouse_x < 0) mouse_x = 0;
+        if (mouse_y < 0) mouse_y = 0;
+        if (mouse_x > 1279) mouse_x = 1279;
+        if (mouse_y > 799) mouse_y = 799;
+        mouse_btn = mouse_pkt[0] & 0x07;
 
-            int adx = dx < 0 ? -dx : dx;
-            int ady = dy < 0 ? -dy : dy;
-            int mag = adx + ady;
-            if (mag < 1) mag = 1;
-
-            uint64_t dt_s = dt >> 8;
-            if (dt_s < 1) dt_s = 1;
-            uint64_t speed = ((uint64_t)mag << 10) / dt_s;
-
-            int scale = 1;
-            if (speed > 80)  scale = 2;
-            if (speed > 200) scale = 3;
-            if (speed > 400) scale = 4;
-            if (mag <= 2) scale = 1;   /* precision / touchpad creep */
-
-            mouse_x += dx * scale;
-            mouse_y -= dy * scale;
-            if (mouse_x < 0) mouse_x = 0;
-            if (mouse_y < 0) mouse_y = 0;
-            if (mouse_x > 1279) mouse_x = 1279;
-            if (mouse_y > 799) mouse_y = 799;
-        }
+        mouse_pkt_count++;
+        if (mouse_pkt_count == 1 || (mouse_pkt_count % 50) == 0)
+            DbgPrint("ps2: mouse pkt#%d dx=%d dy=%d -> (%d,%d)\n",
+                     mouse_pkt_count, dx, dy, mouse_x, mouse_y);
     } else {
         kbd_buf[kbd_w++ % 64] = b;
-        mouse_idx = 0;
+        mouse_idx = 0; /* resync mouse if stream mixed */
     }
 }
 
@@ -118,23 +93,34 @@ static int ps2_init(void) {
 
     ps2_cmd(0x20); ps2_wait_read();
     uint8_t cfg = ps2_inb(PS2_DATA);
-    cfg |= 0x03;
+    cfg |= 0x03;           /* IRQ1 + IRQ12 */
     cfg &= (uint8_t)~0x30;
+    cfg |= 0x02;           /* clock mouse enable in config often bit1 */
     ps2_cmd(0x60); ps2_data(cfg);
 
+    /* mouse port on */
     ps2_cmd(0xA8);
+    /* defaults */
     ps2_cmd(0xD4); ps2_data(0xF6); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+    /* sample rate 100 */
+    ps2_cmd(0xD4); ps2_data(0xF3); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+    ps2_cmd(0xD4); ps2_data(100);  ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+    /* enable streaming */
     ps2_cmd(0xD4); ps2_data(0xF4); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
 
+    /* keyboard enable scanning */
     ps2_data(0xF4); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
 
-    ps2_outb(0x21, ps2_inb(0x21) & (uint8_t)~0x06);
+    /* unmask PIC IRQ1 + IRQ12 */
+    ps2_outb(0x21, ps2_inb(0x21) & (uint8_t)~0x02);
+    ps2_outb(0x21, ps2_inb(0x21) & (uint8_t)~0x04); /* cascade */
     ps2_outb(0xA1, ps2_inb(0xA1) & (uint8_t)~0x10);
 
     KeConnectInterrupt(0x21, ps2_irq_kbd);
     KeConnectInterrupt(0x2C, ps2_irq_kbd);
 
     mouse_idx = 0;
+    mouse_pkt_count = 0;
     ps2_ready = 1;
     DbgPrint("ps2: keyboard+mouse ready (synced)\n");
     return 1;

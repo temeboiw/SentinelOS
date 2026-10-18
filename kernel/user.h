@@ -457,13 +457,25 @@ static Frame *syscall_handler(Frame *f) {
         typedef struct { int type, x, y, btn; char key; } UIn;
         UIn *out = (UIn *)f->rdi;
         if (!out) { f->rax = 0; return f; }
+
         ps2_poll();
-        virtio_input_poll();
-        if (vi_ok) {
+        if (vi_ok) virtio_input_poll();
+
+        /* tablet owns absolute position when present */
+        if (vi_ok && (vi_moved || vi_clicked)) {
             mouse_x = vi_x;
             mouse_y = vi_y;
             mouse_btn = vi_btn;
+            out->type = vi_clicked ? 3 : 2;
+            out->x = mouse_x;
+            out->y = mouse_y;
+            out->btn = mouse_btn;
+            vi_moved = 0;
+            vi_clicked = 0;
+            f->rax = 1;
+            return f;
         }
+
         char k = 0;
         if (ps2_read_key(&k)) {
             out->type = 1;
@@ -474,16 +486,9 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = 1;
             return f;
         }
-        if (vi_ok && vi_have) {
-            out->type = (vi_have == 3) ? 3 : 2;
-            out->x = mouse_x;
-            out->y = mouse_y;
-            out->btn = mouse_btn;
-            vi_have = 0;
-            f->rax = 1;
-            return f;
-        }
-        {
+
+        /* PS/2 relative – only if no tablet */
+        if (!vi_ok) {
             static int lx = -1, ly = -1, lb = -1;
             if (mouse_x != lx || mouse_y != ly || mouse_btn != lb) {
                 int pressed = (mouse_btn & 1) && !(lb & 1);
@@ -496,11 +501,21 @@ static Frame *syscall_handler(Frame *f) {
                 return f;
             }
         }
+
+        /* RR at most every 32 empty polls so pointer stays responsive */
         {
-            int me = up_find_proc(MmCurrentProcess);
-            if (me >= 0) up_save(f, me);
-            int nxt = up_pick_next();
-            if (nxt >= 0 && nxt != me) { up_load(f, nxt); f->rax = 0; return f; }
+            static int empty;
+            empty++;
+            if ((empty & 31) == 0) {
+                int me = up_find_proc(MmCurrentProcess);
+                if (me >= 0) up_save(f, me);
+                int nxt = up_pick_next();
+                if (nxt >= 0 && nxt != me) {
+                    up_load(f, nxt);
+                    f->rax = 0;
+                    return f;
+                }
+            }
         }
         f->rax = 0;
         return f;

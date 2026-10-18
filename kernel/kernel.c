@@ -8,6 +8,8 @@
 #include "ke.h"
 #include "bootcheck.h"
 #include "user.h"
+#include "virtio_blk.h"
+#include "hda.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -51,6 +53,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
+    hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
     uint64_t got = pmm_reclaim_boot_services(bi);
     DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",

@@ -196,6 +196,113 @@ static int hda_codec_verb(uint8_t cad, uint8_t nid,
     return -1;
 }
 
+/* Long-form HDA verbs: 4-bit verb + 16-bit payload (e.g. connection list). */
+static int hda_codec_verb16(uint8_t cad, uint8_t nid,
+                            uint8_t verb, uint16_t payload,
+                          uint32_t *result) {
+    uint16_t csz = hda_read8(HDA_CORBSIZE) & 3;
+    uint16_t rsz = hda_read8(HDA_RIRBSIZE) & 3;
+    uint16_t ccount = csz == 2 ? 256 : (csz == 1 ? 16 : 2);
+    uint16_t rcount = rsz == 2 ? 256 : (rsz == 1 ? 16 : 2);
+
+    uint16_t next = (uint16_t)((hda_corb_wp + 1) % ccount);
+    static int ring_debug_count = 0;
+    if (ring_debug_count < 3) {
+        DbgPrint("hda: ring debug CORBSIZE=%02x RIRBSIZE=%02x "
+                 "ccount=%u rcount=%u sw_wp=%u hw_rp=%u "
+                 "CORB_LO=%08x HI=%08x\n",
+                 hda_read8(HDA_CORBSIZE), hda_read8(HDA_RIRBSIZE),
+                 ccount, rcount, hda_corb_wp, hda_read16(HDA_CORBRP),
+                 hda_read32(HDA_CORB_LO), hda_read32(HDA_CORB_HI));
+        ring_debug_count++;
+    }
+    uint32_t command = ((uint32_t)(cad & 0x0F) << 28) |
+                       ((uint32_t)nid << 20) |
+                       ((uint32_t)(verb & 0x0F) << 16) | payload;
+
+    ((volatile uint32_t *)(HHDM_BASE + hda_corb_pa))[next] = command;
+    __asm__ volatile("mfence" ::: "memory");
+
+    DbgPrint("hda: enqueue slot=%u command=%08x slot_readback=%08x "
+             "ring_pa=%p\n",
+             next, command,
+             ((volatile uint32_t *)(HHDM_BASE + hda_corb_pa))[next],
+             (void *)hda_corb_pa);
+
+    hda_write16(HDA_CORBWP, next);
+    __asm__ volatile("mfence" ::: "memory");
+    uint16_t wp_readback = hda_read16(HDA_CORBWP);
+    hda_corb_wp = next;
+
+    if (ring_debug_count <= 3) {
+        DbgPrint("hda: CORBWP write=%u readback=%u CORBRP=%u\n",
+                 next, wp_readback, hda_read16(HDA_CORBRP));
+    }
+
+    int corb_consumed = 0;
+
+    for (uint32_t i = 0; i < 5000000; i++) {
+        uint16_t rp = hda_read16(HDA_CORBRP) & (ccount - 1);
+        if (rp == next) {
+            corb_consumed = 1;
+            break;
+        }
+        __asm__ volatile("pause");
+    }
+
+    if (!corb_consumed) {
+        DbgPrint("hda: CORB stalled target=%u CORBWP=%04x CORBRP=%04x "
+                 "CORBCTL=%02x CORBSTS=%02x RIRBCTL=%02x RIRBSTS=%02x\n",
+                 next, hda_read16(HDA_CORBWP), hda_read16(HDA_CORBRP),
+                 hda_read8(HDA_CORBCTL), hda_read8(0x4D),
+                 hda_read8(HDA_RIRBCTL), hda_read8(0x5D));
+        DbgPrint("hda: stalled-ring detail RIRBWP=%04x RIRBRP_SW=%u "
+                 "GCTL=%08x STATESTS=%04x\n",
+                 hda_read16(HDA_RIRBWP), hda_rirb_last,
+                 hda_read32(HDA_REG_GCTL),
+                 hda_read16(HDA_REG_STATESTS));
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < 5000000; i++) {
+        uint16_t wp = hda_read16(HDA_RIRBWP) & (rcount - 1);
+
+        if (wp != hda_rirb_last) {
+            uint64_t response =
+                ((volatile uint64_t *)(HHDM_BASE + hda_rirb_pa))[wp];
+            hda_rirb_last = wp;
+
+            /* Acknowledge response interrupt and reset QEMU's count. */
+            hda_write8(0x5D, 0x01);
+
+            DbgPrint("hda: verb cad=%u nid=%u verb=%03x param=%02x "
+                     "rirb=%u response=%08x ext=%08x\n",
+                     cad, nid, verb, payload, wp,
+                     (uint32_t)response, (uint32_t)(response >> 32));
+
+            if (((response >> 32) & 0x0F) != cad)
+                continue;
+
+            if (result)
+                *result = (uint32_t)response;
+
+            /* Clear write-one-to-clear status flags. */
+            hda_write8(0x4D, 0x01); /* CORBSTS: CMEI */
+            return 0;
+        }
+
+        __asm__ volatile("pause");
+    }
+
+    DbgPrint("hda: verb timeout cad=%u nid=%u verb=%03x param=%02x "
+             "CORBWP=%04x CORBRP=%04x RIRBWP=%04x last=%u\n",
+             cad, nid, verb, payload,
+             hda_read16(HDA_CORBWP), hda_read16(HDA_CORBRP),
+             hda_read16(HDA_RIRBWP), hda_rirb_last);
+    return -1;
+}
+
+
 static int hda_codec_probe(void) {
     if (!hda_regs)
         return -1;

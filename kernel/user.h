@@ -100,7 +100,7 @@ static void up_load(Frame *f, int idx) {
     f->ss = USER_DS;
     if (u->fresh || u->rip < 0x10000) {
         f->rip = u->entry ? u->entry : u->rip;
-        f->rsp = USER_STACK_TOP;
+        f->rsp = USER_STACK_TOP - 8; /* Win64 entry RSP is 8 mod 16 */
         f->rflags = 0x202;
         f->rax = 0;
         up_clear_gpr(f);
@@ -141,144 +141,390 @@ static int up_pick_next(void) {
 
 static uint64_t user_fb_base;
 static uint32_t user_fb_w, user_fb_h, user_fb_pitch;
-static int mod_relocated[BOOT_MAX_MODULES];
-static int pe_resolving;
 static int fb_map_logged;
 
-static void pe_apply_relocs(uint8_t *phys, int64_t delta) {
-    if (phys[0] != 'M' || phys[1] != 'Z') return;
-    int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *opt = phys + lfanew + 4 + 20;
-    if (*(uint16_t *)opt != 0x20B) return;
-    uint32_t reloc_rva = *(uint32_t *)(opt + 112 + 5 * 8);
-    uint32_t reloc_sz  = *(uint32_t *)(opt + 112 + 5 * 8 + 4);
-    if (!reloc_rva || !reloc_sz) return;
-    uint8_t *rel = phys + reloc_rva;
-    uint8_t *end = rel + reloc_sz;
-    while (rel + 8 <= end) {
-        uint32_t page_rva = *(uint32_t *)rel;
-        uint32_t block_sz = *(uint32_t *)(rel + 4);
-        if (block_sz < 8) break;
-        uint32_t count = (block_sz - 8) / 2;
-        uint16_t *entry = (uint16_t *)(rel + 8);
-        for (uint32_t i = 0; i < count; i++) {
-            uint16_t e = entry[i];
-            uint16_t type = e >> 12;
-            uint16_t off = e & 0xFFF;
-            if (type == 10) {
-                uint64_t *p = (uint64_t *)(phys + page_rva + off);
-                *p += (uint64_t)delta;
-            } else if (type == 3) {
-                uint32_t *p = (uint32_t *)(phys + page_rva + off);
-                *p += (uint32_t)delta;
-            }
-        }
-        rel += block_sz;
+/*
+ * PE32+ image loader v2.
+ *
+ * BootModule describes a file-layout PE image in physical memory. Each process
+ * receives a private, image-layout copy, so relocations and IAT writes never
+ * mutate the boot module or another process's image.
+ */
+#define PE_MAX_INSTANCES (MM_MAX_PROCESSES * BOOT_MAX_MODULES)
+#define PE_MAX_IMAGE_SIZE (64ULL * 1024 * 1024)
+#define PE_DOS_HEADER_SIZE 0x40u
+#define PE_NT_HEADER_SIZE 24u
+#define PE_OPT64_MIN_SIZE 240u
+#define PE_SECTION_SIZE 40u
+#define PE_DIRECTORY_BASE 112u
+#define PE_DIR_EXPORT 0u
+#define PE_DIR_IMPORT 1u
+#define PE_DIR_BASERELOC 5u
+
+typedef struct {
+    uint32_t pe_off, section_off, section_count, opt_size;
+    uint32_t image_size, headers_size, entry_rva;
+    uint64_t preferred_base;
+    uint32_t export_rva, export_size;
+    uint32_t import_rva, import_size;
+    uint32_t reloc_rva, reloc_size;
+} PEHeaderView;
+
+typedef struct {
+    KPROCESS *proc;
+    BootModule *source;
+    uint64_t image_phys, base, entry, alloc_size;
+    uint32_t image_size;
+    uint8_t state; /* 0 free, 1 mapped, 2 resolving, 3 resolved, 4 failed */
+    uint8_t used;
+} PEImageInstance;
+
+static PEImageInstance pe_instances[PE_MAX_INSTANCES];
+
+static int pe_span(uint64_t total, uint64_t off, uint64_t len) {
+    return off <= total && len <= total - off;
+}
+
+static int pe_read_headers(BootModule *mod, PEHeaderView *v) {
+    if (!mod || !mod->phys || !mod->size || mod->size < PE_DOS_HEADER_SIZE || !v)
+        return -1;
+    const uint8_t *file = (const uint8_t *)(HHDM_BASE + mod->phys);
+    if (file[0] != 'M' || file[1] != 'Z') return -1;
+    uint32_t peoff = *(const uint32_t *)(file + 0x3C);
+    if (!pe_span(mod->size, peoff, PE_NT_HEADER_SIZE)) return -1;
+    if (file[peoff] != 'P' || file[peoff + 1] != 'E' ||
+        file[peoff + 2] != 0 || file[peoff + 3] != 0) return -1;
+
+    const uint8_t *coff = file + peoff + 4;
+    uint16_t machine = *(const uint16_t *)(coff + 0);
+    uint16_t sections = *(const uint16_t *)(coff + 2);
+    uint16_t opt_size = *(const uint16_t *)(coff + 16);
+    if (machine != 0x8664 || !sections || sections > 96 ||
+        opt_size < PE_OPT64_MIN_SIZE) return -1;
+    uint64_t optoff = (uint64_t)peoff + 24;
+    if (!pe_span(mod->size, optoff, opt_size)) return -1;
+    const uint8_t *opt = file + optoff;
+    if (*(const uint16_t *)opt != 0x20B) return -1;
+
+    uint32_t image_size = *(const uint32_t *)(opt + 56);
+    uint32_t headers_size = *(const uint32_t *)(opt + 60);
+    uint32_t entry_rva = *(const uint32_t *)(opt + 16);
+    uint64_t preferred = *(const uint64_t *)(opt + 24);
+    uint32_t dirs = *(const uint32_t *)(opt + 108);
+    if (!image_size || image_size > PE_MAX_IMAGE_SIZE ||
+        !headers_size || headers_size > image_size ||
+        headers_size > mod->size || !entry_rva || entry_rva >= image_size ||
+        dirs < 6 || opt_size < PE_DIRECTORY_BASE + 6 * 8) return -1;
+
+    uint64_t section_off = optoff + opt_size;
+    uint64_t section_bytes = (uint64_t)sections * PE_SECTION_SIZE;
+    if (section_off > UINT32_MAX ||
+        !pe_span(mod->size, section_off, section_bytes)) return -1;
+
+    v->pe_off = peoff;
+    v->section_off = (uint32_t)section_off;
+    v->section_count = sections;
+    v->opt_size = opt_size;
+    v->image_size = image_size;
+    v->headers_size = headers_size;
+    v->entry_rva = entry_rva;
+    v->preferred_base = preferred;
+    v->export_rva = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_EXPORT * 8);
+    v->export_size = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_EXPORT * 8 + 4);
+    v->import_rva = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_IMPORT * 8);
+    v->import_size = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_IMPORT * 8 + 4);
+    v->reloc_rva = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_BASERELOC * 8);
+    v->reloc_size = *(const uint32_t *)(opt + PE_DIRECTORY_BASE + PE_DIR_BASERELOC * 8 + 4);
+
+    for (uint32_t i = 0; i < sections; i++) {
+        const uint8_t *sh = file + section_off + (uint64_t)i * PE_SECTION_SIZE;
+        uint32_t virtual_size = *(const uint32_t *)(sh + 8);
+        uint32_t virtual_address = *(const uint32_t *)(sh + 12);
+        uint32_t raw_size = *(const uint32_t *)(sh + 16);
+        uint32_t raw_off = *(const uint32_t *)(sh + 20);
+        uint32_t mapped = virtual_size > raw_size ? virtual_size : raw_size;
+        if (mapped && !pe_span(image_size, virtual_address, mapped)) return -1;
+        if (raw_size && !pe_span(mod->size, raw_off, raw_size)) return -1;
     }
+    if ((v->export_rva || v->export_size) &&
+        (!v->export_rva || !v->export_size ||
+         !pe_span(image_size, v->export_rva, v->export_size))) return -1;
+    if ((v->import_rva || v->import_size) &&
+        (!v->import_rva || !v->import_size ||
+         !pe_span(image_size, v->import_rva, v->import_size))) return -1;
+    if ((v->reloc_rva || v->reloc_size) &&
+        (!v->reloc_rva || !v->reloc_size ||
+         !pe_span(image_size, v->reloc_rva, v->reloc_size))) return -1;
+    return 0;
 }
 
 static BootModule *PspFindModule(BootInfo *bi, const char *name) {
-    for (uint32_t i = 0; i < bi->module_count; i++) {
+    if (!bi || !name) return 0;
+    for (uint32_t i = 0; i < bi->module_count && i < BOOT_MAX_MODULES; i++) {
         const char *n = bi->modules[i].name;
-        int m = 1;
-        for (int k = 0; name[k] || n[k]; k++) {
+        int match = 1;
+        uint32_t k = 0;
+        for (; k < sizeof bi->modules[i].name && name[k] && n[k]; k++) {
             char a = name[k], b = n[k];
             if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
             if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
-            if (a != b) { m = 0; break; }
+            if (a != b) { match = 0; break; }
         }
-        if (m) return &bi->modules[i];
+        if (!match || k >= sizeof bi->modules[i].name || name[k] || n[k]) continue;
+        return &bi->modules[i];
     }
     return 0;
+}
+
+static PEImageInstance *pe_find_instance(KPROCESS *proc, BootModule *mod) {
+    for (uint32_t i = 0; i < PE_MAX_INSTANCES; i++)
+        if (pe_instances[i].used && pe_instances[i].proc == proc &&
+            pe_instances[i].source == mod) return &pe_instances[i];
+    return 0;
+}
+
+static int pe_overlap(uint64_t a, uint64_t as, uint64_t b, uint64_t bs) {
+    return a < b + bs && b < a + as;
+}
+
+static int pe_base_available(KPROCESS *proc, uint64_t base, uint64_t size) {
+    if (!base || base >= 0x0000800000000000ULL ||
+        size > 0x0000800000000000ULL - base) return 0;
+    for (uint32_t i = 0; i < PE_MAX_INSTANCES; i++) {
+        PEImageInstance *x = &pe_instances[i];
+        if (x->used && x->proc == proc &&
+            pe_overlap(base, size, x->base, x->alloc_size)) return 0;
+    }
+    return 1;
+}
+
+static int pe_apply_relocs(uint8_t *image, uint32_t image_size,
+                           uint32_t rva, uint32_t size, int64_t delta) {
+    if (!delta) return 0;
+    if (!rva || !size || !pe_span(image_size, rva, size)) return -1;
+    uint32_t off = rva, end = rva + size;
+    while (off < end) {
+        if (!pe_span(end, off, 8)) return -1;
+        uint32_t page_rva = *(uint32_t *)(image + off);
+        uint32_t block_size = *(uint32_t *)(image + off + 4);
+        if (block_size < 8 || block_size > end - off ||
+            ((block_size - 8) & 1)) return -1;
+        uint32_t count = (block_size - 8) / 2;
+        for (uint32_t i = 0; i < count; i++) {
+            uint16_t e = *(uint16_t *)(image + off + 8 + i * 2);
+            uint16_t type = e >> 12;
+            uint64_t target64 = (uint64_t)page_rva + (e & 0x0FFF);
+            if (target64 > UINT32_MAX) return -1;
+            uint32_t target = (uint32_t)target64;
+            if (type == 0) continue; /* IMAGE_REL_BASED_ABSOLUTE */
+            if (type == 10) {
+                if (!pe_span(image_size, target, 8)) return -1;
+                *(uint64_t *)(image + target) += (uint64_t)delta;
+            } else if (type == 3) {
+                if (!pe_span(image_size, target, 4)) return -1;
+                *(uint32_t *)(image + target) += (uint32_t)delta;
+            } else {
+                return -1; /* unknown relocation type */
+            }
+        }
+        off += block_size;
+    }
+    return off == end ? 0 : -1;
 }
 
 static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
-    if (!proc || !mod || !mod->phys || !mod->size) return -1;
-    uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
-    uint64_t base = mod->base ? mod->base : 0x40000000ULL;
-    uint64_t size = (mod->size + 0xFFF) & ~0xFFFULL;
-    for (uint64_t off = 0; off < size; off += 0x1000) {
-        uint64_t pa = mod->phys + off;
-        map_4k_in(proc->Pml4, base + off, pa, PTE_U | PTE_RW);
+    if (!proc || !mod) return -1;
+    if (pe_find_instance(proc, mod)) return 0;
+
+    PEHeaderView h;
+    if (pe_read_headers(mod, &h) != 0) {
+        DbgPrint("pe: rejected invalid/unsupported PE32+ image '%s'\n", mod->name);
+        return -1;
     }
-    if (phys[0] == 'M' && phys[1] == 'Z') {
-        int32_t lfanew = *(int32_t *)(phys + 0x3C);
-        uint8_t *opt = phys + lfanew + 4 + 20;
-        if (*(uint16_t *)opt == 0x20B) {
-            uint64_t img_base = *(uint64_t *)(opt + 24);
-            int64_t delta = (int64_t)base - (int64_t)img_base;
-            if (delta) pe_apply_relocs(phys, delta);
-            uint32_t ep = *(uint32_t *)(opt + 16);
-            mod->entry = base + ep;
-            mod->base = base;
+
+    uint64_t alloc_size = ((uint64_t)h.image_size + 0xFFFULL) & ~0xFFFULL;
+    uint64_t base = h.preferred_base;
+    if (!pe_base_available(proc, base, alloc_size)) {
+        if (!h.reloc_rva || !h.reloc_size) {
+            DbgPrint("pe: preferred base collision and no relocations: %s\n", mod->name);
+            return -1;
         }
-    } else {
-        mod->base = base;
-        if (!mod->entry) mod->entry = base;
+        base = 0x50000000ULL;
+        while (!pe_base_available(proc, base, alloc_size)) {
+            if (base > 0x00007F0000000000ULL - 0x04000000ULL) return -1;
+            base += 0x04000000ULL;
+        }
     }
+
+    uint64_t pa = pmm_alloc_n(alloc_size / PAGE_SIZE);
+    if (!pa) {
+        DbgPrint("pe: cannot allocate %llu bytes for %s\n", alloc_size, mod->name);
+        return -1;
+    }
+    uint8_t *image = (uint8_t *)(HHDM_BASE + pa);
+    const uint8_t *file = (const uint8_t *)(HHDM_BASE + mod->phys);
+    for (uint64_t i = 0; i < alloc_size; i++) image[i] = 0;
+    for (uint32_t i = 0; i < h.headers_size; i++) image[i] = file[i];
+
+    for (uint32_t i = 0; i < h.section_count; i++) {
+        const uint8_t *sh = file + h.section_off + (uint64_t)i * PE_SECTION_SIZE;
+        uint32_t va = *(const uint32_t *)(sh + 12);
+        uint32_t raw_size = *(const uint32_t *)(sh + 16);
+        uint32_t raw_off = *(const uint32_t *)(sh + 20);
+        for (uint32_t j = 0; j < raw_size; j++) image[va + j] = file[raw_off + j];
+    }
+
+    int64_t delta = (int64_t)base - (int64_t)h.preferred_base;
+    if (pe_apply_relocs(image, h.image_size, h.reloc_rva, h.reloc_size, delta) != 0) {
+        DbgPrint("pe: relocation failure in %s\n", mod->name);
+        for (uint64_t i = 0; i < alloc_size / PAGE_SIZE; i++) pmm_free(pa + i * PAGE_SIZE);
+        return -1;
+    }
+
+    PEImageInstance *slot = 0;
+    for (uint32_t i = 0; i < PE_MAX_INSTANCES; i++)
+        if (!pe_instances[i].used) { slot = &pe_instances[i]; break; }
+    if (!slot) {
+        for (uint64_t i = 0; i < alloc_size / PAGE_SIZE; i++) pmm_free(pa + i * PAGE_SIZE);
+        return -1;
+    }
+
+    for (uint64_t off = 0; off < alloc_size; off += PAGE_SIZE)
+        map_4k_in(proc->Pml4, base + off, pa + off, PTE_U | PTE_RW);
+
+    slot->proc = proc;
+    slot->source = mod;
+    slot->image_phys = pa;
+    slot->base = base;
+    slot->entry = base + h.entry_rva;
+    slot->alloc_size = alloc_size;
+    slot->image_size = h.image_size;
+    slot->state = 1;
+    slot->used = 1;
+    DbgPrint("pe: mapped private %s base=%p size=%u entry=%p\n",
+             mod->name, (void *)base, h.image_size, (void *)slot->entry);
     return 0;
 }
 
-static uint64_t pe_get_export(BootModule *mod, const char *func) {
-    if (!mod || !mod->phys) return 0;
-    uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
-    if (phys[0] != 'M' || phys[1] != 'Z') return 0;
-    int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *opt = phys + lfanew + 4 + 20;
-    if (*(uint16_t *)opt != 0x20B) return 0;
-    uint32_t exp_rva = *(uint32_t *)(opt + 112);
-    if (!exp_rva) return 0;
-    uint8_t *exp = phys + exp_rva;
+static int pe_image_cstr(PEImageInstance *im, uint32_t rva, const char **out) {
+    if (!im || !out || rva >= im->image_size) return -1;
+    const char *s = (const char *)(HHDM_BASE + im->image_phys + rva);
+    uint32_t n = rva;
+    while (n < im->image_size && s[n - rva]) n++;
+    if (n == im->image_size) return -1;
+    *out = s;
+    return 0;
+}
+
+static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod,
+                              const char *func, uint16_t ordinal, int by_ordinal) {
+    PEImageInstance *im = pe_find_instance(proc, mod);
+    if (!im) return 0;
+    uint8_t *image = (uint8_t *)(HHDM_BASE + im->image_phys);
+    PEHeaderView h;
+    if (pe_read_headers(mod, &h) != 0 || !h.export_rva ||
+        !pe_span(im->image_size, h.export_rva, 40)) return 0;
+    uint8_t *exp = image + h.export_rva;
+    uint32_t ordinal_base = *(uint32_t *)(exp + 16);
+    uint32_t nfunc = *(uint32_t *)(exp + 20);
     uint32_t nnames = *(uint32_t *)(exp + 24);
-    uint32_t names_rva = *(uint32_t *)(exp + 32);
-    uint32_t ords_rva  = *(uint32_t *)(exp + 36);
-    uint32_t funcs_rva = *(uint32_t *)(exp + 28);
-    for (uint32_t i = 0; i < nnames; i++) {
-        uint32_t nrva = *(uint32_t *)(phys + names_rva + i * 4);
-        const char *n = (const char *)(phys + nrva);
-        int match = 1;
-        for (int k = 0; func[k] || n[k]; k++) {
-            if (func[k] != n[k]) { match = 0; break; }
+    uint32_t funcs = *(uint32_t *)(exp + 28);
+    uint32_t names = *(uint32_t *)(exp + 32);
+    uint32_t ords = *(uint32_t *)(exp + 36);
+    uint32_t index = 0;
+    if (by_ordinal) {
+        if (ordinal < ordinal_base || (uint32_t)ordinal - ordinal_base >= nfunc) return 0;
+        index = (uint32_t)ordinal - ordinal_base;
+    } else {
+        if (!func || !pe_span(im->image_size, names, (uint64_t)nnames * 4) ||
+            !pe_span(im->image_size, ords, (uint64_t)nnames * 2)) return 0;
+        int found = 0;
+        for (uint32_t i = 0; i < nnames; i++) {
+            uint32_t nrva = *(uint32_t *)(image + names + i * 4);
+            const char *n;
+            if (pe_image_cstr(im, nrva, &n) != 0) return 0;
+            uint32_t k = 0;
+            while (func[k] && n[k] && func[k] == n[k]) k++;
+            if (func[k] || n[k]) continue;
+            index = *(uint16_t *)(image + ords + i * 2);
+            found = 1;
+            break;
         }
-        if (!match) continue;
-        uint16_t ord = *(uint16_t *)(phys + ords_rva + i * 2);
-        uint32_t frva = *(uint32_t *)(phys + funcs_rva + ord * 4);
-        return mod->base + frva;
+        if (!found) return 0;
     }
-    return 0;
+    if (index >= nfunc || !pe_span(im->image_size, funcs, (uint64_t)nfunc * 4)) return 0;
+    uint32_t frva = *(uint32_t *)(image + funcs + index * 4);
+    if (!frva || frva >= im->image_size) return 0;
+    /* Forwarded exports are strings inside the export directory; not executable RVAs. */
+    if (frva >= h.export_rva && frva < h.export_rva + h.export_size) return 0;
+    return im->base + frva;
 }
 
-static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
-    uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
-    if (phys[0] != 'M' || phys[1] != 'Z') return;
-    int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *opt = phys + lfanew + 4 + 20;
-    if (*(uint16_t *)opt != 0x20B) return;
-    uint32_t imp_rva = *(uint32_t *)(opt + 112 + 1 * 8);
-    if (!imp_rva) return;
-    for (uint32_t off = 0; ; off += 20) {
-        uint8_t *desc = phys + imp_rva + off;
+static int pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
+    PEImageInstance *im = pe_find_instance(proc, mod);
+    if (!im) return -1;
+    if (im->state == 3 || im->state == 2) return 0;
+    if (im->state == 4) return -1;
+    im->state = 2;
+
+    PEHeaderView h;
+    if (pe_read_headers(mod, &h) != 0) { im->state = 4; return -1; }
+    if (!h.import_rva || !h.import_size) { im->state = 3; return 0; }
+    uint8_t *image = (uint8_t *)(HHDM_BASE + im->image_phys);
+    uint32_t max_desc = h.import_size / 20;
+    int terminated = 0;
+    for (uint32_t d = 0; d < max_desc; d++) {
+        uint32_t off = h.import_rva + d * 20;
+        if (!pe_span(im->image_size, off, 20)) break;
+        uint8_t *desc = image + off;
+        uint32_t oft = *(uint32_t *)(desc + 0);
         uint32_t name_rva = *(uint32_t *)(desc + 12);
-        uint32_t ft_rva   = *(uint32_t *)(desc + 16);
-        uint32_t oft_rva  = *(uint32_t *)(desc + 0);
-        if (!name_rva || !ft_rva) break;
-        const char *dll = (const char *)(phys + name_rva);
-        BootModule *dep = PspFindModule(user_bootinfo, dll);
-        if (!dep) continue;
-        PspMapUserImage(proc, dep);
-        uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
-        for (uint32_t i = 0; ; i++) {
-            uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
-            if (!look) break;
-            uint64_t *iat = (uint64_t *)(phys + ft_rva + i * 8);
-            uint64_t addr = 0;
-            if (!(look & 0x8000000000000000ULL)) {
-                const char *fn = (const char *)(phys + (uint32_t)look + 2);
-                addr = pe_get_export(dep, fn);
-            }
-            *iat = addr;
+        uint32_t ft = *(uint32_t *)(desc + 16);
+        if (!oft && !name_rva && !ft) { terminated = 1; break; }
+        const char *dll;
+        if (!name_rva || !ft || pe_image_cstr(im, name_rva, &dll) != 0) {
+            im->state = 4; return -1;
         }
+        BootModule *dep = PspFindModule(user_bootinfo, dll);
+        if (!dep || PspMapUserImage(proc, dep) != 0 ||
+            pe_resolve_imports(proc, dep) != 0) {
+            DbgPrint("pe: unresolved DLL dependency %s imported by %s\n", dll, mod->name);
+            im->state = 4; return -1;
+        }
+        if (!pe_find_instance(proc, dep)) { im->state = 4; return -1; }
+        uint32_t lookup = oft ? oft : ft;
+        int thunk_terminated = 0;
+        for (uint32_t i = 0; i < im->image_size / 8; i++) {
+            uint64_t thunk_off = (uint64_t)lookup + (uint64_t)i * 8;
+            uint64_t iat_off = (uint64_t)ft + (uint64_t)i * 8;
+            if (!pe_span(im->image_size, thunk_off, 8) ||
+                !pe_span(im->image_size, iat_off, 8)) break;
+            uint64_t thunk = *(uint64_t *)(image + thunk_off);
+            if (!thunk) { thunk_terminated = 1; break; }
+            uint64_t addr = 0;
+            if (thunk & 0x8000000000000000ULL) {
+                addr = pe_get_export(proc, dep, 0, (uint16_t)thunk, 1);
+            } else {
+                if (thunk > UINT32_MAX || !pe_span(im->image_size, thunk, 3)) {
+                    im->state = 4; return -1;
+                }
+                const char *fn;
+                if (pe_image_cstr(im, (uint32_t)thunk + 2, &fn) != 0) {
+                    im->state = 4; return -1;
+                }
+                addr = pe_get_export(proc, dep, fn, 0, 0);
+            }
+            if (!addr) {
+                DbgPrint("pe: unresolved import in %s from %s\n", mod->name, dll);
+                im->state = 4; return -1;
+            }
+            *(uint64_t *)(image + iat_off) = addr;
+        }
+        if (!thunk_terminated) { im->state = 4; return -1; }
     }
+    if (!terminated) { im->state = 4; return -1; }
+    im->state = 3;
+    return 0;
 }
 
 static int copy_user_str(uint64_t uaddr, char *out, int max) {
@@ -368,13 +614,19 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
         KPROCESS *proc = MmCreateAddressSpace(name);
-        if (!proc || PspMapUserImage(proc, mod) != 0) {
+        if (!proc || PspMapUserImage(proc, mod) != 0 ||
+            pe_resolve_imports(proc, mod) != 0) {
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;
         }
-        pe_resolve_imports(proc, mod);
-        uint64_t entry = mod->entry;
+        PEImageInstance *main_image = pe_find_instance(proc, mod);
+        if (!main_image) {
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        uint64_t entry = main_image->entry;
 
         /* map child stack */
         {
@@ -496,9 +748,9 @@ static Frame *syscall_handler(Frame *f) {
         if (mod) {
             KPROCESS *cur = MmCurrentProcess;
             MmSwitchToProcess(PspSystemProcess);
-            PspMapUserImage(cur, mod);
-            pe_resolve_imports(cur, mod);
-            addr = pe_get_export(mod, func);
+            if (PspMapUserImage(cur, mod) == 0 &&
+                pe_resolve_imports(cur, mod) == 0)
+                addr = pe_get_export(cur, mod, func, 0, 0);
             MmSwitchToProcess(cur);
             DbgPrint("user: GetProcAddress %s!%s = %p", dll, func, (void *)addr);
         }

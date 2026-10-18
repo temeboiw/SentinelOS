@@ -53,6 +53,8 @@ need mkfs.vfat
 need mke2fs
 need mmd
 need mcopy
+need curl
+need sha256sum
 
 if [[ -d "${EDK2}/MdePkg/Include" ]]; then
   EDK_INC=(-isystem"$EDK2/MdePkg/Include" -isystem"$EDK2/MdePkg/Include/X64")
@@ -65,12 +67,30 @@ fi
 
 mkdir -p "$B/obj" "$B/esp/EFI/BOOT" "$B/esp/EFI/magic" "$SYS32" "$B/rootfs/Program Files" "$B/rootfs/Program Files (x86)" "$B/rootfs/Program Files/Common Files" "$B/rootfs/Program Files (x86)/Common Files" "$B/rootfs/Users/Public" "$B/rootfs/Windows/System32"
 
+# Download a known 48 kHz / 16-bit / stereo PCM WAV sample for the HDA driver.
+WAV_SAMPLE="$B/audio-sample.wav"
+WAV_URL="https://samplefile.com/samples/download/audio/wav/wav_stereo_48khz_reference_sample.wav/"
+WAV_SHA256="9dcf7389d3a96fd5f849d6c550511adf5fb825c3e943d656e4300ebe4f4b668b"
+if [[ ! -f "$WAV_SAMPLE" ]] || ! printf '%s  %s\\n' "$WAV_SHA256" "$WAV_SAMPLE" | sha256sum -c --status; then
+  echo "==> Downloading and verifying WAV playback sample"
+  curl -fL --retry 3 --connect-timeout 15 -o "$WAV_SAMPLE.tmp" "$WAV_URL"
+  printf '%s  %s\\n' "$WAV_SHA256" "$WAV_SAMPLE.tmp" | sha256sum -c -
+  mv "$WAV_SAMPLE.tmp" "$WAV_SAMPLE"
+else
+  echo "==> Using cached verified WAV sample: $WAV_SAMPLE"
+fi
+
 COMMON=(
   --target=x86_64-unknown-windows
   -ffreestanding -mno-red-zone -fno-stack-protector -mno-stack-arg-probe
   -mgeneral-regs-only -O2 -Wall -Wno-unused-function
   -I"$ROOT/shared" -I"$ROOT/boot" -I"$B"
 )
+
+# Embed the WAV bytes in a read-only COFF section so the freestanding kernel
+# can parse its RIFF header and feed the PCM data to HDA DMA.
+printf '.section .rdata,"dr"\\n.p2align 4\\n.globl sentinel_wav_start\\nsentinel_wav_start:\\n.incbin "%s"\\n.globl sentinel_wav_end\\nsentinel_wav_end:\\n' "$WAV_SAMPLE" > "$B/obj/audio_sample.S"
+clang "${COMMON[@]}" -c "$B/obj/audio_sample.S" -o "$B/obj/audio_sample.o"
 
 build_efi() {
   local name="$1" out="$2"
@@ -98,7 +118,7 @@ python3 "$ROOT/scripts/prepare-audio-sample.py" "$B/audio_sample.h"
 clang "${COMMON[@]}" -c "$ROOT/kernel/kernel.c" -o "$B/obj/kernel.o"
 lld -flavor link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase \
   /base:0xFFFFFFFF80200000 /fixed:no \
-  "/out:$SYS32/krnl.exe" "$B/obj/kernel.o" "$B/obj/hal.lib"
+  "/out:$SYS32/krnl.exe" "$B/obj/kernel.o" "$B/obj/audio_sample.o" "$B/obj/hal.lib"
 
 
 echo "==> user PE images"

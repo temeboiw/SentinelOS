@@ -97,7 +97,13 @@ static int hda_audio_start_test_tone(void) {
     }
     volatile HdaBdlEntry *bdl=(volatile HdaBdlEntry *)(HHDM_BASE+hda_bdl_pa);
     volatile int16_t *pcm=(volatile int16_t *)(HHDM_BASE+hda_pcm_pa);
-    bdl[0].address=hda_pcm_pa; bdl[0].length=HDA_PCM_BYTES; bdl[0].flags=1;
+    /* Keep every BDL segment <= 64 KiB; split the 192,000-byte buffer
+       into three aligned 64,000-byte descriptors. */
+    for (uint32_t i=0; i<3; i++) {
+        bdl[i].address=hda_pcm_pa + (uint64_t)i*64000;
+        bdl[i].length=64000;
+        bdl[i].flags=(i==2) ? 1 : 0; /* IOC on final descriptor */
+    }
     hda_fill_test_tone(pcm);
 
     /* Configure output pin, EAPD if present, and DAC format/stream tag. */
@@ -119,7 +125,7 @@ static int hda_audio_start_test_tone(void) {
     hda_write32(HDA_SD0_BDPL,(uint32_t)hda_bdl_pa);
     hda_write32(HDA_SD0_BDPU,(uint32_t)(hda_bdl_pa>>32));
     hda_write32(HDA_SD0_CBL,HDA_PCM_BYTES);
-    hda_write16(HDA_SD0_LVI,0);
+    hda_write16(HDA_SD0_LVI,2);
     hda_write16(HDA_SD0_FMT,0x0011);
     hda_write8(HDA_SD0_CTL+2,0x10); /* stream tag 1 */
     hda_write8(HDA_SD0_CTL,0x02); /* RUN */

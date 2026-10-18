@@ -174,8 +174,13 @@ static void virtio_input_poll(void) {
                 if (ev.code == VI_ABS_X) { vi_x = (v * 1279) / 32767; vi_moved = 1; }
                 if (ev.code == VI_ABS_Y) { vi_y = (v * 799) / 32767; vi_moved = 1; }
             } else if (ev.type == VI_EV_KEY && ev.code == VI_BTN_LEFT) {
-                if (ev.value) { vi_btn |= 1; vi_clicked = 1; }
-                else vi_btn &= ~1;
+                if (ev.value) {
+                    if (!(vi_btn & 1))
+                        vi_clicked = 1;  /* only report the press edge */
+                    vi_btn |= 1;
+                } else {
+                    vi_btn &= ~1;
+                }
                 vi_moved = 1;
             }
             uint16_t ai = vi_avail->idx;

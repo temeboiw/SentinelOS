@@ -40,7 +40,19 @@ void explorer_main(void) {
             NtWriteConsole("explorer: open File Explorer\n");
             char name[] = {'f','i','l','e','e','x','p','l','o','r','e','r','.','e','x','e',0};
             u64 pid = NtCreateProcess(name);
-            if (pid != 0 && pid != (u64)-1) { g_launched = 1; NtWriteConsole("explorer: fileexplorer running\n"); }
+            if (pid != 0 && pid != (u64)-1) {
+                NtWriteConsole("explorer: fileexplorer closed; restoring desktop\n");
+                g_launched = 0;
+                hwnd = pCreate ? pCreate(0, "Desktop", "Desktop", 0, 0, 0, 1, 1, 0, 0, 0, 0) : 0;
+                if (pShow) pShow(hwnd, 1);
+                if (pText) {
+                    pText(0, 0, 4, "FILE EXPLORER", -1);
+                    pText(0, 0, 5, "(click the cube)", -1);
+                }
+                if (pBar) pBar();
+                if (pInv) pInv(0, 0, 1);
+                if (pUpd) pUpd(hwnd);
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 typedef unsigned long long u64;
-enum { SYS_Exit=0, SYS_Write=1, SYS_Create=4 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Create=4, SYS_Yield=21 };
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
     __asm__ volatile(
@@ -17,7 +17,6 @@ void smss_main(void) {
     puts("smss: starting explorer.exe\n");
     char name[] = { 'e','x','p','l','o','r','e','r','.','e','x','e', 0 };
     (void)sy3(SYS_Create, (u64)name, 0, 0);
-    puts("smss: explorer scheduled, exiting\n");
-    sy3(SYS_Exit, 0, 0, 0);
-    for (;;) __asm__ volatile("hlt");
+    puts("smss: session manager staying alive\n");
+    for (;;) (void)sy3(SYS_Yield, 0, 0, 0);
 }

@@ -5,7 +5,7 @@ typedef const char *LPCSTR;
 typedef long long i64;
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_Shutdown=11,
-    SYS_WmReg=15, SYS_WmMin=16, SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19
+    SYS_WmReg=15, SYS_WmMin=16, SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19, SYS_WmRect=20
 };
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
@@ -275,7 +275,11 @@ void *CreateWindowExA(u32 ex, LPCSTR cls, LPCSTR title, u32 style,
     else g_wnd.visible = 1;
     int i = 0; if (title) for (; title[i] && i < 63; i++) g_wnd.title[i] = title[i];
     g_wnd.title[i] = 0; g_wnd.minimized = 0; g_nlines = 0; g_menu = 0; g_drag = 0;
-    if (g_wnd.visible) sy3(SYS_WmReg, 0, (u64)g_wnd.title, 0);
+    if (g_wnd.visible) {
+        sy3(SYS_WmReg, 0, (u64)g_wnd.title, 0);
+        int rect[4] = { g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h };
+        sy3(SYS_WmRect, (u64)rect, 0, 0);
+    }
     compose();
     return (void *)1;
 }
@@ -316,6 +320,12 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
             if (ev.type == 2 || ev.type == 3) {
                 g_mx = ev.x;
                 g_my = ev.y;
+                {
+                    static int cursor_dbg_count;
+                    if (cursor_dbg_count++ < 5)
+                        sy3(SYS_Write, 1,
+                            (u64)"[cursor] got mouse event\n", 25);
+                }
                 msg->message = (ev.type == 3) ? 0x0201 : 0x0200;
                 msg->pt_x = ev.x;
                 msg->pt_y = ev.y;
@@ -324,6 +334,10 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     g_wnd.y = ev.y - g_drag_oy;
                     if (g_wnd.x < 0) g_wnd.x = 0;
                     if (g_wnd.y < 0) g_wnd.y = 0;
+                    {
+                        int rect[4] = { g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h };
+                        sy3(SYS_WmRect, (u64)rect, 0, 0);
+                    }
                     compose();
                     return 1;
                 }
@@ -346,7 +360,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         }
                         dbg[n++] = '\n';
                         dbg[n] = 0;
-                        sy3(1, (u64)dbg, n, 0);
+                        sy3(1, 1, (u64)dbg, n);
                     }
                     on_click(ev.x, ev.y);
                 } else {

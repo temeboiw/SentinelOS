@@ -32,6 +32,8 @@
 #define SYS_WmUnregister            17
 #define SYS_WmQuery                 18
 #define SYS_WmRestore               19
+#define SYS_WmSetRect              20
+#define SYS_NtYield               21
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
 static uint64_t user_saved_ksp, user_saved_rip;
@@ -121,7 +123,18 @@ static int up_pick_next(void) {
     int start = (up_cur < 0) ? 0 : up_cur;
     for (int k = 1; k <= UP_MAX; k++) {
         int i = (start + k) % UP_MAX;
-        if (up_tab[i].alive && up_tab[i].proc) return i;
+        if (!up_tab[i].alive || !up_tab[i].proc) continue;
+
+        /* Keep a parent suspended while one of its children is alive. */
+        int has_live_child = 0;
+        for (int j = 0; j < UP_MAX; j++) {
+            if (up_tab[j].alive && up_tab[j].proc &&
+                up_tab[j].parent == i) {
+                has_live_child = 1;
+                break;
+            }
+        }
+        if (!has_live_child) return i;
     }
     return -1;
 }
@@ -295,16 +308,6 @@ static Frame *syscall_handler(Frame *f) {
                     up_tab[i].parent = -1;
                 }
             }
-        }
-        DbgPrint("[exit] dying pid=%lu parent_idx=%d up_cur=%d\n",
-                 (unsigned long)(dying ? dying->Pid : 0),
-                 parent_idx, up_cur);
-        for (int i = 0; i < UP_MAX; i++) {
-            DbgPrint("[exit] slot=%d pid=%lu alive=%d parent=%d\n",
-                     i,
-                     (unsigned long)(up_tab[i].proc ? up_tab[i].proc->Pid : 0),
-                     up_tab[i].alive,
-                     up_tab[i].parent);
         }
         int nxt = -1;
         if (parent_idx >= 0 && parent_idx < UP_MAX &&
@@ -505,7 +508,22 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_NtGetInput: {
         typedef struct { int type, x, y, btn; char key; } UIn;
         UIn *out = (UIn *)f->rdi;
+        static UIn pending_click;
+        static int pending_click_valid;
+        static int pending_click_pid;
+        int mepid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
         if (!out) { f->rax = 0; return f; }
+
+        /* A click already assigned to another process must remain queued. */
+        if (pending_click_valid) {
+            if (pending_click_pid == mepid) {
+                *out = pending_click;
+                pending_click_valid = 0;
+                f->rax = 1;
+                return f;
+            }
+            goto no_input_event;
+        }
 
         ps2_poll();
         if (vi_ok) virtio_input_poll();
@@ -521,6 +539,15 @@ static Frame *syscall_handler(Frame *f) {
             out->btn = mouse_btn;
             vi_moved = 0;
             vi_clicked = 0;
+            if (out->type == 3) {
+                int target = wm_hit_test(out->x, out->y);
+                if (target <= 0) target = mepid;
+                pending_click = *out;
+                pending_click_pid = target;
+                pending_click_valid = 1;
+                if (target != mepid) goto no_input_event;
+                pending_click_valid = 0;
+            }
             f->rax = 1;
             return f;
         }
@@ -546,11 +573,21 @@ static Frame *syscall_handler(Frame *f) {
                 out->y = mouse_y;
                 out->btn = mouse_btn;
                 lx = mouse_x; ly = mouse_y; lb = mouse_btn;
+                if (out->type == 3) {
+                    int target = wm_hit_test(out->x, out->y);
+                    if (target <= 0) target = mepid;
+                    pending_click = *out;
+                    pending_click_pid = target;
+                    pending_click_valid = 1;
+                    if (target != mepid) goto no_input_event;
+                    pending_click_valid = 0;
+                }
                 f->rax = 1;
                 return f;
             }
         }
 
+    no_input_event:
         /* RR at most every 32 empty polls so pointer stays responsive */
         {
             static int empty;
@@ -560,10 +597,6 @@ static Frame *syscall_handler(Frame *f) {
                 if (me >= 0) up_save(f, me);
                 int nxt = up_pick_next();
                 if (nxt >= 0 && nxt != me) {
-                    DbgPrint("[rr] current=%d next=%d current_pid=%lu next_pid=%lu\n",
-                             me, nxt,
-                             (unsigned long)(me >= 0 && up_tab[me].proc ? up_tab[me].proc->Pid : 0),
-                             (unsigned long)(up_tab[nxt].proc ? up_tab[nxt].proc->Pid : 0));
                     if (me >= 0) up_tab[me].rax = 0;
                     up_load(f, nxt);
                     return f;
@@ -622,8 +655,32 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = (uint64_t)(uint32_t)pidv;
         return f;
     }
+    case SYS_WmSetRect: {
+        int rect[4];
+        int *src = (int *)f->rdi;
+        if (!src) { f->rax = 0; return f; }
+        for (int i = 0; i < 4; i++) rect[i] = src[i];
+        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        wm_set_rect(pid, rect[0], rect[1], rect[2], rect[3]);
+        f->rax = 0;
+        return f;
+    }
     case SYS_WmRestore: {
         wm_restore_pid((int)f->rdi);
+        f->rax = 0;
+        return f;
+    }
+    case SYS_NtYield: {
+        int me = up_find_proc(MmCurrentProcess);
+        if (me >= 0) {
+            up_save(f, me);
+            up_tab[me].rax = 0;
+        }
+        int nxt = up_pick_next();
+        if (nxt >= 0 && nxt != me) {
+            up_load(f, nxt);
+            return f;
+        }
         f->rax = 0;
         return f;
     }

@@ -54,12 +54,12 @@ static int hda_find_output_route(void) {
             if (hda_codec_verb(0,n,0xF00,0x0C,&pin)) continue;
             if (!(pin & 0x10)) continue; /* no output capability */
             uint32_t lenv=0;
-            if (hda_get_long(n,0xF,0x000E,&lenv)) continue;
+            if (hda_get_param(n,0x0E,&lenv)) continue;
             uint32_t len=lenv&0x7f; if (!len) continue;
             if (len>16) len=16;
             for (uint32_t ci=0;ci<len;ci++) {
                 uint32_t ent=0;
-                if (hda_get_long(n,0xF, (uint16_t)(0x1000|ci), &ent)) break;
+                if (hda_codec_verb(0,n,0xF02,(uint8_t)ci,&ent)) break;
                 uint8_t conn=(uint8_t)(ent&0x7f);
                 uint32_t cc=0;
                 if (hda_get_param(conn,0x09,&cc)) continue;
@@ -121,9 +121,8 @@ static int hda_audio_start_test_tone(void) {
     hda_write32(HDA_SD0_CBL,HDA_PCM_BYTES);
     hda_write16(HDA_SD0_LVI,0);
     hda_write16(HDA_SD0_FMT,0x0011);
-    hda_write8(HDA_SD0_CTL+2,0x02); /* stream tag 1 in CTL[7:4] + RUN */
-    hda_write8(HDA_SD0_CTL+1,0x10);
-    hda_write8(HDA_SD0_CTL,0x02);
+    hda_write8(HDA_SD0_CTL+2,0x10); /* stream tag 1 */
+    hda_write8(HDA_SD0_CTL,0x02); /* RUN */
     DbgPrint("hda-audio: tone stream started, 48kHz stereo S16 (%u bytes)\n",HDA_PCM_BYTES);
     return 0;
 }

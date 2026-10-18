@@ -17,7 +17,7 @@ qemu-system-x86_64 \
   -drive if=pflash,format=raw,file="$VARS" \
   -drive file="$DISKIMG",format=raw,if=none,id=d0 \
   -device virtio-blk-pci,drive=d0 \
-  -audiodev wav,id=audio0,path=build/sentinel-audio.wav \
+  -audiodev wav,id=audio0,path=$B/sentinel-audio.wav \
   -device ich9-intel-hda,id=hda,debug=0 \
   -device hda-duplex,bus=hda.0,audiodev=audio0 \
   -vnc :0 \

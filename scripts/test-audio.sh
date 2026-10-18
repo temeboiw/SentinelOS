@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WAV="$ROOT/build/sentinel-audio.wav"
 
-echo "==> Building and launching SentinelOS with HDA audio capture"
+echo "==> Building SentinelOS with a downloaded WAV sample and launching HDA playback capture"
 "$ROOT/scripts/build.sh" --run
 
 echo "==> Checking captured WAV: $WAV"
@@ -25,5 +25,5 @@ pcm = b[data + 8:min(data + 8 + n, len(b))]
 if not any(pcm):
     raise SystemExit("FAIL: PCM data is all zero")
 print(f"PASS: WAV header valid, file={len(b)} bytes, PCM captured={len(pcm)} bytes")
-print("Note: this validates QEMU's captured test tone, not arbitrary input-WAV playback.")
+print("Note: this checks that QEMU captured nonzero audio from the embedded WAV sample; it does not yet prove audible playback on physical hardware.")
 PY

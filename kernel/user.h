@@ -46,17 +46,39 @@ typedef struct {
     uint64_t rip, rsp, rflags, rax;
     int alive;
     int fresh;
+    uint64_t gpr[14];   /* r15 r14 r13 r12 r11 r10 r9 r8 rbp rdi rsi rdx rcx rbx */
 } UserProc;
 static UserProc up_tab[UP_MAX];
 static int up_n;
 static int up_cur = -1;
+
+/* A process switch must carry the whole register file, not just RIP/RSP. */
+static void up_snap(Frame *f, UserProc *u) {
+    u->gpr[0]  = f->r15; u->gpr[1]  = f->r14; u->gpr[2]  = f->r13;
+    u->gpr[3]  = f->r12; u->gpr[4]  = f->r11; u->gpr[5]  = f->r10;
+    u->gpr[6]  = f->r9;  u->gpr[7]  = f->r8;  u->gpr[8]  = f->rbp;
+    u->gpr[9]  = f->rdi; u->gpr[10] = f->rsi; u->gpr[11] = f->rdx;
+    u->gpr[12] = f->rcx; u->gpr[13] = f->rbx;
+}
+static void up_restore_gpr(Frame *f, const UserProc *u) {
+    f->r15 = u->gpr[0];  f->r14 = u->gpr[1];  f->r13 = u->gpr[2];
+    f->r12 = u->gpr[3];  f->r11 = u->gpr[4];  f->r10 = u->gpr[5];
+    f->r9  = u->gpr[6];  f->r8  = u->gpr[7];  f->rbp = u->gpr[8];
+    f->rdi = u->gpr[9];  f->rsi = u->gpr[10]; f->rdx = u->gpr[11];
+    f->rcx = u->gpr[12]; f->rbx = u->gpr[13];
+}
+static void up_clear_gpr(Frame *f) {
+    f->r15 = f->r14 = f->r13 = f->r12 = f->r11 = f->r10 = 0;
+    f->r9 = f->r8 = f->rbp = f->rdi = f->rsi = f->rdx = f->rcx = f->rbx = 0;
+}
 
 static void up_save(Frame *f, int idx) {
     if (idx < 0 || idx >= UP_MAX || !up_tab[idx].alive) return;
     up_tab[idx].rip = f->rip;
     up_tab[idx].rsp = f->rsp;
     up_tab[idx].rflags = f->rflags;
-    /* keep rax – syscall return value must survive GetInput RR */
+    up_snap(f, &up_tab[idx]);
+    /* keep rax - syscall return value must survive GetInput RR */
 }
 static void up_save_full(Frame *f, int idx) {
     if (idx < 0 || idx >= UP_MAX || !up_tab[idx].alive) return;
@@ -64,6 +86,7 @@ static void up_save_full(Frame *f, int idx) {
     up_tab[idx].rsp = f->rsp;
     up_tab[idx].rflags = f->rflags;
     up_tab[idx].rax = f->rax;
+    up_snap(f, &up_tab[idx]);
 }
 static void up_load(Frame *f, int idx) {
     UserProc *u = &up_tab[idx];
@@ -77,12 +100,14 @@ static void up_load(Frame *f, int idx) {
         f->rsp = USER_STACK_TOP;
         f->rflags = 0x202;
         f->rax = 0;
+        up_clear_gpr(f);
         u->fresh = 0;
     } else {
         f->rip = u->rip;
         f->rsp = u->rsp;
         f->rflags = u->rflags ? u->rflags : 0x202;
         f->rax = u->rax;
+        up_restore_gpr(f, u);
     }
     up_cur = idx;
 }
@@ -351,6 +376,7 @@ static Frame *syscall_handler(Frame *f) {
             up_tab[up_n].rsp = f->rsp;
             up_tab[up_n].rflags = f->rflags ? f->rflags : 0x202;
             up_tab[up_n].rax = proc->Pid;
+            up_snap(f, &up_tab[up_n]);
             up_n++;
         } else {
             int me = up_find_proc(caller);
@@ -511,8 +537,8 @@ static Frame *syscall_handler(Frame *f) {
                 if (me >= 0) up_save(f, me);
                 int nxt = up_pick_next();
                 if (nxt >= 0 && nxt != me) {
+                    if (me >= 0) up_tab[me].rax = 0;
                     up_load(f, nxt);
-                    f->rax = 0;
                     return f;
                 }
             }

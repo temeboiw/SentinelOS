@@ -3,23 +3,21 @@
 import io
 import struct
 import sys
-import urllib.request
 import wave
 from pathlib import Path
 
-URL = "https://pnb-website-bucket.s3.us-east-2.amazonaws.com/samples/audio/wav/sample-audio-10s-16bit-44khz.wav"
-SRC_RATE = 44100
 DST_RATE = 48000
 SECONDS = 1
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("build/audio_sample.h")
-
-req = urllib.request.Request(URL, headers={"User-Agent": "SentinelOS-audio-test/1.0"})
-with urllib.request.urlopen(req, timeout=30) as response:
-    downloaded = response.read()
+source = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("build/audio-sample.wav")
+downloaded = source.read_bytes()
 
 with wave.open(io.BytesIO(downloaded), "rb") as src:
-    if (src.getnchannels(), src.getsampwidth(), src.getframerate(), src.getcomptype()) != (2, 2, SRC_RATE, "NONE"):
-        raise SystemExit("Downloaded sample is not uncompressed 44.1 kHz, 16-bit stereo PCM")
+    if (src.getnchannels(), src.getsampwidth(), src.getcomptype()) != (2, 2, "NONE"):
+        raise SystemExit("Input sample must be uncompressed 16-bit stereo PCM")
+    SRC_RATE = src.getframerate()
+    if SRC_RATE < 8000 or SRC_RATE > 192000:
+        raise SystemExit(f"Unsupported input sample rate: {SRC_RATE}")
     frames = src.readframes(min(SRC_RATE * SECONDS, src.getnframes()))
 
 count = len(frames) // 4

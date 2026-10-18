@@ -46,6 +46,7 @@ typedef struct {
     uint64_t rip, rsp, rflags, rax;
     int alive;
     int fresh;
+    int parent;
     uint64_t gpr[14];   /* r15 r14 r13 r12 r11 r10 r9 r8 rbp rdi rsi rdx rcx rbx */
 } UserProc;
 static UserProc up_tab[UP_MAX];
@@ -283,13 +284,33 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_NtTerminateProcess: {
         DbgPrint("[user] exit");
         KPROCESS *dying = MmCurrentProcess;
+        int dead_idx = up_find_proc(dying);
+        int parent_idx = (dead_idx >= 0) ? up_tab[dead_idx].parent : -1;
         ut_exit_current();
         if (dying && dying != PspSystemProcess) {
             wm_unregister((int)dying->Pid);
-            for (int i = 0; i < UP_MAX; i++)
-                if (up_tab[i].proc == dying) up_tab[i].alive = 0;
+            for (int i = 0; i < UP_MAX; i++) {
+                if (up_tab[i].proc == dying) {
+                    up_tab[i].alive = 0;
+                    up_tab[i].parent = -1;
+                }
+            }
         }
-        int nxt = up_pick_next();
+        DbgPrint("[exit] dying pid=%lu parent_idx=%d up_cur=%d\n",
+                 (unsigned long)(dying ? dying->Pid : 0),
+                 parent_idx, up_cur);
+        for (int i = 0; i < UP_MAX; i++) {
+            DbgPrint("[exit] slot=%d pid=%lu alive=%d parent=%d\n",
+                     i,
+                     (unsigned long)(up_tab[i].proc ? up_tab[i].proc->Pid : 0),
+                     up_tab[i].alive,
+                     up_tab[i].parent);
+        }
+        int nxt = -1;
+        if (parent_idx >= 0 && parent_idx < UP_MAX &&
+            up_tab[parent_idx].alive && up_tab[parent_idx].proc)
+            nxt = parent_idx;
+        if (nxt < 0) nxt = up_pick_next();
         if (nxt >= 0) {
             DbgPrint("user: switch process");
             up_load(f, nxt);
@@ -368,6 +389,7 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         if (up_find_proc(caller) < 0 && up_n < UP_MAX) {
+            up_tab[up_n].parent = -1;
             up_tab[up_n].proc = caller;
             up_tab[up_n].entry = f->rip;
             up_tab[up_n].alive = 1;
@@ -386,6 +408,7 @@ static Frame *syscall_handler(Frame *f) {
             }
         }
         if (up_n < UP_MAX) {
+            up_tab[up_n].parent = up_find_proc(caller);
             up_tab[up_n].proc = proc;
             up_tab[up_n].entry = entry;
             up_tab[up_n].alive = 1;
@@ -537,6 +560,10 @@ static Frame *syscall_handler(Frame *f) {
                 if (me >= 0) up_save(f, me);
                 int nxt = up_pick_next();
                 if (nxt >= 0 && nxt != me) {
+                    DbgPrint("[rr] current=%d next=%d current_pid=%lu next_pid=%lu\n",
+                             me, nxt,
+                             (unsigned long)(me >= 0 && up_tab[me].proc ? up_tab[me].proc->Pid : 0),
+                             (unsigned long)(up_tab[nxt].proc ? up_tab[nxt].proc->Pid : 0));
                     if (me >= 0) up_tab[me].rax = 0;
                     up_load(f, nxt);
                     return f;
@@ -648,6 +675,7 @@ static void user_enter(BootInfo *bi) {
     uint64_t ktop = ((uint64_t)user_kstack + sizeof user_kstack) & ~15ULL;
     user_set_kernel_stack(ktop);
     if (ki_current) ki_current->Process = proc;
+    up_tab[0].parent = -1;
     up_tab[0].proc = proc;
     up_tab[0].entry = smss->entry;
     up_tab[0].alive = 1;

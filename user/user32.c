@@ -329,6 +329,25 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 }
                 if (ev.type == 3) {
                     g_drag = 0;
+                    {
+                        char dbg[64];
+                        int pid = (int)sy3(2, 0, 0, 0);
+                        int n = 0;
+                        const char prefix[] = "[click] pid=";
+                        while (prefix[n]) { dbg[n] = prefix[n]; n++; }
+                        if (pid == 0) dbg[n++] = '0';
+                        else {
+                            char rev[12]; int r = 0;
+                            while (pid > 0 && r < 11) {
+                                rev[r++] = '0' + (pid % 10);
+                                pid /= 10;
+                            }
+                            while (r) dbg[n++] = rev[--r];
+                        }
+                        dbg[n++] = '\n';
+                        dbg[n] = 0;
+                        sy3(1, (u64)dbg, n, 0);
+                    }
                     on_click(ev.x, ev.y);
                 } else {
                     present_cursor_only();

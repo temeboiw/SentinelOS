@@ -110,15 +110,13 @@ static int hda_audio_start_test_tone(void) {
     if (hda_set_short(hda_pin_nid,0x707,0x40)) return -1; /* output enabled */
     (void)hda_set_short(hda_pin_nid,0x70C,0x02);          /* EAPD enable */
     if (hda_set_short(hda_dac_nid,0x706,0x10)) return -1; /* stream tag 1 */
-    if (hda_get_long(hda_dac_nid,0x2,0x0011,&(uint32_t){0})) {
-        /* SET_STREAM_FORMAT is a long verb; 0x0011 = 48kHz, 16-bit. */
-        uint32_t ignored=0;
-        if (hda_get_long(hda_dac_nid,0x2,0x0011,&ignored)) {
-            DbgPrint("hda-audio: converter format command failed\n"); return -1;
-        }
+    /* SET_STREAM_FORMAT is a long verb; 0x0011 = 48kHz, 16-bit stereo. */
+    uint32_t ignored=0;
+    if (hda_get_long(hda_dac_nid,0x2,0x0011,&ignored)) {
+        DbgPrint("hda-audio: converter format command failed\n"); return -1;
     }
 
-    /* Stop SD0 and program one looping buffer descriptor. */
+    /* Stop SD0 and program the three-entry looping buffer descriptor list. */
     hda_write8(HDA_SD0_CTL,0);
     for (volatile uint32_t d=0;d<10000;d++) __asm__ volatile("pause");
     hda_write8(HDA_SD0_STS,0x1C);
@@ -129,6 +127,8 @@ static int hda_audio_start_test_tone(void) {
     hda_write16(HDA_SD0_FMT,0x0011);
     hda_write8(HDA_SD0_CTL+2,0x10); /* stream tag 1 */
     hda_write8(HDA_SD0_CTL,0x02); /* RUN */
-    DbgPrint("hda-audio: tone stream started, 48kHz stereo S16 (%u bytes)\n",HDA_PCM_BYTES);
+    DbgPrint("hda-audio: tone stream started, 48kHz stereo S16 (%u bytes); SD0CTL=%02x tag=%02x LPIB=%08x STS=%02x\n",
+             HDA_PCM_BYTES,hda_read8(HDA_SD0_CTL),hda_read8(HDA_SD0_CTL+2),
+             hda_read32(HDA_SD0_LPIB),hda_read8(HDA_SD0_STS));
     return 0;
 }

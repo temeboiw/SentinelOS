@@ -18,6 +18,13 @@ static int mouse_btn;
 static uint8_t mouse_pkt[3];
 static int mouse_idx;
 static int ps2_ready;
+static uint64_t mouse_last_tsc;
+
+static inline uint64_t ps2_rdtsc(void) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
 
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++)
@@ -27,66 +34,109 @@ static void ps2_wait_read(void) {
     for (int i = 0; i < 100000; i++)
         if (ps2_inb(PS2_STAT) & 1) return;
 }
-static void ps2_cmd(uint8_t c) { ps2_wait_write(); ps2_outb(PS2_STAT, c); }
+static void ps2_cmd(uint8_t c)  { ps2_wait_write(); ps2_outb(PS2_STAT, c); }
 static void ps2_data(uint8_t c) { ps2_wait_write(); ps2_outb(PS2_DATA, c); }
 
-static void ps2_handle_byte(uint8_t b) {
-    if (ps2_inb(PS2_STAT) & 0x20) {
-        if (mouse_idx == 0 && !(b & 0x08)) return;
+static void ps2_handle_byte(uint8_t b, int is_mouse) {
+    if (is_mouse) {
+        if (mouse_idx == 0) {
+            if (!(b & 0x08)) return;
+            if (b & 0xC0) return;
+            mouse_pkt[0] = b;
+            mouse_idx = 1;
+            return;
+        }
         mouse_pkt[mouse_idx++] = b;
-        if (mouse_idx >= 3) {
-            mouse_idx = 0;
-            int dx = (int8_t)mouse_pkt[1];
-            int dy = (int8_t)mouse_pkt[2];
-            if (mouse_pkt[0] & 0x10) dx = (int)(dx | 0xFFFFFF00);
-            if (mouse_pkt[0] & 0x20) dy = (int)(dy | 0xFFFFFF00);
-            if (dx > 40) dx = 40;
-            if (dx < -40) dx = -40;
-            if (dy > 40) dy = 40;
-            if (dy < -40) dy = -40;
-            mouse_btn = mouse_pkt[0] & 7;
-            if (dx || dy) {
-                mouse_x += dx * 2;
-                mouse_y -= dy * 2;
-                if (mouse_x < 0) mouse_x = 0;
-                if (mouse_y < 0) mouse_y = 0;
-                if (mouse_x > 1279) mouse_x = 1279;
-                if (mouse_y > 799) mouse_y = 799;
-            }
+        if (mouse_idx < 3) return;
+
+        mouse_idx = 0;
+        int dx = (int8_t)mouse_pkt[1];
+        int dy = (int8_t)mouse_pkt[2];
+        if (dx > 25) dx = 25;
+        if (dx < -25) dx = -25;
+        if (dy > 25) dy = 25;
+        if (dy < -25) dy = -25;
+
+        mouse_btn = mouse_pkt[0] & 7;
+        if (dx || dy) {
+            /*
+             * Velocity from real motion: distance / TSC time.
+             * Slow glide → 1:1. Fast flick → mild boost. No runaway.
+             */
+            uint64_t now = ps2_rdtsc();
+            uint64_t dt = now - mouse_last_tsc;
+            mouse_last_tsc = now;
+            if (dt < 1) dt = 1;
+
+            int adx = dx < 0 ? -dx : dx;
+            int ady = dy < 0 ? -dy : dy;
+            int mag = adx + ady;
+            if (mag < 1) mag = 1;
+
+            uint64_t dt_s = dt >> 8;
+            if (dt_s < 1) dt_s = 1;
+            uint64_t speed = ((uint64_t)mag << 10) / dt_s;
+
+            int scale = 1;
+            if (speed > 80)  scale = 2;
+            if (speed > 200) scale = 3;
+            if (speed > 400) scale = 4;
+            if (mag <= 2) scale = 1;   /* precision / touchpad creep */
+
+            mouse_x += dx * scale;
+            mouse_y -= dy * scale;
+            if (mouse_x < 0) mouse_x = 0;
+            if (mouse_y < 0) mouse_y = 0;
+            if (mouse_x > 1279) mouse_x = 1279;
+            if (mouse_y > 799) mouse_y = 799;
         }
     } else {
         kbd_buf[kbd_w++ % 64] = b;
+        mouse_idx = 0;
     }
 }
 
 static void ps2_poll(void) {
-    while (ps2_inb(PS2_STAT) & 1)
-        ps2_handle_byte(ps2_inb(PS2_DATA));
+    for (int n = 0; n < 64; n++) {
+        uint8_t st = ps2_inb(PS2_STAT);
+        if (!(st & 1)) break;
+        int is_mouse = (st & 0x20) != 0;
+        uint8_t b = ps2_inb(PS2_DATA);
+        ps2_handle_byte(b, is_mouse);
+    }
 }
 
 static void ps2_irq_kbd(Frame *f) {
     (void)f;
-    while (ps2_inb(PS2_STAT) & 1)
-        ps2_handle_byte(ps2_inb(PS2_DATA));
+    ps2_poll();
 }
 
 static int ps2_init(void) {
-    ps2_cmd(0xAD); ps2_cmd(0xA7);
+    ps2_cmd(0xAD);
+    ps2_cmd(0xA7);
     while (ps2_inb(PS2_STAT) & 1) (void)ps2_inb(PS2_DATA);
+
     ps2_cmd(0x20); ps2_wait_read();
     uint8_t cfg = ps2_inb(PS2_DATA);
-    cfg |= 0x03; cfg &= (uint8_t)~0x30;
+    cfg |= 0x03;
+    cfg &= (uint8_t)~0x30;
     ps2_cmd(0x60); ps2_data(cfg);
+
     ps2_cmd(0xA8);
     ps2_cmd(0xD4); ps2_data(0xF6); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
     ps2_cmd(0xD4); ps2_data(0xF4); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+
     ps2_data(0xF4); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+
     ps2_outb(0x21, ps2_inb(0x21) & (uint8_t)~0x06);
     ps2_outb(0xA1, ps2_inb(0xA1) & (uint8_t)~0x10);
+
     KeConnectInterrupt(0x21, ps2_irq_kbd);
     KeConnectInterrupt(0x2C, ps2_irq_kbd);
+
+    mouse_idx = 0;
     ps2_ready = 1;
-    DbgPrint("ps2: keyboard+mouse ready (IRQ1/IRQ12)\n");
+    DbgPrint("ps2: keyboard+mouse ready (synced)\n");
     return 1;
 }
 

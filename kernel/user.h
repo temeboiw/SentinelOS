@@ -7,6 +7,10 @@
 #include "heap.h"
 #include "bootinfo.h"
 #include "ps2.h"
+#include "ext4k.h"
+#include "virtio_input.h"
+#include "uthread.h"
+#include "wm.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -19,105 +23,172 @@
 #define SYS_NtMapFramebuffer        8
 #define SYS_NtGetProcAddress        9
 #define SYS_NtGetInput              10
+#define SYS_NtShutdown              11
+#define SYS_NtSetCurrentDirectory   12
+#define SYS_NtCreateThread          13
+#define SYS_NtWaitForSingleObject   14
+#define SYS_WmRegister              15
+#define SYS_WmSetMin                16
+#define SYS_WmUnregister            17
+#define SYS_WmQuery                 18
+#define SYS_WmRestore               19
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
 static uint64_t user_saved_ksp, user_saved_rip;
 static BootInfo *user_bootinfo;
 static KPROCESS *user_pending;
-static uint64_t  user_pending_entry;
+static uint64_t user_pending_entry;
+
+#define UP_MAX 8
+typedef struct {
+    KPROCESS *proc;
+    uint64_t entry;
+    uint64_t rip, rsp, rflags, rax;
+    int alive;
+    int fresh;
+} UserProc;
+static UserProc up_tab[UP_MAX];
+static int up_n;
+static int up_cur = -1;
+
+static void up_save(Frame *f, int idx) {
+    if (idx < 0 || idx >= UP_MAX || !up_tab[idx].alive) return;
+    up_tab[idx].rip = f->rip;
+    up_tab[idx].rsp = f->rsp;
+    up_tab[idx].rflags = f->rflags;
+    /* keep rax – syscall return value must survive GetInput RR */
+}
+static void up_save_full(Frame *f, int idx) {
+    if (idx < 0 || idx >= UP_MAX || !up_tab[idx].alive) return;
+    up_tab[idx].rip = f->rip;
+    up_tab[idx].rsp = f->rsp;
+    up_tab[idx].rflags = f->rflags;
+    up_tab[idx].rax = f->rax;
+}
+static void up_load(Frame *f, int idx) {
+    UserProc *u = &up_tab[idx];
+    if (!u->alive || !u->proc) return;
+    if (ki_current) ki_current->Process = u->proc;
+    MmSwitchToProcess(u->proc);
+    f->cs = USER_CS;
+    f->ss = USER_DS;
+    if (u->fresh || u->rip < 0x10000) {
+        f->rip = u->entry ? u->entry : u->rip;
+        f->rsp = USER_STACK_TOP;
+        f->rflags = 0x202;
+        f->rax = 0;
+        u->fresh = 0;
+    } else {
+        f->rip = u->rip;
+        f->rsp = u->rsp;
+        f->rflags = u->rflags ? u->rflags : 0x202;
+        f->rax = u->rax;
+    }
+    up_cur = idx;
+}
+static int up_find_proc(KPROCESS *p) {
+    for (int i = 0; i < UP_MAX; i++)
+        if (up_tab[i].alive && up_tab[i].proc == p) return i;
+    return -1;
+}
+static int up_pick_next(void) {
+    int start = (up_cur < 0) ? 0 : up_cur;
+    for (int k = 1; k <= UP_MAX; k++) {
+        int i = (start + k) % UP_MAX;
+        if (up_tab[i].alive && up_tab[i].proc) return i;
+    }
+    return -1;
+}
+
 static uint64_t user_fb_base;
 static uint32_t user_fb_w, user_fb_h, user_fb_pitch;
 static int mod_relocated[BOOT_MAX_MODULES];
+static int pe_resolving;
+static int fb_map_logged;
 
 static void pe_apply_relocs(uint8_t *phys, int64_t delta) {
-    if (!delta) return;
     if (phys[0] != 'M' || phys[1] != 'Z') return;
     int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *nth = phys + lfanew;
-    if (*(uint32_t *)nth != 0x4550) return;
-    uint8_t *opt = nth + 4 + 20;
+    uint8_t *opt = phys + lfanew + 4 + 20;
     if (*(uint16_t *)opt != 0x20B) return;
-    uint32_t rel_rva = *(uint32_t *)(opt + 112 + 5 * 8);
-    uint32_t rel_sz  = *(uint32_t *)(opt + 112 + 5 * 8 + 4);
-    if (!rel_rva || !rel_sz) return;
-    uint8_t *p = phys + rel_rva, *end = p + rel_sz;
-    while (p + 8 <= end) {
-        uint32_t va = *(uint32_t *)p, sz = *(uint32_t *)(p + 4);
-        if (sz < 8) break;
-        uint16_t *e = (uint16_t *)(p + 8);
-        uint32_t n = (sz - 8) / 2;
-        for (uint32_t i = 0; i < n; i++)
-            if ((e[i] >> 12) == 10)
-                *(uint64_t *)(phys + va + (e[i] & 0xFFF)) += (uint64_t)delta;
-        p += sz;
+    uint32_t reloc_rva = *(uint32_t *)(opt + 112 + 5 * 8);
+    uint32_t reloc_sz  = *(uint32_t *)(opt + 112 + 5 * 8 + 4);
+    if (!reloc_rva || !reloc_sz) return;
+    uint8_t *rel = phys + reloc_rva;
+    uint8_t *end = rel + reloc_sz;
+    while (rel + 8 <= end) {
+        uint32_t page_rva = *(uint32_t *)rel;
+        uint32_t block_sz = *(uint32_t *)(rel + 4);
+        if (block_sz < 8) break;
+        uint32_t count = (block_sz - 8) / 2;
+        uint16_t *entry = (uint16_t *)(rel + 8);
+        for (uint32_t i = 0; i < count; i++) {
+            uint16_t e = entry[i];
+            uint16_t type = e >> 12;
+            uint16_t off = e & 0xFFF;
+            if (type == 10) {
+                uint64_t *p = (uint64_t *)(phys + page_rva + off);
+                *p += (uint64_t)delta;
+            } else if (type == 3) {
+                uint32_t *p = (uint32_t *)(phys + page_rva + off);
+                *p += (uint32_t)delta;
+            }
+        }
+        rel += block_sz;
     }
 }
 
 static BootModule *PspFindModule(BootInfo *bi, const char *name) {
     for (uint32_t i = 0; i < bi->module_count; i++) {
-        int match = 1;
-        for (int k = 0; name[k]; k++) {
-            char a = bi->modules[i].name[k], b = name[k];
-            if (a >= 'A' && a <= 'Z') a += 32;
-            if (b >= 'A' && b <= 'Z') b += 32;
-            if (a != b) { match = 0; break; }
+        const char *n = bi->modules[i].name;
+        int m = 1;
+        for (int k = 0; name[k] || n[k]; k++) {
+            char a = name[k], b = n[k];
+            if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+            if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+            if (a != b) { m = 0; break; }
         }
-        if (match) return &bi->modules[i];
-    }
-    return NULL;
-}
-
-static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
-    uint64_t prefer = mod->base, phys = mod->phys, size = mod->size;
-    if (!prefer || !phys || !size || !user_bootinfo) return -1;
-    int idx = (int)(mod - user_bootinfo->modules);
-    if (idx >= 0 && idx < (int)BOOT_MAX_MODULES && !mod_relocated[idx]) {
-        pe_apply_relocs((uint8_t *)(HHDM_BASE + phys), (int64_t)(prefer - phys));
-        mod_relocated[idx] = 1;
-    }
-    for (uint64_t off = 0; off < size; off += 0x1000)
-        map_4k_in(proc->Pml4, prefer + off, phys + off, PTE_U | PTE_RW);
-    /* map user stack only if missing – remapping zeroes it and breaks GetProcAddress */
-    {
-        uint64_t va = USER_STACK_TOP - 0x1000;
-        int need = 1;
-        uint64_t *pml4 = proc->Pml4;
-        int i4=(va>>39)&511, i3=(va>>30)&511, i2=(va>>21)&511, i1=(va>>12)&511;
-        if ((pml4[i4] & 1) && !(pml4[i4] & 0x80)) {
-            uint64_t *pdpt = (uint64_t *)(pml4[i4] & ~0xFFFULL);
-            if ((pdpt[i3] & 1) && !(pdpt[i3] & 0x80)) {
-                uint64_t *pd = (uint64_t *)(pdpt[i3] & ~0xFFFULL);
-                if ((pd[i2] & 1) && !(pd[i2] & 0x80)) {
-                    uint64_t *pt = (uint64_t *)(pd[i2] & ~0xFFFULL);
-                    if (pt[i1] & 1) need = 0;
-                }
-            }
-        }
-        if (need) MmMapUserPage(proc, va, 1);
+        if (m) return &bi->modules[i];
     }
     return 0;
 }
 
-static int copy_user_str(uint64_t uaddr, char *out, int max) {
-    if (uaddr < 0x10000 || uaddr >= 0x0000800000000000ULL) return -1;
-    for (int i = 0; i < max - 1; i++) {
-        char c = *(volatile char *)(uaddr + (uint64_t)i);
-        out[i] = c;
-        if (!c) return 0;
+static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
+    if (!proc || !mod || !mod->phys || !mod->size) return -1;
+    uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
+    uint64_t base = mod->base ? mod->base : 0x40000000ULL;
+    uint64_t size = (mod->size + 0xFFF) & ~0xFFFULL;
+    for (uint64_t off = 0; off < size; off += 0x1000) {
+        uint64_t pa = mod->phys + off;
+        map_4k_in(proc->Pml4, base + off, pa, PTE_U | PTE_RW);
     }
-    out[max - 1] = 0;
+    if (phys[0] == 'M' && phys[1] == 'Z') {
+        int32_t lfanew = *(int32_t *)(phys + 0x3C);
+        uint8_t *opt = phys + lfanew + 4 + 20;
+        if (*(uint16_t *)opt == 0x20B) {
+            uint64_t img_base = *(uint64_t *)(opt + 24);
+            int64_t delta = (int64_t)base - (int64_t)img_base;
+            if (delta) pe_apply_relocs(phys, delta);
+            uint32_t ep = *(uint32_t *)(opt + 16);
+            mod->entry = base + ep;
+            mod->base = base;
+        }
+    } else {
+        mod->base = base;
+        if (!mod->entry) mod->entry = base;
+    }
     return 0;
 }
 
 static uint64_t pe_get_export(BootModule *mod, const char *func) {
+    if (!mod || !mod->phys) return 0;
     uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
     if (phys[0] != 'M' || phys[1] != 'Z') return 0;
     int32_t lfanew = *(int32_t *)(phys + 0x3C);
     uint8_t *opt = phys + lfanew + 4 + 20;
     if (*(uint16_t *)opt != 0x20B) return 0;
     uint32_t exp_rva = *(uint32_t *)(opt + 112);
-    uint32_t exp_sz  = *(uint32_t *)(opt + 116);
-    if (!exp_rva || !exp_sz) return 0;
+    if (!exp_rva) return 0;
     uint8_t *exp = phys + exp_rva;
     uint32_t nnames = *(uint32_t *)(exp + 24);
     uint32_t names_rva = *(uint32_t *)(exp + 32);
@@ -127,8 +198,9 @@ static uint64_t pe_get_export(BootModule *mod, const char *func) {
         uint32_t nrva = *(uint32_t *)(phys + names_rva + i * 4);
         const char *n = (const char *)(phys + nrva);
         int match = 1;
-        for (int k = 0; func[k] || n[k]; k++)
+        for (int k = 0; func[k] || n[k]; k++) {
             if (func[k] != n[k]) { match = 0; break; }
+        }
         if (!match) continue;
         uint16_t ord = *(uint16_t *)(phys + ords_rva + i * 2);
         uint32_t frva = *(uint32_t *)(phys + funcs_rva + ord * 4);
@@ -137,27 +209,70 @@ static uint64_t pe_get_export(BootModule *mod, const char *func) {
     return 0;
 }
 
+static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
+    uint8_t *phys = (uint8_t *)(HHDM_BASE + mod->phys);
+    if (phys[0] != 'M' || phys[1] != 'Z') return;
+    int32_t lfanew = *(int32_t *)(phys + 0x3C);
+    uint8_t *opt = phys + lfanew + 4 + 20;
+    if (*(uint16_t *)opt != 0x20B) return;
+    uint32_t imp_rva = *(uint32_t *)(opt + 112 + 1 * 8);
+    if (!imp_rva) return;
+    for (uint32_t off = 0; ; off += 20) {
+        uint8_t *desc = phys + imp_rva + off;
+        uint32_t name_rva = *(uint32_t *)(desc + 12);
+        uint32_t ft_rva   = *(uint32_t *)(desc + 16);
+        uint32_t oft_rva  = *(uint32_t *)(desc + 0);
+        if (!name_rva || !ft_rva) break;
+        const char *dll = (const char *)(phys + name_rva);
+        BootModule *dep = PspFindModule(user_bootinfo, dll);
+        if (!dep) continue;
+        PspMapUserImage(proc, dep);
+        uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
+        for (uint32_t i = 0; ; i++) {
+            uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
+            if (!look) break;
+            uint64_t *iat = (uint64_t *)(phys + ft_rva + i * 8);
+            uint64_t addr = 0;
+            if (!(look & 0x8000000000000000ULL)) {
+                const char *fn = (const char *)(phys + (uint32_t)look + 2);
+                addr = pe_get_export(dep, fn);
+            }
+            *iat = addr;
+        }
+    }
+}
+
+static int copy_user_str(uint64_t uaddr, char *out, int max) {
+    if (uaddr < 0x10000 || uaddr >= 0x0000800000000000ULL) return -1;
+    for (int i = 0; i < max - 1; i++) {
+        char c = ((const char *)uaddr)[i];
+        out[i] = c;
+        if (!c) return 0;
+    }
+    out[max - 1] = 0;
+    return 0;
+}
+
 static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case SYS_NtTerminateProcess: {
-        DbgPrint("[user] exit(%llu)\n", f->rdi);
-        if (user_pending) {
-            KPROCESS *next = user_pending;
-            uint64_t entry = user_pending_entry;
-            user_pending = 0; user_pending_entry = 0;
-            if (ki_current) ki_current->Process = next;
-            MmSwitchToProcess(next);
-            DbgPrint("user: run pending pid=%lu entry=%p\n",
-                     (unsigned long)next->Pid, (void *)entry);
-            f->rip = entry; f->cs = USER_CS; f->ss = USER_DS;
-            f->rsp = USER_STACK_TOP; f->rflags = 0x202; f->rax = 0;
+        DbgPrint("[user] exit");
+        KPROCESS *dying = MmCurrentProcess;
+        ut_exit_current();
+        if (dying && dying != PspSystemProcess) {
+            wm_unregister((int)dying->Pid);
+            for (int i = 0; i < UP_MAX; i++)
+                if (up_tab[i].proc == dying) up_tab[i].alive = 0;
+        }
+        int nxt = up_pick_next();
+        if (nxt >= 0) {
+            DbgPrint("user: switch process");
+            up_load(f, nxt);
             return f;
         }
+        DbgPrint("user: no process left");
         MmSwitchToProcess(PspSystemProcess);
-        if (ki_current) ki_current->Process = PspSystemProcess;
-        f->rip = user_saved_rip; f->cs = KERNEL_CS; f->ss = KERNEL_DS;
-        f->rsp = user_saved_ksp; f->rflags = 0x202;
-        return f;
+        for (;;) __asm__ volatile("cli; hlt");
     }
     case SYS_NtWriteFile: {
         uint64_t uaddr = f->rsi, len = f->rdx;
@@ -177,167 +292,297 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     case SYS_NtAllocateVirtualMemory: {
         uint64_t prefer = f->rdi, size = (f->rsi + 0xFFF) & ~0xFFFULL;
-        if (!size || size > 4ull * 1024 * 1024) { f->rax = 0; return f; }
-        KPROCESS *proc = MmCurrentProcess;
-        if (!proc || proc == PspSystemProcess) { f->rax = 0; return f; }
-        if (!prefer) { static uint64_t bump = 0x50000000ULL; prefer = bump; bump += size; }
-        MmSwitchToProcess(PspSystemProcess);
-        int ok = 1;
+        if (!size || size > 16ull * 1024 * 1024) { f->rax = 0; return f; }
+        if (!prefer) prefer = 0x50000000ULL;
         for (uint64_t off = 0; off < size; off += 0x1000) {
             uint64_t pa = pmm_alloc_zeroed();
-            if (!pa) { ok = 0; break; }
-            map_4k_in(proc->Pml4, prefer + off, pa, PTE_U | PTE_RW);
+            if (!pa) { f->rax = 0; return f; }
+            map_4k_in(MmCurrentProcess->Pml4, prefer + off, pa, PTE_U | PTE_RW);
         }
-        MmSwitchToProcess(proc);
-        if (!ok) { f->rax = 0; return f; }
         f->rax = prefer;
         return f;
     }
     case SYS_NtCreateProcess: {
-        char name[32];
-        if (copy_user_str(f->rdi, name, sizeof name) != 0) { f->rax = (uint64_t)-1LL; return f; }
-        BootModule *mod = PspFindModule(user_bootinfo, name);
-        if (!mod) { DbgPrint("user: NtCreateProcess '%s' not found\n", name); f->rax = (uint64_t)-1LL; return f; }
+        char name[64];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
         KPROCESS *caller = MmCurrentProcess;
+        /* kernel work under system CR3 (page tables / pmm use low identity) */
         MmSwitchToProcess(PspSystemProcess);
+
+        BootModule *mod = PspFindModule(user_bootinfo, name);
+        if (!mod) {
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
         KPROCESS *proc = MmCreateAddressSpace(name);
-        int ok = proc && (PspMapUserImage(proc, mod) == 0);
+        if (!proc || PspMapUserImage(proc, mod) != 0) {
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        pe_resolve_imports(proc, mod);
         uint64_t entry = mod->entry;
+
+        /* map child stack */
+        {
+            uint64_t stack_sz = 0x10000ULL;
+            uint64_t stack_lo = USER_STACK_TOP - stack_sz;
+            for (uint64_t off = 0; off < stack_sz; off += 0x1000) {
+                uint64_t pa = pmm_alloc_zeroed();
+                if (!pa) {
+                    MmSwitchToProcess(caller);
+                    f->rax = (uint64_t)-1LL;
+                    return f;
+                }
+                map_4k_in(proc->Pml4, stack_lo + off, pa, PTE_U | PTE_RW);
+            }
+        }
+
+        if (up_find_proc(caller) < 0 && up_n < UP_MAX) {
+            up_tab[up_n].proc = caller;
+            up_tab[up_n].entry = f->rip;
+            up_tab[up_n].alive = 1;
+            up_tab[up_n].fresh = 0;
+            up_tab[up_n].rip = f->rip;
+            up_tab[up_n].rsp = f->rsp;
+            up_tab[up_n].rflags = f->rflags ? f->rflags : 0x202;
+            up_tab[up_n].rax = proc->Pid;
+            up_n++;
+        } else {
+            int me = up_find_proc(caller);
+            if (me >= 0) {
+                up_save(f, me);
+                up_tab[me].rax = proc->Pid;
+            }
+        }
+        if (up_n < UP_MAX) {
+            up_tab[up_n].proc = proc;
+            up_tab[up_n].entry = entry;
+            up_tab[up_n].alive = 1;
+            up_tab[up_n].fresh = 1;
+            up_tab[up_n].rip = entry;
+            up_tab[up_n].rsp = USER_STACK_TOP;
+            up_tab[up_n].rflags = 0x202;
+            up_tab[up_n].rax = 0;
+            up_n++;
+            DbgPrint("user: NtCreateProcess concurrent");
+        }
+        {
+            int ci = up_find_proc(proc);
+            if (ci >= 0) {
+                up_load(f, ci);
+                f->rax = proc->Pid;
+                return f;
+            }
+        }
         MmSwitchToProcess(caller);
-        if (!ok) { f->rax = (uint64_t)-1LL; return f; }
-        user_pending = proc; user_pending_entry = entry;
-        DbgPrint("user: NtCreateProcess '%s' pid=%lu pending\n", name, (unsigned long)proc->Pid);
-        f->rax = 0;
+        f->rax = proc->Pid;
         return f;
     }
     case SYS_NtOpenFile: {
-        char name[32];
-        if (copy_user_str(f->rdi, name, sizeof name) != 0) { f->rax = (uint64_t)-1LL; return f; }
-        BootModule *mod = PspFindModule(user_bootinfo, name);
-        if (!mod) { f->rax = (uint64_t)-1LL; return f; }
-        for (uint32_t i = 0; i < user_bootinfo->module_count; i++)
-            if (&user_bootinfo->modules[i] == mod) { f->rax = i + 1; return f; }
-        f->rax = (uint64_t)-1LL;
+        char name[64];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
+            f->rax = (uint64_t)-1LL; return f;
+        }
+        f->rax = 1;
         return f;
     }
     case SYS_NtReadFile: {
-        uint64_t h = f->rdi, uaddr = f->rsi, len = f->rdx;
-        if (!h || h > user_bootinfo->module_count) { f->rax = (uint64_t)-1LL; return f; }
-        BootModule *mod = &user_bootinfo->modules[h - 1];
-        if (len > mod->size) len = mod->size;
-        uint8_t *src = (uint8_t *)(HHDM_BASE + mod->phys);
-        for (uint64_t i = 0; i < len; i++) ((uint8_t *)uaddr)[i] = src[i];
-        f->rax = len;
-        return f;
-    }
-    case SYS_NtQueryDirectoryFile: {
-        uint64_t index = f->rdi, uname = f->rsi;
-        if (index >= user_bootinfo->module_count) { f->rax = 1; return f; }
-        char *dst = (char *)uname;
-        const char *src = user_bootinfo->modules[index].name;
-        for (int i = 0; i < 31; i++) { dst[i] = src[i]; if (!src[i]) break; }
-        dst[31] = 0;
         f->rax = 0;
         return f;
     }
+    case SYS_NtQueryDirectoryFile: {
+        uint32_t index = (uint32_t)f->rdi;
+        char *name = (char *)f->rsi;
+        if (!name) { f->rax = 0; return f; }
+        if (g_ext4_ok && index < (uint32_t)vfs_nent) {
+            const char *n = vfs_ents[index].name;
+            int i = 0; for (; n[i] && i < 63; i++) name[i] = n[i];
+            name[i] = 0;
+            f->rax = vfs_ents[index].is_dir ? 2 : 1;
+        } else if (user_bootinfo && index < user_bootinfo->module_count) {
+            const char *n = user_bootinfo->modules[index].name;
+            int i = 0; for (; n[i] && i < 63; i++) name[i] = n[i];
+            name[i] = 0;
+            f->rax = 1;
+        } else f->rax = 0;
+        return f;
+    }
     case SYS_NtMapFramebuffer: {
-        if (!user_fb_base || !f->rdi) { f->rax = 0; return f; }
-        KPROCESS *proc = MmCurrentProcess;
-        if (!proc || proc == PspSystemProcess) { f->rax = 0; return f; }
-        uint64_t uva = 0x60000000ULL;
-        uint64_t size = (uint64_t)user_fb_pitch * user_fb_h;
-        if (size > 32ull * 1024 * 1024) size = 32ull * 1024 * 1024;
+        if (!user_fb_base) { f->rax = 0; return f; }
+        KPROCESS *cur = MmCurrentProcess;
         MmSwitchToProcess(PspSystemProcess);
-        for (uint64_t off = 0; off < size; off += 0x1000) {
-            uint64_t pa = (user_fb_base + off) & ~0xFFFULL;
-            map_4k_in(proc->Pml4, uva + off, pa, PTE_U | PTE_RW);
+        uint64_t uva = 0x70000000ULL;
+        uint64_t pages = ((uint64_t)user_fb_pitch * user_fb_h + 0xFFF) >> 12;
+        for (uint64_t i = 0; i < pages; i++)
+            map_4k_in(cur->Pml4, uva + (i << 12),
+                      (user_fb_base + (i << 12)) & ~0xFFFULL, PTE_U | PTE_RW);
+        MmSwitchToProcess(cur);
+        if (f->rdi) {
+            *(uint64_t *)f->rdi = uva;
+            *(uint32_t *)(f->rdi + 8) = user_fb_w;
+            *(uint32_t *)(f->rdi + 12) = user_fb_h;
+            *(uint32_t *)(f->rdi + 16) = user_fb_pitch;
         }
-        {
-            uint32_t *fb = (uint32_t *)(void *)user_fb_base;
-            uint32_t pitch = user_fb_pitch / 4;
-            uint32_t w = user_fb_w, h = user_fb_h;
-            for (uint32_t y = 0; y < h; y++)
-                for (uint32_t x = 0; x < w; x++)
-                    fb[y * pitch + x] = 0xFF1A1A2E;
-            uint32_t y0 = h > 56 ? h - 56 : 0;
-            for (uint32_t y = y0; y < h; y++)
-                for (uint32_t x = 0; x < w; x++)
-                    fb[y * pitch + x] = 0xFF16213E;
-            for (uint32_t x = 0; x < w; x++)
-                fb[y0 * pitch + x] = 0xFFE94560;
-            DbgPrint("user: FB mapped %ux%u @%p\n", w, h, (void *)user_fb_base);
+        if (!fb_map_logged) {
+            DbgPrint("user: FB mapped %ux%u", user_fb_w, user_fb_h);
+            fb_map_logged = 1;
         }
-        MmSwitchToProcess(proc);
-        *(uint64_t *)f->rdi = uva;
-        *(uint32_t *)(f->rdi + 8) = user_fb_w;
-        *(uint32_t *)(f->rdi + 12) = user_fb_h;
-        *(uint32_t *)(f->rdi + 16) = user_fb_pitch;
         f->rax = uva;
         return f;
     }
     case SYS_NtGetProcAddress: {
-        char dll[32], fn[64];
-        if (copy_user_str(f->rdi, dll, sizeof dll) != 0 ||
-            copy_user_str(f->rsi, fn, sizeof fn) != 0) { f->rax = 0; return f; }
+        char dll[64], func[64];
+        if (copy_user_str(f->rdi, dll, sizeof dll) != 0) dll[0] = 0;
+        if (copy_user_str(f->rsi, func, sizeof func) != 0) func[0] = 0;
         BootModule *mod = PspFindModule(user_bootinfo, dll);
-        if (!mod) { DbgPrint("user: GetProcAddress: no %s\n", dll); f->rax = 0; return f; }
-        KPROCESS *caller = MmCurrentProcess;
-        MmSwitchToProcess(PspSystemProcess);
-        PspMapUserImage(caller, mod);
-        MmSwitchToProcess(caller);
-        uint64_t addr = pe_get_export(mod, fn);
-        DbgPrint("user: GetProcAddress %s!%s = %p\n", dll, fn, (void *)addr);
+        uint64_t addr = 0;
+        if (mod) {
+            KPROCESS *cur = MmCurrentProcess;
+            MmSwitchToProcess(PspSystemProcess);
+            PspMapUserImage(cur, mod);
+            pe_resolve_imports(cur, mod);
+            addr = pe_get_export(mod, func);
+            MmSwitchToProcess(cur);
+            DbgPrint("user: GetProcAddress %s!%s = %p", dll, func, (void *)addr);
+        }
         f->rax = addr;
         return f;
     }
-
     case SYS_NtGetInput: {
-        for (int i = 0; i < 64; i++) {
-            if (!(ps2_inb(0x64) & 1)) break;
-            ps2_handle_byte(ps2_inb(0x60));
-        }
-        int *out = (int *)f->rdi;
+        typedef struct { int type, x, y, btn; char key; } UIn;
+        UIn *out = (UIn *)f->rdi;
         if (!out) { f->rax = 0; return f; }
-        while (kbd_r != kbd_w) {
-            uint8_t sc = kbd_buf[kbd_r++ % 64];
-            if (sc & 0x80) continue;
-            int step = 24;
-            if (sc == 0x48 || sc == 0x11) { mouse_y -= step; if (mouse_y < 0) mouse_y = 0; }
-            else if (sc == 0x50 || sc == 0x1F) { mouse_y += step; if (mouse_y > 799) mouse_y = 799; }
-            else if (sc == 0x4B || sc == 0x1E) { mouse_x -= step; if (mouse_x < 0) mouse_x = 0; }
-            else if (sc == 0x4D || sc == 0x20) { mouse_x += step; if (mouse_x > 1279) mouse_x = 1279; }
-            else if (sc == 0x1C || sc == 0x39) {
-                out[0] = 3; out[1] = mouse_x; out[2] = mouse_y; out[3] = 1;
-                f->rax = 1; return f;
-            } else {
-                char key = ps2_scancode_to_ascii(sc);
-                if (key) {
-                    out[0] = 1; out[1] = mouse_x; out[2] = mouse_y; out[3] = mouse_btn;
-                    ((char *)out)[16] = key;
-                    f->rax = 1; return f;
-                }
+        ps2_poll();
+        virtio_input_poll();
+        if (vi_ok) {
+            mouse_x = vi_x;
+            mouse_y = vi_y;
+            mouse_btn = vi_btn;
+        }
+        char k = 0;
+        if (ps2_read_key(&k)) {
+            out->type = 1;
+            out->key = k;
+            out->x = mouse_x;
+            out->y = mouse_y;
+            out->btn = mouse_btn;
+            f->rax = 1;
+            return f;
+        }
+        if (vi_ok && vi_have) {
+            out->type = (vi_have == 3) ? 3 : 2;
+            out->x = mouse_x;
+            out->y = mouse_y;
+            out->btn = mouse_btn;
+            vi_have = 0;
+            f->rax = 1;
+            return f;
+        }
+        {
+            static int lx = -1, ly = -1, lb = -1;
+            if (mouse_x != lx || mouse_y != ly || mouse_btn != lb) {
+                int pressed = (mouse_btn & 1) && !(lb & 1);
+                out->type = pressed ? 3 : 2;
+                out->x = mouse_x;
+                out->y = mouse_y;
+                out->btn = mouse_btn;
+                lx = mouse_x; ly = mouse_y; lb = mouse_btn;
+                f->rax = 1;
+                return f;
             }
         }
-        static int last_mx = -1, last_my = -1, last_btn = -1;
-        if (mouse_x != last_mx || mouse_y != last_my || mouse_btn != last_btn) {
-            int down = (mouse_btn & 1) && !(last_btn & 1);
-            out[0] = down ? 3 : 2;
-            out[1] = mouse_x; out[2] = mouse_y; out[3] = mouse_btn;
-            last_mx = mouse_x; last_my = mouse_y; last_btn = mouse_btn;
-            f->rax = 1; return f;
+        {
+            int me = up_find_proc(MmCurrentProcess);
+            if (me >= 0) up_save(f, me);
+            int nxt = up_pick_next();
+            if (nxt >= 0 && nxt != me) { up_load(f, nxt); f->rax = 0; return f; }
         }
         f->rax = 0;
         return f;
     }
+    case SYS_NtSetCurrentDirectory: {
+        char name[128];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
+            f->rax = (uint64_t)-1LL; return f;
+        }
+        int r = g_ext4_ok ? vfs_chdir(name) : -1;
+        f->rax = (uint64_t)(int64_t)r;
+        return f;
+    }
+    case SYS_NtCreateThread: {
+        f->rax = ut_create(f->rdi, f->rsi);
+        return f;
+    }
+    case SYS_NtWaitForSingleObject: {
+        f->rax = ut_wait(f, (int)f->rdi, (uint32_t)f->rsi);
+        return f;
+    }
+    case SYS_WmRegister: {
+        char title[40];
+        if (copy_user_str(f->rsi, title, sizeof title) != 0) title[0] = 0;
+        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        wm_register(pid, title);
+        f->rax = 0;
+        return f;
+    }
+    case SYS_WmSetMin: {
+        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        wm_set_min(pid, (int)f->rdi);
+        f->rax = 0;
+        return f;
+    }
+    case SYS_WmUnregister: {
+        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        wm_unregister(pid);
+        f->rax = 0;
+        return f;
+    }
+    case SYS_WmQuery: {
+        char tmp[40];
+        int minv = 0, pidv = 0;
+        if (!wm_query((int)f->rdi, tmp, &minv, &pidv)) { f->rax = 0; return f; }
+        if (f->rsi) {
+            char *d = (char *)f->rsi;
+            int k = 0; for (; tmp[k]; k++) d[k] = tmp[k]; d[k] = 0;
+        }
+        if (f->rdx) *(int *)f->rdx = minv;
+        f->rax = (uint64_t)(uint32_t)pidv;
+        return f;
+    }
+    case SYS_WmRestore: {
+        wm_restore_pid((int)f->rdi);
+        f->rax = 0;
+        return f;
+    }
+    case SYS_NtShutdown: {
+        if (f->rdi == 0)
+            HalReturnToFirmware(HalPowerDownRoutine);
+        else
+            HalReturnToFirmware(HalRebootRoutine);
+        f->rax = 0;
+        return f;
+    }
+    case 40:
+        f->rax = (uint64_t)-1LL;
+        return f;
     default:
-        DbgPrint("[user] unknown syscall %llu\n", f->rax);
         f->rax = (uint64_t)-1LL;
         return f;
     }
 }
 
+
 static void user_enter(BootInfo *bi) {
     ps2_init();
+    ata_init();
+    virtio_blk_init();
+    virtio_input_init();
+    vfs_mount_c();
     DbgPrint("\n-- usermode (smss) --\n");
     user_bootinfo = (BootInfo *)(HHDM_BASE + (uint64_t)bi);
     user_fb_base = bi->fb_base;
@@ -345,7 +590,6 @@ static void user_enter(BootInfo *bi) {
     user_fb_h = bi->height;
     user_fb_pitch = bi->pitch;
     user_pending = 0;
-    DbgPrint("fs: C: mounted -> System32 (%u files)\n", user_bootinfo->module_count);
 
     DbgPrint("user: BootInfo modules (%u)\n", user_bootinfo->module_count);
     for (uint32_t i = 0; i < user_bootinfo->module_count; i++)
@@ -356,18 +600,43 @@ static void user_enter(BootInfo *bi) {
 
     KPROCESS *proc = MmCreateAddressSpace("smss");
     if (!proc || PspMapUserImage(proc, smss) != 0) {
-        DbgPrint("user: map smss failed\n"); return;
+        DbgPrint("user: map smss failed\n");
+        return;
     }
 
     uint64_t ktop = ((uint64_t)user_kstack + sizeof user_kstack) & ~15ULL;
     user_set_kernel_stack(ktop);
     if (ki_current) ki_current->Process = proc;
+    up_tab[0].proc = proc;
+    up_tab[0].entry = smss->entry;
+    up_tab[0].alive = 1;
+    up_tab[0].fresh = 0;
+    up_tab[0].rip = smss->entry;
+    up_tab[0].rsp = USER_STACK_TOP;
+    up_tab[0].rflags = 0x202;
+    up_n = 1;
+    up_cur = 0;
 
     uint64_t entry = smss->entry;
     DbgPrint("user: pid=%lu enter smss %p\n", (unsigned long)proc->Pid, (void *)entry);
 
     uint64_t *s = (uint64_t *)ktop;
-    *--s = USER_DS; *--s = USER_STACK_TOP; *--s = 0x202; *--s = USER_CS; *--s = entry;
+    *--s = USER_DS;
+    *--s = USER_STACK_TOP;
+    *--s = 0x202;
+    *--s = USER_CS;
+    *--s = entry;
+
+    /* map user stack: 64 KiB below USER_STACK_TOP */
+    {
+        uint64_t stack_sz = 0x10000ULL;
+        uint64_t stack_lo = USER_STACK_TOP - stack_sz;
+        for (uint64_t off = 0; off < stack_sz; off += 0x1000) {
+            uint64_t pa = pmm_alloc_zeroed();
+            if (!pa) { DbgPrint("user: stack alloc fail\n"); return; }
+            map_4k_in(proc->Pml4, stack_lo + off, pa, PTE_U | PTE_RW);
+        }
+    }
     MmSwitchToProcess(proc);
 
     __asm__ volatile(
@@ -379,7 +648,8 @@ static void user_enter(BootInfo *bi) {
         "1:\n"
         : [rip] "=m"(user_saved_rip), [rsp] "=m"(user_saved_ksp)
         : [frame] "r"(s)
-        : "rcx", "memory");
+        : "rcx", "memory"
+    );
 
     MmSwitchToProcess(PspSystemProcess);
     if (ki_current) ki_current->Process = PspSystemProcess;

@@ -9,6 +9,12 @@
 #include "bootcheck.h"
 #include "user.h"
 
+/* MSVC/clang stack probe – we are freestanding */
+__attribute__((naked)) void __chkstk(void) {
+    __asm__ volatile("ret");
+}
+
+
 // Edit and rebuild to exercise the exception handler:
 //   0 = normal boot   1 = #UD (ud2)   2 = #GP (non-canonical access)   3 = #PF (unmapped address)
 #ifndef TEST_FAULT

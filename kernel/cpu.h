@@ -114,6 +114,7 @@ typedef void (*KINTERRUPT_ROUTINE)(Frame *);
 static KINTERRUPT_ROUTINE irq_handler[256];
 
 static void KeConnectInterrupt(ULONG Vector, KINTERRUPT_ROUTINE Routine) { irq_handler[Vector & 255] = Routine; }
+static void irq_stub_eoi(Frame *f) { (void)f; }
 
 // called from isr_common; returns the frame to resume.  Breakpoint returns, other exceptions dump state and halt,
 // vectors >= 32 are dispatched (then the scheduler may hand back a different thread's frame).

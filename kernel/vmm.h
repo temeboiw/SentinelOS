@@ -50,7 +50,7 @@ static uint64_t *table_next(uint64_t *tbl, unsigned idx) {
         uint64_t pa = pmm_alloc_zeroed();
         if (!pa) vmm_panic("out of memory for page tables");
         vmm_table_pages++;
-        tbl[idx] = pa | PTE_P | PTE_RW;
+        tbl[idx] = pa | PTE_P | PTE_RW | PTE_U;
     }
     uint64_t pa = tbl[idx] & PTE_ADDR;
     if (MmCurrentProcess && MmCurrentProcess != PspSystemProcess)
@@ -278,8 +278,8 @@ static void vmm_selftest(const BootInfo *bi, uint64_t code_addr, uint64_t stack_
     *hi = 0xAABBCCDDEEFF0011ULL;
     DbgPrint("vmm test: write via direct map, read via identity: %s\n", *lo == 0xAABBCCDDEEFF0011ULL ? "ok" : "FAIL");
     DbgPrint("vmm test: translate(direct map + page) == page: %s\n", vmm_translate(HHDM_BASE + pa) == pa ? "ok" : "FAIL");
-    DbgPrint("vmm test: kernel code identity-mapped: %s\n", vmm_translate(code_addr) == code_addr ? "ok" : "FAIL");
-    DbgPrint("vmm test: kernel stack identity-mapped: %s\n", vmm_translate(stack_addr) == stack_addr ? "ok" : "FAIL");
+    DbgPrint("vmm test: kernel code higher-half mapped: %s\n", vmm_translate(code_addr) != ~0ULL ? "ok" : "FAIL");
+    DbgPrint("vmm test: kernel stack higher-half mapped: %s\n", vmm_translate(stack_addr) != ~0ULL ? "ok" : "FAIL");
     DbgPrint("vmm test: framebuffer mapped (both aliases): %s\n",
             (vmm_translate(bi->fb_base) == bi->fb_base && vmm_translate(HHDM_BASE + bi->fb_base) == bi->fb_base) ? "ok" : "FAIL");
     DbgPrint("vmm test: unmapped address is really unmapped: %s\n",

@@ -168,7 +168,11 @@ HALAPI BOOLEAN HalStartClockInterrupt(ULONG Hz, ULONG Vector) {
 }
 
 HALAPI VOID HalEndSystemInterrupt(KIRQL NewIrql, ULONG Vector) {
-    (void)NewIrql; (void)Vector;
+    (void)NewIrql;
+    if (Vector >= 0x20 && Vector <= 0x2F) {
+        if (Vector >= 0x28) outb(0xA0, 0x20);
+        outb(0x20, 0x20);
+    }
     if (apic_ready) lapic_write(LAPIC_EOI, 0);
 }
 

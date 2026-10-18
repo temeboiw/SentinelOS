@@ -62,11 +62,11 @@ else
   EDK_INC=()
 fi
 
-mkdir -p "$B/obj" "$B/esp/EFI/BOOT" "$B/esp/EFI/magic" "$SYS32"
+mkdir -p "$B/obj" "$B/esp/EFI/BOOT" "$B/esp/EFI/magic" "$SYS32" "$B/rootfs/Program Files" "$B/rootfs/Program Files (x86)" "$B/rootfs/Program Files/Common Files" "$B/rootfs/Program Files (x86)/Common Files" "$B/rootfs/Users/Public" "$B/rootfs/Windows/System32"
 
 COMMON=(
   --target=x86_64-unknown-windows
-  -ffreestanding -mno-red-zone -fno-stack-protector
+  -ffreestanding -mno-red-zone -fno-stack-protector -mno-stack-arg-probe
   -mgeneral-regs-only -O2 -Wall -Wno-unused-function
   -I"$ROOT/shared" -I"$ROOT/boot"
 )
@@ -114,15 +114,16 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
 clang "${USER_CFLAGS[@]}" -c "$ROOT/user/kernel32.c" -o "$B/obj/kernel32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41000000 \
   /export:ExitProcess /export:GetStdHandle /export:WriteFile /export:VirtualAlloc \
-  /export:CreateFileA /export:ReadFile /export:CloseHandle /export:QueryDirectoryA \
-  /export:GetLastError /export:SetLastError /export:PeekInput /export:GetTickCount64 /export:Sleep \
+  /export:CreateFileA /export:ReadFile /export:CloseHandle /export:QueryDirectoryA /export:SetCurrentDirectoryA \
+  /export:GetLastError /export:SetLastError /export:PeekInput /export:GetTickCount64 /export:Sleep /export:ExitWindowsEx \
+  /export:CreateThread /export:WaitForSingleObject \
   "/implib:$B/obj/kernel32.lib" "/out:$SYS32/kernel32.dll" "$B/obj/kernel32.o"
 
 clang "${USER_CFLAGS[@]}" -c "$ROOT/user/user32.c" -o "$B/obj/user32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41100000 \
   /export:MessageBoxA /export:CreateWindowExA /export:ShowWindow /export:UpdateWindow \
   /export:TextOutA /export:InvalidateRect /export:GetMessageA /export:TranslateMessage \
-  /export:DispatchMessageA /export:DestroyWindow /export:PostQuitMessage \
+  /export:DispatchMessageA /export:DestroyWindow /export:PostQuitMessage /export:ExitWindowsEx /export:DrawTaskbar \
   "/implib:$B/obj/user32.lib" "/out:$SYS32/user32.dll" "$B/obj/user32.o"
 test -f "$SYS32/kernel32.dll" || { echo FATAL: kernel32.dll missing; exit 1; }
 test -f "$SYS32/user32.dll" || { echo FATAL: user32.dll missing; exit 1; }

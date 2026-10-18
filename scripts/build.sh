@@ -87,10 +87,9 @@ COMMON=(
   -I"$ROOT/shared" -I"$ROOT/boot" -I"$B"
 )
 
-# Embed the WAV bytes in a read-only COFF section so the freestanding kernel
-# can parse its RIFF header and feed the PCM data to HDA DMA.
-printf '.section .rdata,"dr"\n.p2align 4\n.globl sentinel_wav_start\nsentinel_wav_start:\n.incbin "%s"\n.globl sentinel_wav_end\nsentinel_wav_end:\n' "$WAV_SAMPLE" > "$B/obj/audio_sample.S"
-clang "${COMMON[@]}" -c "$B/obj/audio_sample.S" -o "$B/obj/audio_sample.o"
+# Generate a C header containing the verified WAV bytes. This avoids invoking
+# Clang's assembly frontend, which is unreliable in some Termux/proot setups.
+python3 "$ROOT/scripts/prepare-audio-sample.py" "$B/audio_sample.h" "$WAV_SAMPLE"
 
 build_efi() {
   local name="$1" out="$2"
@@ -114,11 +113,10 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib \
   /base:0xFFFFFFFF81000000 /fixed:no \
   "/implib:$B/obj/hal.lib" "/out:$SYS32/hal.dll" "$B/obj/hal.o"
 
-python3 "$ROOT/scripts/prepare-audio-sample.py" "$B/audio_sample.h"
 clang "${COMMON[@]}" -c "$ROOT/kernel/kernel.c" -o "$B/obj/kernel.o"
 lld -flavor link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase \
   /base:0xFFFFFFFF80200000 /fixed:no \
-  "/out:$SYS32/krnl.exe" "$B/obj/kernel.o" "$B/obj/audio_sample.o" "$B/obj/hal.lib"
+  "/out:$SYS32/krnl.exe" "$B/obj/kernel.o" "$B/obj/hal.lib"
 
 
 echo "==> user PE images"

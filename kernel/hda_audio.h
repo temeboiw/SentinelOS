@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "hda.h"
+#include "audio_sample.h"
 
 /* Play PCM samples from a build-time downloaded, embedded WAV file. */
 #define HDA_SD0_CTL  0x80
@@ -13,9 +14,6 @@
 #define HDA_SD0_BDPU 0x9C
 #define HDA_BDL_SEGMENT_BYTES 60000u
 #define HDA_BDL_MAX_ENTRIES 256u
-
-extern const uint8_t sentinel_wav_start[];
-extern const uint8_t sentinel_wav_end[];
 
 typedef struct __attribute__((packed)) {
     uint64_t address;

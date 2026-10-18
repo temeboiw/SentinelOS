@@ -10,6 +10,7 @@
 #include "user.h"
 #include "virtio_blk.h"
 #include "hda.h"
+#include "hda_audio.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -53,7 +54,10 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
-    hda_init();
+    if (hda_init() == 0) {
+        if (hda_audio_start_test_tone() != 0)
+            DbgPrint("hda-audio: test tone could not start; boot continues\\n");
+    }
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
     uint64_t got = pmm_reclaim_boot_services(bi);
     DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",

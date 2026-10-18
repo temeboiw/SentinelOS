@@ -55,8 +55,8 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
     if (hda_init() == 0) {
-        if (hda_audio_start_test_tone() != 0)
-            DbgPrint("hda-audio: test tone could not start; boot continues\\n");
+        if (hda_audio_start_wav() != 0)
+            DbgPrint("hda-audio: WAV playback could not start; boot continues\\n");
     }
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
     uint64_t got = pmm_reclaim_boot_services(bi);

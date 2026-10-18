@@ -45,6 +45,7 @@ fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: missing tool '$1'"; exit 1; }; }
 need clang
+need python3
 need lld
 need qemu-img
 need sfdisk
@@ -68,7 +69,7 @@ COMMON=(
   --target=x86_64-unknown-windows
   -ffreestanding -mno-red-zone -fno-stack-protector -mno-stack-arg-probe
   -mgeneral-regs-only -O2 -Wall -Wno-unused-function
-  -I"$ROOT/shared" -I"$ROOT/boot"
+  -I"$ROOT/shared" -I"$ROOT/boot" -I"$B"
 )
 
 build_efi() {
@@ -93,6 +94,7 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib \
   /base:0xFFFFFFFF81000000 /fixed:no \
   "/implib:$B/obj/hal.lib" "/out:$SYS32/hal.dll" "$B/obj/hal.o"
 
+python3 "$ROOT/scripts/prepare-audio-sample.py" "$B/audio_sample.h"
 clang "${COMMON[@]}" -c "$ROOT/kernel/kernel.c" -o "$B/obj/kernel.o"
 lld -flavor link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase \
   /base:0xFFFFFFFF80200000 /fixed:no \

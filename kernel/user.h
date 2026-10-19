@@ -734,7 +734,11 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = NtStatusResult(NT_STATUS_INVALID_HANDLE);
             return f;
         }
-        if (f->rdx != 0 || !f->rsi || !f->rcx ||
+        if (f->rdx != 0) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_PARAMETER);
+            return f;
+        }
+        if (!f->rsi || !f->rcx ||
             !MmValidateUserRange(MmCurrentProcess, f->rsi, sizeof(uint64_t), 1) ||
             !MmValidateUserRange(MmCurrentProcess, f->rcx, sizeof(uint64_t), 1)) {
             f->rax = NtStatusResult(NT_STATUS_ACCESS_VIOLATION);
@@ -748,7 +752,8 @@ static Frame *syscall_handler(Frame *f) {
         if (!requested || requested > UINT64_MAX - 0xFFFULL ||
             requested > 16ull * 1024 * 1024 ||
             (alloc_type & ~(NT_MEM_RESERVE | NT_MEM_COMMIT)) != 0 ||
-            !(alloc_type & (NT_MEM_RESERVE | NT_MEM_COMMIT)) ||
+            (alloc_type & (NT_MEM_RESERVE | NT_MEM_COMMIT)) !=
+                (NT_MEM_RESERVE | NT_MEM_COMMIT) ||
             protect != NT_PAGE_READWRITE) {
             f->rax = NtStatusResult(NT_STATUS_INVALID_PARAMETER);
             return f;

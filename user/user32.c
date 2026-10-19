@@ -726,6 +726,7 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
 __attribute__((dllexport))
 BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     (void)hwnd;
+    if (!msg) return 0;
     (void)min;
     (void)max;
 
@@ -769,8 +770,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     continue;
                 }
 
+                msg->hwnd = 0;
                 msg->message = 0x0100;
                 msg->wParam = (u64)(unsigned char)ev.key;
+                msg->lParam = 0;
+                msg->time = 0;
                 msg->pt_x = g_mx;
                 msg->pt_y = g_my;
                 return 1;
@@ -799,7 +803,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_mx = ev.x;
                 g_my = ev.y;
 
+                msg->hwnd = 0;
                 msg->message = (ev.type == 3) ? 0x0201 : 0x0200;
+                msg->wParam = (u64)(unsigned int)ev.btn;
+                msg->lParam = 0;
+                msg->time = 0;
                 msg->pt_x = ev.x;
                 msg->pt_y = ev.y;
 

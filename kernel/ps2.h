@@ -54,7 +54,7 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
         if (mouse_pkt[0] & 0x80) dy = 0;
 
         /* VNC deltas are tiny – scale up */
-        int scale = 3;
+        int scale = 2;
         mouse_x += dx * scale;
         mouse_y -= dy * scale; /* PS/2 Y is opposite screen Y */
         if (mouse_x < 0) mouse_x = 0;

@@ -335,3 +335,285 @@ __attribute__((dllexport)) DWORD GetProcessId(HANDLE process) {
 __attribute__((dllexport)) DWORD GetCurrentProcessIdCompat(void) {
     return (DWORD)sy3(2,0,0,0);
 }
+
+
+/* -------------------------------------------------------------------------
+ * Phase 1 runtime support: heap allocator, memory primitives and Unicode.
+ * This allocator manages reusable blocks inside process-private VirtualAlloc
+ * arenas. The kernel currently has no page-release syscall, so freeing a heap
+ * block returns it to the heap for reuse rather than unmapping its arena.
+ * ------------------------------------------------------------------------- */
+typedef unsigned long SIZE_T;
+typedef unsigned int UINT;
+typedef unsigned short WORD;
+typedef unsigned char BYTE;
+typedef void *LPVOID_LOCAL;
+typedef const char *LPCCH;
+typedef const unsigned short *LPCWCH;
+#define HEAP_ZERO_MEMORY 0x00000008u
+#define MEM_COMMIT 0x1000u
+#define MEM_RESERVE 0x2000u
+#define PAGE_READWRITE 0x04u
+#define CP_ACP 0u
+#define CP_UTF8 65001u
+#define CP_1252 1252u
+#define HEAP_ARENA_BYTES (1024u * 1024u)
+#define HEAP_ARENA_MAX 16
+
+typedef struct HeapBlock {
+    u64 size;
+    struct HeapBlock *next;
+    u32 free;
+    u32 magic;
+} HeapBlock;
+typedef struct {
+    BYTE *base;
+    HeapBlock *first;
+} HeapArena;
+static HeapArena g_heap_arenas[HEAP_ARENA_MAX];
+static u32 g_heap_arena_count;
+#define HEAP_BLOCK_MAGIC 0x53484D42u
+
+static u64 k32_align16(u64 n) { return (n + 15u) & ~15ull; }
+static void *k32_heap_grow(void) {
+    if (g_heap_arena_count >= HEAP_ARENA_MAX) return 0;
+    u32 slot = g_heap_arena_count;
+    u64 base = 0x51000000ull + (u64)slot * HEAP_ARENA_BYTES;
+    void *mem = (void *)sy3(SYS_Alloc, base, HEAP_ARENA_BYTES, 0);
+    if (!mem || (u64)mem != base) return 0;
+    HeapArena *a = &g_heap_arenas[slot];
+    a->base = (BYTE *)mem;
+    a->first = (HeapBlock *)mem;
+    a->first->size = HEAP_ARENA_BYTES - sizeof(HeapBlock);
+    a->first->next = 0;
+    a->first->free = 1;
+    a->first->magic = HEAP_BLOCK_MAGIC;
+    g_heap_arena_count++;
+    return mem;
+}
+static HeapBlock *k32_block_from_user(const void *p) {
+    if (!p) return 0;
+    HeapBlock *b = (HeapBlock *)((BYTE *)p - sizeof(HeapBlock));
+    for (u32 i=0; i<g_heap_arena_count; i++) {
+        BYTE *lo=g_heap_arenas[i].base, *hi=lo+HEAP_ARENA_BYTES;
+        if ((BYTE *)b >= lo && (BYTE *)b + sizeof(HeapBlock) <= hi &&
+            b->magic == HEAP_BLOCK_MAGIC) return b;
+    }
+    return 0;
+}
+static void *k32_heap_alloc(u64 bytes, u32 flags) {
+    if (!bytes) bytes=1;
+    bytes=k32_align16(bytes);
+    if (bytes > HEAP_ARENA_BYTES-sizeof(HeapBlock)) {
+        /* Large allocations use their own exact-sized VirtualAlloc region. */
+        u64 size=(bytes+sizeof(HeapBlock)+0xFFFu)&~0xFFFULL;
+        if(size>16ull*1024*1024)return 0;
+        static u32 large_slot;
+        u64 base=0x53000000ull+(u64)(large_slot++)*0x01000000ull;
+        void *mem=(void *)sy3(SYS_Alloc,base,size,0);
+        if(!mem || (u64)mem!=base)return 0;
+        HeapBlock *b=(HeapBlock *)mem;
+        b->size=size-sizeof(HeapBlock);b->next=0;b->free=0;b->magic=HEAP_BLOCK_MAGIC;
+        BYTE *out=(BYTE *)mem+sizeof(HeapBlock);
+        if(flags&HEAP_ZERO_MEMORY)for(u64 i=0;i<bytes;i++)out[i]=0;
+        return out;
+    }
+    for (;;) {
+        for(u32 i=0;i<g_heap_arena_count;i++) {
+            for(HeapBlock *b=g_heap_arenas[i].first;b;b=b->next) {
+                if(!b->free || b->magic!=HEAP_BLOCK_MAGIC || b->size<bytes)continue;
+                if(b->size >= bytes+sizeof(HeapBlock)+32) {
+                    HeapBlock *n=(HeapBlock *)((BYTE *)b+sizeof(HeapBlock)+bytes);
+                    n->size=b->size-bytes-sizeof(HeapBlock);
+                    n->next=b->next;n->free=1;n->magic=HEAP_BLOCK_MAGIC;
+                    b->next=n;b->size=bytes;
+                }
+                b->free=0;
+                BYTE *out=(BYTE *)b+sizeof(HeapBlock);
+                if(flags&HEAP_ZERO_MEMORY)for(u64 j=0;j<b->size;j++)out[j]=0;
+                return out;
+            }
+        }
+        if(!k32_heap_grow())return 0;
+    }
+}
+__attribute__((dllexport)) HANDLE GetProcessHeap(void) { return (HANDLE)1; }
+__attribute__((dllexport)) LPVOID HeapAlloc(HANDLE heap,DWORD flags,SIZE_T bytes) {
+    if(heap && heap!=(HANDLE)1){g_last_error=ERROR_INVALID_HANDLE;return 0;}
+    void *p=k32_heap_alloc(bytes,flags);
+    g_last_error=p?ERROR_SUCCESS:ERROR_NOT_ENOUGH_MEMORY;
+    return p;
+}
+__attribute__((dllexport)) BOOL HeapFree(HANDLE heap,DWORD flags,LPVOID p) {
+    (void)flags;
+    if(heap && heap!=(HANDLE)1){g_last_error=ERROR_INVALID_HANDLE;return 0;}
+    if(!p){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    HeapBlock *b=k32_block_from_user(p);
+    if(!b || b->free){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    b->free=1;
+    for(u32 i=0;i<g_heap_arena_count;i++) {
+        for(HeapBlock *q=g_heap_arenas[i].first;q && q->next;q=q->next) {
+            if(q->free && q->next->free &&
+               (BYTE *)q+sizeof(HeapBlock)+q->size==(BYTE *)q->next) {
+                q->size+=sizeof(HeapBlock)+q->next->size;
+                q->next=q->next->next;
+            }
+        }
+    }
+    g_last_error=ERROR_SUCCESS;return 1;
+}
+__attribute__((dllexport)) SIZE_T HeapSize(HANDLE heap,DWORD flags,LPCVOID p) {
+    (void)flags;
+    if(heap && heap!=(HANDLE)1){g_last_error=ERROR_INVALID_HANDLE;return (SIZE_T)-1;}
+    HeapBlock *b=k32_block_from_user(p);
+    if(!b || b->free){g_last_error=ERROR_INVALID_PARAMETER;return (SIZE_T)-1;}
+    g_last_error=ERROR_SUCCESS;return (SIZE_T)b->size;
+}
+__attribute__((dllexport)) LPVOID HeapReAlloc(HANDLE heap,DWORD flags,LPVOID p,SIZE_T bytes) {
+    if(!p)return HeapAlloc(heap,flags,bytes);
+    if(!bytes){HeapFree(heap,0,p);return 0;}
+    HeapBlock *b=k32_block_from_user(p);
+    if(!b || b->free){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    if(b->size>=bytes) {
+        if(flags&HEAP_ZERO_MEMORY)for(u64 i=bytes;i<b->size;i++)((BYTE *)p)[i]=0;
+        return p;
+    }
+    void *n=HeapAlloc(heap,flags,bytes);
+    if(!n)return 0;
+    BYTE *d=(BYTE *)n,*s=(BYTE *)p;
+    for(u64 i=0;i<b->size;i++)d[i]=s[i];
+    HeapFree(heap,0,p);
+    return n;
+}
+__attribute__((dllexport)) LPVOID LocalAlloc(UINT flags,SIZE_T bytes) {
+    return HeapAlloc((HANDLE)1,(flags&0x40)?HEAP_ZERO_MEMORY:0,bytes);
+}
+__attribute__((dllexport)) LPVOID LocalReAlloc(LPVOID p,SIZE_T bytes,UINT flags) {
+    return HeapReAlloc((HANDLE)1,(flags&0x40)?HEAP_ZERO_MEMORY:0,p,bytes);
+}
+__attribute__((dllexport)) LPVOID LocalFree(LPVOID p) {
+    return HeapFree((HANDLE)1,0,p)?0:p;
+}
+__attribute__((dllexport)) LPVOID GlobalAlloc(UINT flags,SIZE_T bytes) {
+    return LocalAlloc(flags,bytes);
+}
+__attribute__((dllexport)) LPVOID GlobalReAlloc(LPVOID p,SIZE_T bytes,UINT flags) {
+    return LocalReAlloc(p,bytes,flags);
+}
+__attribute__((dllexport)) LPVOID GlobalFree(LPVOID p) { return LocalFree(p); }
+
+__attribute__((dllexport)) void *RtlMoveMemory(void *dst,const void *src,SIZE_T n) {
+    if(!dst||!src)return dst;
+    BYTE *d=(BYTE *)dst;const BYTE *s=(const BYTE *)src;
+    if(d<s || d>=s+n){for(u64 i=0;i<n;i++)d[i]=s[i];}
+    else {for(u64 i=n;i>0;i--)d[i-1]=s[i-1];}
+    return dst;
+}
+__attribute__((dllexport)) void *RtlCopyMemory(void *dst,const void *src,SIZE_T n) {
+    if(!dst||!src)return dst;
+    BYTE *d=(BYTE *)dst;const BYTE *s=(const BYTE *)src;
+    for(u64 i=0;i<n;i++)d[i]=s[i];
+    return dst;
+}
+__attribute__((dllexport)) void *RtlZeroMemory(void *dst,SIZE_T n) {
+    if(dst)for(u64 i=0;i<n;i++)((BYTE *)dst)[i]=0;
+    return dst;
+}
+__attribute__((dllexport)) int lstrlenW(LPCWSTR s) {
+    int n=0;if(!s)return 0;while(s[n])n++;return n;
+}
+__attribute__((dllexport)) int lstrcmpW(LPCWSTR a,LPCWSTR b) {
+    if(!a)a=(LPCWSTR)u"";if(!b)b=(LPCWSTR)u"";
+    while(*a && *a==*b){a++;b++;}
+    return (int)*a-(int)*b;
+}
+__attribute__((dllexport)) int lstrcmpiW(LPCWSTR a,LPCWSTR b) {
+    if(!a)a=(LPCWSTR)u"";if(!b)b=(LPCWSTR)u"";
+    while(*a && *b) {
+        WORD x=*a++,y=*b++;
+        if(x>='A'&&x<='Z')x=(WORD)(x+32);
+        if(y>='A'&&y<='Z')y=(WORD)(y+32);
+        if(x!=y)return (int)x-(int)y;
+    }
+    return (int)*a-(int)*b;
+}
+__attribute__((dllexport)) LPWSTR lstrcpyW(LPWSTR d,LPCWSTR s) {
+    if(!d||!s)return d;int i=0;do{d[i]=s[i];}while(s[i++]);return d;
+}
+__attribute__((dllexport)) LPWSTR lstrcpynW(LPWSTR d,LPCWSTR s,int cap) {
+    if(!d||cap<=0)return d;int i=0;
+    if(s)while(s[i]&&i<cap-1){d[i]=s[i];i++;}
+    d[i]=0;return d;
+}
+__attribute__((dllexport)) DWORD CharLowerBuffA(LPSTR s,DWORD n) {
+    if(!s)return 0;for(DWORD i=0;i<n;i++)if(s[i]>='A'&&s[i]<='Z')s[i]=(char)(s[i]+32);return n;
+}
+__attribute__((dllexport)) DWORD CharUpperBuffA(LPSTR s,DWORD n) {
+    if(!s)return 0;for(DWORD i=0;i<n;i++)if(s[i]>='a'&&s[i]<='z')s[i]=(char)(s[i]-32);return n;
+}
+__attribute__((dllexport)) int MultiByteToWideChar(UINT cp,DWORD flags,LPCCH src,int src_len,LPWSTR dst,int dst_cap) {
+    (void)flags;
+    if(!src || src_len==0 || dst_cap<0 || (!dst && dst_cap)) {g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    int input=src_len<0?0:src_len;
+    if(src_len<0){while(src[input])input++;input++;}
+    int out=0;
+    for(int i=0;i<input;) {
+        u32 ch=(BYTE)src[i++];
+        if(cp==CP_UTF8) {
+            BYTE c=(BYTE)src[i-1];
+            if(c<0x80)ch=c;
+            else if((c&0xE0)==0xC0 && i<input){ch=((u32)(c&0x1F)<<6)|((BYTE)src[i++]&0x3F);}
+            else if((c&0xF0)==0xE0 && i+1<input){ch=((u32)(c&0x0F)<<12)|(((BYTE)src[i]&0x3F)<<6)|((BYTE)src[i+1]&0x3F);i+=2;}
+            else if((c&0xF8)==0xF0 && i+2<input){ch=((u32)(c&7)<<18)|(((BYTE)src[i]&0x3F)<<12)|(((BYTE)src[i+1]&0x3F)<<6)|((BYTE)src[i+2]&0x3F);i+=3;}
+            else ch=0xFFFD;
+        } else if(cp!=CP_ACP && cp!=CP_1252) {g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+        if(ch<=0xFFFF) {
+            if(dst && out<dst_cap)dst[out]=(WORD)ch;
+            out++;
+        } else {
+            ch-=0x10000;
+            if(dst&&out<dst_cap)dst[out]=(WORD)(0xD800+(ch>>10));
+            out++;
+            if(dst&&out<dst_cap)dst[out]=(WORD)(0xDC00+(ch&0x3FF));
+            out++;
+        }
+    }
+    if(dst && out>dst_cap){g_last_error=ERROR_INSUFFICIENT_BUFFER;return 0;}
+    g_last_error=ERROR_SUCCESS;return out;
+}
+__attribute__((dllexport)) int WideCharToMultiByte(UINT cp,DWORD flags,LPCWCH src,int src_len,LPSTR dst,int dst_cap,LPCCH defchar,BOOL *used_default) {
+    (void)flags;(void)defchar;
+    if(used_default)*used_default=0;
+    if(!src || src_len==0 || dst_cap<0 || (!dst&&dst_cap)){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    int input=src_len<0?0:src_len;
+    if(src_len<0){while(src[input])input++;input++;}
+    if(cp!=CP_UTF8 && cp!=CP_ACP && cp!=CP_1252){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    int out=0;
+    for(int i=0;i<input;i++) {
+        u32 ch=src[i];
+        if(ch>=0xD800 && ch<=0xDBFF && i+1<input && src[i+1]>=0xDC00 && src[i+1]<=0xDFFF)
+            ch=0x10000+((ch-0xD800)<<10)+(src[++i]-0xDC00);
+        if(cp!=CP_UTF8) {
+            BYTE c=(ch<=255)?(BYTE)ch:(BYTE)'?';
+            if(ch>255 && used_default)*used_default=1;
+            if(dst&&out<dst_cap)dst[out]=(char)c;
+            out++;
+        } else if(ch<0x80) {
+            if(dst&&out<dst_cap)dst[out]=(char)ch;out++;
+        } else if(ch<0x800) {
+            if(dst&&out<dst_cap)dst[out]=(char)(0xC0|(ch>>6));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|(ch&0x3F));out++;
+        } else if(ch<0x10000) {
+            if(dst&&out<dst_cap)dst[out]=(char)(0xE0|(ch>>12));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|((ch>>6)&0x3F));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|(ch&0x3F));out++;
+        } else {
+            if(dst&&out<dst_cap)dst[out]=(char)(0xF0|(ch>>18));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|((ch>>12)&0x3F));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|((ch>>6)&0x3F));out++;
+            if(dst&&out<dst_cap)dst[out]=(char)(0x80|(ch&0x3F));out++;
+        }
+    }
+    if(dst && out>dst_cap){g_last_error=ERROR_INSUFFICIENT_BUFFER;return 0;}
+    g_last_error=ERROR_SUCCESS;return out;
+}

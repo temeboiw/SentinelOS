@@ -76,6 +76,23 @@ static int wm_query(int index, char *name_out, int *min_out, int *pid_out) {
     return 0;
 }
 
+
+/* The frontmost visible top-level window owns keyboard focus. */
+static int wm_keyboard_target(void) {
+    int best = -1;
+    unsigned long long best_z = 0;
+    for (int i = 0; i < WM_MAX; i++) {
+        WmEntry *e = &wm_tab[i];
+        if (!e->alive || e->minimized || e->w <= 0 || e->h <= 0)
+            continue;
+        if (best < 0 || e->z > best_z) {
+            best = i;
+            best_z = e->z;
+        }
+    }
+    return best >= 0 ? wm_tab[best].pid : 0;
+}
+
 /* Pick the highest-z visible window under the pointer.
    Outside windows (for example, the taskbar), use the frontmost
    non-minimized window so desktop controls still receive clicks. */

@@ -320,7 +320,7 @@ lld -flavor link \
   "$B/obj/cmd.o"
 
 echo "  -> gdi32.dll"
-clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/gdi32.c" -o "$B/obj/gdi32.o"
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/gdi32.c" -o "$B/obj/gdi32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41200000 \
   /export:CreateCompatibleDC /export:DeleteDC /export:SelectObject /export:DeleteObject \
   /export:CreateSolidBrush /export:CreatePen /export:CreateFontA /export:MoveToEx /export:LineTo \
@@ -330,7 +330,7 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
   "/out:$SYS32/gdi32.dll" "$B/obj/gdi32.o"
 
 echo "  -> advapi32.dll"
-clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/advapi32.c" -o "$B/obj/advapi32.o"
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/advapi32.c" -o "$B/obj/advapi32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41300000 \
   /export:RegOpenKeyExA /export:RegCreateKeyExA /export:RegQueryValueExA /export:RegSetValueExA \
   /export:RegCloseKey /export:RegDeleteKeyA /export:RegDeleteValueA /export:RegEnumKeyExA \
@@ -339,13 +339,13 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
   "/out:$SYS32/advapi32.dll" "$B/obj/advapi32.o"
 
 echo "  -> shell32.dll"
-clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/shell32.c" -o "$B/obj/shell32.o"
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/shell32.c" -o "$B/obj/shell32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41400000 \
   /export:ShellExecuteA /export:ShellExecuteExA /export:SHGetFolderPathA /export:CommandLineToArgvA \
   "/out:$SYS32/shell32.dll" "$B/obj/shell32.o"
 
 echo "  -> ole32.dll"
-clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/ole32.c" -o "$B/obj/ole32.o"
+clang "${USER_CFLAGS[@]}" -c "$ROOT/user/ole32.c" -o "$B/obj/ole32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41500000 \
   /export:CoInitialize /export:CoInitializeEx /export:CoUninitialize /export:CoCreateInstance \
   /export:CoGetClassObject /export:CoInitializeSecurity \

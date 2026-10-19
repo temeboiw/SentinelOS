@@ -163,9 +163,21 @@ void mainCRTStartup(void) {
         if(pDisp)pDisp(&msg);
         if(msg.message!=0x0201 && msg.message!=0x0203)continue;
         /* MSG layout matches user32: time, pt_x, pt_y (screen coordinates). */
-        int click_y=msg.y;
-        int line=(click_y-(g_win_y+44))/16;
-        int row=line-2;
+        /*
+         * Match the actual client-area row geometry used by user32:
+         * text rows start at window_y + 44, each row is 16px high.
+         * Reject clicks outside the Explorer client content instead of
+         * accidentally mapping title-bar/edge clicks to row zero.
+         */
+        int client_top=g_win_y+44;
+        int client_bottom=g_win_y+40+520-8;
+        if(msg.x < 54 || msg.x >= 40+760-16 ||
+           msg.y < client_top || msg.y >= client_bottom) {
+            g_last_row=-1;
+            continue;
+        }
+        int content_line=(msg.y-client_top)/16;
+        int row=content_line-2;
         if(row<0 || row>=g_count) {g_last_row=-1;continue;}
         u64 now=pTick?pTick():msg.time;
         int dbl=(msg.message==0x0203) ||

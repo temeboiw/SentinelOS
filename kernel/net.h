@@ -7,6 +7,7 @@
 #include "serial.h"
 #include "pmm.h"
 #include "vmm.h"
+#include "../shared/netabi.h"
 
 #define NET_RX_COUNT 32
 #define NET_TX_COUNT 8
@@ -203,4 +204,16 @@ static int net_receive_frame(void *out, uint16_t capacity) {
     net_rx_next = (i + 1) % NET_RX_COUNT;
     net_rx_packets++;
     return len;
+}
+
+static void net_query_config(SENTINELOS_NET_CONFIG *out) {
+    if (!out) return;
+    for (uint64_t i = 0; i < sizeof(*out); i++) ((uint8_t *)out)[i] = 0;
+    out->Version = SENTINELOS_NET_CONFIG_VERSION;
+    if (!net_ready) return;
+    out->Flags |= SENTINELOS_NET_DRIVER_READY;
+    if (net_rd(E1000_REG_STATUS) & 2) out->Flags |= SENTINELOS_NET_LINK_UP;
+    for (int i = 0; i < 6; i++) out->MacAddress[i] = net_mac[i];
+    out->RxPackets = net_rx_packets;
+    out->TxPackets = net_tx_packets;
 }

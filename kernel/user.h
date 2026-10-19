@@ -913,7 +913,7 @@ static Frame *syscall_handler(Frame *f) {
         uint32_t index = (uint32_t)f->rdi;
         char *name = (char *)f->rsi;
 
-        if (!name) {
+        if (!name || !MmValidateUserRange(MmCurrentProcess, (uint64_t)name, 64, 1)) {
             f->rax = 0;
             return f;
         }
@@ -952,27 +952,29 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         KPROCESS *cur = MmCurrentProcess;
-        MmSwitchToProcess(PspSystemProcess);
-
         uint64_t uva = 0x70000000ULL;
-        uint64_t pages =
-            ((uint64_t)user_fb_pitch * user_fb_h + 0xFFFULL) >> 12;
+        uint64_t bytes = (uint64_t)user_fb_pitch * user_fb_h;
+        uint64_t pages = (bytes + 0xFFFULL) >> 12;
+        if (!cur || cur == PspSystemProcess || !pages ||
+            !MmValidateUserRange(cur, f->rdi, 20, 1) ||
+            !MmUserRangeUnmapped(cur, uva, pages << 12)) {
+            f->rax = 0;
+            return f;
+        }
 
+        MmSwitchToProcess(PspSystemProcess);
         for (uint64_t i = 0; i < pages; i++) {
             map_4k_in(cur->Pml4,
                       uva + (i << 12),
                       (user_fb_base + (i << 12)) & ~0xFFFULL,
                       PTE_U | PTE_RW);
         }
-
         MmSwitchToProcess(cur);
 
-        if (f->rdi) {
-            *(uint64_t *)f->rdi = uva;
-            *(uint32_t *)(f->rdi + 8) = user_fb_w;
-            *(uint32_t *)(f->rdi + 12) = user_fb_h;
-            *(uint32_t *)(f->rdi + 16) = user_fb_pitch;
-        }
+        *(uint64_t *)f->rdi = uva;
+        *(uint32_t *)(f->rdi + 8) = user_fb_w;
+        *(uint32_t *)(f->rdi + 12) = user_fb_h;
+        *(uint32_t *)(f->rdi + 16) = user_fb_pitch;
 
         if (!fb_map_logged) {
             DbgPrint("user: FB mapped %ux%u", user_fb_w, user_fb_h);
@@ -1029,7 +1031,7 @@ static Frame *syscall_handler(Frame *f) {
 
         int mepid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
 
-        if (!out) {
+        if (!out || !MmValidateUserRange(MmCurrentProcess, (uint64_t)out, sizeof *out, 1)) {
             f->rax = 0;
             return f;
         }
@@ -1218,6 +1220,15 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
+        if (f->rsi && !MmValidateUserRange(MmCurrentProcess, f->rsi, sizeof tmp, 1)) {
+            f->rax = 0;
+            return f;
+        }
+        if (f->rdx && !MmValidateUserRange(MmCurrentProcess, f->rdx, sizeof minv, 1)) {
+            f->rax = 0;
+            return f;
+        }
+
         if (f->rsi) {
             char *d = (char *)f->rsi;
             int k = 0;
@@ -1239,7 +1250,7 @@ static Frame *syscall_handler(Frame *f) {
         int rect[4];
         int *src = (int *)f->rdi;
 
-        if (!src) {
+        if (!src || !MmValidateUserRange(MmCurrentProcess, (uint64_t)src, sizeof rect, 0)) {
             f->rax = 0;
             return f;
         }

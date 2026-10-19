@@ -52,8 +52,10 @@ static int g_search_len;
 static u32 cur_under[16][16];
 static int cur_on, cur_ox, cur_oy;
 static WINDOW g_wnd;
-static char g_lines[40][80];
+#define CMD_TEXT_LINES 512
+static char g_lines[CMD_TEXT_LINES][80];
 static int g_nlines, g_tb_n, g_tb_pids[8];
+static int g_scroll_top, g_scroll_drag, g_scroll_grab, g_batch_follow;
 
 #define COL_BG       0xFF0D1117
 #define COL_PANEL    0xFF161B22
@@ -401,10 +403,18 @@ static void compose(void) {
 
         fill(x + 4, y + 36, w - 8, h - 42, COL_BG);
 
-        for (int i = 0; i < g_nlines; i++) {
+        int content_x = x + 14;
+        int content_y = y + 44;
+        int visible_rows = (h - 52) / 16;
+        if (visible_rows < 1) visible_rows = 1;
+        int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+        if (g_scroll_top > max_scroll) g_scroll_top = max_scroll;
+        for (int row = 0; row < visible_rows; row++) {
+            int i = g_scroll_top + row;
+            if (i >= g_nlines) break;
             const char *s = g_lines[i];
-            int tx = x + 14;
-            int ty = y + 44 + i * 16;
+            int tx = content_x;
+            int ty = content_y + row * 16;
             u32 ic = 0;
 
             if (s[0] == '[' && s[1] == 'D' && s[2] == 'I')
@@ -425,6 +435,25 @@ static void compose(void) {
             }
 
             draw_text(tx, ty + 2, s, COL_TEXT);
+        }
+
+        /* Native-style vertical scrollbar for terminal history. */
+        {
+            int sx = x + w - 14;
+            int sy = y + 36;
+            int sh = h - 44;
+            int total = g_nlines > visible_rows ? g_nlines : visible_rows;
+            if (sh < 12) sh = 12;
+            fill(sx, sy, 10, sh, COL_TITLE);
+            int thumb_h = total > 0 ? (sh * visible_rows) / total : sh;
+            if (thumb_h < 18) thumb_h = 18;
+            if (thumb_h > sh) thumb_h = sh;
+            int thumb_range = sh - thumb_h;
+            int thumb_y = sy;
+            if (max_scroll > 0)
+                thumb_y += (thumb_range * g_scroll_top) / max_scroll;
+            fill(sx + 2, thumb_y, 6, thumb_h, COL_MUTED);
+            fill(sx + 3, thumb_y + 2, 4, thumb_h > 4 ? thumb_h - 4 : 1, COL_ACCENT);
         }
     }
 
@@ -454,6 +483,34 @@ static void on_click(int x, int y) {
             sy3(SYS_WmMin, 1, 0, 0);
             compose();
             return;
+        }
+
+        /* Scrollbar click/drag takes precedence over title-bar dragging. */
+        {
+            int visible_rows = (g_wnd.h - 52) / 16;
+            if (visible_rows < 1) visible_rows = 1;
+            int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+            int sx = wx + ww - 14, sy = wy + 36, sh = g_wnd.h - 44;
+            int total = g_nlines > visible_rows ? g_nlines : visible_rows;
+            if (sh < 12) sh = 12;
+            int thumb_h = total > 0 ? (sh * visible_rows) / total : sh;
+            if (thumb_h < 18) thumb_h = 18;
+            if (thumb_h > sh) thumb_h = sh;
+            int thumb_range = sh - thumb_h;
+            int thumb_y = sy + (max_scroll > 0 ? (thumb_range * g_scroll_top) / max_scroll : 0);
+            if (max_scroll > 0 && hit(x, y, sx, sy, sx + 12, sy + sh)) {
+                if (y >= thumb_y && y < thumb_y + thumb_h) {
+                    g_scroll_drag = 1;
+                    g_scroll_grab = y - thumb_y;
+                } else {
+                    int target = y < thumb_y ? g_scroll_top - visible_rows : g_scroll_top + visible_rows;
+                    if (target < 0) target = 0;
+                    if (target > max_scroll) target = max_scroll;
+                    g_scroll_top = target;
+                    compose();
+                }
+                return;
+            }
         }
 
         if (hit(x, y, wx, wy, wx + ww - 60, wy + 32)) {
@@ -572,6 +629,9 @@ void *CreateWindowExA(
     g_wnd.title[i] = 0;
     g_wnd.minimized = 0;
     g_nlines = 0;
+    g_scroll_top = 0;
+    g_scroll_drag = 0;
+    g_batch_follow = 1;
     g_menu = 0;
     g_search_focus = 0;
     g_search_len = 0;
@@ -620,16 +680,30 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
         while (str[len]) len++;
     }
 
-    if (y >= 0 && y < 40) {
+    if (y == -1) {
+        g_nlines = 0;
+        g_scroll_top = 0;
+        g_scroll_drag = 0;
+        for (int i = 0; i < CMD_TEXT_LINES; i++) g_lines[i][0] = 0;
+        return 1;
+    }
+    if (y == -2) {
+        int visible_rows = (g_wnd.h - 52) / 16;
+        if (visible_rows < 1) visible_rows = 1;
+        g_batch_follow = g_scroll_top >= (g_nlines > visible_rows ? g_nlines - visible_rows : 0);
+        return 1;
+    }
+    if (y >= 0 && y < CMD_TEXT_LINES) {
         int n = len < 79 ? len : 79;
-
-        for (int i = 0; i < n; i++)
-            g_lines[y][i] = str[i];
-
+        for (int i = 0; i < n; i++) g_lines[y][i] = str[i];
         g_lines[y][n] = 0;
-
-        if (y >= g_nlines)
-            g_nlines = y + 1;    }
+        if (y >= g_nlines) g_nlines = y + 1;
+        if (g_batch_follow) {
+            int visible_rows = (g_wnd.h - 52) / 16;
+            if (visible_rows < 1) visible_rows = 1;
+            g_scroll_top = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+        }
+    }
 
     return 1;
 }
@@ -640,6 +714,11 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
     (void)rc;
     (void)erase;
 
+    if (g_batch_follow) {
+        int visible_rows = (g_wnd.h - 52) / 16;
+        if (visible_rows < 1) visible_rows = 1;
+        g_scroll_top = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+    }
     compose();
     return 1;
 }
@@ -705,6 +784,27 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 msg->pt_x = ev.x;
                 msg->pt_y = ev.y;
 
+                if (g_scroll_drag && (ev.btn & 1)) {
+                    int visible_rows = (g_wnd.h - 52) / 16;
+                    if (visible_rows < 1) visible_rows = 1;
+                    int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+                    int sx = g_wnd.x + g_wnd.w - 14;
+                    int sy = g_wnd.y + 36;
+                    int sh = g_wnd.h - 44;
+                    int total = g_nlines > visible_rows ? g_nlines : visible_rows;
+                    if (sh < 12) sh = 12;
+                    int thumb_h = total > 0 ? (sh * visible_rows) / total : sh;
+                    if (thumb_h < 18) thumb_h = 18;
+                    if (thumb_h > sh) thumb_h = sh;
+                    int thumb_range = sh - thumb_h;
+                    int py = ev.y - g_scroll_grab - sy;
+                    if (py < 0) py = 0;
+                    if (py > thumb_range) py = thumb_range;
+                    g_scroll_top = thumb_range > 0 ? (py * max_scroll) / thumb_range : 0;
+                    compose();
+                    continue;
+                }
+
                 if (g_drag && (ev.btn & 1)) {
                     g_wnd.x = ev.x - g_drag_ox;
                     g_wnd.y = ev.y - g_drag_oy;
@@ -723,6 +823,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
 
                 if (ev.type == 3) {
                     g_drag = 0;
+                    g_scroll_drag = 0;
                     on_click(ev.x, ev.y);
                 } else {
                     present_cursor_only();

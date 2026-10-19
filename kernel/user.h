@@ -1284,9 +1284,9 @@ static Frame *syscall_handler(Frame *f) {
 
         UIn *out = (UIn *)f->rdi;
 
-        static UIn pending_click;
-        static int pending_click_valid;
-        static int pending_click_pid;
+        static UIn pending_mouse;
+        static int pending_mouse_valid;
+        static int pending_mouse_pid;
         static UIn pending_key;
         static int pending_key_valid;
         static int pending_key_pid;
@@ -1311,11 +1311,11 @@ static Frame *syscall_handler(Frame *f) {
             goto no_input_event;
         }
 
-        /* A click assigned to another process remains queued. */
-        if (pending_click_valid) {
-            if (pending_click_pid == mepid) {
-                *out = pending_click;
-                pending_click_valid = 0;
+        /* Mouse motion and clicks belong only to the window under the pointer. */
+        if (pending_mouse_valid) {
+            if (pending_mouse_pid == mepid) {
+                *out = pending_mouse;
+                pending_mouse_valid = 0;
                 f->rax = 1;
                 return f;
             }
@@ -1355,18 +1355,18 @@ static Frame *syscall_handler(Frame *f) {
             vi_moved = 0;
             vi_clicked = 0;
 
-            if (out->type == 3) {
+            {
                 int target = wm_hit_test(out->x, out->y);
                 if (target <= 0) target = mepid;
 
-                pending_click = *out;
-                pending_click_pid = target;
-                pending_click_valid = 1;
+                pending_mouse = *out;
+                pending_mouse_pid = target;
+                pending_mouse_valid = 1;
 
                 if (target != mepid)
                     goto no_input_event;
 
-                pending_click_valid = 0;
+                pending_mouse_valid = 0;
             }
 
             f->rax = 1;
@@ -1410,18 +1410,18 @@ static Frame *syscall_handler(Frame *f) {
                 ly = mouse_y;
                 lb = mouse_btn;
 
-                if (out->type == 3) {
+                {
                     int target = wm_hit_test(out->x, out->y);
                     if (target <= 0) target = mepid;
 
-                    pending_click = *out;
-                    pending_click_pid = target;
-                    pending_click_valid = 1;
+                    pending_mouse = *out;
+                    pending_mouse_pid = target;
+                    pending_mouse_valid = 1;
 
                     if (target != mepid)
                         goto no_input_event;
 
-                    pending_click_valid = 0;
+                    pending_mouse_valid = 0;
                 }
 
                 f->rax = 1;

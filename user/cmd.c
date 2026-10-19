@@ -419,6 +419,8 @@ static void run_command(const char *raw) {
         command_echo(arg);
     } else if (equals(cmd, "cat")) {
         command_cat(arg);
+    } else if (equals(cmd, "ipconfig")) {
+        command_ipconfig();
     } else if (equals(cmd, "exit")) {
         NtExit(0);
     } else {

@@ -92,10 +92,26 @@ __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD 
         g_last_error=ERROR_INVALID_HANDLE; return 0;
     }
     if (!len) { g_last_error=ERROR_SUCCESS; return 1; }
-    i64 n=(i64)sy3(SYS_ReadFile,hv-FILE_HANDLE_TAG,(u64)buf,len);
-    if (n<0) { g_last_error=ERROR_INVALID_HANDLE; return 0; }
-    if (rd) *rd=(DWORD)n;
-    g_last_error=ERROR_SUCCESS; return 1;
+
+    /* The kernel's bounded read syscall transfers at most 4096 bytes per call.
+       Loop so ordinary Win32 callers can request larger buffers. */
+    DWORD total=0;
+    while (total<len) {
+        DWORD chunk=len-total;
+        if (chunk>4096) chunk=4096;
+        i64 n=(i64)sy3(SYS_ReadFile,hv-FILE_HANDLE_TAG,(u64)((unsigned char *)buf+total),chunk);
+        if (n<0) {
+            if (rd) *rd=total;
+            g_last_error=ERROR_INVALID_HANDLE;
+            return total!=0;
+        }
+        if (n==0) break; /* EOF */
+        total+=(DWORD)n;
+        if ((DWORD)n<chunk) break;
+    }
+    if (rd) *rd=total;
+    g_last_error=ERROR_SUCCESS;
+    return 1;
 }
 __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
     u64 hv=(u64)h;

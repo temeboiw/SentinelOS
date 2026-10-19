@@ -161,15 +161,17 @@ void mainCRTStartup(void) {
         if(!pGetMsg(&msg,0,0,0))continue;
         if(pTrans)pTrans(&msg);
         if(pDisp)pDisp(&msg);
-        if(msg.message!=0x0201 && msg.message!=0x0203)continue; /* down / double-click */
-        int line=(msg.y-(g_win_y+44))/16;
+        if(msg.message!=0x0201 && msg.message!=0x0203)continue;
+        /* user32 MSG coordinates are screen coordinates (pt_x/pt_y). */
+        int click_y=msg.y;
+        int line=(click_y-(g_win_y+44))/16;
         int row=line-2;
         if(row<0 || row>=g_count) {g_last_row=-1;continue;}
         u64 now=pTick?pTick():msg.time;
         int dbl=(msg.message==0x0203) ||
-                (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=500);
+                (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=1000);
         g_last_row=row; g_last_click_ms=now;
-        if(!dbl)continue;
+        /* Folder navigation is single-click: don't make it depend on timing. */
         if(g_isdir[row]) {
             char target[128]; make_target_path(row,target,sizeof target);
             int ok=pChdir ? pChdir(target) : 0;
@@ -178,13 +180,14 @@ void mainCRTStartup(void) {
                 copy_text(g_path,target,sizeof g_path);
                 if(is_root())path_init();
                 g_last_row=-1;
+                g_last_click_ms=0;
                 reload(pQuery,pText,pInv);
             } else if(pMsgBox) {
                 pMsgBox(0,target,"Cannot open folder",0);
             }
         } else if(ends_with(g_names[row],".exe")) {
-            launch_exe(g_names[row],pMsgBox);
-        } else if(pMsgBox) {
+            if(dbl) launch_exe(g_names[row],pMsgBox);
+        } else if(dbl && pMsgBox) {
             pMsgBox(0,g_names[row],"File",0);
         }
     }

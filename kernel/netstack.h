@@ -23,13 +23,14 @@ static uint8_t ns_arp_mac[6];
 static uint32_t ns_arp_ip;
 static uint32_t ns_ip_id = 1;
 static uint32_t ns_dhcp_xid = 0x534F5301u;
-static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;
+static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;
+static uint32_t ns_dns_answer;
 static int ns_dns_done;
 static uint32_t ns_ping_target;
 static int ns_ping_seen;
-static void ns_query_config(SENTINELOS_NET_CONFIG *out);\nstatic int ns_dns_done;\nstatic uint32_t ns_ping_target;\nstatic int ns_ping_seen;
 static int ns_dhcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
+static void ns_query_config(SENTINELOS_NET_CONFIG *out);
 
 static uint16_t ns_rd16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
 static uint32_t ns_rd32(const uint8_t *p) { return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3]; }

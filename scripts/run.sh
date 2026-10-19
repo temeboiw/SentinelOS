@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -6,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 B="$ROOT/build"
 DISKIMG="$B/magic-disk.img"
 VARS="$B/vars.fd"
+NET_PCAP="$B/net.pcap"
 
 # Display selection:
 # auto   = VNC in proot/headless environments; window on a desktop
@@ -88,8 +88,11 @@ if [[ ! -f "$VARS" ]]; then
     dd if=/dev/zero of="$VARS" bs=1M count=2 status=none
 fi
 
+mkdir -p "$B"
+
 echo "SentinelOS: starting QEMU"
 echo "Machine: Q35 | RAM: 1024 MiB | Network: QEMU user-mode NAT (E1000)"
+echo "SentinelOS: packet capture -> $NET_PCAP"
 
 exec qemu-system-x86_64 \
     -machine q35 \
@@ -99,6 +102,7 @@ exec qemu-system-x86_64 \
     -drive file="$DISKIMG",format=raw,if=none,id=d0 \
     -device virtio-blk-pci,drive=d0 \
     -netdev user,id=net0,ipv6=off \
+    -object filter-dump,id=netdump,netdev=net0,file="$NET_PCAP" \
     -device e1000,netdev=net0,mac=52:54:00:12:34:56 \
     -audiodev "wav,id=audio0,path=$B/sentinel-audio.wav" \
     -device ich9-intel-hda,id=hda,debug=0 \

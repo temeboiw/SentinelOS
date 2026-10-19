@@ -94,7 +94,25 @@ static void panel(int x, int y, int w, int h, u32 f, u32 b) {
 }
 
 static void draw_char(int x, int y, char ch, u32 col) {
-    const unsigned char *glyph = font8x8_basic[(unsigned char)ch];
+    unsigned char code = (unsigned char)ch;
+    static const unsigned char latin1[6][8] = {
+        /* ä, ö, å, Ä, Ö, Å: 8x8 Latin-1 glyphs */
+        { 0x00,0x24,0x00,0x1C,0x02,0x1E,0x22,0x1D },
+        { 0x00,0x24,0x00,0x1C,0x22,0x22,0x22,0x1C },
+        { 0x08,0x14,0x08,0x1C,0x22,0x3E,0x22,0x22 },
+        { 0x24,0x00,0x1C,0x22,0x22,0x3E,0x22,0x22 },
+        { 0x24,0x00,0x1C,0x22,0x22,0x22,0x22,0x1C },
+        { 0x08,0x14,0x08,0x1C,0x22,0x22,0x3E,0x22 }
+    };
+    const unsigned char *glyph;
+    if (code == 0xE4) glyph = latin1[0];
+    else if (code == 0xF6) glyph = latin1[1];
+    else if (code == 0xE5) glyph = latin1[2];
+    else if (code == 0xC4) glyph = latin1[3];
+    else if (code == 0xD6) glyph = latin1[4];
+    else if (code == 0xC5) glyph = latin1[5];
+    else if (code < 128) glyph = font8x8_basic[code];
+    else glyph = font8x8_basic['?'];
 
     for (int row = 0; row < 8; row++) {
         unsigned char bits = glyph[row];

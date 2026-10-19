@@ -90,8 +90,8 @@ static UserImage user_images[USER_IMAGE_MAX];
 
 /* Disk-loaded PE images are normalized to image layout before entering the
  * existing per-process mapper. Keep their metadata stable for import resolution. */
-#define DISK_PE_MODULE_MAX 8
-#define DISK_PE_FILE_MAX (64ULL * 1024 * 1024)
+#define DISK_PE_MODULE_MAX 32
+/* PE32+ file offsets and SizeOfImage are 32-bit; actual limit is available RAM. */
 static BootModule disk_pe_modules[DISK_PE_MODULE_MAX];
 static uint8_t disk_pe_used[DISK_PE_MODULE_MAX];
 
@@ -621,6 +621,45 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
         const char *dll = (const char *)(phys + name_rva);
         BootModule *dep = PspFindModule(user_bootinfo, dll);
 
+        /* Reuse an already-loaded disk DLL by its import name. */
+        if (!dep) {
+            for (int di = 0; di < DISK_PE_MODULE_MAX; di++) {
+                if (!disk_pe_used[di]) continue;
+                int same = 1;
+                for (int k = 0; dll[k] || disk_pe_modules[di].name[k]; k++) {
+                    char a = dll[k], b = disk_pe_modules[di].name[k];
+                    if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+                    if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+                    if (a != b) { same = 0; break; }
+                }
+                if (same) { dep = &disk_pe_modules[di]; break; }
+            }
+        }
+
+        /* Windows-style DLL search path: primary C:\\magic\\System32, then
+           C:\\Windows\\System32. Keep the imported basename, never trust
+           a path embedded in a PE import table. */
+        if (!dep) {
+            char dllpath[160];
+            int n = 0, k = 0;
+            const char *prefix = "C:\\magic\\System32\\";
+            while (prefix[k] && n < (int)sizeof(dllpath)-1) dllpath[n++] = prefix[k++];
+            k = 0;
+            while (dll[k] && dll[k] != '/' && dll[k] != '\\\\' &&
+                   n < (int)sizeof(dllpath)-1) dllpath[n++] = dll[k++];
+            dllpath[n] = 0;
+            dep = PspLoadDiskPe(dllpath);
+            if (!dep) {
+                n = 0; k = 0;
+                prefix = "C:\\Windows\\System32\\";
+                while (prefix[k] && n < (int)sizeof(dllpath)-1) dllpath[n++] = prefix[k++];
+                k = 0;
+                while (dll[k] && dll[k] != '/' && dll[k] != '\\\\' &&
+                       n < (int)sizeof(dllpath)-1) dllpath[n++] = dll[k++];
+                dllpath[n] = 0;
+                dep = PspLoadDiskPe(dllpath);
+            }
+        }
         if (!dep)
             continue;
 
@@ -674,8 +713,11 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
 static BootModule *PspLoadDiskPe(const char *path) {
     if (!path || !g_ext4_ok) return 0;
     uint64_t file_size = vfs_file_size(path);
-    if (file_size < 0x100 || file_size > DISK_PE_FILE_MAX) {
-        DbgPrint("pe: invalid disk image size for %s (%llu)\\n", path,
+    /* No arbitrary 64 MiB policy cap. PE file offsets are 32-bit and
+       allocations still must fit physical memory and the kernel allocator. */
+    if (file_size < 0x100 || file_size > 0xFFFFFFFFULL ||
+        file_size > UINT64_MAX - (PAGE_SIZE - 1)) {
+        DbgPrint("pe: unsupported disk image size for %s (%llu)\\n", path,
                  (unsigned long long)file_size);
         return 0;
     }
@@ -719,7 +761,7 @@ static BootModule *PspLoadDiskPe(const char *path) {
     uint64_t image_base = *(uint64_t *)(opt + 24);
     uint32_t entry_rva = *(uint32_t *)(opt + 16);
     uint64_t sectoff = optoff + optsz;
-    if (size_image < 0x1000 || size_image > DISK_PE_FILE_MAX ||
+    if (size_image < 0x1000 ||
         size_headers > file_size || size_headers > size_image ||
         entry_rva >= size_image ||
         sectoff + (uint64_t)nsec * 40 > file_size ||
@@ -771,8 +813,12 @@ static BootModule *PspLoadDiskPe(const char *path) {
 
     BootModule *mod = &disk_pe_modules[slot];
     for (int i = 0; i < 32; i++) mod->name[i] = 0;
+    /* Store the DLL basename so import lookup can match "kernel32.dll". */
+    const char *base_name = path;
+    for (int i = 0; path[i]; i++)
+        if (path[i] == '/' || path[i] == '\\\\') base_name = path + i + 1;
     int n = 0;
-    while (path[n] && n < 31) { mod->name[n] = path[n]; n++; }
+    while (base_name[n] && n < 31) { mod->name[n] = base_name[n]; n++; }
     mod->name[n] = 0;
     mod->base = image_base;
     mod->phys = image_pa;

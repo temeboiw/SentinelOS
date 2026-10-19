@@ -216,13 +216,31 @@ static int MmValidateUserRange(KPROCESS *proc, uint64_t va, uint64_t len, int wr
     return 1;
 }
 
+static int MmVirtualPagePresent(KPROCESS *proc, uint64_t va) {
+    if (!proc || va >= 0x0000800000000000ULL) return 0;
+    uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
+    uint64_t e = root[(va >> 39) & 511];
+    if (!(e & PTE_P)) return 0;
+    uint64_t *pdpt = PHYS_TO_VIRT(e & PTE_ADDR);
+    e = pdpt[(va >> 30) & 511];
+    if (!(e & PTE_P)) return 0;
+    if (e & PTE_PS) return 1;
+    uint64_t *pd = PHYS_TO_VIRT(e & PTE_ADDR);
+    e = pd[(va >> 21) & 511];
+    if (!(e & PTE_P)) return 0;
+    if (e & PTE_PS) return 1;
+    uint64_t *pt = PHYS_TO_VIRT(e & PTE_ADDR);
+    return (pt[(va >> 12) & 511] & PTE_P) != 0;
+}
+
 static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
     if (!proc || !len || va < 0x10000ULL ||
         va >= 0x0000800000000000ULL || len > UINT64_MAX - va ||
         va + len > 0x0000800000000000ULL) return 0;
     uint64_t last_page = (va + len - 1) & ~0xFFFULL;
     for (uint64_t page = va & ~0xFFFULL; ; page += 0x1000ULL) {
-        if (MmLookupUserPte(proc, page, 0)) return 0;
+        /* Reject supervisor mappings too (e.g. the APIC MMIO window). */
+        if (MmVirtualPagePresent(proc, page)) return 0;
         if (page >= last_page) break;
         if (page > UINT64_MAX - 0x1000ULL) return 0;
     }

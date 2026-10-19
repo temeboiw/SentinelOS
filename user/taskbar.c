@@ -1,4 +1,6 @@
+
 typedef unsigned int u32;
+
 static const unsigned char FONT[38][7] = {
 {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
 {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},{0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
@@ -20,34 +22,156 @@ static const unsigned char FONT[38][7] = {
 {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
 {0,0,0,0,0,0,0},{0,0,0x04,0,0x04,0,0},
 };
-static int gi(char c){
-  if(c>='A'&&c<='Z')return c-'A'; if(c>='a'&&c<='z')return c-'a';
-  if(c>='0'&&c<='9')return 26+(c-'0'); if(c==':')return 37; return 36;
+
+#define COLOR_BG       0xFF1A1A2E
+#define COLOR_HEADER   0xFF0F3460
+#define COLOR_BAR      0xFF16213E
+#define COLOR_ACCENT   0xFFE94560
+#define COLOR_START    0xFF0F4C75
+#define COLOR_FILES    0xFF533483
+#define COLOR_SEARCH   0xFF0D1117
+#define COLOR_BORDER   0xFF3B4664
+#define COLOR_WHITE    0xFFFFFFFF
+#define COLOR_MUTED    0xFFAAAAAA
+
+static int gi(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a';
+    if (c >= '0' && c <= '9') return 26 + (c - '0');
+    if (c == ':') return 37;
+    return 36;
 }
-static void draw_char(u32 *fb,u32 pitch,u32 x,u32 y,char ch,u32 col){
-  const unsigned char *g=FONT[gi(ch)];
-  for(int r=0;r<7;r++)for(int c=0;c<5;c++)
-    if(g[r]&(0x10>>c)) fb[(y+r)*pitch+(x+c)]=col;
+
+static void draw_char(
+    u32 *fb, u32 pitch, u32 x, u32 y, char ch, u32 col
+) {
+    const unsigned char *g = FONT[gi(ch)];
+
+    for (int r = 0; r < 7; r++) {
+        for (int c = 0; c < 5; c++) {
+            if (g[r] & (0x10 >> c))
+                fb[(y + r) * pitch + (x + c)] = col;
+        }
+    }
 }
-static void draw_text(u32 *fb,u32 pitch,u32 x,u32 y,const char *s,u32 col){
-  for(;*s;s++){draw_char(fb,pitch,x,y,*s,col);x+=6;}
+
+static void draw_text(
+    u32 *fb, u32 pitch, u32 x, u32 y,
+    const char *s, u32 col
+) {
+    for (; *s; s++) {
+        draw_char(fb, pitch, x, y, *s, col);
+        x += 6;
+    }
 }
-static void fill(u32 *fb,u32 pitch,u32 x,u32 y,u32 w,u32 h,u32 col){
-  for(u32 yy=y;yy<y+h;yy++)
-    for(u32 xx=x;xx<x+w;xx++)
-      fb[yy*pitch+xx]=col;
+
+static void fill(
+    u32 *fb, u32 pitch,
+    u32 x, u32 y, u32 w, u32 h, u32 col
+) {
+    for (u32 yy = y; yy < y + h; yy++) {
+        for (u32 xx = x; xx < x + w; xx++) {
+            fb[yy * pitch + xx] = col;
+        }
+    }
 }
-void TaskbarDraw(u32 *fb, u32 width, u32 height, u32 pitch_px) {
-  if(!fb || width < 64 || height < 64 || pitch_px < width) return;
-  fill(fb, pitch_px, 0, 0, width, height, 0xFF1A1A2E);
-  fill(fb, pitch_px, 0, 0, width, 28, 0xFF0F3460);
-  draw_text(fb, pitch_px, 12, 10, "MAGIC OS", 0xFFE94560);
-  u32 bar_h = 56, y0 = height - bar_h;
-  fill(fb, pitch_px, 0, y0, width, bar_h, 0xFF16213E);
-  fill(fb, pitch_px, 0, y0, width, 3, 0xFFE94560);
-  fill(fb, pitch_px, 8, y0 + 10, 88, 36, 0xFF0F4C75);
-  draw_text(fb, pitch_px, 28, y0 + 22, "START", 0xFFFFFFFF);
-  fill(fb, pitch_px, 104, y0 + 10, 88, 36, 0xFF533483);
-  draw_text(fb, pitch_px, 122, y0 + 22, "FILES", 0xFFFFFFFF);
-  draw_text(fb, pitch_px, width - 60, y0 + 22, "C:", 0xFFAAAAAA);
+
+static void draw_search_bar(
+    u32 *fb, u32 pitch, u32 width, u32 y
+) {
+    /*
+     * Search box sits beside START and FILES.
+     * Leave room for the C: indicator at the right.
+     */
+    const u32 x = 204;
+    const u32 right_margin = 76;
+    const u32 minimum_width = 90;
+    const u32 desired_width = 300;
+
+    if (width <= x + right_margin + minimum_width)
+        return;
+
+    u32 available = width - x - right_margin;
+    u32 box_width = desired_width;
+
+    if (box_width > available)
+        box_width = available;
+
+    /* Border and background. */
+    fill(fb, pitch, x, y, box_width, 36, COLOR_BORDER);
+    fill(fb, pitch, x + 1, y + 1,
+         box_width - 2, 34, COLOR_SEARCH);
+
+    /* Simple magnifying-glass icon. */
+    fill(fb, pitch, x + 12, y + 11, 9, 9, COLOR_MUTED);
+    fill(fb, pitch, x + 14, y + 13, 5, 5, COLOR_SEARCH);
+    fill(fb, pitch, x + 20, y + 20, 5, 3, COLOR_MUTED);
+
+    /* Placeholder text. */
+    if (box_width >= 112) {
+        draw_text(
+            fb, pitch,
+            x + 34, y + 15,
+            "SEARCH APPS",
+            COLOR_MUTED
+        );
+    }
+}
+
+void TaskbarDraw(
+    u32 *fb, u32 width, u32 height, u32 pitch_px
+) {
+    if (!fb || width < 64 || height < 64 || pitch_px < width)
+        return;
+
+    /* Desktop background. */
+    fill(fb, pitch_px, 0, 0, width, height, COLOR_BG);
+
+    /* Top header. */
+    fill(fb, pitch_px, 0, 0, width, 28, COLOR_HEADER);
+    draw_text(
+        fb, pitch_px, 12, 10,
+        "MAGIC OS", COLOR_ACCENT
+    );
+
+    /* Bottom taskbar. */
+    u32 bar_h = 56;
+    u32 y0 = height - bar_h;
+
+    fill(fb, pitch_px, 0, y0, width, bar_h, COLOR_BAR);
+    fill(fb, pitch_px, 0, y0, width, 3, COLOR_ACCENT);
+
+    /* Start button. */
+    fill(
+        fb, pitch_px,
+        8, y0 + 10, 88, 36,
+        COLOR_START
+    );
+    draw_text(
+        fb, pitch_px, 28, y0 + 22,
+        "START", COLOR_WHITE
+    );
+
+    /* Files button. */
+    fill(
+        fb, pitch_px,
+        104, y0 + 10, 88, 36,
+        COLOR_FILES
+    );
+    draw_text(
+        fb, pitch_px, 122, y0 + 22,
+        "FILES", COLOR_WHITE
+    );
+
+    /* NEW: Search bar. */
+    draw_search_bar(
+        fb, pitch_px, width, y0 + 10
+    );
+
+    /* Drive indicator. */
+    draw_text(
+        fb, pitch_px,
+        width - 60, y0 + 22,
+        "C:", COLOR_MUTED
+    );
 }

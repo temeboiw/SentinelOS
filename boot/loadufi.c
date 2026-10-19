@@ -281,8 +281,18 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     Module *krnl = load_module("krnl.exe");
 
     {
-        static const char *users[] = { "smss.exe", "explorer.exe", "fileexplorer.exe", "taskbar.dll", "kernel32.dll", "user32.dll", "hello.exe" };
-        int nusers = 7;
+        static const char *users[] = {
+            "smss.exe",
+            "explorer.exe",
+            "fileexplorer.exe",
+            "taskbar.dll",
+            "kernel32.dll",
+            "user32.dll",
+            "hello.exe",
+            "cmd.exe"
+        };
+        int nusers = sizeof(users) / sizeof(users[0]);
+        
         for (int u = 0; u < nusers; u++) {
             const char *path[3] = { "magic", "System32", users[u] };
             VOID *file; UINTN fsize;
@@ -313,9 +323,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
 
     for (int i = 0; i < nmods; i++) {
-        if (!streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1)) continue;
-        resolve_imports(&mods[i]);
+        if (!streq(mods[i].name, "hal.dll", 1) &&
+            !streq(mods[i].name, "krnl.exe", 1)) continue;
+
+        say(L"loadufi: resolving ");
+        say_a(mods[i].name);
+        say(L"\r\n");
+        resolve_imports_hh(i);
     }
+
+    say(L"loadufi: imports resolved\r\n");
+
     if (!krnl->entry) die("krnl.exe has no entry point", "", "");
 
     BootInfo *bi;
@@ -372,14 +390,73 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         resolve_imports_hh(i);
     }
 
-    UINTN msz = 0, key, dsz; UINT32 dver; EFI_MEMORY_DESCRIPTOR *map;
-    bs->GetMemoryMap(&msz, NULL, &key, &dsz, &dver);
-    msz += 8 * dsz;
-    bs->AllocatePool(EfiLoaderData, msz, (VOID **)&map);
-    if (EFI_ERROR(bs->GetMemoryMap(&msz, map, &key, &dsz, &dver))) for (;;) {}
-    bi->mmap = (UINT64)(UINTN)map; bi->mmap_size = msz; bi->desc_size = dsz;
+    
+    say(L"loadufi: preparing memory map\r\n");
 
-    if (EFI_ERROR(bs->ExitBootServices(image, key))) for (;;) {}
+    UINTN msz = 0, key = 0, dsz = 0;
+    UINT32 dver = 0;
+    EFI_MEMORY_DESCRIPTOR *map = NULL;
+
+    EFI_STATUS status = bs->GetMemoryMap(
+        &msz, NULL, &key, &dsz, &dver
+    );
+
+    if (status != EFI_BUFFER_TOO_SMALL || dsz == 0)
+        for (;;) __asm__ volatile("hlt");
+
+    UINTN map_capacity = msz + 16 * dsz;
+
+    status = bs->AllocatePool(
+        EfiLoaderData, map_capacity, (VOID **)&map
+    );
+
+    if (EFI_ERROR(status))
+        for (;;) __asm__ volatile("hlt");
+
+    int attempt = 0;
+
+    while (attempt < 4) {
+        msz = map_capacity;
+
+        status = bs->GetMemoryMap(
+            &msz, map, &key, &dsz, &dver
+        );
+
+        if (status == EFI_BUFFER_TOO_SMALL) {
+            bs->FreePool(map);
+            map = NULL;
+
+            map_capacity = msz + 16 * dsz;
+
+            status = bs->AllocatePool(
+                EfiLoaderData, map_capacity, (VOID **)&map
+            );
+
+            if (EFI_ERROR(status))
+                for (;;) __asm__ volatile("hlt");
+
+            continue;
+        }
+
+        if (EFI_ERROR(status))
+            for (;;) __asm__ volatile("hlt");
+
+        bi->mmap = (UINT64)(UINTN)map;
+        bi->mmap_size = msz;
+        bi->desc_size = dsz;
+
+        /* Do not call console or allocation services between
+           GetMemoryMap and ExitBootServices. */
+        status = bs->ExitBootServices(image, key);
+
+        if (!EFI_ERROR(status))
+            break;
+
+        attempt++;
+    }
+
+    if (EFI_ERROR(status))
+        for (;;) __asm__ volatile("hlt");
 
     __asm__ __volatile__("mov %0, %%cr3" :: "r"((UINT64)(UINTN)hh_pml4) : "memory");
     ((void (*)(BootInfo *))(UINTN)krnl->entry)(bi);

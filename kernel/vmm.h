@@ -327,6 +327,20 @@ static void map_range(uint64_t voff, uint64_t s, uint64_t e, uint64_t attr) {
     for (uint64_t p = s; p < e; p += LARGE) map_2m(voff + p, p, attr);
 }
 
+/* Ensure a device MMIO range is accessible through the shared HHDM.
+ * Use 2 MiB uncached mappings, matching the kernel's existing direct-map policy.
+ * Existing mappings are left untouched (map_2m is first-mapping-wins).
+ */
+static int vmm_map_mmio_hhdm(uint64_t phys, uint64_t size) {
+    if (!size || phys > UINT64_MAX - size) return -1;
+    uint64_t start = phys & ~(LARGE - 1);
+    uint64_t end = (phys + size + LARGE - 1) & ~(LARGE - 1);
+    if (end < start) return -1;
+    for (uint64_t pa = start; pa < end; pa += LARGE)
+        map_2m(HHDM_BASE + pa, pa, PTE_PCD | PTE_PWT);
+    return 0;
+}
+
 // software page-table walk; returns physical address or ~0 if unmapped
 static uint64_t vmm_translate(uint64_t v) {
     /* Page-table pages must be accessed through the shared direct map. */

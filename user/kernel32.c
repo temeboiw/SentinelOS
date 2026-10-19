@@ -1,6 +1,7 @@
 typedef unsigned long long u64;
 typedef long long i64;
 typedef unsigned int DWORD;
+typedef unsigned int u32;
 typedef int BOOL;
 typedef void *HANDLE;
 typedef void *LPVOID;
@@ -371,7 +372,10 @@ typedef struct {
     BYTE *base;
     HeapBlock *first;
 } HeapArena;
+typedef struct { BYTE *base; u64 bytes; u32 used; } HeapLarge;
 static HeapArena g_heap_arenas[HEAP_ARENA_MAX];
+static HeapLarge g_heap_large[32];
+static u32 g_heap_large_count;
 static u32 g_heap_arena_count;
 #define HEAP_BLOCK_MAGIC 0x53484D42u
 

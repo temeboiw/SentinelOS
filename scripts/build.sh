@@ -253,6 +253,14 @@ lld -flavor link \
   /export:ExitWindowsEx \
   /export:CreateThread \
   /export:WaitForSingleObject \
+  /export:GetCurrentProcessId /export:GetCurrentThreadId /export:GetCurrentProcess /export:GetCurrentThread \
+  /export:IsDebuggerPresent /export:QueryPerformanceCounter /export:QueryPerformanceFrequency \
+  /export:GetSystemTimeAsFileTime /export:GetCurrentDirectoryA /export:GetWindowsDirectoryA \
+  /export:GetSystemDirectoryA /export:GetTempPathA /export:GetModuleFileNameA /export:GetModuleHandleA \
+  /export:GetModuleHandleW /export:GetProcessAffinityMask /export:GetFileAttributesA /export:CreateDirectoryA \
+  /export:DeleteFileA /export:MoveFileA /export:GetComputerNameA /export:GetEnvironmentVariableA \
+  /export:SetEnvironmentVariableA /export:FlushFileBuffers /export:GetExitCodeProcess /export:TerminateProcess \
+  /export:ProcessIdToSessionId \
   "/implib:$B/obj/kernel32.lib" \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"

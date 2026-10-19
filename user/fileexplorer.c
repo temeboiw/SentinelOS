@@ -172,12 +172,12 @@ void mainCRTStartup(void) {
          */
         int client_top=g_win_y+44;
         int client_bottom=g_win_y+40+520-8;
-        if(msg.x < 54 || msg.x >= 40+760-16 ||
-           msg.y < client_top || msg.y >= client_bottom) {
+        if(msg.pt_x < 54 || msg.pt_x >= 40+760-16 ||
+           msg.pt_y < client_top || msg.pt_y >= client_bottom) {
             g_last_row=-1;
             continue;
         }
-        int content_line=(msg.y-client_top)/16;
+        int content_line=(msg.pt_y-client_top)/16;
         int row=content_line-2;
         if(row<0 || row>=g_count) {g_last_row=-1;continue;}
         u64 now=pTick?pTick():msg.time;

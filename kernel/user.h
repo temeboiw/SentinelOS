@@ -870,6 +870,8 @@ static Frame *syscall_handler(Frame *f) {
                 uint64_t pa = pmm_alloc_zeroed();
 
                 if (!pa) {
+                    PspForgetUserImages(proc);
+                    MmDeleteAddressSpace(proc);
                     MmSwitchToProcess(caller);
                     f->rax = (uint64_t)-1LL;
                     return f;
@@ -1452,15 +1454,13 @@ static void user_enter(BootInfo *bi) {
             uint64_t pa = pmm_alloc_zeroed();
 
             if (!pa) {
-                DbgPrint("user: stack alloc fail\n");
+                DbgPrint("user: stack alloc fail\\n");
                 MmSwitchToProcess(PspSystemProcess);
-
-                if (ki_current)
-                    ki_current->Process = PspSystemProcess;
-
+                if (ki_current) ki_current->Process = PspSystemProcess;
+                PspForgetUserImages(proc);
+                MmDeleteAddressSpace(proc);
                 return;
             }
-
             map_4k_in(proc->Pml4,
                       stack_lo + off, pa, PTE_U | PTE_RW | PTE_OWNED);
         }

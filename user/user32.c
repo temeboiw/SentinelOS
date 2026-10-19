@@ -737,6 +737,72 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
     return 1;
 }
 
+
+static void redraw_window_contents(void) {
+    if (!g_front || !g_wnd.visible || g_wnd.minimized) return;
+
+    /* Typing should repaint only the terminal client area, not the desktop. */
+    cursor_restore();
+    g_draw = g_front;
+    g_draw_pitch = g_pitch;
+
+    int x = g_wnd.x, y = g_wnd.y, w = g_wnd.w, h = g_wnd.h;
+    fill(x + 4, y + 36, w - 8, h - 42, COL_BG);
+
+    int content_x = x + 14;
+    int content_y = y + 44;
+    int visible_rows = (h - 52) / 16;
+    if (visible_rows < 1) visible_rows = 1;
+    int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+    if (g_scroll_top > max_scroll) g_scroll_top = max_scroll;
+
+    for (int row = 0; row < visible_rows; row++) {
+        int i = g_scroll_top + row;
+        if (i >= g_nlines) break;
+        const char *s = g_lines[i];
+        int tx = content_x;
+        int ty = content_y + row * 16;
+        u32 ic = 0;
+
+        if (s[0] == '[' && s[1] == 'D' && s[2] == 'I')
+            ic = COL_WARN;
+        else if (s[0] == '[' && s[1] == 'E')
+            ic = COL_ACCENT2;
+        else if (s[0] == '[' && s[1] == 'D' && s[2] == 'L')
+            ic = COL_ACCENT;
+        else if (s[0] == '[')
+            ic = COL_MUTED;
+
+        if (ic) {
+            fill(tx, ty, 12, 12, ic);
+            fill(tx + 2, ty + 2, 8, 3, COL_WHITE);
+            tx += 18;
+            while (*s && *s != ' ') s++;
+            if (*s == ' ') s++;
+        }
+        draw_text(tx, ty + 2, s, COL_TEXT);
+    }
+
+    /* Keep the scrollbar in sync with the terminal history. */
+    int sx = x + w - 14, sy = y + 36, sh = h - 44;
+    int total = g_nlines > visible_rows ? g_nlines : visible_rows;
+    if (sh < 12) sh = 12;
+    fill(sx, sy, 10, sh, COL_TITLE);
+    int thumb_h = total > 0 ? (sh * visible_rows) / total : sh;
+    if (thumb_h < 18) thumb_h = 18;
+    if (thumb_h > sh) thumb_h = sh;
+    int thumb_range = sh - thumb_h;
+    int thumb_y = sy;
+    if (max_scroll > 0)
+        thumb_y += (thumb_range * g_scroll_top) / max_scroll;
+    fill(sx + 2, thumb_y, 6, thumb_h, COL_MUTED);
+    fill(sx + 3, thumb_y + 2, 4, thumb_h > 4 ? thumb_h - 4 : 1, COL_ACCENT);
+
+    g_draw = g_front;
+    g_draw_pitch = g_pitch;
+    cursor_save_draw(g_mx, g_my);
+}
+
 __attribute__((dllexport))
 BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
     (void)hwnd;
@@ -748,7 +814,7 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
         if (visible_rows < 1) visible_rows = 1;
         g_scroll_top = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
     }
-    compose();
+    redraw_window_contents();
     return 1;
 }
 

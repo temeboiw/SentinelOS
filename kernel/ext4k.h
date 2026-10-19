@@ -253,6 +253,13 @@ static int vfs_chdir(const char *name) {
 #define VFS_OPEN_MAX 32
 typedef struct { uint32_t ino; uint64_t offset; int used; } VfsOpenFile;
 static VfsOpenFile vfs_open_files[VFS_OPEN_MAX];
+static uint64_t vfs_file_size(const char *path) {
+    uint32_t ino = vfs_resolve_path(path);
+    uint8_t inode[256];
+    if (!ino || e4_inode(&g_ext4, ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000) != 0x8000) return 0;
+    return e4_size(inode);
+}
 static int vfs_open_read(const char *path) {
     uint32_t ino=vfs_resolve_path(path); if(!ino)return -1;
     uint8_t inode[256]; if(e4_inode(&g_ext4,ino,inode)<0 || (E16(inode,0)&0xF000)!=0x8000)return -1;

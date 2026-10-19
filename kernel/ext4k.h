@@ -250,6 +250,17 @@ static int vfs_chdir(const char *name) {
     return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
 }
 
+/* Win32-compatible basic file attributes for the read-only ext4 volume. */
+static uint32_t vfs_get_attributes(const char *path) {
+    uint32_t ino = vfs_resolve_path(path);
+    uint8_t inode[256];
+    if (!ino || e4_inode(&g_ext4, ino, inode) < 0) return 0xFFFFFFFFu;
+    uint16_t mode = E16(inode, 0) & 0xF000;
+    if (mode == 0x4000) return 0x10u; /* FILE_ATTRIBUTE_DIRECTORY */
+    if (mode == 0x8000) return 0x80u; /* FILE_ATTRIBUTE_NORMAL */
+    return 0xFFFFFFFFu;
+}
+
 #define VFS_OPEN_MAX 32
 typedef struct { uint32_t ino; uint64_t offset; int used; } VfsOpenFile;
 static VfsOpenFile vfs_open_files[VFS_OPEN_MAX];

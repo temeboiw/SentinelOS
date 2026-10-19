@@ -36,6 +36,8 @@ static uint16_t ns_tcp_remote_port, ns_tcp_local_port;
 static int ns_tcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 static void ns_query_config(SENTINELOS_NET_CONFIG *out);
+static int ns_poll(void);
+static int ns_send_ipv4(uint32_t dst, uint8_t proto, const uint8_t *payload, uint16_t plen);
 
 static uint16_t ns_rd16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
 static uint32_t ns_rd32(const uint8_t *p) { return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3]; }

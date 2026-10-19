@@ -234,11 +234,15 @@ static int net_e1000_init(void) {
     }
 
     uint64_t mmio = (uint64_t)(bar & ~0xFu);
-    /* The kernel's HHDM maps EFI MMIO/reserved ranges uncached. Avoid remapping
-       a 2 MiB large-page mapping with map_4k(), which would corrupt the page tables. */
+    /* EFI firmware may omit the PCI BAR from its memory map. Explicitly add
+       an uncached 2 MiB HHDM mapping when that physical range is absent. */
     if (vmm_translate(HHDM_BASE + mmio) != mmio) {
-        DbgPrint("net: E1000 MMIO BAR %p is not mapped in HHDM\n", (void *)mmio);
-        return -1;
+        if (vmm_map_mmio_hhdm(mmio, E1000_MMIO_SIZE) ||
+            vmm_translate(HHDM_BASE + mmio) != mmio) {
+            DbgPrint("net: failed to map E1000 MMIO BAR %p in HHDM\n", (void *)mmio);
+            return -1;
+        }
+        DbgPrint("net: mapped E1000 MMIO BAR %p in HHDM (uncached)\n", (void *)mmio);
     }
 
     uint32_t command_status = net_pci_read(bus, slot, function, 0x04);

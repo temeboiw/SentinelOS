@@ -115,9 +115,16 @@ static void launch_app(const char *name, void **hwnd) {
         if (pInv) pInv(*hwnd, 0, 1);
         if (pUpd) pUpd(*hwnd);
     } else {
+        /*
+         * user32 state is private per process, but the framebuffer is shared.
+         * Repainting here erases the newly launched application's window;
+         * continuing to poll input can also paint a stale cursor over it.
+         * Leave the framebuffer to the launched application.
+         */
         g_search_len = 0;
         g_search[0] = 0;
-        redraw_desktop(hwnd);
+        NtWriteConsole("explorer: yielding desktop to launched application\n");
+        for (;;) (void)NtYieldExecution();
     }
 
     g_launched = 0;

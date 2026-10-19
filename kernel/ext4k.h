@@ -97,7 +97,13 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
             uint8_t namelen = buf[o + 6];
             if (E32(buf, o) && namelen == nl) {
                 int i = 0;
-                while (i < nl && buf[o + 8 + i] == (uint8_t)name[i]) i++;
+                while (i < nl) {
+                    uint8_t a = buf[o + 8 + i], b = (uint8_t)name[i];
+                    if (a >= 'A' && a <= 'Z') a = (uint8_t)(a + ('a' - 'A'));
+                    if (b >= 'A' && b <= 'Z') b = (uint8_t)(b + ('a' - 'A'));
+                    if (a != b) break;
+                    i++;
+                }
                 if (i == nl) return E32(buf, o);
             }
             o += rl;
@@ -169,48 +175,84 @@ static uint64_t vfs_find_ext4_lba(void) {
 }
 
 
+/*
+ * Resolve paths on the C: volume. Supports C:\absolute paths, either slash,
+ * relative paths, "." and "..". Directory lookups are case-insensitive.
+ */
+static uint32_t vfs_resolve_path(const char *path) {
+    if (!g_ext4_ok || !path || !path[0]) return 0;
+    uint32_t dir = vfs_cwd_ino, i = 0;
+    if ((path[0] == 'C' || path[0] == 'c') && path[1] == ':') {
+        i = 2;
+        if (path[i] == '\\' || path[i] == '/') dir = 2;
+    } else if (path[0] == '\\' || path[0] == '/') {
+        dir = 2;
+    }
+    while (path[i] == '\\' || path[i] == '/') i++;
+
+    char component[64];
+    while (path[i]) {
+        uint32_t n = 0;
+        while (path[i] && path[i] != '\\' && path[i] != '/') {
+            if (n + 1 >= sizeof component) return 0;
+            component[n++] = path[i++];
+        }
+        component[n] = 0;
+        while (path[i] == '\\' || path[i] == '/') i++;
+        if (!n || (n == 1 && component[0] == '.')) continue;
+        if (n == 2 && component[0] == '.' && component[1] == '.') {
+            uint32_t parent = e4_lookup(&g_ext4, dir, "..");
+            if (parent) dir = parent;
+            continue;
+        }
+        uint32_t child = e4_lookup(&g_ext4, dir, component);
+        if (!child) return 0;
+        uint8_t inode[256];
+        if (e4_inode(&g_ext4, child, inode) < 0) return 0;
+        if (path[i] && ((E16(inode, 0) & 0xF000) != 0x4000)) return 0;
+        dir = child;
+    }
+    return dir;
+}
+
+/* Change CWD to an existing directory using a Windows-style path. */
 static int vfs_chdir(const char *name) {
     if (!name || !name[0]) return -1;
-    /* parent */
-    if (name[0]=='.' && name[1]=='.' && name[2]==0) {
-        if (vfs_cwd_ino == 2) return 0;
-        vfs_cwd_ino = vfs_parent_ino;
-        vfs_parent_ino = 2;
-        return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
+    uint32_t ino = vfs_resolve_path(name);
+    if (!ino) return -1;
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4, ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000) != 0x4000)
+        return -2;
+
+    char normalized[128];
+    int out = 0, i = 0;
+    normalized[out++] = 'C'; normalized[out++] = ':'; normalized[out++] = '\\';
+    if ((name[0] == 'C' || name[0] == 'c') && name[1] == ':') i = 2;
+    while (name[i] == '\\' || name[i] == '/') i++;
+    while (name[i] && out < (int)sizeof(normalized) - 1) {
+        char ch = name[i++];
+        if (ch == '/') ch = '\\';
+        if (ch == '\\') {
+            if (out > 3 && normalized[out - 1] == '\\') continue;
+            if (out > 3 && normalized[out - 1] != '\\') normalized[out++] = '\\';
+        } else {
+            normalized[out++] = ch;
+        }
     }
-    for (int i = 0; i < vfs_nent; i++) {
-        const char *a = vfs_ents[i].name, *b = name;
-        int ok = 1;
-        while (*a || *b) { if (*a++ != *b++) { ok = 0; break; } }
-        if (!ok) continue;
-        if (!vfs_ents[i].is_dir) return -2;
-        vfs_parent_ino = vfs_cwd_ino;
-        vfs_cwd_ino = vfs_ents[i].ino;
-        return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
-    }
-    return -1;
+    while (out > 3 && normalized[out - 1] == '\\') out--;
+    normalized[out] = 0;
+    for (int j = 0; j <= out; j++) vfs_cwd[j] = normalized[j];
+
+    vfs_cwd_ino = ino;
+    vfs_parent_ino = e4_lookup(&g_ext4, ino, "..");
+    if (!vfs_parent_ino) vfs_parent_ino = 2;
+    return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
 }
 
 #define VFS_OPEN_MAX 32
 typedef struct { uint32_t ino; uint64_t offset; int used; } VfsOpenFile;
 static VfsOpenFile vfs_open_files[VFS_OPEN_MAX];
-static uint32_t vfs_resolve_path(const char *path) {
-    if(!g_ext4_ok || !path || !path[0]) return 0;
-    uint32_t dir=2,i=0; char component[64];
-    if((path[0]=='C'||path[0]=='c') && path[1]==':') i=2;
-    while(path[i]=='/' || path[i]=='\\') i++;
-    while(path[i]) {
-        uint32_t n=0;
-        while(path[i] && path[i]!='/' && path[i]!='\\') { if(n+1>=sizeof component)return 0; component[n++]=path[i++]; }
-        component[n]=0; while(path[i]=='/' || path[i]=='\\')i++;
-        if(!n || (n==1 && component[0]=='.'))continue;
-        if(n==2 && component[0]=='.' && component[1]=='.'){dir=2;continue;}
-        uint32_t child=e4_lookup(&g_ext4,dir,component); if(!child)return 0;
-        uint8_t inode[256]; if(e4_inode(&g_ext4,child,inode)<0)return 0;
-        if(path[i] && ((E16(inode,0)&0xF000)!=0x4000))return 0;
-        dir=child;
-    } return dir;
-}
 static int vfs_open_read(const char *path) {
     uint32_t ino=vfs_resolve_path(path); if(!ino)return -1;
     uint8_t inode[256]; if(e4_inode(&g_ext4,ino,inode)<0 || (E16(inode,0)&0xF000)!=0x8000)return -1;

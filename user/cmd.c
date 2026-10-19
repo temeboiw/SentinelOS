@@ -20,6 +20,7 @@ typedef int (*ShowWindow_t)(void *, int);
 typedef int (*GetMessageA_t)(MSG *, void *, u32, u32);
 typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef int (*InvalidateRect_t)(void *, void *, int);
+typedef int (*UpdateWindow_t)(void *);
 
 #define LINE_COUNT 256
 #define LINE_SIZE  80
@@ -43,6 +44,7 @@ typedef struct {
 static void *g_window;
 static TextOutA_t g_text;
 static InvalidateRect_t g_invalidate;
+static UpdateWindow_t g_update;
 static char g_lines[LINE_COUNT][LINE_SIZE];
 static int g_line_count;
 static char g_command[CMD_SIZE];
@@ -659,6 +661,7 @@ void mainCRTStartup(void) {
         (GetMessageA_t)NtGetProcAddress(u32name, "GetMessageA");
     g_text = (TextOutA_t)NtGetProcAddress(u32name, "TextOutA");
     g_invalidate = (InvalidateRect_t)NtGetProcAddress(u32name, "InvalidateRect");
+    g_update = (UpdateWindow_t)NtGetProcAddress(u32name, "UpdateWindow");
 
     if (!create || !show || !getmsg || !g_text) {
         NtWriteConsole("cmd: required user32 APIs missing\n");
@@ -680,6 +683,8 @@ void mainCRTStartup(void) {
     print_line("");
 
     redraw_prompt();
+    if (g_update) g_update(g_window);
+    NtWriteConsole("cmd: window ready; entering input loop\\n");
 
     MSG msg;
     for (;;) {

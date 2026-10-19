@@ -199,21 +199,21 @@ static void cursor_save_draw(int x, int y) {
             /* A proper filled pointer: black outline, white face, grey edge/shadow. */
             static const char *arrow[16] = {
                 "BB..............",
-                "BSB.............",
-                "BWSB............",
-                "BWWBS...........",
-                "BWWWSB..........",
-                "BWWWWSB.........",
-                "BWWWWWSB........",
-                "BWWWWWWBS.......",
-                "BWWWWWWWSB......",
-                "BWWWWBBBBB......",
-                "BWWBS...........",
-                "BWS.BS..........",
-                "BS..BWS.........",
-                "B....BWS........",
-                ".....BWS........",
-                "......BS........"
+                "BWB.............",
+                "BWWB............",
+                "BWWWB...........",
+                "BWWWWB..........",
+                "BWWWWWB.........",
+                "BWWWWWWB........",
+                "BWWWWWWWB.......",
+                "BWWWWWWWWB......",
+                "BWWWWBBBBBB.....",
+                "BWWB..B.........",
+                "BWB.BWB.........",
+                "BB...BWB........",
+                "B.....BWB.......",
+                "......BWB.......",
+                ".......BB......."
             };
             char pix = arrow[j][i];
             if (pix == 'B') g_front[yy * g_pitch + xx] = 0xFF101820;

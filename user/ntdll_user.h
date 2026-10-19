@@ -1,5 +1,6 @@
 #pragma once
 #include "ntabi.h"
+#include "../shared/netabi.h"
 
 /* Legacy SentinelOS syscall numbers are kept stable for existing binaries. */
 typedef unsigned long long u64;
@@ -71,6 +72,11 @@ static inline u64 NtMapFramebuffer(FBInfo *out) {
 }
 static inline u64 NtGetProcAddress(const char *dll, const char *fn) {
     return sy3(SYS_GetProcAddress, (u64)dll, (u64)fn, 0);
+}
+
+/* SentinelOS network interface query (legacy syscall ID 22). */
+static inline int NtQueryNetworkConfig(SENTINELOS_NET_CONFIG *out) {
+    return (int)sy3(22, (u64)out, 0, 0);
 }
 
 /* NT-style APIs implemented by the new, stable syscall range. */

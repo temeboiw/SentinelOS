@@ -322,6 +322,63 @@ static char hex_digit(unsigned v) {
     return (char)(v < 10 ? '0' + v : 'A' + v - 10);
 }
 
+static int parse_ipv4(const char *s, u32 *out) {
+    u32 value = 0; int parts = 0;
+    while (*s) {
+        if (parts >= 4) return -1;
+        unsigned v = 0, digits = 0;
+        while (*s >= '0' && *s <= '9') {
+            v = v * 10u + (unsigned)(*s++ - '0');
+            if (v > 255u) return -1;
+            digits++;
+        }
+        if (!digits) return -1;
+        value = (value << 8) | v; parts++;
+        if (!*s) break;
+        if (*s++ != '.') return -1;
+        if (!*s) return -1;
+    }
+    if (parts != 4) return -1;
+    *out = value; return 0;
+}
+static void format_ipv4(u32 ip, char *out, int cap) {
+    int n = 0;
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        unsigned v = (ip >> shift) & 255u;
+        char digits[3]; int d = 0;
+        if (v >= 100) digits[d++] = (char)('0' + v / 100);
+        if (v >= 10) digits[d++] = (char)('0' + (v / 10) % 10);
+        digits[d++] = (char)('0' + v % 10);
+        for (int i = 0; i < d && n < cap - 1; i++) out[n++] = digits[i];
+        if (shift && n < cap - 1) out[n++] = '.';
+    }
+    out[n] = 0;
+}
+static void command_dhcp(void) {
+    print_line("Requesting IPv4 configuration via DHCP...");
+    if (NtNetworkDhcp() == 0) print_line("DHCP lease acquired.");
+    else print_line("DHCP failed or timed out. Check QEMU networking and link.");
+    command_ipconfig();
+}
+static void command_ping(const char *arg) {
+    u32 ip;
+    if (parse_ipv4(arg, &ip)) { print_line("Usage: ping <IPv4 address>"); return; }
+    char line[LINE_SIZE], address[20];
+    format_ipv4(ip, address, sizeof address);
+    str_copy(line, "Pinging ", sizeof line);
+    int n = str_len(line); str_copy(line+n, address, sizeof line-n); print_line(line);
+    if (NtNetworkPing(ip) == 0) print_line("Reply received (ICMP echo).");
+    else print_line("Request timed out or ARP resolution failed.");
+}
+static void command_nslookup(const char *arg) {
+    u32 ip = 0;
+    if (!arg[0]) { print_line("Usage: nslookup <hostname>"); return; }
+    if (NtNetworkDnsQuery(arg, &ip) != 0) { print_line("DNS query failed or timed out."); return; }
+    char line[LINE_SIZE], address[20];
+    format_ipv4(ip, address, sizeof address);
+    str_copy(line, "Address: ", sizeof line);
+    int n = str_len(line); str_copy(line+n, address, sizeof line-n); print_line(line);
+}
 static void command_ipconfig(void) {
     SENTINELOS_NET_CONFIG cfg;
     for (unsigned i = 0; i < sizeof cfg; i++)
@@ -357,10 +414,10 @@ static void command_ipconfig(void) {
 
     if (!(cfg.Flags & SENTINELOS_NET_IPV4_CONFIGURED)) {
         print_line("   IPv4 Address . . . . : 0.0.0.0");
-        print_line("   DHCP . . . . . . . . : Not implemented yet");
+        print_line("   DHCP . . . . . . . . : Run 'dhcp' to request a lease");
         print_line("   DNS Servers . . . . . : Not configured");
         print_line("");
-        print_line("Network driver is experimental; no internet yet.");
+        print_line("Run dhcp to configure IPv4, then ping or nslookup.");
         return;
     }
 
@@ -386,7 +443,11 @@ static void command_ipconfig(void) {
         line[n] = 0;
         print_line(line);
     }
-    print_line("   DNS Server . . . . . : configured");
+    char dnsline[LINE_SIZE], dnsip[20];
+    format_ipv4(cfg.DnsServer, dnsip, sizeof dnsip);
+    str_copy(dnsline, "   DNS Server . . . . . : ", sizeof dnsline);
+    str_copy(dnsline + str_len(dnsline), dnsip, sizeof dnsline - str_len(dnsline));
+    print_line(dnsline);
     print_line("");
 }
 
@@ -402,7 +463,7 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, exit");
+        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
@@ -421,6 +482,12 @@ static void run_command(const char *raw) {
         command_cat(arg);
     } else if (equals(cmd, "ipconfig")) {
         command_ipconfig();
+    } else if (equals(cmd, "dhcp")) {
+        command_dhcp();
+    } else if (equals(cmd, "ping")) {
+        command_ping(arg);
+    } else if (equals(cmd, "nslookup")) {
+        command_nslookup(arg);
     } else if (equals(cmd, "exit")) {
         NtExit(0);
     } else {

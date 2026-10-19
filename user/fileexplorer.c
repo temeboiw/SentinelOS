@@ -43,7 +43,7 @@ typedef struct {
     int x, y;
 } MSG;
 
-#define MAX_ENT 48
+#define MAX_ENT 27 /* 27 entries + two header lines fit without scrolling */
 static char g_names[MAX_ENT][64];
 static int g_isdir[MAX_ENT];
 static int g_count;
@@ -111,7 +111,7 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         g_count++;
     }
     pText(0,0,0,g_path,-1);
-    pText(0,0,1,"Double-click folders to open; .. goes up; double-click .exe to run",-1);
+    pText(0,0,1,"Click folder to open; .. goes up; double-click .exe to run",-1);
     for(int i=0;i<g_count;i++) {
         char line[80]; int p=0;
         const char *tag=g_isdir[i]?"[DIR] ":ends_with(g_names[i],".exe")?"[EXE] ":ends_with(g_names[i],".dll")?"[DLL] ":"[FIL] ";
@@ -162,7 +162,7 @@ void mainCRTStartup(void) {
         if(pTrans)pTrans(&msg);
         if(pDisp)pDisp(&msg);
         if(msg.message!=0x0201 && msg.message!=0x0203)continue;
-        /* user32 MSG coordinates are screen coordinates (pt_x/pt_y). */
+        /* MSG layout matches user32: time, pt_x, pt_y (screen coordinates). */
         int click_y=msg.y;
         int line=(click_y-(g_win_y+44))/16;
         int row=line-2;

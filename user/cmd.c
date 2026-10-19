@@ -356,10 +356,37 @@ static void format_ipv4(u32 ip, char *out, int cap) {
     }
     out[n] = 0;
 }
+static void format_u64(u64 value, char *out, int cap) {
+    char reverse[20];
+    int n = 0, pos = 0;
+    if (cap < 2) return;
+    do {
+        reverse[n++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value && n < (int)sizeof reverse);
+    while (n > 0 && pos < cap - 1) out[pos++] = reverse[--n];
+    out[pos] = 0;
+}
+
 static void command_dhcp(void) {
     print_line("Requesting IPv4 configuration via DHCP...");
-    if (NtNetworkDhcp() == 0) print_line("DHCP lease acquired.");
-    else print_line("DHCP failed or timed out. Check QEMU networking and link.");
+    int result = NtNetworkDhcp();
+    if (result == 0) print_line("DHCP lease acquired.");
+    else print_line("DHCP failed or timed out.");
+    SENTINELOS_NET_CONFIG cfg;
+    for (unsigned i = 0; i < sizeof cfg; i++)
+        ((unsigned char *)&cfg)[i] = 0;
+    if (NtQueryNetworkConfig(&cfg) == 0) {
+        char number[24], line[LINE_SIZE];
+        format_u64(cfg.TxPackets, number, sizeof number);
+        str_copy(line, "   TX packets . . . . . : ", sizeof line);
+        str_copy(line + str_len(line), number, sizeof line - str_len(line));
+        print_line(line);
+        format_u64(cfg.RxPackets, number, sizeof number);
+        str_copy(line, "   RX packets . . . . . : ", sizeof line);
+        str_copy(line + str_len(line), number, sizeof line - str_len(line));
+        print_line(line);
+    }
     command_ipconfig();
 }
 static void command_ping(const char *arg) {

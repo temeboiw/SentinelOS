@@ -189,10 +189,32 @@ static void cursor_save_draw(int x, int y) {
 
             cur_under[j][i] = g_front[yy * g_pitch + xx];
 
-            if (i == 0 || j == 0 || i == 15 || j == 15)
-                g_front[yy * g_pitch + xx] = COL_WHITE;
-            else if (i < 3 || j < 3)
-                g_front[yy * g_pitch + xx] = COL_ACCENT;
+            /*
+             * Small 16x16 arrow cursor. Coordinates are relative to the
+             * arrow tip (0,0), not a hollow rectangle.
+             * '#' = white edge, 'B' = dark outline, 'W' = white fill.
+             */
+            static const char *arrow[16] = {
+                "B...............",
+                "BB..............",
+                "BWB.............",
+                "BWWB............",
+                "BWWWB...........",
+                "BWWWWB..........",
+                "BWWWWWB.........",
+                "BWWWWWWB........",
+                "BWWWWWWWB.......",
+                "BWWWWBBBB.......",
+                "BWWBWB..........",
+                "BWB.BWB.........",
+                "BB..BWB.........",
+                "B....BWB........",
+                ".....BWB........",
+                "......BB........"
+            };
+            char pix = arrow[j][i];
+            if (pix == 'B') g_front[yy * g_pitch + xx] = 0xFF101820;
+            else if (pix == 'W') g_front[yy * g_pitch + xx] = COL_WHITE;
         }
     }
 

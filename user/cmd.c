@@ -322,6 +322,8 @@ static char hex_digit(unsigned v) {
     return (char)(v < 10 ? '0' + v : 'A' + v - 10);
 }
 
+static void command_ipconfig(void);
+
 static int parse_ipv4(const char *s, u32 *out) {
     u32 value = 0; int parts = 0;
     while (*s) {

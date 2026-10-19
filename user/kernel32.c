@@ -22,6 +22,7 @@ static DWORD g_last_error;
 #define ERROR_NOT_ENOUGH_MEMORY 8u
 #define ERROR_INVALID_PARAMETER 87u
 #define ERROR_NOT_SUPPORTED 50u
+#define ERROR_INSUFFICIENT_BUFFER 122u
 #define GENERIC_READ 0x80000000u
 #define GENERIC_WRITE 0x40000000u
 #define OPEN_EXISTING 3u
@@ -171,7 +172,7 @@ __attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap,LPSTR out) {
     u64 n=sy3(35,(u64)out,cap,0);
     if(!n) { g_last_error=ERROR_INVALID_FUNCTION; return 0; }
     if(out && cap>n) g_last_error=ERROR_SUCCESS;
-    else g_last_error=ERROR_INVALID_PARAMETER;
+    else g_last_error=ERROR_INSUFFICIENT_BUFFER;
     return (DWORD)n;
 }
 __attribute__((dllexport)) DWORD GetWindowsDirectoryA(LPSTR out,DWORD cap) { const char p[]="C:\\Windows"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }

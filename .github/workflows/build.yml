@@ -1,0 +1,34 @@
+name: SentinelOS build
+
+on:
+  push:
+    branches:
+      - feature/networking-stack
+  pull_request:
+    branches:
+      - feature/networking-stack
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-utils fdisk dosfstools mtools e2fsprogs gnu-efi
+
+      - name: Build disk image
+        run: |
+          chmod +x scripts/build.sh
+          EDK2=/usr/include/efi bash scripts/build.sh
+
+      - name: Verify disk image and GPT
+        run: |
+          test -s build/magic-disk.img
+          qemu-img info build/magic-disk.img
+          sfdisk --verify build/magic-disk.img
+          sfdisk --dump build/magic-disk.img

@@ -313,6 +313,8 @@ static char hex_digit(unsigned v) {
 }
 
 static void command_ipconfig(void);
+static void format_ipv4(u32 ip, char *out, int cap);
+static void format_u64(u64 value, char *out, int cap);
 static void command_ps(void){
     SENTINEL_PROCESS_INFORMATION e[8];i64 count=NtQueryProcesses(e,sizeof e);
     if(count<0){print_line("ps: process query failed.");return;}print_line("PID       PPID      STATE   IMAGE");

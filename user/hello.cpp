@@ -62,7 +62,7 @@ typedef struct {
     char image_name[64];
 } ProcessInfo;
 
-void hello_main(void) {
+extern "C" void hello_main(void) {
     raw_write("\nSentinelOS API smoke tests\n");
     raw_write("==========================\n");
 

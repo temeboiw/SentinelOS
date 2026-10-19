@@ -110,3 +110,11 @@ static inline NTSTATUS NtQueryVirtualMemory(
         (u64)process, (u64)base_address, information_class,
         (u64)information, information_length, (u64)return_length);
 }
+
+/* SentinelOS polling network services (syscalls 23-26). */
+static inline int NtNetworkPoll(void) { return (int)sy3(23, 0, 0, 0); }
+static inline int NtNetworkDhcp(void) { return (int)sy3(24, 0, 0, 0); }
+static inline int NtNetworkPing(u32 ipv4_network_order) { return (int)sy3(25, ipv4_network_order, 0, 0); }
+static inline int NtNetworkDnsQuery(const char *hostname, u32 *answer_network_order) {
+    return (int)sy3(26, (u64)hostname, (u64)answer_network_order, 0);
+}

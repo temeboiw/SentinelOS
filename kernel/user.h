@@ -1140,15 +1140,20 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
-        if (g_ext4_ok && index < (uint32_t)vfs_nent) {
-            const char *n = vfs_ents[index].name;
-            int i = 0;
+        if (g_ext4_ok) {
+            /* Never mix boot modules into a mounted filesystem directory listing. */
+            if (index < (uint32_t)vfs_nent) {
+                const char *n = vfs_ents[index].name;
+                int i = 0;
 
-            for (; n[i] && i < 63; i++)
-                name[i] = n[i];
+                for (; n[i] && i < 63; i++)
+                    name[i] = n[i];
 
-            name[i] = 0;
-            f->rax = vfs_ents[index].is_dir ? 2 : 1;
+                name[i] = 0;
+                f->rax = vfs_ents[index].is_dir ? 2 : 1;
+            } else {
+                f->rax = 0;
+            }
         } else if (user_bootinfo &&
                    index < user_bootinfo->module_count &&
                    index < BOOT_MAX_MODULES) {

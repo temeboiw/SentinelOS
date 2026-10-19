@@ -81,10 +81,10 @@ static void make_target_path(int row, char *out, int cap) {
     if(g_names[row][0]=='.' && g_names[row][1]=='.' && !g_names[row][2]) {
         int n=0; while(out[n])n++;
         if(n>3) {
-            if(out[n-1]=='\\')n--;
-            while(n>3 && out[n-1]!='\\')n--;
-            if(n<3)n=3;
-            out[n]=0;
+            int sep=-1;
+            for(int j=3;j<n;j++) if(out[j]=='\\') sep=j;
+            if(sep<=2) out[3]=0;
+            else out[sep]=0;
         }
         return;
     }

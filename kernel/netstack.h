@@ -160,7 +160,13 @@ static void ns_handle_ipv4(const uint8_t *eth,uint16_t len) {
     if((ip[0]>>4)!=4 || ihl!=20 || ihl>len || total<ihl || total>len ||
        ns_checksum(ip,ihl)!=0 || (ns_rd16(ip+6)&0x3FFFu)) return;
     uint32_t dst=ns_rd32(ip+16);
-    if(dst!=ns_cfg.IPv4Address && dst!=0xFFFFFFFFu && !((dst&0xF0000000u)==0xE0000000u)) return;
+    /* DHCP replies may be unicast to yiaddr before this client has installed
+       that address. Do not discard them just because IPv4Address is still 0. */
+    int dhcp_reply = ip[9]==NS_IP_UDP && total>=28 &&
+        ns_rd16(ip+20)==NS_DHCP_SERVER_PORT &&
+        ns_rd16(ip+22)==NS_DHCP_CLIENT_PORT;
+    if(!dhcp_reply && dst!=ns_cfg.IPv4Address && dst!=0xFFFFFFFFu &&
+       !((dst&0xF0000000u)==0xE0000000u)) return;
     if(ip[9]==NS_IP_ICMP) ns_handle_icmp(ip,total);
     else if(ip[9]==NS_IP_UDP) ns_handle_udp(ip,total);
 }

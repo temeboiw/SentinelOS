@@ -239,6 +239,21 @@ static UserImage *PspGetUserImage(KPROCESS *proc, BootModule *mod) {
     return 0;
 }
 
+static void PspForgetUserImages(KPROCESS *proc) {
+    if (!proc) return;
+    for (int i = 0; i < USER_IMAGE_MAX; i++) {
+        if (user_images[i].proc != proc) continue;
+        user_images[i].proc = 0;
+        user_images[i].source = 0;
+        user_images[i].phys = 0;
+        user_images[i].base = 0;
+        user_images[i].entry = 0;
+        user_images[i].size = 0;
+        user_images[i].resolving = 0;
+        user_images[i].resolved = 0;
+    }
+}
+
 /*
  * Apply PE base relocations to the private copy only.
  * The source BootModule bytes are never changed.
@@ -393,7 +408,7 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
      */
     for (uint64_t off = 0; off < rounded; off += USER_IMAGE_PAGE) {
         map_4k_in(proc->Pml4, base + off,
-                  private_pa + off, PTE_U | PTE_RW);
+                  private_pa + off, PTE_U | PTE_RW | PTE_OWNED);
     }
 
     if (pe_is_image(dst, size)) {
@@ -410,8 +425,8 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
 
         if (ep_rva >= size) {
             DbgPrint("user: invalid PE entry point in %s\n", mod->name);
-            for (uint64_t i = 0; i < pages; i++)
-                pmm_free(private_pa + i * USER_IMAGE_PAGE);
+            for (uint64_t off = 0; off < rounded; off += USER_IMAGE_PAGE)
+                MmUnmapAllocatedUserPage(proc, base + off);
 
             image->proc = 0;
             image->source = 0;
@@ -679,6 +694,18 @@ static Frame *syscall_handler(Frame *f) {
                     up_tab[i].parent = -1;
                 }
             }
+
+            /* No thread may resume in an address space after its exit. */
+            MmSwitchToProcess(PspSystemProcess);
+            if (ki_current) ki_current->Process = PspSystemProcess;
+            for (int i = 0; i < UT_MAX; i++) {
+                if (ut_tab[i].proc == dying) {
+                    ut_tab[i].alive = 0;
+                    ut_tab[i].proc = 0;
+                }
+            }
+            PspForgetUserImages(dying);
+            MmDeleteAddressSpace(dying);
         }
 
         int nxt = -1;
@@ -837,7 +864,7 @@ static Frame *syscall_handler(Frame *f) {
                 }
 
                 map_4k_in(proc->Pml4,
-                          stack_lo + off, pa, PTE_U | PTE_RW);
+                          stack_lo + off, pa, PTE_U | PTE_RW | PTE_OWNED);
             }
         }
 
@@ -1423,7 +1450,7 @@ static void user_enter(BootInfo *bi) {
             }
 
             map_4k_in(proc->Pml4,
-                      stack_lo + off, pa, PTE_U | PTE_RW);
+                      stack_lo + off, pa, PTE_U | PTE_RW | PTE_OWNED);
         }
     }
 

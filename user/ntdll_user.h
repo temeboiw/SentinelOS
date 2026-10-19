@@ -1,6 +1,7 @@
 #pragma once
 #include "ntabi.h"
 #include "../shared/netabi.h"
+typedef unsigned short u16;
 
 /* Legacy SentinelOS syscall numbers are kept stable for existing binaries. */
 typedef unsigned long long u64;
@@ -118,6 +119,13 @@ static inline int NtNetworkPing(u32 ipv4_network_order) { return (int)sy3(25, ip
 static inline int NtNetworkDnsQuery(const char *hostname, u32 *answer_network_order) {
     return (int)sy3(26, (u64)hostname, (u64)answer_network_order, 0);
 }
-static inline int NtNetworkTcpConnect(u32 ipv4_network_order, u32 port) {
-    return (int)sy3(27, ipv4_network_order, port, 0);
-}
+static inline int NtNetworkTcpConnect(u32 ip,u32 port){return (int)sy3(27,ip,port,0);}
+static inline u64 NtOpenFile(const char*p){return sy3(5,(u64)p,0,0);}
+static inline i64 NtReadFile(u64 h,void*b,u32 n){return (i64)sy3(6,h,(u64)b,n);}
+static inline int NtCloseFile(u64 h){return (int)sy3(34,h,0,0);}
+static inline u64 NtGetTickCount64(void){return sy3(33,0,0,0);}
+static inline i64 NtQueryProcesses(SENTINEL_PROCESS_INFORMATION*p,u64 n){return (i64)sy3(28,(u64)p,n,0);}
+static inline int NtTerminatePid(u64 p){return (int)sy3(29,p,0,0);}
+static inline int NtUdpBind(u32 p){return (int)sy3(31,p,0,0);}
+static inline int NtUdpSend(u32 ip,u32 sp,u32 dp,const void*b,u32 n){return (int)NtSyscall6(30,ip,sp,dp,(u64)b,n,0);}
+static inline int NtUdpReceive(void*b,u32 n,u32*ip,u16*p){return (int)NtSyscall6(32,(u64)b,n,(u64)ip,(u64)p,0,0);}

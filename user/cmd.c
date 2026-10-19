@@ -188,6 +188,7 @@ static int parent_path(const char *path, char *parent, int cap) {
 }
 
 static void command_mkdir(const char *arg) {
+    (void)arg;print_line("Mounted ext4 volume is read-only; mkdir is disabled until ext4 writes are implemented.");return;
     char path[PATH_SIZE], parent[PATH_SIZE];
     if (normalize_path(arg, path, sizeof path) != 0) {
         print_line("Usage: mkdir <folder>");
@@ -214,6 +215,7 @@ static void command_mkdir(const char *arg) {
 }
 
 static void command_echo(const char *arg) {
+    (void)arg;print_line("Mounted ext4 volume is read-only; persistent writes are not implemented yet.");return;
     char text[DATA_SIZE], path[PATH_SIZE], parent[PATH_SIZE];
     int i = 0, out = 0, gt = -1;
     while (arg[i]) {
@@ -271,36 +273,20 @@ static void command_echo(const char *arg) {
 }
 
 static void command_cat(const char *arg) {
-    char path[PATH_SIZE];
-    if (normalize_path(arg, path, sizeof path) != 0) {
-        print_line("Usage: cat <file>");
-        return;
-    }
-    int fi = file_index(path);
-    if (fi < 0) {
-        print_line("File not found.");
-        return;
-    }
-    if (!g_files[fi].data[0]) {
-        print_line("");
-        return;
-    }
-
-    /* Print contents as lines, keeping the terminal output bounded. */
-    const char *s = g_files[fi].data;
-    char line[LINE_SIZE];
-    while (*s) {
-        int n = 0;
-        while (*s && *s != '\n' && n < LINE_SIZE - 1)
-            line[n++] = *s++;
-        line[n] = 0;
-        print_line(line);
-        if (*s == '\n') s++;
-    }
+    char path[PATH_SIZE],buffer[128],full[PATH_SIZE+4];
+    if(normalize_path(arg,path,sizeof path)!=0){print_line("Usage: cat <file>");return;}
+    str_copy(full,"C:\\",sizeof full);str_copy(full+str_len(full),path,sizeof full-str_len(full));
+    u64 h=NtOpenFile(full);if((i64)h<0||!h){print_line("File not found on mounted disk.");return;}
+    for(;;){i64 got=NtReadFile(h,buffer,sizeof(buffer)-1);if(got<=0)break;buffer[got]=0;char line[LINE_SIZE];int n=0;
+        for(int i=0;i<got;i++){if(buffer[i]=='\n'||n==LINE_SIZE-1){line[n]=0;print_line(line);n=0;}else if(buffer[i]!='\r')line[n++]=buffer[i];}
+        if(n){line[n]=0;print_line(line);}
+    }NtCloseFile(h);
 }
 
 static void command_dir(void) {
-    print_line("Directory of C:\\");
+    print_line("Directory of mounted C: volume");
+    for(u64 index=0;index<64;index++){char name[64];i64 kind=NtQueryDirectory(index,name);if(!kind)break;char line[LINE_SIZE];str_copy(line,kind==2?"<DIR> ":"       ",sizeof line);str_copy(line+str_len(line),name,sizeof line-str_len(line));print_line(line);}
+    return;
     for (int i = 0; i < DIR_MAX; i++) {
         if (g_dirs[i].used) {
             char line[LINE_SIZE];
@@ -327,7 +313,29 @@ static char hex_digit(unsigned v) {
 }
 
 static void command_ipconfig(void);
-
+static void command_ps(void){
+    SENTINEL_PROCESS_INFORMATION e[8];i64 count=NtQueryProcesses(e,sizeof e);
+    if(count<0){print_line("ps: process query failed.");return;}print_line("PID       PPID      STATE   IMAGE");
+    for(i64 i=0;i<count&&i<8;i++){char line[LINE_SIZE],num[24];int n=0;format_u64(e[i].ProcessId,num,sizeof num);str_copy(line,num,sizeof line);n=str_len(line);
+        while(n<10)line[n++]=' ';line[n]=0;format_u64(e[i].ParentProcessId,num,sizeof num);str_copy(line+n,num,sizeof line-n);n=str_len(line);
+        while(n<20)line[n++]=' ';line[n]=0;str_copy(line+n,e[i].State==1?"NEW    ":"RUNNING",sizeof line-n);n=str_len(line);str_copy(line+n,e[i].ImageName,sizeof line-n);print_line(line);}
+}
+static void command_kill(const char*a){u64 pid=0;int d=0;while(*a>='0'&&*a<='9'){pid=pid*10+(*a++-'0');d++;}while(*a==' ')a++;if(!d||*a||!pid){print_line("Usage: kill <pid>");return;}print_line(NtTerminatePid(pid)==0?"Process terminated.":"Cannot terminate that PID.");}
+static void command_udpsend(const char*a){
+    char t[24];unsigned i=0;while(a[i]&&a[i]!=' '&&i<sizeof t-1){t[i]=a[i];i++;}t[i]=0;while(a[i]==' ')i++;
+    u32 ip=0;if(parse_ipv4(t,&ip)){print_line("Usage: udpsend <IPv4> <port> <text>");return;}
+    unsigned p=0,d=0;while(a[i]>='0'&&a[i]<='9'){p=p*10+(a[i++]-'0');d++;if(p>65535)break;}while(a[i]==' ')i++;
+    if(!d||!p||p>65535||!a[i]){print_line("Usage: udpsend <IPv4> <port> <text>");return;}
+    print_line(NtUdpSend(ip,49154,p,a+i,(u32)str_len(a+i))==0?"UDP datagram sent.":"UDP send failed; run dhcp first.");
+}
+static void command_udplisten(const char*a){
+    unsigned p=0,d=0;while(a[d]>='0'&&a[d]<='9'){p=p*10+(a[d]-'0');d++;if(p>65535)break;}
+    if(!d||a[d]||!p||p>65535){print_line("Usage: udplisten <port>");return;}
+    if(NtUdpBind(p)){print_line("UDP bind failed.");return;}print_line("Waiting for one UDP datagram...");
+    char data[512];u32 ip=0;u16 sport=0;int n=NtUdpReceive(data,sizeof(data)-1,&ip,&sport);if(n<0){print_line("UDP receive timed out.");return;}
+    data[n]=0;char addr[24],line[LINE_SIZE],num[24];format_ipv4(ip,addr,sizeof addr);format_u64(sport,num,sizeof num);
+    str_copy(line,"From ",sizeof line);str_copy(line+str_len(line),addr,sizeof line-str_len(line));str_copy(line+str_len(line),":",sizeof line-str_len(line));str_copy(line+str_len(line),num,sizeof line-str_len(line));print_line(line);print_line(data);
+}
 static int parse_ipv4(const char *s, u32 *out) {
     u32 value = 0; int parts = 0;
     while (*s) {
@@ -592,7 +600,7 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, nettest, tcpconnect, exit");
+        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ps, kill, ipconfig, dhcp, ping, nslookup, nettest, tcpconnect, udpsend, udplisten, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
@@ -610,6 +618,14 @@ static void run_command(const char *raw) {
         command_echo(arg);
     } else if (equals(cmd, "cat")) {
         command_cat(arg);
+    } else if (equals(cmd, "ps")) {
+        command_ps();
+    } else if (equals(cmd, "kill")) {
+        command_kill(arg);
+    } else if (equals(cmd, "udpsend")) {
+        command_udpsend(arg);
+    } else if (equals(cmd, "udplisten")) {
+        command_udplisten(arg);
     } else if (equals(cmd, "ipconfig")) {
         command_ipconfig();
     } else if (equals(cmd, "dhcp")) {

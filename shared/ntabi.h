@@ -64,6 +64,13 @@ typedef struct {
 } NT_PROCESS_BASIC_INFORMATION;
 
 typedef struct {
+    NT_ULONG_PTR ProcessId;
+    NT_ULONG_PTR ParentProcessId;
+    NT_ULONG State;
+    char ImageName[32];
+} SENTINEL_PROCESS_INFORMATION;
+
+typedef struct {
     NT_PVOID BaseAddress;
     NT_PVOID AllocationBase;
     NT_ULONG AllocationProtect;

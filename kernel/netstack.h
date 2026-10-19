@@ -34,6 +34,11 @@ static int ns_dhcp_state;
 static uint32_t ns_tcp_remote_ip, ns_tcp_local_seq, ns_tcp_remote_seq;
 static uint16_t ns_tcp_remote_port, ns_tcp_local_port;
 static int ns_tcp_state;
+#define NS_UDP_RX_MAX 512u
+static uint16_t ns_udp_listen_port,ns_udp_rx_len,ns_udp_rx_src_port;
+static uint32_t ns_udp_rx_src_ip;
+static int ns_udp_rx_ready;
+static uint8_t ns_udp_rx_data[NS_UDP_RX_MAX];
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 static void ns_query_config(SENTINELOS_NET_CONFIG *out);
 static int ns_poll(void);
@@ -101,6 +106,11 @@ static void ns_handle_udp(uint8_t *ip,uint16_t total) {
     if(ulen<8 || ulen>total-20) return;
     uint16_t src=ns_rd16(udp), dst=ns_rd16(udp+2);
     uint8_t *data=udp+8; uint16_t dlen=(uint16_t)(ulen-8);
+    if(ns_udp_listen_port && dst==ns_udp_listen_port && !ns_udp_rx_ready) {
+        uint16_t take=dlen>NS_UDP_RX_MAX?NS_UDP_RX_MAX:dlen;
+        ns_udp_rx_src_ip=ns_rd32(ip+12);ns_udp_rx_src_port=src;ns_udp_rx_len=take;
+        ns_copy(ns_udp_rx_data,data,take);ns_udp_rx_ready=1;
+    }
     if(dst==NS_DHCP_CLIENT_PORT && src==NS_DHCP_SERVER_PORT &&
        dlen>=240 && ns_rd32(data+4)==ns_dhcp_xid && data[0]==2 &&
        ns_mac_equal(data+28,ns_cfg.MacAddress) &&
@@ -371,6 +381,18 @@ static int ns_dns_query(const char *name,uint32_t *answer) {
     ns_dns_wait_id=0;
     if(!ns_dns_done)return -1;
     *answer=ns_dns_answer; return 0;
+}
+static int ns_udp_bind(uint16_t port){if(!port)return -1;ns_udp_listen_port=port;ns_udp_rx_ready=0;ns_udp_rx_len=0;return 0;}
+static int ns_udp_send_app(uint32_t dst,uint16_t sport,uint16_t dport,const uint8_t *data,uint16_t len){
+    ns_query_config(0);if(!dst||!sport||!dport||!data||len>NS_UDP_RX_MAX||!(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED))return -1;
+    return ns_send_udp(dst,sport,dport,data,len);
+}
+static int ns_udp_recv_app(uint32_t *src_ip,uint16_t *src_port,uint8_t *data,uint16_t cap){
+    if(!ns_udp_listen_port||!data||!cap)return -1;
+    for(volatile uint32_t t=0;t<1000000u&&!ns_udp_rx_ready;t++)ns_poll();
+    if(!ns_udp_rx_ready)return -1;
+    uint16_t n=ns_udp_rx_len<cap?ns_udp_rx_len:cap;ns_copy(data,ns_udp_rx_data,n);
+    if(src_ip)*src_ip=ns_udp_rx_src_ip;if(src_port)*src_port=ns_udp_rx_src_port;ns_udp_rx_ready=0;return (int)n;
 }
 static void ns_query_config(SENTINELOS_NET_CONFIG *out) {
     SENTINELOS_NET_CONFIG hw;

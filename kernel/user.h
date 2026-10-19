@@ -37,6 +37,13 @@
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
 #define SYS_NtYield                  21
+#define SYS_NtQueryProcesses         28
+#define SYS_NtTerminatePid           29
+#define SYS_NtUdpSend                30
+#define SYS_NtUdpBind                31
+#define SYS_NtUdpReceive              32
+#define SYS_NtGetTickCount            33
+#define SYS_NtCloseFile               34
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1116,20 +1123,53 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtOpenFile: {
-        char name[64];
-
-        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
-            f->rax = (uint64_t)-1LL;
-            return f;
-        }
-
-        f->rax = 1;
-        return f;
+        char name[128];if(copy_user_str(f->rdi,name,sizeof name)!=0||!g_ext4_ok){f->rax=(uint64_t)-1LL;return f;}
+        f->rax=(uint64_t)(int64_t)vfs_open_read(name);return f;
     }
-
-    case SYS_NtReadFile:
-        f->rax = 0;
-        return f;
+    case SYS_NtReadFile: {
+        int handle=(int)f->rdi;uint64_t buffer=f->rsi;uint32_t length=(uint32_t)f->rdx;
+        if(!buffer||!length||length>4096||!MmValidateUserRange(MmCurrentProcess,buffer,length,1)){f->rax=(uint64_t)-1LL;return f;}
+        uint8_t bounce[4096];int64_t got=vfs_read_open(handle,bounce,length);
+        if(got>0)for(int64_t i=0;i<got;i++)((uint8_t*)buffer)[i]=bounce[i];f->rax=(uint64_t)got;return f;
+    }
+    case SYS_NtCloseFile:f->rax=(uint64_t)(int64_t)vfs_close_open((int)f->rdi);return f;
+    case SYS_NtQueryProcesses: {
+        uint64_t out=f->rdi,cap=f->rsi;
+        if(!out||cap<sizeof(SENTINEL_PROCESS_INFORMATION)||!MmValidateUserRange(MmCurrentProcess,out,cap>UP_MAX*sizeof(SENTINEL_PROCESS_INFORMATION)?UP_MAX*sizeof(SENTINEL_PROCESS_INFORMATION):cap,1)){f->rax=(uint64_t)-1LL;return f;}
+        uint64_t count=0,max=cap/sizeof(SENTINEL_PROCESS_INFORMATION);if(max>UP_MAX)max=UP_MAX;
+        for(int i=0;i<UP_MAX&&count<max;i++)if(up_tab[i].alive&&up_tab[i].proc){
+            SENTINEL_PROCESS_INFORMATION item;item.ProcessId=up_tab[i].proc->Pid;item.ParentProcessId=0;
+            if(up_tab[i].parent>=0&&up_tab[i].parent<UP_MAX&&up_tab[up_tab[i].parent].alive&&up_tab[up_tab[i].parent].proc)item.ParentProcessId=up_tab[up_tab[i].parent].proc->Pid;
+            item.State=up_tab[i].fresh?1u:2u;int j=0;const char*n=up_tab[i].proc->ImageName;
+            while(j<31&&n&&n[j]){item.ImageName[j]=n[j];j++;}item.ImageName[j]=0;
+            *(SENTINEL_PROCESS_INFORMATION*)(out+count*sizeof item)=item;count++;
+        }f->rax=count;return f;
+    }
+    case SYS_NtTerminatePid: {
+        uint64_t pid=f->rdi;KPROCESS*target=0;int idx=-1;
+        for(int i=0;i<UP_MAX;i++)if(up_tab[i].alive&&up_tab[i].proc&&up_tab[i].proc->Pid==pid){target=up_tab[i].proc;idx=i;break;}
+        if(!target||target==MmCurrentProcess||target==PspSystemProcess){f->rax=(uint64_t)-1LL;return f;}
+        for(int i=0;i<UP_MAX;i++)if(up_tab[i].parent==idx)up_tab[i].parent=-1;
+        up_tab[idx].alive=0;up_tab[idx].proc=0;wm_unregister((int)pid);
+        MmSwitchToProcess(PspSystemProcess);if(ki_current)ki_current->Process=PspSystemProcess;
+        for(int i=0;i<UT_MAX;i++)if(ut_tab[i].proc==target){ut_tab[i].alive=0;ut_tab[i].proc=0;}
+        PspForgetUserImages(target);MmDeleteAddressSpace(target);MmSwitchToProcess(MmCurrentProcess);f->rax=0;return f;
+    }
+    case SYS_NtUdpSend: {
+        char payload[NS_UDP_RX_MAX];uint32_t len=(uint32_t)f->r9;
+        if(!len||len>sizeof payload||!MmValidateUserRange(MmCurrentProcess,f->rcx,len,0)){f->rax=(uint64_t)-1LL;return f;}
+        for(uint32_t i=0;i<len;i++)payload[i]=((const char*)f->rcx)[i];
+        f->rax=(uint64_t)(int64_t)ns_udp_send_app((uint32_t)f->rdi,(uint16_t)f->rsi,(uint16_t)f->rdx,(const uint8_t*)payload,(uint16_t)len);return f;
+    }
+    case SYS_NtUdpBind:f->rax=(uint64_t)(int64_t)ns_udp_bind((uint16_t)f->rdi);return f;
+    case SYS_NtUdpReceive: {
+        uint64_t dp=f->rdi,cap=f->rsi,iptr=f->rdx,pptr=f->rcx;
+        if(!dp||!cap||cap>NS_UDP_RX_MAX||!MmValidateUserRange(MmCurrentProcess,dp,cap,1)||(iptr&&!MmValidateUserRange(MmCurrentProcess,iptr,sizeof(uint32_t),1))||(pptr&&!MmValidateUserRange(MmCurrentProcess,pptr,sizeof(uint16_t),1))){f->rax=(uint64_t)-1LL;return f;}
+        uint8_t data[NS_UDP_RX_MAX];uint32_t ip=0;uint16_t port=0;int n=ns_udp_recv_app(&ip,&port,data,(uint16_t)cap);
+        if(n>=0){for(int i=0;i<n;i++)((uint8_t*)dp)[i]=data[i];if(iptr)*(uint32_t*)iptr=ip;if(pptr)*(uint16_t*)pptr=port;}
+        f->rax=(uint64_t)(int64_t)n;return f;
+    }
+    case SYS_NtGetTickCount:f->rax=KeTickCount*10ULL;return f;
 
     case SYS_NtQueryDirectoryFile: {
         uint32_t index = (uint32_t)f->rdi;

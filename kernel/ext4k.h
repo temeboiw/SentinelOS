@@ -191,6 +191,45 @@ static int vfs_chdir(const char *name) {
     return -1;
 }
 
+#define VFS_OPEN_MAX 32
+typedef struct { uint32_t ino; uint64_t offset; int used; } VfsOpenFile;
+static VfsOpenFile vfs_open_files[VFS_OPEN_MAX];
+static uint32_t vfs_resolve_path(const char *path) {
+    if(!g_ext4_ok || !path || !path[0]) return 0;
+    uint32_t dir=2,i=0; char component[64];
+    if((path[0]=='C'||path[0]=='c') && path[1]==':') i=2;
+    while(path[i]=='/' || path[i]=='\\') i++;
+    while(path[i]) {
+        uint32_t n=0;
+        while(path[i] && path[i]!='/' && path[i]!='\\') { if(n+1>=sizeof component)return 0; component[n++]=path[i++]; }
+        component[n]=0; while(path[i]=='/' || path[i]=='\\')i++;
+        if(!n || (n==1 && component[0]=='.'))continue;
+        if(n==2 && component[0]=='.' && component[1]=='.'){dir=2;continue;}
+        uint32_t child=e4_lookup(&g_ext4,dir,component); if(!child)return 0;
+        uint8_t inode[256]; if(e4_inode(&g_ext4,child,inode)<0)return 0;
+        if(path[i] && ((E16(inode,0)&0xF000)!=0x4000))return 0;
+        dir=child;
+    } return dir;
+}
+static int vfs_open_read(const char *path) {
+    uint32_t ino=vfs_resolve_path(path); if(!ino)return -1;
+    uint8_t inode[256]; if(e4_inode(&g_ext4,ino,inode)<0 || (E16(inode,0)&0xF000)!=0x8000)return -1;
+    for(int i=0;i<VFS_OPEN_MAX;i++)if(!vfs_open_files[i].used){vfs_open_files[i].used=1;vfs_open_files[i].ino=ino;vfs_open_files[i].offset=0;return i+1;}
+    return -1;
+}
+static int64_t vfs_read_open(int handle,void *dst,uint32_t length) {
+    if(handle<1 || handle>VFS_OPEN_MAX || !dst || !length || !vfs_open_files[handle-1].used)return -1;
+    VfsOpenFile *f=&vfs_open_files[handle-1];uint8_t inode[256];if(e4_inode(&g_ext4,f->ino,inode)<0)return -1;
+    uint64_t size=e4_size(inode);if(f->offset>=size)return 0;if(length>size-f->offset)length=(uint32_t)(size-f->offset);
+    uint8_t block[4096];uint32_t copied=0;
+    while(copied<length){uint64_t pos=f->offset;uint32_t off=(uint32_t)(pos%g_ext4.blksz),take=g_ext4.blksz-off;if(take>length-copied)take=length-copied;
+        uint64_t physical=e4_map(&g_ext4,inode,(uint32_t)(pos/g_ext4.blksz));
+        if(!physical || e4_read(&g_ext4,physical*g_ext4.blksz,block,g_ext4.blksz)<0)return copied?(int64_t)copied:-1;
+        for(uint32_t j=0;j<take;j++)((uint8_t*)dst)[copied+j]=block[off+j];copied+=take;f->offset+=take;
+    }return copied;
+}
+static int vfs_close_open(int handle){if(handle<1||handle>VFS_OPEN_MAX||!vfs_open_files[handle-1].used)return -1;vfs_open_files[handle-1].used=0;return 0;}
+
 static int vfs_mount_c(void) {
     uint64_t lba = vfs_find_ext4_lba();
     if (e4_mount(&g_ext4, lba) < 0) {

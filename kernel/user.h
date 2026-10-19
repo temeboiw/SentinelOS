@@ -1454,7 +1454,7 @@ static void user_enter(BootInfo *bi) {
             uint64_t pa = pmm_alloc_zeroed();
 
             if (!pa) {
-                DbgPrint("user: stack alloc fail\\n");
+                DbgPrint("user: stack alloc fail\n");
                 MmSwitchToProcess(PspSystemProcess);
                 if (ki_current) ki_current->Process = PspSystemProcess;
                 PspForgetUserImages(proc);

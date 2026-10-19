@@ -468,7 +468,7 @@ rm -f "$B/esp.fat"
 
 FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode"
 
-if ! mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
+if ! mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
   -d "$B/rootfs" \
   -E "offset=$EXT_OFF" \
   "$DISKIMG" "$EXT_BLOCKS" >/dev/null 2>&1
@@ -477,7 +477,7 @@ then
 
   qemu-img create -f raw "$B/ext4.tmp" "$EXT_SZ" >/dev/null
 
-  mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
+  mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
     -d "$B/rootfs" \
     "$B/ext4.tmp" "$EXT_BLOCKS" >/dev/null
 

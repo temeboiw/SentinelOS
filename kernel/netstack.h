@@ -23,7 +23,7 @@ static uint8_t ns_arp_mac[6];
 static uint32_t ns_arp_ip;
 static uint32_t ns_ip_id = 1;
 static uint32_t ns_dhcp_xid = 0x534F5301u;
-static uint16_t ns_dns_id = 0x534Fu;
+static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;\nstatic int ns_dns_done;
 static int ns_dhcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 
@@ -222,7 +222,7 @@ static int ns_dns_query(const char *name,uint32_t *answer) {
     if(!name || !answer || !ns_cfg.DnsServer || !(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED))return -1;
     uint8_t p[512];ns_zero(p,sizeof p);uint16_t qn=0;
     if(ns_dns_name(name,p+12,sizeof(p)-16,&qn))return -1;
-    uint16_t id=++ns_dns_id;ns_wr16(p,id);ns_wr16(p+2,0x0100);ns_wr16(p+4,1);
+    uint16_t id=++ns_dns_id; ns_dns_wait_id=id; ns_dns_done=0; ns_dns_answer=0; ns_wr16(p,id);ns_wr16(p+2,0x0100);ns_wr16(p+4,1);
     ns_wr16(p+12+qn,1);ns_wr16(p+14+qn,1);uint16_t plen=(uint16_t)(16+qn);
     if(ns_send_udp(ns_cfg.DnsServer,49152,NS_DNS_PORT,p,plen))return -1;
     for(volatile uint32_t t=0;t<3000000u;t++) {

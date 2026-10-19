@@ -419,6 +419,39 @@ static void command_ping(const char *arg) {
     if (NtNetworkPing(ip) == 0) print_line("Reply received (ICMP echo).");
     else print_line("Request timed out or ARP resolution failed.");
 }
+static void command_tcpconnect(const char *arg) {
+    char address_text[32];
+    unsigned i=0;
+    while(arg[i] && arg[i]!=' ' && i<sizeof(address_text)-1) {
+        address_text[i]=arg[i]; i++;
+    }
+    address_text[i]=0;
+    while(arg[i]==' ') i++;
+    if(!address_text[0] || !arg[i]) {
+        print_line("Usage: tcpconnect <IPv4 address> <port>");
+        return;
+    }
+    u32 ip=0;
+    if(parse_ipv4(address_text,&ip)) {
+        print_line("tcpconnect: enter a numeric IPv4 address.");
+        return;
+    }
+    unsigned port=0, digits=0;
+    while(arg[i]>='0' && arg[i]<='9') {
+        port=port*10u+(unsigned)(arg[i]-'0');
+        if(port>65535u) break;
+        i++; digits++;
+    }
+    if(!digits || arg[i] || port==0 || port>65535u) {
+        print_line("tcpconnect: port must be 1-65535.");
+        return;
+    }
+    print_line("Starting TCP three-way handshake...");
+    if(NtNetworkTcpConnect(ip,port)==0)
+        print_line("TCP handshake succeeded (SYN/SYN-ACK/ACK).");
+    else
+        print_line("TCP connect failed or timed out.");
+}
 static void command_nslookup(const char *arg) {
     u32 ip = 0;
     if (!arg[0]) { print_line("Usage: nslookup <hostname>"); return; }
@@ -472,7 +505,7 @@ static void command_nettest(void) {
     else
         print_line("[FAIL] ICMP echo to 1.1.1.1 failed (may be filtered).");
 
-    print_line("Self-test complete; TCP/HTTPS is not implemented yet.");
+    print_line("Self-test complete; use tcpconnect <IPv4> <port> to test TCP.");
 }
 
 static void command_ipconfig(void) {
@@ -559,7 +592,7 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, nettest, exit");
+        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, nettest, tcpconnect, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
@@ -587,6 +620,8 @@ static void run_command(const char *raw) {
         command_nslookup(arg);
     } else if (equals(cmd, "nettest")) {
         command_nettest();
+    } else if (equals(cmd, "tcpconnect")) {
+        command_tcpconnect(arg);
     } else if (equals(cmd, "exit")) {
         NtExit(0);
     } else {

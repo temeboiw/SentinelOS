@@ -766,6 +766,9 @@ static BootModule *PspLoadDiskPe(const char *path) {
             image[virtual_rva + j] = file[raw_off + j];
     }
 
+    /* The normalized image owns its own pages now; release the temporary file buffer. */
+    for (uint64_t p = 0; p < file_pages; p++) pmm_free(file_pa + p * PAGE_SIZE);
+
     BootModule *mod = &disk_pe_modules[slot];
     for (int i = 0; i < 32; i++) mod->name[i] = 0;
     int n = 0;

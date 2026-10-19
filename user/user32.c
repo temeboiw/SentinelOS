@@ -498,11 +498,45 @@ static void compose(void) {
     draw_taskbar();
 
     if (g_back) {
-        for (u32 y = 0; y < g_fh; y++) {
-            u32 *dst = g_front + y * g_pitch;
-            u32 *src = g_back + y * g_fw;
-            for (u32 x = 0; x < g_fw; x++)
-                dst[x] = src[x];
+        /*
+         * Each process has a private user32 backbuffer, but all processes
+         * share the physical framebuffer. Copying a private full-screen
+         * frame here lets one app erase every other app's window.
+         *
+         * The shell (its 1x1 invisible window) owns the desktop background.
+         * Normal windows may present only their own window rectangle and
+         * the taskbar strip; never blast their private desktop over peers.
+         */
+        int regions[2][4];
+        int region_count = 0;
+        if (!g_wnd.visible || g_wnd.w <= 2) {
+            regions[region_count][0] = 0;
+            regions[region_count][1] = 0;
+            regions[region_count][2] = (int)g_fw;
+            regions[region_count++][3] = (int)g_fh;
+        } else {
+            regions[region_count][0] = g_wnd.x;
+            regions[region_count][1] = g_wnd.y;
+            regions[region_count][2] = g_wnd.x + g_wnd.w;
+            regions[region_count++][3] = g_wnd.y + g_wnd.h;
+            regions[region_count][0] = 0;
+            regions[region_count][1] = (int)g_fh - 44;
+            regions[region_count][2] = (int)g_fw;
+            regions[region_count++][3] = (int)g_fh;
+        }
+        for (int r = 0; r < region_count; r++) {
+            int x0 = regions[r][0], y0 = regions[r][1];
+            int x1 = regions[r][2], y1 = regions[r][3];
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > (int)g_fw) x1 = (int)g_fw;
+            if (y1 > (int)g_fh) y1 = (int)g_fh;
+            for (int yy = y0; yy < y1; yy++) {
+                u32 *dst = g_front + (u64)yy * g_pitch + x0;
+                u32 *src = g_back + (u64)yy * g_fw + x0;
+                for (int xx = x0; xx < x1; xx++)
+                    dst[xx - x0] = src[xx - x0];
+            }
         }
     }
 

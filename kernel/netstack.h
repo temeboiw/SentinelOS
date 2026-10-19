@@ -233,16 +233,34 @@ static int ns_dhcp_message(uint8_t type,uint32_t requested,uint32_t server) {
 }
 static int ns_dhcp(void) {
     ns_query_config(0);
-    if(!net_ready)return -1;
+    if (!net_ready) {
+        DbgPrint("dhcp: abort; E1000 driver not ready\\n");
+        return -1;
+    }
     ns_cfg.IPv4Address=ns_cfg.SubnetMask=ns_cfg.Gateway=ns_cfg.DnsServer=0;
     ns_cfg.Flags &= ~SENTINELOS_NET_IPV4_CONFIGURED;
-    ns_dhcp_xid+=0x10203041u; ns_dhcp_state=1;
-    if(ns_dhcp_message(1,0,0))return -1;
-    for(volatile uint32_t t=0;t<3000000u && ns_dhcp_state==1;t++)ns_poll();
-    if(ns_dhcp_state!=2)return -1;
+    ns_dhcp_xid+=0x10203041u;
+    ns_dhcp_state=1;
+    int tx = ns_dhcp_message(1,0,0);
+    DbgPrint("dhcp: DISCOVER tx=%d state=%d Tdh=%u Tdt=%u tx_ok=%llu tx_err=%llu\\n",
+        tx, ns_dhcp_state, net_rd(E1000_REG_TDH), net_rd(E1000_REG_TDT),
+        (unsigned long long)net_tx_packets, (unsigned long long)net_tx_errors);
+    if (tx) return -1;
+    for (volatile uint32_t t=0; t<3000000u && ns_dhcp_state==1; t++) ns_poll();
+    DbgPrint("dhcp: after DISCOVER state=%d rx_ok=%llu rx_drop=%llu Rdh=%u Rdt=%u GPRC=%u MPC=%u\\n",
+        ns_dhcp_state, (unsigned long long)net_rx_packets,
+        (unsigned long long)net_rx_dropped, net_rd(E1000_REG_RDH),
+        net_rd(E1000_REG_RDT), net_rd(0x4074), net_rd(0x4010));
+    if (ns_dhcp_state!=2) return -1;
     ns_dhcp_state=3;
-    if(ns_dhcp_message(3,ns_dhcp_offer_ip,ns_dhcp_server))return -1;
-    for(volatile uint32_t t=0;t<3000000u && ns_dhcp_state==3;t++)ns_poll();
+    tx = ns_dhcp_message(3,ns_dhcp_offer_ip,ns_dhcp_server);
+    DbgPrint("dhcp: REQUEST tx=%d offered=%08x server=%08x\\n",
+        tx, ns_dhcp_offer_ip, ns_dhcp_server);
+    if (tx) return -1;
+    for (volatile uint32_t t=0; t<3000000u && ns_dhcp_state==3; t++) ns_poll();
+    DbgPrint("dhcp: final state=%d ip=%08x rx_ok=%llu rx_drop=%llu\\n",
+        ns_dhcp_state, ns_cfg.IPv4Address,
+        (unsigned long long)net_rx_packets, (unsigned long long)net_rx_dropped);
     return ns_dhcp_state==4?0:-1;
 }
 static int ns_ping(uint32_t dst) {

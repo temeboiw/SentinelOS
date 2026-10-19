@@ -85,7 +85,16 @@ typedef struct {
     int resolved;
 } UserImage;
 
+
 static UserImage user_images[USER_IMAGE_MAX];
+
+/* Disk-loaded PE images are normalized to image layout before entering the
+ * existing per-process mapper. Keep their metadata stable for import resolution. */
+#define DISK_PE_MODULE_MAX 8
+#define DISK_PE_FILE_MAX (64ULL * 1024 * 1024)
+static BootModule disk_pe_modules[DISK_PE_MODULE_MAX];
+static uint8_t disk_pe_used[DISK_PE_MODULE_MAX];
+
 
 static uint64_t user_fb_base;
 static uint32_t user_fb_w, user_fb_h, user_fb_pitch;
@@ -658,6 +667,120 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
     image->resolved = 1;
 }
 
+
+/* Read an on-disk AMD64 PE32+ executable, convert raw section offsets to RVAs,
+ * and register it as a stable synthetic module for the existing image/import
+ * mapper. Called with the kernel address space active. */
+static BootModule *PspLoadDiskPe(const char *path) {
+    if (!path || !g_ext4_ok) return 0;
+    uint64_t file_size = vfs_file_size(path);
+    if (file_size < 0x100 || file_size > DISK_PE_FILE_MAX) {
+        DbgPrint("pe: invalid disk image size for %s (%llu)\\n", path,
+                 (unsigned long long)file_size);
+        return 0;
+    }
+
+    int fh = vfs_open_read(path);
+    if (fh < 0) return 0;
+    uint64_t file_pages = (file_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint64_t file_pa = pmm_alloc_n(file_pages);
+    if (!file_pa) { vfs_close_open(fh); return 0; }
+    uint8_t *file = (uint8_t *)(HHDM_BASE + file_pa);
+    for (uint64_t off = 0; off < file_size; ) {
+        uint32_t ask = (uint32_t)((file_size - off) > 4096 ? 4096 : (file_size - off));
+        int64_t got = vfs_read_open(fh, file + off, ask);
+        if (got <= 0) {
+            vfs_close_open(fh);
+            return 0;
+        }
+        off += (uint64_t)got;
+    }
+    vfs_close_open(fh);
+
+    if (file[0] != 'M' || file[1] != 'Z') return 0;
+    int32_t peoff = *(int32_t *)(file + 0x3c);
+    if (peoff < 0 || (uint64_t)peoff + 24 > file_size ||
+        *(uint32_t *)(file + peoff) != 0x00004550) return 0;
+    uint8_t *coff = file + peoff + 4;
+    uint16_t machine = *(uint16_t *)(coff + 0);
+    uint16_t nsec = *(uint16_t *)(coff + 2);
+    uint16_t optsz = *(uint16_t *)(coff + 16);
+    uint64_t optoff = (uint64_t)peoff + 24;
+    if (machine != 0x8664 || !nsec || nsec > 96 ||
+        optsz < 112 + 16 * 8 || optoff + optsz > file_size ||
+        *(uint16_t *)(file + optoff) != 0x20b) {
+        DbgPrint("pe: unsupported PE format for %s\\n", path);
+        return 0;
+    }
+
+    uint8_t *opt = file + optoff;
+    uint32_t size_image = *(uint32_t *)(opt + 56);
+    uint32_t size_headers = *(uint32_t *)(opt + 60);
+    uint64_t image_base = *(uint64_t *)(opt + 24);
+    uint32_t entry_rva = *(uint32_t *)(opt + 16);
+    uint64_t sectoff = optoff + optsz;
+    if (size_image < 0x1000 || size_image > DISK_PE_FILE_MAX ||
+        size_headers > file_size || size_headers > size_image ||
+        entry_rva >= size_image ||
+        sectoff + (uint64_t)nsec * 40 > file_size ||
+        image_base < 0x10000 || image_base >= 0x0000800000000000ULL ||
+        size_image > 0x0000800000000000ULL - image_base) {
+        DbgPrint("pe: invalid PE layout for %s\\n", path);
+        return 0;
+    }
+
+    /* Find a free stable descriptor before allocating the image-layout buffer. */
+    int slot = -1;
+    for (int i = 0; i < DISK_PE_MODULE_MAX; i++) {
+        if (!disk_pe_used[i]) { slot = i; break; }
+    }
+    if (slot < 0) {
+        DbgPrint("pe: disk module table full\\n");
+        return 0;
+    }
+    uint64_t image_pages = (size_image + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint64_t image_pa = pmm_alloc_n(image_pages);
+    if (!image_pa) {
+        DbgPrint("pe: no memory for %s (%u bytes)\\n", path, size_image);
+        return 0;
+    }
+    uint8_t *image = (uint8_t *)(HHDM_BASE + image_pa);
+    for (uint64_t i = 0; i < image_pages * PAGE_SIZE; i++) image[i] = 0;
+    for (uint32_t i = 0; i < size_headers; i++) image[i] = file[i];
+
+    for (uint16_t s = 0; s < nsec; s++) {
+        uint8_t *sec = file + sectoff + (uint64_t)s * 40;
+        uint32_t virtual_size = *(uint32_t *)(sec + 8);
+        uint32_t virtual_rva = *(uint32_t *)(sec + 12);
+        uint32_t raw_size = *(uint32_t *)(sec + 16);
+        uint32_t raw_off = *(uint32_t *)(sec + 20);
+        uint32_t copy_size = raw_size;
+        if (copy_size > virtual_size && virtual_size) copy_size = virtual_size;
+        if ((uint64_t)raw_off + copy_size > file_size ||
+            (uint64_t)virtual_rva + copy_size > size_image ||
+            (virtual_size && (uint64_t)virtual_rva + virtual_size > size_image)) {
+            DbgPrint("pe: section bounds invalid in %s\\n", path);
+            return 0;
+        }
+        for (uint32_t j = 0; j < copy_size; j++)
+            image[virtual_rva + j] = file[raw_off + j];
+    }
+
+    BootModule *mod = &disk_pe_modules[slot];
+    for (int i = 0; i < 32; i++) mod->name[i] = 0;
+    int n = 0;
+    while (path[n] && n < 31) { mod->name[n] = path[n]; n++; }
+    mod->name[n] = 0;
+    mod->base = image_base;
+    mod->phys = image_pa;
+    mod->size = size_image;
+    mod->entry = image_base + entry_rva;
+    disk_pe_used[slot] = 1;
+    DbgPrint("pe: loaded disk image %s base=%p size=%u\\n", path,
+             (void *)image_base, size_image);
+    return mod;
+}
+
 /* ------------------------------------------------------------ user memory */
 
 static int copy_user_str(uint64_t uaddr, char *out, int max) {
@@ -993,7 +1116,7 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtCreateProcess: {
-        char name[64];
+        char name[128];
 
         if (copy_user_str(f->rdi, name, sizeof name) != 0) {
             f->rax = (uint64_t)-1LL;
@@ -1006,6 +1129,7 @@ static Frame *syscall_handler(Frame *f) {
         MmSwitchToProcess(PspSystemProcess);
 
         BootModule *mod = PspFindModule(user_bootinfo, name);
+        if (!mod) mod = PspLoadDiskPe(name);
 
         if (!mod) {
             MmSwitchToProcess(caller);

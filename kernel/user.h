@@ -641,26 +641,20 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
 
 static int copy_user_str(uint64_t uaddr, char *out, int max) {
     if (!out || max <= 0 ||
-        uaddr < 0x10000 ||
-        uaddr >= 0x0000800000000000ULL) {
-        return -1;
-    }
+        uaddr < 0x10000ULL ||
+        uaddr >= 0x0000800000000000ULL) return -1;
 
     for (int i = 0; i < max - 1; i++) {
         uint64_t at = uaddr + (uint64_t)i;
-
-        if (at < uaddr || at >= 0x0000800000000000ULL)
+        if (at < uaddr || !MmValidateUserRange(MmCurrentProcess, at, 1, 0))
             return -1;
-
         char c = ((const char *)at)[0];
         out[i] = c;
-
-        if (!c)
-            return 0;
+        if (!c) return 0;
     }
 
     out[max - 1] = 0;
-    return 0;
+    return -1; /* no terminator within the supplied bound */
 }
 
 /* ------------------------------------------------------------ syscalls */
@@ -713,10 +707,8 @@ static Frame *syscall_handler(Frame *f) {
         uint64_t uaddr = f->rsi;
         uint64_t len = f->rdx;
 
-        if (uaddr >= 0x10000 &&
-            uaddr + len >= uaddr &&
-            uaddr + len < 0x0000800000000000ULL &&
-            len <= 4096) {
+        if (len <= 4096 &&
+            MmValidateUserRange(MmCurrentProcess, uaddr, len, 0)) {
             for (uint64_t i = 0; i < len; i++) {
                 char c = ((const char *)uaddr)[i];
                 if (!c) break;
@@ -736,35 +728,55 @@ static Frame *syscall_handler(Frame *f) {
         return f;
 
     case SYS_NtAllocateVirtualMemory: {
+        KPROCESS *caller = MmCurrentProcess;
         uint64_t prefer = f->rdi;
+        uint64_t requested = f->rsi;
 
-        if (f->rsi > UINT64_MAX - 0xFFFULL) {
+        if (!caller || caller == PspSystemProcess ||
+            requested > UINT64_MAX - 0xFFFULL) {
             f->rax = 0;
             return f;
         }
 
-        uint64_t size = (f->rsi + 0xFFFULL) & ~0xFFFULL;
-
+        uint64_t size = (requested + 0xFFFULL) & ~0xFFFULL;
         if (!size || size > 16ull * 1024 * 1024) {
             f->rax = 0;
             return f;
         }
 
-        if (!prefer)
-            prefer = 0x50000000ULL;
-
-        for (uint64_t off = 0; off < size; off += USER_IMAGE_PAGE) {
-            uint64_t pa = pmm_alloc_zeroed();
-
-            if (!pa) {
-                f->rax = 0;
-                return f;
-            }
-
-            map_4k_in(MmCurrentProcess->Pml4,
-                      prefer + off, pa, PTE_U | PTE_RW);
+        if (!prefer) prefer = 0x50000000ULL;
+        if ((prefer & 0xFFFULL) || prefer < 0x10000ULL ||
+            prefer >= 0x0000800000000000ULL ||
+            size > 0x0000800000000000ULL - prefer) {
+            f->rax = 0;
+            return f;
         }
 
+        /* Validate and allocate while the system CR3 provides the physical
+           identity map used by the PMM. Never replace an existing mapping. */
+        MmSwitchToProcess(PspSystemProcess);
+        if (!MmUserRangeUnmapped(caller, prefer, size)) {
+            MmSwitchToProcess(caller);
+            f->rax = 0;
+            return f;
+        }
+
+        uint64_t mapped = 0;
+        for (; mapped < size; mapped += USER_IMAGE_PAGE) {
+            if (!MmMapAllocatedUserPage(caller, prefer + mapped)) break;
+        }
+
+        if (mapped != size) {
+            while (mapped) {
+                mapped -= USER_IMAGE_PAGE;
+                MmUnmapAllocatedUserPage(caller, prefer + mapped);
+            }
+            MmSwitchToProcess(caller);
+            f->rax = 0;
+            return f;
+        }
+
+        MmSwitchToProcess(caller);
         f->rax = prefer;
         return f;
     }

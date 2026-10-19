@@ -193,7 +193,8 @@ void mainCRTStartup(void) {
                 (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=500);
         g_last_row=row; g_last_click_ms=now;
         if(g_isdir[row]) {
-            if(!dbl) continue;
+            /* Folder navigation is single-click so it works even when the
+               input backend does not emit a separate double-click message. */
             char target[128]; make_target_path(row,target,sizeof target);
             int ok=pChdir ? pChdir(target) : 0;
             if(!ok)ok=(sy3(SYS_Chdir,(u64)target,0,0)==0);

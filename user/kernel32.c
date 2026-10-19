@@ -343,7 +343,7 @@ __attribute__((dllexport)) DWORD GetCurrentProcessIdCompat(void) {
  * arenas. The kernel currently has no page-release syscall, so freeing a heap
  * block returns it to the heap for reuse rather than unmapping its arena.
  * ------------------------------------------------------------------------- */
-typedef unsigned long SIZE_T;
+typedef u64 SIZE_T;
 typedef unsigned int UINT;
 typedef unsigned short WORD;
 typedef unsigned char BYTE;
@@ -399,6 +399,12 @@ static HeapBlock *k32_block_from_user(const void *p) {
         if ((BYTE *)b >= lo && (BYTE *)b + sizeof(HeapBlock) <= hi &&
             b->magic == HEAP_BLOCK_MAGIC) return b;
     }
+    for (u32 i=0; i<g_heap_large_count; i++) {
+        BYTE *lo=g_heap_large[i].base, *hi=lo+g_heap_large[i].bytes;
+        if (g_heap_large[i].used && (BYTE *)b >= lo &&
+            (BYTE *)b + sizeof(HeapBlock) <= hi && b->magic == HEAP_BLOCK_MAGIC)
+            return b;
+    }
     return 0;
 }
 static void *k32_heap_alloc(u64 bytes, u32 flags) {
@@ -407,11 +413,15 @@ static void *k32_heap_alloc(u64 bytes, u32 flags) {
     if (bytes > HEAP_ARENA_BYTES-sizeof(HeapBlock)) {
         /* Large allocations use their own exact-sized VirtualAlloc region. */
         u64 size=(bytes+sizeof(HeapBlock)+0xFFFu)&~0xFFFULL;
-        if(size>16ull*1024*1024)return 0;
-        static u32 large_slot;
-        u64 base=0x53000000ull+(u64)(large_slot++)*0x01000000ull;
+        if(size>15ull*1024*1024 || g_heap_large_count>=32)return 0;
+        u32 slot=g_heap_large_count;
+        u64 base=0x60000000ull+(u64)slot*0x01000000ull;
         void *mem=(void *)sy3(SYS_Alloc,base,size,0);
         if(!mem || (u64)mem!=base)return 0;
+        g_heap_large[slot].base=(BYTE *)mem;
+        g_heap_large[slot].bytes=size;
+        g_heap_large[slot].used=1;
+        g_heap_large_count++;
         HeapBlock *b=(HeapBlock *)mem;
         b->size=size-sizeof(HeapBlock);b->next=0;b->free=0;b->magic=HEAP_BLOCK_MAGIC;
         BYTE *out=(BYTE *)mem+sizeof(HeapBlock);
@@ -450,6 +460,15 @@ __attribute__((dllexport)) BOOL HeapFree(HANDLE heap,DWORD flags,LPVOID p) {
     if(!p){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
     HeapBlock *b=k32_block_from_user(p);
     if(!b || b->free){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    for(u32 i=0;i<g_heap_large_count;i++) {
+        if(g_heap_large[i].used &&
+           (BYTE *)b==g_heap_large[i].base) {
+            b->free=1;
+            g_heap_large[i].used=0;
+            g_last_error=ERROR_SUCCESS;
+            return 1;
+        }
+    }
     b->free=1;
     for(u32 i=0;i<g_heap_arena_count;i++) {
         for(HeapBlock *q=g_heap_arenas[i].first;q && q->next;q=q->next) {

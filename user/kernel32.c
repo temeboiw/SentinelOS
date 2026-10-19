@@ -7,6 +7,11 @@ typedef void *LPVOID;
 typedef const char *LPCSTR;
 typedef const void *LPCVOID;
 typedef char *LPSTR;
+typedef unsigned short WCHAR;
+typedef WCHAR *LPWSTR;
+typedef const WCHAR *LPCWSTR;
+
+static DWORD g_last_error;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 
@@ -57,8 +62,8 @@ __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD 
 __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
     return sy3(12, (u64)path, 0, 0) == 0;
 }
-__attribute__((dllexport)) DWORD GetLastError(void) { return 0; }
-__attribute__((dllexport)) void SetLastError(DWORD e) { (void)e; }
+__attribute__((dllexport)) DWORD GetLastError(void) { return g_last_error; }
+__attribute__((dllexport)) void SetLastError(DWORD e) { g_last_error=e; }
 __attribute__((dllexport)) u64 GetTickCount64(void) { return sy3(33,0,0,0); }
 __attribute__((dllexport)) void Sleep(DWORD ms) { u64 start=sy3(33,0,0,0); while(sy3(33,0,0,0)-start<ms) __asm__ volatile("pause"); }
 __attribute__((dllexport)) BOOL PeekInput(void *out) {
@@ -113,3 +118,139 @@ __attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE h) { (void)h;return 1; }
 __attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE h,DWORD *code) { (void)h;if(code)*code=259;return 1; }
 __attribute__((dllexport)) BOOL TerminateProcess(HANDLE h,DWORD code) { (void)h;sy3(SYS_Exit,code,0,0);return 1; }
 __attribute__((dllexport)) BOOL ProcessIdToSessionId(DWORD pid,DWORD *sid) { (void)pid;if(sid)*sid=0;return 1; }
+
+
+/* Additional Win32 compatibility exports. These are small, real implementations,
+   not placeholders that claim success for unsupported kernel operations. */
+typedef struct {
+    DWORD cb;
+    LPSTR lpReserved;
+    LPSTR lpDesktop;
+    LPSTR lpTitle;
+    DWORD dwX, dwY, dwXSize, dwYSize;
+    DWORD dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+    unsigned short wShowWindow, cbReserved2;
+    unsigned char *lpReserved2;
+    HANDLE hStdInput, hStdOutput, hStdError;
+} STARTUPINFOA_LOCAL;
+
+typedef struct {
+    HANDLE hProcess;
+    HANDLE hThread;
+    DWORD dwProcessId;
+    DWORD dwThreadId;
+} PROCESS_INFORMATION_LOCAL;
+
+typedef struct {
+    DWORD dwOSVersionInfoSize;
+    DWORD dwMajorVersion;
+    DWORD dwMinorVersion;
+    DWORD dwBuildNumber;
+    DWORD dwPlatformId;
+    char szCSDVersion[128];
+} OSVERSIONINFOA_LOCAL;
+
+typedef OSVERSIONINFOA_LOCAL *LPOSVERSIONINFOA_LOCAL;
+
+__attribute__((dllexport)) DWORD GetTickCount(void) {
+    return (DWORD)sy3(33,0,0,0);
+}
+__attribute__((dllexport)) int lstrlenA(LPCSTR s) {
+    int n=0; if(!s)return 0; while(s[n])n++; return n;
+}
+__attribute__((dllexport)) int lstrcmpA(LPCSTR a,LPCSTR b) {
+    if(!a)a=""; if(!b)b="";
+    while(*a && *a==*b){a++;b++;}
+    return (int)(unsigned char)*a-(int)(unsigned char)*b;
+}
+__attribute__((dllexport)) int lstrcmpiA(LPCSTR a,LPCSTR b) {
+    if(!a)a=""; if(!b)b="";
+    while(*a && *b) {
+        char x=*a++,y=*b++;
+        if(x>='A'&&x<='Z')x=(char)(x+('a'-'A'));
+        if(y>='A'&&y<='Z')y=(char)(y+('a'-'A'));
+        if(x!=y)return (int)(unsigned char)x-(int)(unsigned char)y;
+    }
+    return (int)(unsigned char)*a-(int)(unsigned char)*b;
+}
+__attribute__((dllexport)) LPSTR lstrcpyA(LPSTR dst,LPCSTR src) {
+    if(!dst||!src)return dst;
+    int i=0; do {dst[i]=src[i];} while(src[i++]); return dst;
+}
+__attribute__((dllexport)) LPSTR lstrcpynA(LPSTR dst,LPCSTR src,int cap) {
+    if(!dst||cap<=0)return dst;
+    int i=0;
+    if(src)while(src[i] && i<cap-1){dst[i]=src[i];i++;}
+    dst[i]=0; return dst;
+}
+__attribute__((dllexport)) DWORD GetVersion(void) {
+    /* Version 10.0, build 1; packed in the legacy Win32 GetVersion format. */
+    return 10u | (0u<<8) | (1u<<16);
+}
+__attribute__((dllexport)) BOOL GetVersionExA(LPOSVERSIONINFOA_LOCAL v) {
+    if(!v || v->dwOSVersionInfoSize < sizeof(OSVERSIONINFOA_LOCAL)) {
+        g_last_error=87; /* ERROR_INVALID_PARAMETER */
+        return 0;
+    }
+    v->dwMajorVersion=10;
+    v->dwMinorVersion=0;
+    v->dwBuildNumber=1;
+    v->dwPlatformId=2; /* VER_PLATFORM_WIN32_NT */
+    v->szCSDVersion[0]=0;
+    g_last_error=0;
+    return 1;
+}
+__attribute__((dllexport)) BOOL CreateProcessA(
+    LPCSTR application, LPSTR command_line, void *process_attributes,
+    void *thread_attributes, BOOL inherit_handles, DWORD creation_flags,
+    void *environment, LPCSTR current_directory,
+    STARTUPINFOA_LOCAL *startup, PROCESS_INFORMATION_LOCAL *information)
+{
+    (void)command_line;(void)process_attributes;(void)thread_attributes;
+    (void)inherit_handles;(void)creation_flags;(void)environment;
+    (void)current_directory;(void)startup;
+    const char *image=application;
+    if(!image || !image[0]) {
+        g_last_error=87;
+        return 0;
+    }
+    i64 pid=(i64)sy3(4,(u64)image,0,0);
+    if(pid<=0) {
+        g_last_error=2; /* ERROR_FILE_NOT_FOUND / image could not be loaded */
+        return 0;
+    }
+    if(information) {
+        information->hProcess=(HANDLE)pid;
+        information->hThread=0;
+        information->dwProcessId=(DWORD)pid;
+        information->dwThreadId=0;
+    }
+    g_last_error=0;
+    return 1;
+}
+__attribute__((dllexport)) BOOL CreateProcessW(
+    LPCWSTR application, LPWSTR command_line, void *process_attributes,
+    void *thread_attributes, BOOL inherit_handles, DWORD creation_flags,
+    void *environment, LPCWSTR current_directory,
+    void *startup, PROCESS_INFORMATION_LOCAL *information)
+{
+    (void)command_line;(void)process_attributes;(void)thread_attributes;
+    (void)inherit_handles;(void)creation_flags;(void)environment;
+    (void)current_directory;(void)startup;
+    if(!application) { g_last_error=87; return 0; }
+    char path[128]; int i=0;
+    while(application[i] && i<(int)sizeof(path)-1) {
+        WCHAR ch=application[i];
+        if(ch>127) { g_last_error=1113; return 0; }
+        path[i]=(char)ch; i++;
+    }
+    path[i]=0;
+    return CreateProcessA(path,0,0,0,0,0,0,0,0,information);
+}
+__attribute__((dllexport)) DWORD GetProcessId(HANDLE process) {
+    if(!process || process==(HANDLE)(i64)-1) return (DWORD)sy3(2,0,0,0);
+    return (DWORD)(u64)process;
+}
+__attribute__((dllexport)) DWORD GetCurrentProcessIdCompat(void) {
+    return (DWORD)sy3(2,0,0,0);
+}

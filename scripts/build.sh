@@ -404,7 +404,8 @@ qemu-img create -f raw "$DISKIMG" 5G >/dev/null
 
 # The GPT reserves its final 33 sectors for backup metadata. Compute the
 # second partition from the actual 5 GiB image size instead of overrunning it.
-DISK_SECTORS=$((5 * 1024 * 1024 * 1024 / 512))
+DISK_BYTES=$((5 * 1024 * 1024 * 1024))
+DISK_SECTORS=$((DISK_BYTES / 512))
 ESP_START=2048
 ESP_SECTORS=262144
 EXT_START=$((ESP_START + ESP_SECTORS))
@@ -428,6 +429,18 @@ ESP_OFF=$((ESP_START * 512))
 EXT_OFF=$((EXT_START * 512))
 EXT_SZ=$((EXT_SECTORS * 512))
 EXT_BLOCKS=$((EXT_SZ / 4096))
+# Leave a little room for ext4 metadata; disable the default 5% reserved blocks
+# because this is a fixed-size OS image, not a multi-user server filesystem.
+if (( EXT_BLOCKS < 1024 )); then
+  echo "FATAL: ext4 partition is too small"
+  exit 1
+fi
+ROOTFS_BYTES=$(du -sb "$B/rootfs" | awk '{print $1}')
+if (( ROOTFS_BYTES > EXT_SZ - 64 * 1024 * 1024 )); then
+  echo "FATAL: rootfs contents need ${ROOTFS_BYTES} bytes, but the 5-GiB disk only"
+  echo "       has ${EXT_SZ} bytes for ext4. Remove large files or increase disk size."
+  exit 1
+fi
 
 dd if=/dev/zero \
   of="$B/esp.fat" \
@@ -470,7 +483,7 @@ then
 
   dd if="$B/ext4.tmp" \
     of="$DISKIMG" \
-    bs=512 seek=264192 conv=notrunc status=none
+    bs=512 seek="$EXT_START" conv=notrunc status=none
 
   rm -f "$B/ext4.tmp"
 fi

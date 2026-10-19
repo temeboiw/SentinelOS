@@ -398,7 +398,7 @@ static void vmm_init(const BootInfo *bi) {
     __asm__ volatile("movq %0, %%cr3" :: "r"(root_pa) : "memory");
     /* Keep the root pointer valid after leaving the identity-map-only phase. */
     pml4 = PHYS_TO_VIRT(root_pa);
-    DbgPrint("vmm: running on our own page tables (higher-half)\\n");
+    DbgPrint("vmm: running on our own page tables (higher-half)\n");
     MmInitSystemProcess();
 }
 

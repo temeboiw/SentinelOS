@@ -384,6 +384,16 @@ static void net_query_config(SENTINELOS_NET_CONFIG *out) {
     for (int i = 0; i < 6; i++) out->MacAddress[i] = net_mac[i];
     out->RxPackets = net_rx_packets;
     out->TxPackets = net_tx_packets;
+    out->RxHead = net_rd(E1000_REG_RDH);
+    out->RxTail = net_rd(E1000_REG_RDT);
+    out->RxDescStatus = net_rx_ring ? net_rx_ring[net_rx_next].status : 0;
+    out->RxDescErrors = net_rx_ring ? net_rx_ring[net_rx_next].errors : 0;
+    out->RxControl = net_rd(E1000_REG_RCTL);
+    out->RxGoodCount = net_rd(0x4000); /* GPRC: good packets received */
+    out->RxMissedCount = net_rd(0x4010); /* MPC: missed packets */
+    out->TxHead = net_rd(E1000_REG_TDH);
+    out->TxTail = net_rd(E1000_REG_TDT);
+    out->TxDescStatus = net_tx_ring ? net_tx_ring[(net_tx_next + NET_TX_COUNT - 1) % NET_TX_COUNT].status : 0;
 }
 
 /* Driver statistics for kernel diagnostics; no protocol stack is implied. */

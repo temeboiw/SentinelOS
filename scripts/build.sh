@@ -350,18 +350,31 @@ echo "==> GPT disk image (FAT32 ESP + ext4)"
 rm -f "$DISKIMG"
 qemu-img create -f raw "$DISKIMG" 5G >/dev/null
 
+# The GPT reserves its final 33 sectors for backup metadata. Compute the
+# second partition from the actual 5 GiB image size instead of overrunning it.
+DISK_SECTORS=$((5 * 1024 * 1024 * 1024 / 512))
+ESP_START=2048
+ESP_SECTORS=262144
+EXT_START=$((ESP_START + ESP_SECTORS))
+GPT_RESERVED_END=33
+EXT_SECTORS=$((DISK_SECTORS - GPT_RESERVED_END - EXT_START))
+if (( EXT_SECTORS <= 0 )); then
+  echo "FATAL: disk image is too small for the requested partitions"
+  exit 1
+fi
+
 sfdisk "$DISKIMG" <<SFDISK
 label: gpt
 unit: sectors
 first-lba: 2048
 
-start=2048, size=262144, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
-start=264192, size=10221568, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
+start=$ESP_START, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
+start=$EXT_START, size=$EXT_SECTORS, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
 SFDISK
 
-ESP_OFF=$((2048 * 512))
-EXT_OFF=$((264192 * 512))
-EXT_SZ=$((10221568 * 512))
+ESP_OFF=$((ESP_START * 512))
+EXT_OFF=$((EXT_START * 512))
+EXT_SZ=$((EXT_SECTORS * 512))
 EXT_BLOCKS=$((EXT_SZ / 4096))
 
 dd if=/dev/zero \

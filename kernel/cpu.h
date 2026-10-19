@@ -41,7 +41,7 @@ static uint64_t gdt[7] = {
 };
 static IdtEntry idt[256];
 static Tss tss;
-static uint8_t ist_stack[3][8192] __attribute__((aligned(16)));   // IST1 = #DF, IST2 = NMI, IST3 = #MC
+static uint8_t ist_stack[4][8192] __attribute__((aligned(16)));   // IST1 = #DF, IST2 = NMI, IST3 = #MC, IST4 = #PF
 
 // ---- per-vector stubs: push (fake) error code + vector, then share isr_common ----
 #define STUB_NOERR(n) ".globl isr" #n "\nisr" #n ":\n push 0\n push " #n "\n jmp isr_common\n"
@@ -146,6 +146,12 @@ __attribute__((used)) Frame *isr_handler(Frame *f) {
     DbgPrint("\n*** EXCEPTION %llu: %s ***\n", f->vector, exc_name[f->vector]);
     DbgPrint("error=%016llx  rip=%016llx  cs=%04llx  rflags=%016llx\n", f->error, f->rip, f->cs, f->rflags);
     DbgPrint("rsp=%016llx  ss=%04llx  cr2=%016llx  cr3=%016llx\n", f->rsp, f->ss, cr2, cr3);
+    if (f->vector == 14) {
+        DbgPrint("pf: present=%u write=%u user=%u reserved=%u instruction=%u\n",
+                 (unsigned)(f->error & 1), (unsigned)((f->error >> 1) & 1),
+                 (unsigned)((f->error >> 2) & 1), (unsigned)((f->error >> 3) & 1),
+                 (unsigned)((f->error >> 4) & 1));
+    }
     DbgPrint("rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n", f->rax, f->rbx, f->rcx, f->rdx);
     DbgPrint("rsi=%016llx rdi=%016llx rbp=%016llx r8 =%016llx\n", f->rsi, f->rdi, f->rbp, f->r8);
     DbgPrint("r9 =%016llx r10=%016llx r11=%016llx r12=%016llx\n", f->r9, f->r10, f->r11, f->r12);
@@ -188,7 +194,7 @@ static void user_set_kernel_stack(uint64_t rsp0) {
 }
 
 static void cpu_init(void) {
-    for (int i = 0; i < 3; i++) tss.ist[i] = (uint64_t)ist_stack[i] + sizeof ist_stack[i];
+    for (int i = 0; i < 4; i++) tss.ist[i] = (uint64_t)ist_stack[i] + sizeof ist_stack[i];
     tss.iomap = sizeof(Tss);                        // no I/O permission bitmap
     set_tss_descriptor();
 
@@ -211,7 +217,7 @@ static void cpu_init(void) {
         ::: "rax", "memory");
 
     for (int i = 0; i < 32; i++)
-        set_gate(i, (uint64_t)isr_table[i], i == 8 ? 1 : i == 2 ? 2 : i == 18 ? 3 : 0);
+        set_gate(i, (uint64_t)isr_table[i], i == 8 ? 1 : i == 2 ? 2 : i == 18 ? 3 : i == 14 ? 4 : 0);
     for (int i = 32; i < 256; i++)
         set_gate(i, (uint64_t)isr_irq_base + (uint64_t)(i - 32) * 16, 0);
     // Syscall vector 0x80 – DPL 3 so user code can execute `int 0x80`

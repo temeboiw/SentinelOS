@@ -1156,7 +1156,7 @@ static Frame *syscall_handler(Frame *f) {
         PspForgetUserImages(target);MmDeleteAddressSpace(target);MmSwitchToProcess(MmCurrentProcess);f->rax=0;return f;
     }
     case SYS_NtUdpSend: {
-        char payload[NS_UDP_RX_MAX];uint32_t len=(uint32_t)f->r9;
+        char payload[NS_UDP_RX_MAX];uint32_t len=(uint32_t)f->r8;
         if(!len||len>sizeof payload||!MmValidateUserRange(MmCurrentProcess,f->rcx,len,0)){f->rax=(uint64_t)-1LL;return f;}
         for(uint32_t i=0;i<len;i++)payload[i]=((const char*)f->rcx)[i];
         f->rax=(uint64_t)(int64_t)ns_udp_send_app((uint32_t)f->rdi,(uint16_t)f->rsi,(uint16_t)f->rdx,(const uint8_t*)payload,(uint16_t)len);return f;

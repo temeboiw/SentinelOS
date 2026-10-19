@@ -116,7 +116,7 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         g_count++;
     }
     pText(0,0,0,g_path,-1);
-    pText(0,0,1,"Click folder to open; .. goes up; double-click .exe to run",-1);
+    pText(0,0,1,"Double-click folders to open; .. goes up; double-click .exe to run",-1);
     for(int i=0;i<g_count;i++) {
         char line[80]; int p=0;
         const char *tag=g_isdir[i]?"[DIR] ":ends_with(g_names[i],".exe")?"[EXE] ":ends_with(g_names[i],".dll")?"[DLL] ":"[FIL] ";
@@ -190,7 +190,7 @@ void mainCRTStartup(void) {
         if(row<0 || row>=g_count) {g_last_row=-1;continue;}
         u64 now=pTick?pTick():msg.time;
         int dbl=(msg.message==0x0203) ||
-                (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=1000);
+                (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=500);
         g_last_row=row; g_last_click_ms=now;
         if(g_isdir[row]) {
             if(!dbl) continue;

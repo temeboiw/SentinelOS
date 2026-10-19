@@ -11,6 +11,7 @@
 #include "virtio_input.h"
 #include "uthread.h"
 #include "wm.h"
+#include "ntabi.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -679,8 +680,181 @@ static int copy_user_str(uint64_t uaddr, char *out, int max) {
 
 /* ------------------------------------------------------------ syscalls */
 
+static uint64_t NtStatusResult(NTSTATUS status) {
+    return (uint64_t)(int64_t)status;
+}
+
 static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
+    case NT_SYS_QUERY_INFORMATION_PROCESS: {
+        if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS ||
+            f->rdx != NT_PROCESS_BASIC_INFORMATION ||
+            f->r8 < sizeof(NT_PROCESS_BASIC_INFORMATION)) {
+            f->rax = NtStatusResult(
+                (NT_HANDLE)f->rdi != NT_CURRENT_PROCESS
+                    ? NT_STATUS_INVALID_HANDLE
+                    : (f->rdx != NT_PROCESS_BASIC_INFORMATION
+                        ? NT_STATUS_INVALID_PARAMETER
+                        : NT_STATUS_INFO_LENGTH_MISMATCH));
+            return f;
+        }
+
+        if (!MmValidateUserRange(MmCurrentProcess, f->rcx,
+                                 sizeof(NT_PROCESS_BASIC_INFORMATION), 1) ||
+            (f->r9 && !MmValidateUserRange(MmCurrentProcess, f->r9,
+                                           sizeof(NT_ULONG), 1))) {
+            f->rax = NtStatusResult(NT_STATUS_ACCESS_VIOLATION);
+            return f;
+        }
+
+        NT_PROCESS_BASIC_INFORMATION info;
+        info.ExitStatus = NT_STATUS_SUCCESS;
+        info.PebBaseAddress = 0;
+        info.AffinityMask = 1;
+        info.BasePriority = 8;
+        info.UniqueProcessId = MmCurrentProcess ? MmCurrentProcess->Pid : 0;
+        info.InheritedFromUniqueProcessId = 0;
+
+        int me = up_find_proc(MmCurrentProcess);
+        if (me >= 0) {
+            int parent = up_tab[me].parent;
+            if (parent >= 0 && parent < UP_MAX &&
+                up_tab[parent].alive && up_tab[parent].proc)
+                info.InheritedFromUniqueProcessId = up_tab[parent].proc->Pid;
+        }
+
+        *(NT_PROCESS_BASIC_INFORMATION *)f->rcx = info;
+        if (f->r9) *(NT_ULONG *)f->r9 = sizeof info;
+        f->rax = NtStatusResult(NT_STATUS_SUCCESS);
+        return f;
+    }
+
+    case NT_SYS_ALLOCATE_VIRTUAL_MEMORY: {
+        if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_HANDLE);
+            return f;
+        }
+        if (f->rdx != 0 || !f->rsi || !f->rcx ||
+            !MmValidateUserRange(MmCurrentProcess, f->rsi, sizeof(uint64_t), 1) ||
+            !MmValidateUserRange(MmCurrentProcess, f->rcx, sizeof(uint64_t), 1)) {
+            f->rax = NtStatusResult(NT_STATUS_ACCESS_VIOLATION);
+            return f;
+        }
+
+        uint64_t base = *(uint64_t *)f->rsi;
+        uint64_t requested = *(uint64_t *)f->rcx;
+        uint64_t alloc_type = f->r8;
+        uint64_t protect = f->r9;
+        if (!requested || requested > UINT64_MAX - 0xFFFULL ||
+            requested > 16ull * 1024 * 1024 ||
+            (alloc_type & ~(NT_MEM_RESERVE | NT_MEM_COMMIT)) != 0 ||
+            !(alloc_type & (NT_MEM_RESERVE | NT_MEM_COMMIT)) ||
+            protect != NT_PAGE_READWRITE) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_PARAMETER);
+            return f;
+        }
+
+        uint64_t size = (requested + 0xFFFULL) & ~0xFFFULL;
+        if (!base) base = 0x50000000ULL;
+        if ((base & 0xFFFULL) || base < 0x10000ULL ||
+            base >= 0x0000800000000000ULL ||
+            size > 0x0000800000000000ULL - base) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_ADDRESS);
+            return f;
+        }
+
+        KPROCESS *caller = MmCurrentProcess;
+        if (!caller || caller == PspSystemProcess) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_HANDLE);
+            return f;
+        }
+
+        MmSwitchToProcess(PspSystemProcess);
+        if (!MmUserRangeUnmapped(caller, base, size)) {
+            MmSwitchToProcess(caller);
+            f->rax = NtStatusResult(NT_STATUS_INVALID_ADDRESS);
+            return f;
+        }
+
+        uint64_t mapped = 0;
+        for (; mapped < size; mapped += USER_IMAGE_PAGE) {
+            if (!MmMapAllocatedUserPage(caller, base + mapped)) break;
+        }
+        if (mapped != size) {
+            while (mapped) {
+                mapped -= USER_IMAGE_PAGE;
+                MmUnmapAllocatedUserPage(caller, base + mapped);
+            }
+            MmSwitchToProcess(caller);
+            f->rax = NtStatusResult(NT_STATUS_NO_MEMORY);
+            return f;
+        }
+
+        MmSwitchToProcess(caller);
+        *(uint64_t *)f->rsi = base;
+        *(uint64_t *)f->rcx = size;
+        f->rax = NtStatusResult(NT_STATUS_SUCCESS);
+        return f;
+    }
+
+    case NT_SYS_YIELD_EXECUTION: {
+        int me = up_find_proc(MmCurrentProcess);
+        if (me >= 0) {
+            up_save(f, me);
+            up_tab[me].rax = 0;
+        }
+        int next = up_pick_next();
+        if (next >= 0 && next != me) {
+            up_load(f, next);
+            return f;
+        }
+        f->rax = NtStatusResult(NT_STATUS_SUCCESS);
+        return f;
+    }
+
+    case NT_SYS_QUERY_VIRTUAL_MEMORY: {
+        if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_HANDLE);
+            return f;
+        }
+        if (f->rdx != NT_MEMORY_BASIC_INFORMATION ||
+            f->r8 < sizeof(NT_MEMORY_BASIC_INFORMATION)) {
+            f->rax = NtStatusResult(
+                f->rdx != NT_MEMORY_BASIC_INFORMATION
+                    ? NT_STATUS_INVALID_PARAMETER
+                    : NT_STATUS_INFO_LENGTH_MISMATCH);
+            return f;
+        }
+        if (!MmValidateUserRange(MmCurrentProcess, f->rcx,
+                                 sizeof(NT_MEMORY_BASIC_INFORMATION), 1) ||
+            (f->r9 && !MmValidateUserRange(MmCurrentProcess, f->r9,
+                                           sizeof(NT_ULONG), 1))) {
+            f->rax = NtStatusResult(NT_STATUS_ACCESS_VIOLATION);
+            return f;
+        }
+
+        uint64_t va = f->rsi;
+        uint64_t pte = MmLookupUserPte(MmCurrentProcess, va, 0);
+        if (!pte) {
+            f->rax = NtStatusResult(NT_STATUS_INVALID_ADDRESS);
+            return f;
+        }
+
+        NT_MEMORY_BASIC_INFORMATION info;
+        info.BaseAddress = (NT_PVOID)(va & ~0xFFFULL);
+        info.AllocationBase = info.BaseAddress;
+        info.AllocationProtect = NT_PAGE_READWRITE;
+        info.PartitionId = 0;
+        info.RegionSize = 0x1000;
+        info.State = NT_MEM_COMMITTED;
+        info.Protect = (pte & PTE_RW) ? NT_PAGE_READWRITE : NT_PAGE_READONLY;
+        info.Type = NT_MEM_PRIVATE;
+        *(NT_MEMORY_BASIC_INFORMATION *)f->rcx = info;
+        if (f->r9) *(NT_ULONG *)f->r9 = sizeof info;
+        f->rax = NtStatusResult(NT_STATUS_SUCCESS);
+        return f;
+    }
+
     case SYS_NtTerminateProcess: {
         DbgPrint("[user] exit");
 

@@ -80,3 +80,36 @@ __attribute__((dllexport)) HANDLE CreateThread(
 __attribute__((dllexport)) DWORD WaitForSingleObject(HANDLE h, DWORD ms) {
     return (DWORD)sy3(SYS_Wait, (u64)h, (u64)ms, 0);
 }
+
+
+/* Common process, clock, path and environment APIs used by Win32 programs.
+   Unsupported filesystem mutations deliberately fail instead of pretending. */
+typedef struct { DWORD low, high; } FILETIME;
+typedef struct { i64 quad; } LARGE_INTEGER;
+__attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }
+__attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
+__attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
+__attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
+__attribute__((dllexport)) BOOL IsDebuggerPresent(void) { return 0; }
+__attribute__((dllexport)) BOOL QueryPerformanceCounter(LARGE_INTEGER *v) { if(!v)return 0; v->quad=(i64)sy3(33,0,0,0)*10000; return 1; }
+__attribute__((dllexport)) BOOL QueryPerformanceFrequency(LARGE_INTEGER *v) { if(!v)return 0; v->quad=10000000; return 1; }
+__attribute__((dllexport)) void GetSystemTimeAsFileTime(FILETIME *v) { if(v){v->low=0;v->high=0;} }
+__attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap,LPSTR out) { const char p[]="C:\\"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
+__attribute__((dllexport)) DWORD GetWindowsDirectoryA(LPSTR out,DWORD cap) { const char p[]="C:\\Windows"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
+__attribute__((dllexport)) DWORD GetSystemDirectoryA(LPSTR out,DWORD cap) { const char p[]="C:\\Windows\\System32"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
+__attribute__((dllexport)) DWORD GetTempPathA(DWORD cap,LPSTR out) { const char p[]="C:\\Users\\Public\\Downloads\\"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
+__attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module,LPSTR out,DWORD cap) { (void)module;if(out&&cap)out[0]=0;return 0; }
+__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) { (void)name; return (HANDLE)1; }
+__attribute__((dllexport)) HANDLE GetModuleHandleW(const unsigned short *name) { (void)name; return (HANDLE)1; }
+__attribute__((dllexport)) BOOL GetProcessAffinityMask(HANDLE p,u64 *process,u64 *system) { (void)p;if(process)*process=1;if(system)*system=1;return 1; }
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
+__attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path,void *sec) { (void)path;(void)sec;return 0; }
+__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path;return 0; }
+__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from,LPCSTR to) { (void)from;(void)to;return 0; }
+__attribute__((dllexport)) BOOL GetComputerNameA(LPSTR name,DWORD *size) { const char p[]="SENTINELOS";DWORD n=sizeof p-1;if(!size)return 0;if(!name||*size<=n){*size=n+1;return 0;}for(DWORD i=0;i<=n;i++)name[i]=p[i];*size=n;return 1; }
+__attribute__((dllexport)) DWORD GetEnvironmentVariableA(LPCSTR name,LPSTR out,DWORD cap) { (void)name;if(out&&cap)out[0]=0;return 0; }
+__attribute__((dllexport)) BOOL SetEnvironmentVariableA(LPCSTR name,LPCSTR value) { (void)name;(void)value;return 0; }
+__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE h) { (void)h;return 1; }
+__attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE h,DWORD *code) { (void)h;if(code)*code=259;return 1; }
+__attribute__((dllexport)) BOOL TerminateProcess(HANDLE h,DWORD code) { (void)h;sy3(SYS_Exit,code,0,0);return 1; }
+__attribute__((dllexport)) BOOL ProcessIdToSessionId(DWORD pid,DWORD *sid) { (void)pid;if(sid)*sid=0;return 1; }

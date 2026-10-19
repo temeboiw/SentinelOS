@@ -73,8 +73,14 @@ static uint16_t vb_avail_idx;
 static uint16_t vb_last_used;
 
 static void *vb_map_bar(uint64_t pa, uint64_t len) {
-    for (uint64_t o = 0; o < len; o += 0x1000)
-        map_4k(HHDM_BASE + pa + o, pa + o, PTE_RW | PTE_PCD | PTE_PWT);
+    for (uint64_t o = 0; o < len; o += 0x1000) {
+        uint64_t phys = pa + o;
+        /* Reuse an existing identity-correct HHDM mapping. Device BARs may
+           share a 2 MiB page with another device, so map_4k would panic when
+           that large page is already present. */
+        if (vmm_translate(HHDM_BASE + phys) != phys)
+            map_4k(HHDM_BASE + phys, phys, PTE_RW | PTE_PCD | PTE_PWT);
+    }
     return (void *)(HHDM_BASE + pa);
 }
 

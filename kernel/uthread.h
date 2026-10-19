@@ -71,14 +71,22 @@ static uint64_t ut_create(uint64_t start, uint64_t param) {
     if (slot < 0) return (uint64_t)-1LL;
     MmSwitchToProcess(PspSystemProcess);
     uint64_t stack_va = 0x7FFE0000ULL - (uint64_t)(slot + 1) * UT_STACK_SIZE;
-    int ok = 1;
-    for (uint64_t off = 0; off < UT_STACK_SIZE; off += 0x1000) {
+    uint64_t mapped = 0;
+    for (; mapped < UT_STACK_SIZE; mapped += 0x1000) {
         uint64_t pa = pmm_alloc_zeroed();
-        if (!pa) { ok = 0; break; }
-        map_4k_in(proc->Pml4, stack_va + off, pa, PTE_U | PTE_RW);
+        if (!pa) break;
+        map_4k_in(proc->Pml4, stack_va + mapped, pa,
+                  PTE_U | PTE_RW | PTE_OWNED);
+    }
+    if (mapped != UT_STACK_SIZE) {
+        while (mapped) {
+            mapped -= 0x1000;
+            MmUnmapAllocatedUserPage(proc, stack_va + mapped);
+        }
+        MmSwitchToProcess(proc);
+        return (uint64_t)-1LL;
     }
     MmSwitchToProcess(proc);
-    if (!ok) return (uint64_t)-1LL;
     UThread *t = &ut_tab[slot];
     t->proc = proc;
     t->entry = start;

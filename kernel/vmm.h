@@ -168,7 +168,7 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
         for (int i=0;i<MM_MAX_PROCESSES;i++) if (p==&MmProcessPool[i]) MmProcessUsed[i]=0;
         return NULL;
     }
-    uint64_t *np = (uint64_t *)pml4_pa;  /* System CR3: identity */
+    uint64_t *np = PHYS_TO_VIRT(pml4_pa); /* Shared direct-map access to this address space's root. */
     for (int i = 256; i < 512; i++) np[i] = PspSystemProcess->Pml4[i];
     /* APIC/IOAPIC so HAL works under process CR3 */
     for (uint64_t pa = 0xFEC00000ULL; pa < 0x100000000ULL; pa += 0x200000ULL)
@@ -183,8 +183,85 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
     return p;
 }
 
+/* Page-table walk for user pointers; the HHDM is shared by all processes. */
+static uint64_t MmLookupUserPte(KPROCESS *proc, uint64_t va, int write) {
+    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) return 0;
+    uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
+    uint64_t e = root[(va >> 39) & 511];
+    if (!(e & PTE_P) || !(e & PTE_U)) return 0;
+    uint64_t *pdpt = PHYS_TO_VIRT(e & PTE_ADDR);
+    e = pdpt[(va >> 30) & 511];
+    if (!(e & PTE_P) || !(e & PTE_U) || (write && !(e & PTE_RW))) return 0;
+    if (e & PTE_PS) return e;
+    uint64_t *pd = PHYS_TO_VIRT(e & PTE_ADDR);
+    e = pd[(va >> 21) & 511];
+    if (!(e & PTE_P) || !(e & PTE_U) || (write && !(e & PTE_RW))) return 0;
+    if (e & PTE_PS) return e;
+    uint64_t *pt = PHYS_TO_VIRT(e & PTE_ADDR);
+    e = pt[(va >> 12) & 511];
+    if (!(e & PTE_P) || !(e & PTE_U) || (write && !(e & PTE_RW))) return 0;
+    return e;
+}
+
+static int MmValidateUserRange(KPROCESS *proc, uint64_t va, uint64_t len, int write) {
+    if (!len) return va >= 0x10000ULL && va < 0x0000800000000000ULL;
+    if (va < 0x10000ULL || va >= 0x0000800000000000ULL ||
+        len > UINT64_MAX - va || va + len > 0x0000800000000000ULL) return 0;
+    uint64_t last_page = (va + len - 1) & ~0xFFFULL;
+    for (uint64_t page = va & ~0xFFFULL; ; page += 0x1000ULL) {
+        if (!MmLookupUserPte(proc, page, write)) return 0;
+        if (page >= last_page) break;
+        if (page > UINT64_MAX - 0x1000ULL) return 0;
+    }
+    return 1;
+}
+
+static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
+    if (!proc || !len || va < 0x10000ULL ||
+        va >= 0x0000800000000000ULL || len > UINT64_MAX - va ||
+        va + len > 0x0000800000000000ULL) return 0;
+    uint64_t last_page = (va + len - 1) & ~0xFFFULL;
+    for (uint64_t page = va & ~0xFFFULL; ; page += 0x1000ULL) {
+        if (MmLookupUserPte(proc, page, 0)) return 0;
+        if (page >= last_page) break;
+        if (page > UINT64_MAX - 0x1000ULL) return 0;
+    }
+    return 1;
+}
+
+/* Only for frames allocated by the user-memory allocator, never device mappings. */
+static int MmUnmapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
+    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) return 0;
+    uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
+    uint64_t e4 = root[(va >> 39) & 511];
+    if (!(e4 & PTE_P)) return 0;
+    uint64_t *pdpt = PHYS_TO_VIRT(e4 & PTE_ADDR);
+    uint64_t e3 = pdpt[(va >> 30) & 511];
+    if (!(e3 & PTE_P) || (e3 & PTE_PS)) return 0;
+    uint64_t *pd = PHYS_TO_VIRT(e3 & PTE_ADDR);
+    uint64_t e2 = pd[(va >> 21) & 511];
+    if (!(e2 & PTE_P) || (e2 & PTE_PS)) return 0;
+    uint64_t *pt = PHYS_TO_VIRT(e2 & PTE_ADDR);
+    unsigned i = (va >> 12) & 511;
+    uint64_t e = pt[i];
+    if (!(e & PTE_P) || !(e & PTE_U)) return 0;
+    pt[i] = 0;
+    pmm_free(e & PTE_ADDR);
+    if (MmCurrentProcess == proc) __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+    return 1;
+}
+
+static int MmMapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
+    if (!MmUserRangeUnmapped(proc, va, 0x1000ULL)) return 0;
+    uint64_t pa = pmm_alloc_zeroed();
+    if (!pa) return 0;
+    map_4k_in(proc->Pml4, va, pa, PTE_U | PTE_RW);
+    return 1;
+}
+
 static void MmDeleteAddressSpace(KPROCESS *p) {
-    if (!p || p == PspSystemProcess) return;
+    if (!p || p == PspSystemProcess || p == MmCurrentProcess) return;
+    /* Shared upper-half kernel tables must never be reclaimed with a process. */
     pmm_free(p->DirectoryTableBase);
     for (int i=0;i<MM_MAX_PROCESSES;i++)
         if (p==&MmProcessPool[i]) { MmProcessUsed[i]=0; break; }
@@ -199,15 +276,16 @@ static void map_range(uint64_t voff, uint64_t s, uint64_t e, uint64_t attr) {
 
 // software page-table walk; returns physical address or ~0 if unmapped
 static uint64_t vmm_translate(uint64_t v) {
+    /* Page-table pages must be accessed through the shared direct map. */
     uint64_t e = pml4[(v >> 39) & 511];
     if (!(e & PTE_P)) return ~0ULL;
-    e = ((uint64_t *)(e & PTE_ADDR))[(v >> 30) & 511];
+    e = PHYS_TO_VIRT(e & PTE_ADDR)[(v >> 30) & 511];
     if (!(e & PTE_P)) return ~0ULL;
     if (e & PTE_PS) return (e & 0x000FFFFFC0000000ULL) | (v & 0x3FFFFFFFULL);
-    e = ((uint64_t *)(e & PTE_ADDR))[(v >> 21) & 511];
+    e = PHYS_TO_VIRT(e & PTE_ADDR)[(v >> 21) & 511];
     if (!(e & PTE_P)) return ~0ULL;
     if (e & PTE_PS) return (e & 0x000FFFFFFFE00000ULL) | (v & 0x1FFFFFULL);
-    e = ((uint64_t *)(e & PTE_ADDR))[(v >> 12) & 511];
+    e = PHYS_TO_VIRT(e & PTE_ADDR)[(v >> 12) & 511];
     if (!(e & PTE_P)) return ~0ULL;
     return (e & PTE_ADDR) | (v & 0xFFFULL);
 }
@@ -263,8 +341,11 @@ static void vmm_init(const BootInfo *bi) {
                  bi->modules[i].name, (void *)phys, (void *)virt, size / 1024);
     }
 
-    __asm__ volatile("movq %0, %%cr3" :: "r"((uint64_t)pml4) : "memory");
-    DbgPrint("vmm: running on our own page tables (higher-half)\n");
+    uint64_t root_pa = (uint64_t)pml4;
+    __asm__ volatile("movq %0, %%cr3" :: "r"(root_pa) : "memory");
+    /* Keep the root pointer valid after leaving the identity-map-only phase. */
+    pml4 = PHYS_TO_VIRT(root_pa);
+    DbgPrint("vmm: running on our own page tables (higher-half)\\n");
     MmInitSystemProcess();
 }
 

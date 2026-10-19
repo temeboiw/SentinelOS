@@ -340,6 +340,23 @@ static int net_send_frame(const void *data, uint16_t len) {
 
     const uint8_t *src = (const uint8_t *)data;
     for (uint16_t n = 0; n < len; n++) net_tx_buf[i][n] = src[n];
+
+    /* Log the first few frames before handing them to the NIC. This verifies
+       the Ethernet header and the physical DMA address independently of DHCP. */
+    static uint32_t tx_debug_count;
+    if (tx_debug_count < 8) {
+        uint16_t ethertype = (uint16_t)(((uint16_t)net_tx_buf[i][12] << 8) |
+                                        net_tx_buf[i][13]);
+        DbgPrint("net: TX frame idx=%u len=%u dma=%p dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x type=%04x\\n",
+            i, (unsigned)len, (void *)(uintptr_t)net_tx_buf_pa[i],
+            net_tx_buf[i][0], net_tx_buf[i][1], net_tx_buf[i][2],
+            net_tx_buf[i][3], net_tx_buf[i][4], net_tx_buf[i][5],
+            net_tx_buf[i][6], net_tx_buf[i][7], net_tx_buf[i][8],
+            net_tx_buf[i][9], net_tx_buf[i][10], net_tx_buf[i][11],
+            ethertype);
+        tx_debug_count++;
+    }
+
     d->length = len; d->cso = 0; d->css = 0; d->special = 0;
     d->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
     __asm__ volatile("" ::: "memory");

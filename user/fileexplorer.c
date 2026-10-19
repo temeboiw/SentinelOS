@@ -73,12 +73,19 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         name[0] = 0;
         DWORD t = pQuery(i, name, 64);
         if (t == 0) break;
+        int isdir = (t == 2);
+        if (name[0]=='.' && name[1]=='.' && !name[2])
+            isdir = 1;
+
+        /* At the drive root, show folders only. Files appear after opening a folder. */
+        if (g_path[0]=='C' && g_path[1]==':' && g_path[2]=='\\' &&
+            g_path[3]==0 && !isdir)
+            continue;
+
         int k = 0;
         for (; name[k] && k < 63; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
-        g_isdir[g_count] = (t == 2);
-        if (g_names[g_count][0]=='.' && g_names[g_count][1]=='.' && !g_names[g_count][2])
-            g_isdir[g_count] = 1;
+        g_isdir[g_count] = isdir;
         g_count++;
     }
     /* TextOut lines: 0=path 1=hint 2..=entries  => click must subtract 2 */

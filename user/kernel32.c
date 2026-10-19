@@ -728,7 +728,7 @@ __attribute__((dllexport)) DWORD GetFullPathNameA(
     if(!out||cap<=o){g_last_error=ERROR_INSUFFICIENT_BUFFER;return o+1;}
     for(u32 j=0;j<=o;j++)out[j]=normalized[j];
     if(file_part) {
-        int j=(int)o-1;while(j>=0&&out[j]!='\\\\')j++;
+        int j=(int)o-1;while(j>=0&&out[j]!='\\\\')j--;
         if(j>=0)*file_part=out+j+1;
     }
     g_last_error=ERROR_SUCCESS;return o;

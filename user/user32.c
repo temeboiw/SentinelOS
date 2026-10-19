@@ -194,6 +194,8 @@ static void cursor_save_draw(int x, int y) {
              * arrow tip (0,0), not a hollow rectangle.
              * '#' = white edge, 'B' = dark outline, 'W' = white fill.
              */
+            /* Classic filled desktop pointer: dark outline, white face,
+               tapered tip and a visible stem. '.' remains transparent. */
             static const char *arrow[16] = {
                 "B...............",
                 "BB..............",

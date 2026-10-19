@@ -16,6 +16,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out EDK2 headers
+        uses: actions/checkout@v4
+        with:
+          repository: tianocore/edk2
+          path: edk2
+          fetch-depth: 1
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -24,7 +31,7 @@ jobs:
       - name: Build disk image
         run: |
           chmod +x scripts/build.sh
-          EDK2=/usr/include/efi bash scripts/build.sh
+          EDK2=$GITHUB_WORKSPACE/edk2 bash scripts/build.sh
 
       - name: Verify disk image and GPT
         run: |

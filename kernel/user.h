@@ -647,7 +647,7 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
             const char *prefix = "C:\\magic\\System32\\";
             while (prefix[k] && n < (int)sizeof(dllpath)-1) dllpath[n++] = prefix[k++];
             k = 0;
-            while (dll[k] && dll[k] != '/' && dll[k] != '\\\\' &&
+            while (dll[k] && dll[k] != '/' && dll[k] != '\\' &&
                    n < (int)sizeof(dllpath)-1) dllpath[n++] = dll[k++];
             dllpath[n] = 0;
             dep = PspLoadDiskPe(dllpath);
@@ -656,7 +656,7 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
                 prefix = "C:\\Windows\\System32\\";
                 while (prefix[k] && n < (int)sizeof(dllpath)-1) dllpath[n++] = prefix[k++];
                 k = 0;
-                while (dll[k] && dll[k] != '/' && dll[k] != '\\\\' &&
+                while (dll[k] && dll[k] != '/' && dll[k] != '\\' &&
                        n < (int)sizeof(dllpath)-1) dllpath[n++] = dll[k++];
                 dllpath[n] = 0;
                 dep = PspLoadDiskPe(dllpath);
@@ -818,7 +818,7 @@ static BootModule *PspLoadDiskPe(const char *path) {
     /* Store the DLL basename so import lookup can match "kernel32.dll". */
     const char *base_name = path;
     for (int i = 0; path[i]; i++)
-        if (path[i] == '/' || path[i] == '\\\\') base_name = path + i + 1;
+        if (path[i] == '/' || path[i] == '\\') base_name = path + i + 1;
     int n = 0;
     while (base_name[n] && n < 31) { mod->name[n] = base_name[n]; n++; }
     mod->name[n] = 0;
@@ -1308,8 +1308,11 @@ static Frame *syscall_handler(Frame *f) {
             if(up_tab[i].parent>=0&&up_tab[i].parent<UP_MAX&&up_tab[up_tab[i].parent].alive&&up_tab[up_tab[i].parent].proc)item.ParentProcessId=up_tab[up_tab[i].parent].proc->Pid;
             item.State=up_tab[i].fresh?1u:2u;int j=0;const char*n=up_tab[i].proc->ImageName;
             while(j<31&&n&&n[j]){item.ImageName[j]=n[j];j++;}item.ImageName[j]=0;
-            *(SENTINEL_PROCESS_INFORMATION*)(out+count*sizeof item)=item;count++;
-        }f->rax=count;return f;
+            *(SENTINEL_PROCESS_INFORMATION*)(out+count*sizeof item)=item;
+            count++;
+        }
+        f->rax=count;
+        return f;
     }
     case SYS_NtTerminatePid: {
         KPROCESS *caller=MmCurrentProcess;

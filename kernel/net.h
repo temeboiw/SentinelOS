@@ -308,6 +308,18 @@ static int net_e1000_init(void) {
     net_wr(E1000_REG_TIPG, 10u | (8u << 10) | (6u << 20));
     net_wr(E1000_REG_CTRL, net_rd(E1000_REG_CTRL) | E1000_CTRL_SLU);
 
+    /* Read back the programmed RX ring before enabling the stack. */
+    DbgPrint("net: RX ring pa=%p len=%u head=%u tail=%u RCTL=%08x\\n",
+        (void *)net_rx_ring_pa,
+        (unsigned)(sizeof(E1000RxDesc) * NET_RX_COUNT),
+        net_rd(E1000_REG_RDH),
+        net_rd(E1000_REG_RDT),
+        net_rd(E1000_REG_RCTL));
+    DbgPrint("net: RX desc0 addr=%p status=%02x errors=%02x\\n",
+        (void *)net_rx_ring[0].addr,
+        net_rx_ring[0].status,
+        net_rx_ring[0].errors);
+
     net_pci_device = device;
     net_ready = 1;
     DbgPrint("net: e1000 bus=%u slot=%u %04x:%04x ready; MAC %02x:%02x:%02x:%02x:%02x:%02x link=%s\n",

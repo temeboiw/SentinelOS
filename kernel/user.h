@@ -357,7 +357,7 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
         base < 0x10000ULL || base >= 0x0000800000000000ULL ||
         rounded > 0x0000800000000000ULL - base ||
         !MmUserRangeUnmapped(proc, base, rounded)) {
-        DbgPrint("user: image VA collision or invalid range for %s\\n", mod->name);
+        DbgPrint("user: image VA collision or invalid range for %s\n", mod->name);
         return -1;
     }
 

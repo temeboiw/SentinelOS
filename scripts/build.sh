@@ -262,6 +262,9 @@ lld -flavor link \
   /export:DeleteFileA /export:MoveFileA /export:GetComputerNameA /export:GetEnvironmentVariableA \
   /export:SetEnvironmentVariableA /export:FlushFileBuffers /export:GetExitCodeProcess /export:TerminateProcess \
   /export:ProcessIdToSessionId \
+  /export:GetTickCount /export:lstrlenA /export:lstrcmpA /export:lstrcmpiA \\
+  /export:lstrcpyA /export:lstrcpynA /export:GetVersion /export:GetVersionExA \\
+  /export:CreateProcessA /export:CreateProcessW /export:GetProcessId \\
   "/implib:$B/obj/kernel32.lib" \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"

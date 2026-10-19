@@ -1082,6 +1082,24 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     }
 }
 
+/* Query the current process's window geometry and visible text scroll offset. */
+__attribute__((dllexport))
+BOOL GetWindowRect(void *hwnd, int *rect) {
+    (void)hwnd;
+    if (!rect || !g_wnd.visible || g_wnd.w <= 0 || g_wnd.h <= 0)
+        return 0;
+    rect[0] = g_wnd.x;
+    rect[1] = g_wnd.y;
+    rect[2] = g_wnd.x + g_wnd.w;
+    rect[3] = g_wnd.y + g_wnd.h;
+    return 1;
+}
+
+__attribute__((dllexport))
+int GetScrollPosition(void) {
+    return g_scroll_top;
+}
+
 __attribute__((dllexport))
 BOOL TranslateMessage(const MSG *m) {
     (void)m;

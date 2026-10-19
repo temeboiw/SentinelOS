@@ -351,9 +351,15 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
 
     uint64_t rounded = (size + USER_IMAGE_PAGE - 1) & ~(USER_IMAGE_PAGE - 1);
     uint64_t pages = rounded / USER_IMAGE_PAGE;
+    uint64_t base = mod->base ? mod->base : 0x40000000ULL;
 
-    if (!pages)
+    if (!pages || (base & (USER_IMAGE_PAGE - 1)) ||
+        base < 0x10000ULL || base >= 0x0000800000000000ULL ||
+        rounded > 0x0000800000000000ULL - base ||
+        !MmUserRangeUnmapped(proc, base, rounded)) {
+        DbgPrint("user: image VA collision or invalid range for %s\\n", mod->name);
         return -1;
+    }
 
     int slot = -1;
     for (int i = 0; i < USER_IMAGE_MAX; i++) {
@@ -385,7 +391,6 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
     for (uint64_t i = size; i < rounded; i++)
         dst[i] = 0;
 
-    uint64_t base = mod->base ? mod->base : 0x40000000ULL;
     uint64_t entry = base;
 
     /*
@@ -831,7 +836,14 @@ static Frame *syscall_handler(Frame *f) {
 
         KPROCESS *proc = MmCreateAddressSpace(name);
 
-        if (!proc || PspMapUserImage(proc, mod) != 0) {
+        if (!proc) {
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        if (PspMapUserImage(proc, mod) != 0) {
+            PspForgetUserImages(proc);
+            MmDeleteAddressSpace(proc);
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;

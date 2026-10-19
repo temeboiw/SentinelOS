@@ -397,6 +397,21 @@ ls -lh \
   "$SYS32/ole32.dll" \
   "$SYS32/cmd.exe"
 
+# Stage the freshly built user-facing system files into the Windows path too.
+# Keep magic/System32 intact: the UEFI loader uses it as its boot-module source.
+echo "==> Staging updated system files into C:\\Windows\\System32"
+for image in \
+  hal.dll krnl.exe smss.exe explorer.exe fileexplorer.exe taskbar.dll \
+  kernel32.dll user32.dll gdi32.dll advapi32.dll shell32.dll ole32.dll cmd.exe
+do
+  install -m 0644 "$SYS32/$image" "$B/rootfs/Windows/System32/$image"
+done
+
+# Show the exact Explorer and user32 binaries that will be included in the image.
+ls -lh \
+  "$B/rootfs/Windows/System32/fileexplorer.exe" \
+  "$B/rootfs/Windows/System32/user32.dll"
+
 echo "==> GPT disk image (FAT32 ESP + ext4)"
 
 rm -f "$DISKIMG"

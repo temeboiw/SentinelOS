@@ -14,6 +14,7 @@
 #define PTE_PWT  (1ULL << 3)
 #define PTE_PCD  (1ULL << 4)
 #define PTE_PS   (1ULL << 7)
+#define PTE_OWNED (1ULL << 9)       // leaf frame belongs to this address space
 #define PTE_ADDR 0x000FFFFFFFFFF000ULL
 #define LARGE    (2ULL << 20)
 
@@ -104,7 +105,7 @@ static void map_4k(uint64_t virt, uint64_t phys, uint64_t attr) {
 static uint64_t MmMapUserPage(KPROCESS *proc, uint64_t virt, int writable) {
     uint64_t pa = pmm_alloc_zeroed();
     if (!pa) vmm_panic("MmMapUserPage: OOM");
-    map_4k_in(proc->Pml4, virt, pa, PTE_U | (writable ? PTE_RW : 0));
+    map_4k_in(proc->Pml4, virt, pa, PTE_U | PTE_OWNED | (writable ? PTE_RW : 0));
     return pa;
 }
 
@@ -262,7 +263,7 @@ static int MmUnmapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
     uint64_t *pt = PHYS_TO_VIRT(e2 & PTE_ADDR);
     unsigned i = (va >> 12) & 511;
     uint64_t e = pt[i];
-    if (!(e & PTE_P) || !(e & PTE_U)) return 0;
+    if (!(e & PTE_P) || !(e & PTE_U) || !(e & PTE_OWNED)) return 0;
     pt[i] = 0;
     pmm_free(e & PTE_ADDR);
     if (MmCurrentProcess == proc) __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
@@ -273,14 +274,48 @@ static int MmMapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
     if (!MmUserRangeUnmapped(proc, va, 0x1000ULL)) return 0;
     uint64_t pa = pmm_alloc_zeroed();
     if (!pa) return 0;
-    map_4k_in(proc->Pml4, va, pa, PTE_U | PTE_RW);
+    map_4k_in(proc->Pml4, va, pa, PTE_U | PTE_RW | PTE_OWNED);
     return 1;
 }
 
 static void MmDeleteAddressSpace(KPROCESS *p) {
-    if (!p || p == PspSystemProcess || p == MmCurrentProcess) return;
-    /* Shared upper-half kernel tables must never be reclaimed with a process. */
-    pmm_free(p->DirectoryTableBase);
+    if (!p || p == PspSystemProcess || p == MmCurrentProcess ||
+        MmCurrentProcess != PspSystemProcess) return;
+
+    /* Lower-half page tables are private to this process. The upper-half
+       kernel mappings are shared and intentionally never traversed here. */
+    uint64_t *root = PHYS_TO_VIRT(p->DirectoryTableBase & PTE_ADDR);
+    for (unsigned i4 = 0; i4 < 256; i4++) {
+        uint64_t e4 = root[i4];
+        if (!(e4 & PTE_P)) continue;
+        uint64_t pdpt_pa = e4 & PTE_ADDR;
+        uint64_t *pdpt = PHYS_TO_VIRT(pdpt_pa);
+        for (unsigned i3 = 0; i3 < 512; i3++) {
+            uint64_t e3 = pdpt[i3];
+            if (!(e3 & PTE_P) || (e3 & PTE_PS)) continue;
+            uint64_t pd_pa = e3 & PTE_ADDR;
+            uint64_t *pd = PHYS_TO_VIRT(pd_pa);
+            for (unsigned i2 = 0; i2 < 512; i2++) {
+                uint64_t e2 = pd[i2];
+                if (!(e2 & PTE_P) || (e2 & PTE_PS)) continue;
+                uint64_t pt_pa = e2 & PTE_ADDR;
+                uint64_t *pt = PHYS_TO_VIRT(pt_pa);
+                for (unsigned i1 = 0; i1 < 512; i1++) {
+                    uint64_t e1 = pt[i1];
+                    if ((e1 & (PTE_P | PTE_OWNED)) == (PTE_P | PTE_OWNED))
+                        pmm_free(e1 & PTE_ADDR);
+                }
+                pmm_free(pt_pa);
+            }
+            pmm_free(pd_pa);
+        }
+        pmm_free(pdpt_pa);
+    }
+
+    uint64_t root_pa = p->DirectoryTableBase & PTE_ADDR;
+    p->DirectoryTableBase = 0;
+    p->Pml4 = 0;
+    pmm_free(root_pa);
     for (int i=0;i<MM_MAX_PROCESSES;i++)
         if (p==&MmProcessPool[i]) { MmProcessUsed[i]=0; break; }
 }

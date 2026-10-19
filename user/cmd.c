@@ -421,7 +421,7 @@ void mainCRTStartup(void) {
             continue;
         }
 
-        if (key >= 32 && key <= 126 && g_command_len < CMD_SIZE - 1) {
+        if (((unsigned char)key >= 32) && g_command_len < CMD_SIZE - 1) {
             g_command[g_command_len++] = key;
             g_command[g_command_len] = 0;
             redraw_prompt();

@@ -83,7 +83,6 @@ static volatile uint32_t *net_regs;
 static int net_ready;
 static uint8_t net_mac[6];
 static uint16_t net_pci_device;
-static uint64_t net_mmio_pa;
 static uint64_t net_rx_ring_pa, net_tx_ring_pa;
 static E1000RxDesc *net_rx_ring;
 static E1000TxDesc *net_tx_ring;
@@ -205,6 +204,12 @@ fail:
 
 /* Initialize hardware and its polling RX/TX descriptor rings. */
 static int net_e1000_init(void) {
+    /* If reinitialized, stop DMA before releasing the old rings. */
+    if (net_regs) {
+        net_wr(E1000_REG_IMC, 0xFFFFFFFFu);
+        net_wr(E1000_REG_RCTL, 0);
+        net_wr(E1000_REG_TCTL, 0);
+    }
     net_ready = 0;
     net_regs = 0;
     net_rx_next = net_tx_next = 0;
@@ -230,7 +235,6 @@ static int net_e1000_init(void) {
     uint32_t command_status = net_pci_read(slot, function, 0x04);
     /* Only write the low command word; upper status bits can be write-one-to-clear. */
     net_pci_write(slot, function, 0x04, (command_status & 0xFFFFu) | 0x0006u);
-    net_mmio_pa = mmio;
     net_regs = (volatile uint32_t *)(HHDM_BASE + mmio);
 
     /* Disable all device interrupts: this driver deliberately polls. */

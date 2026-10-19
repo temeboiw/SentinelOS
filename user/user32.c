@@ -254,8 +254,6 @@ static void submit_search(void) {
 
         g_menu = 0;
         g_search_focus = 0;
-        compose:
-        ;
         /*
          * SYS_CreateProcess is syscall 4 in this OS.
          * The process must also be loaded by the bootloader.
@@ -359,6 +357,8 @@ static void draw_taskbar(void) {
         draw_text(mx + 14, my + 100, "CANCEL", COL_MUTED);
     }
 }
+
+static void compose(void);
 
 /*
  * Search typing changes only the Start menu. Repaint and present just the
@@ -1008,7 +1008,6 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     int visible_rows = (g_wnd.h - 52) / 16;
                     if (visible_rows < 1) visible_rows = 1;
                     int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
-                    int sx = g_wnd.x + g_wnd.w - 14;
                     int sy = g_wnd.y + 36;
                     int sh = g_wnd.h - 44;
                     int total = g_nlines > visible_rows ? g_nlines : visible_rows;

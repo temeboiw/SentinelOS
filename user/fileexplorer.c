@@ -72,19 +72,13 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         char name[64];
         name[0] = 0;
         DWORD t = pQuery(i, name, 64);
-        if (t == 1) break;
+        if (t == 0) break;
         int k = 0;
         for (; name[k] && k < 63; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
         g_isdir[g_count] = (t == 2);
         if (g_names[g_count][0]=='.' && g_names[g_count][1]=='.' && !g_names[g_count][2])
             g_isdir[g_count] = 1;
-        if (!g_isdir[g_count]) {
-            int dot = 0;
-            for (int j = 0; g_names[g_count][j]; j++)
-                if (g_names[g_count][j] == '.') { dot = 1; break; }
-            if (!dot) g_isdir[g_count] = 1;
-        }
         g_count++;
     }
     /* TextOut lines: 0=path 1=hint 2..=entries  => click must subtract 2 */

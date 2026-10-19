@@ -118,3 +118,6 @@ static inline int NtNetworkPing(u32 ipv4_network_order) { return (int)sy3(25, ip
 static inline int NtNetworkDnsQuery(const char *hostname, u32 *answer_network_order) {
     return (int)sy3(26, (u64)hostname, (u64)answer_network_order, 0);
 }
+static inline int NtNetworkTcpConnect(u32 ipv4_network_order, u32 port) {
+    return (int)sy3(27, ipv4_network_order, port, 0);
+}

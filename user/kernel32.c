@@ -365,6 +365,7 @@ typedef struct HeapBlock {
     struct HeapBlock *next;
     u32 free;
     u32 magic;
+    u64 reserved;
 } HeapBlock;
 typedef struct {
     BYTE *base;

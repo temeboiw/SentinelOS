@@ -287,6 +287,8 @@ lld -flavor link \
   /export:GetMessageA \
   /export:TranslateMessage \
   /export:DispatchMessageA \
+  /export:GetWindowRect \
+  /export:GetScrollPosition \
   /export:DestroyWindow \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \

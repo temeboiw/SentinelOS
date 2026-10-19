@@ -195,6 +195,7 @@ USER_CFLAGS=(
   -ffreestanding
   -fno-stack-protector
   -fno-pic
+  -fno-builtin
   -mno-red-zone
   -mgeneral-regs-only
   -O2
@@ -270,6 +271,8 @@ lld -flavor link \
   /export:RtlMoveMemory /export:RtlCopyMemory /export:RtlZeroMemory \
   /export:lstrlenW /export:lstrcmpW /export:lstrcmpiW /export:lstrcpyW /export:lstrcpynW \
   /export:CharLowerBuffA /export:CharUpperBuffA /export:MultiByteToWideChar /export:WideCharToMultiByte \
+  /export:GetFileAttributesW /export:SetCurrentDirectoryW /export:GetCurrentDirectoryW /export:CreateFileW /export:GetFullPathNameA \
+  /export:memcpy /export:memmove /export:memset /export:memcmp \
   "/implib:$B/obj/kernel32.lib" \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"

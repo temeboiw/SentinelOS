@@ -80,7 +80,7 @@ static inline NTSTATUS NtQueryInformationProcess(
 {
     return (NTSTATUS)NtSyscall6(NT_SYS_QUERY_INFORMATION_PROCESS,
         (u64)process, information_class, (u64)information,
-        information_length, 0, (u64)return_length);
+        information_length, (u64)return_length, 0);
 }
 
 static inline NTSTATUS NtAllocateVirtualMemory(

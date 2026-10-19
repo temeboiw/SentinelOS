@@ -40,7 +40,7 @@ typedef struct {
     unsigned long long wParam;
     long long lParam;
     DWORD time;
-    int x, y;
+    int pt_x, pt_y;
 } MSG;
 
 #define MAX_ENT 27 /* 27 entries + two header lines fit without scrolling */

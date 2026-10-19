@@ -23,7 +23,7 @@ static uint8_t ns_arp_mac[6];
 static uint32_t ns_arp_ip;
 static uint32_t ns_ip_id = 1;
 static uint32_t ns_dhcp_xid = 0x534F5301u;
-static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;\nstatic int ns_dns_done;
+static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;\nstatic int ns_dns_done;\nstatic uint32_t ns_ping_target;\nstatic int ns_ping_seen;
 static int ns_dhcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 
@@ -71,6 +71,8 @@ static void ns_handle_arp(const uint8_t *p,uint16_t len) {
 static void ns_handle_icmp(uint8_t *ip,uint16_t total) {
     if(total<28 || ip[9]!=NS_IP_ICMP) return;
     uint8_t *icmp=ip+20; uint16_t n=(uint16_t)(total-20);
+    if(icmp[0]==0 && icmp[1]==0 && ns_rd32(ip+12)==ns_ping_target &&
+       ns_rd16(icmp+4)==0x534F && ns_rd16(icmp+6)==1) { ns_ping_seen=1; return; }
     if(icmp[0]==8 && icmp[1]==0 && ns_checksum(icmp,n)==0) {
         uint32_t src=ns_rd32(ip+12), dst=ns_rd32(ip+16);
         if(dst!=ns_cfg.IPv4Address) return;

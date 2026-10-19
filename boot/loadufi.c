@@ -361,6 +361,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             say_a(mods[i].name);
             say(L"\r\n");
             UINT64 rva = mods[i].entry - phys;
+            /* map_image() relocated this image to wherever the firmware put it
+               (phys) when ImageBase was not free.  The kernel maps user images at
+               'prefer' and computes its own delta from the PE header's ImageBase,
+               so hand it the image relocated back to that header ImageBase. */
+            if (phys != mods[i].nt->OptionalHeader.ImageBase)
+                hh_apply_relocs((UINT8 *)(UINTN)phys,
+                                (INT64)(mods[i].nt->OptionalHeader.ImageBase - phys));
             bi->modules[i].base = prefer;
             bi->modules[i].phys = phys;
             bi->modules[i].entry = prefer + rva;

@@ -307,6 +307,23 @@ static uint64_t vfs_file_size(const char *path) {
         (E16(inode, 0) & 0xF000) != 0x8000) return 0;
     return e4_size(inode);
 }
+
+/* Win32-compatible GetFileAttributesA subset.
+ * FILE_ATTRIBUTE_DIRECTORY for directories, NORMAL for ordinary files,
+ * and INVALID_FILE_ATTRIBUTES when the path does not exist.
+ */
+static uint32_t vfs_get_attributes(const char *path) {
+    if (!g_ext4_ok || !path || !path[0]) return 0xFFFFFFFFu;
+    uint32_t ino = vfs_resolve_path(path);
+    uint8_t inode[256];
+    if (!ino || e4_inode(&g_ext4, ino, inode) < 0)
+        return 0xFFFFFFFFu;
+
+    uint16_t mode = E16(inode, 0) & 0xF000;
+    if (mode == 0x4000) return 0x00000010u; /* FILE_ATTRIBUTE_DIRECTORY */
+    if (mode == 0x8000) return 0x00000080u; /* FILE_ATTRIBUTE_NORMAL */
+    return 0xFFFFFFFFu;
+}
 static int vfs_open_read(const char *path) {
     uint32_t ino=vfs_resolve_path(path); if(!ino)return -1;
     uint8_t inode[256]; if(e4_inode(&g_ext4,ino,inode)<0 || (E16(inode,0)&0xF000)!=0x8000)return -1;

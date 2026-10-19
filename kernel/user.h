@@ -187,6 +187,13 @@ static int up_find_proc(KPROCESS *p) {
     return -1;
 }
 
+static int up_find_free_slot(void) {
+    for (int i = 0; i < UP_MAX; i++)
+        if (!up_tab[i].alive)
+            return i;
+    return -1;
+}
+
 static int up_pick_next(void) {
     /* Round-robin every live process; parents remain schedulable while children run. */
     int start = (up_cur < 0) ? 0 : up_cur;
@@ -1054,18 +1061,18 @@ static Frame *syscall_handler(Frame *f) {
             }
         }
 
-        if (up_find_proc(caller) < 0 && up_n < UP_MAX) {
-            up_tab[up_n].parent = -1;
-            up_tab[up_n].proc = caller;
-            up_tab[up_n].entry = f->rip;
-            up_tab[up_n].alive = 1;
-            up_tab[up_n].fresh = 0;
-            up_tab[up_n].rip = f->rip;
-            up_tab[up_n].rsp = f->rsp;
-            up_tab[up_n].rflags = f->rflags ? f->rflags : 0x202;
-            up_tab[up_n].rax = proc->Pid;
-
-            up_snap(f, &up_tab[up_n]);
+        int caller_slot = up_find_free_slot();
+        if (up_find_proc(caller) < 0 && caller_slot >= 0) {
+            up_tab[caller_slot].parent = -1;
+            up_tab[caller_slot].proc = caller;
+            up_tab[caller_slot].entry = f->rip;
+            up_tab[caller_slot].alive = 1;
+            up_tab[caller_slot].fresh = 0;
+            up_tab[caller_slot].rip = f->rip;
+            up_tab[caller_slot].rsp = f->rsp;
+            up_tab[caller_slot].rflags = f->rflags ? f->rflags : 0x202;
+            up_tab[caller_slot].rax = proc->Pid;
+            up_snap(f, &up_tab[caller_slot]);
             up_n++;
         } else {
             int me = up_find_proc(caller);
@@ -1076,18 +1083,18 @@ static Frame *syscall_handler(Frame *f) {
             }
         }
 
-        if (up_n < UP_MAX) {
-            up_tab[up_n].parent = up_find_proc(caller);
-            up_tab[up_n].proc = proc;
-            up_tab[up_n].entry = entry;
-            up_tab[up_n].alive = 1;
-            up_tab[up_n].fresh = 1;
-            up_tab[up_n].rip = entry;
-            up_tab[up_n].rsp = USER_STACK_TOP;
-            up_tab[up_n].rflags = 0x202;
-            up_tab[up_n].rax = 0;
+        int child_slot = up_find_free_slot();
+        if (child_slot >= 0) {
+            up_tab[child_slot].parent = up_find_proc(caller);
+            up_tab[child_slot].proc = proc;
+            up_tab[child_slot].entry = entry;
+            up_tab[child_slot].alive = 1;
+            up_tab[child_slot].fresh = 1;
+            up_tab[child_slot].rip = entry;
+            up_tab[child_slot].rsp = USER_STACK_TOP;
+            up_tab[child_slot].rflags = 0x202;
+            up_tab[child_slot].rax = 0;
             up_n++;
-
             DbgPrint("user: NtCreateProcess concurrent");
         }
 

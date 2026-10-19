@@ -369,6 +369,14 @@ static int net_receive_frame(void *out, uint16_t capacity) {
     uint16_t len = d->length;
     uint8_t errors = d->errors;
     uint8_t status = d->status;
+    static uint32_t rx_debug_count;
+    if (rx_debug_count < 8) {
+        DbgPrint("net: RX done idx=%u len=%u status=%02x errors=%02x head=%u tail=%u GPRC=%u MPC=%u\\n",
+            i, (unsigned)len, status, errors,
+            net_rd(E1000_REG_RDH), net_rd(E1000_REG_RDT),
+            net_rd(0x4074), net_rd(0x4010));
+        rx_debug_count++;
+    }
     int valid = (status & E1000_RXD_STAT_EOP) && !errors &&
                 len >= 14 && len <= NET_BUF_SIZE && len <= capacity;
     if (valid) {

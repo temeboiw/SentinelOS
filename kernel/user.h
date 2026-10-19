@@ -566,6 +566,8 @@ static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod,
  * resolving/resolved flags prevent dependency cycles such as A -> B -> A.
  * DLL images and their import address tables are process-private too.
  */
+static BootModule *PspLoadDiskPe(const char *path);
+
 static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
     if (!proc || !mod)
         return;

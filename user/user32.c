@@ -784,11 +784,13 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     int visible_rows = (g_wnd.h - 52) / 16;
                     if (visible_rows < 1) visible_rows = 1;
                     int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+                    int old_scroll_top = g_scroll_top;
                     g_scroll_top -= (int)(signed char)ev.key * 3;
                     if (g_scroll_top < 0) g_scroll_top = 0;
                     if (g_scroll_top > max_scroll) g_scroll_top = max_scroll;
                     g_batch_follow = (g_scroll_top == max_scroll);
-                    compose();
+                    /* Avoid repainting when wheel input cannot change the view. */
+                    if (g_scroll_top != old_scroll_top) compose();
                 }
                 continue;
             }

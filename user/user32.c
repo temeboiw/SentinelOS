@@ -776,6 +776,23 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 return 1;
             }
 
+            if (ev.type == 4) {
+                /* Signed wheel ticks: positive is up, negative is down. */
+                if (g_wnd.visible && !g_wnd.minimized &&
+                    hit(ev.x, ev.y, g_wnd.x, g_wnd.y,
+                        g_wnd.x + g_wnd.w, g_wnd.y + g_wnd.h)) {
+                    int visible_rows = (g_wnd.h - 52) / 16;
+                    if (visible_rows < 1) visible_rows = 1;
+                    int max_scroll = g_nlines > visible_rows ? g_nlines - visible_rows : 0;
+                    g_scroll_top -= (int)(signed char)ev.key * 3;
+                    if (g_scroll_top < 0) g_scroll_top = 0;
+                    if (g_scroll_top > max_scroll) g_scroll_top = max_scroll;
+                    g_batch_follow = (g_scroll_top == max_scroll);
+                    compose();
+                }
+                continue;
+            }
+
             if (ev.type == 2 || ev.type == 3) {
                 g_mx = ev.x;
                 g_my = ev.y;

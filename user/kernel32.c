@@ -415,7 +415,7 @@ static void *k32_heap_alloc(u64 bytes, u32 flags) {
         u64 size=(bytes+sizeof(HeapBlock)+0xFFFu)&~0xFFFULL;
         if(size>15ull*1024*1024 || g_heap_large_count>=32)return 0;
         u32 slot=g_heap_large_count;
-        u64 base=0x60000000ull+(u64)slot*0x01000000ull;
+        u64 base=0x200000000ull+(u64)slot*0x01000000ull;
         void *mem=(void *)sy3(SYS_Alloc,base,size,0);
         if(!mem || (u64)mem!=base)return 0;
         g_heap_large[slot].base=(BYTE *)mem;
@@ -635,4 +635,116 @@ __attribute__((dllexport)) int WideCharToMultiByte(UINT cp,DWORD flags,LPCWCH sr
     }
     if(dst && out>dst_cap){g_last_error=ERROR_INSUFFICIENT_BUFFER;return 0;}
     g_last_error=ERROR_SUCCESS;return out;
+}
+
+
+/* Wide-character filesystem entry points share the same checked ANSI paths. */
+static int k32_wide_to_ansi(LPCWSTR wide,char *out,u32 cap) {
+    if(!wide||!out||!cap)return -1;
+    u32 i=0;
+    while(wide[i] && i+1<cap) {
+        if(wide[i]>0x7F){g_last_error=1113;return -1;}
+        out[i]=(char)wide[i];i++;
+    }
+    if(wide[i]){g_last_error=ERROR_INSUFFICIENT_BUFFER;return -1;}
+    out[i]=0;return (int)i;
+}
+__attribute__((dllexport)) DWORD GetFileAttributesW(LPCWSTR path) {
+    char p[128];
+    if(k32_wide_to_ansi(path,p,sizeof p)<0)return 0xFFFFFFFFu;
+    return GetFileAttributesA(p);
+}
+__attribute__((dllexport)) BOOL SetCurrentDirectoryW(LPCWSTR path) {
+    char p[128];
+    if(k32_wide_to_ansi(path,p,sizeof p)<0)return 0;
+    return SetCurrentDirectoryA(p);
+}
+__attribute__((dllexport)) DWORD GetCurrentDirectoryW(DWORD cap,LPWSTR out) {
+    char path[128];
+    DWORD n=GetCurrentDirectoryA(sizeof path,path);
+    if(!n)return 0;
+    DWORD required=n+1;
+    if(!out || cap<required){g_last_error=ERROR_INSUFFICIENT_BUFFER;return required;}
+    for(DWORD i=0;i<required;i++)out[i]=(BYTE)path[i];
+    g_last_error=ERROR_SUCCESS;
+    return n;
+}
+__attribute__((dllexport)) HANDLE CreateFileW(
+    LPCWSTR name,DWORD access,DWORD share,void *sec,DWORD disposition,
+    DWORD flags,HANDLE templ)
+{
+    char path[128];
+    if(k32_wide_to_ansi(name,path,sizeof path)<0)return INVALID_HANDLE_VALUE;
+    return CreateFileA(path,access,share,sec,disposition,flags,templ);
+}
+__attribute__((dllexport)) DWORD GetFullPathNameA(
+    LPCSTR path,DWORD cap,LPSTR out,LPSTR *file_part)
+{
+    if(file_part)*file_part=0;
+    if(!path||!path[0]){g_last_error=ERROR_INVALID_PARAMETER;return 0;}
+    char full[256];u32 n=0;
+    int absolute=(path[0]=='\\\\'||path[0]=='/') ||
+                 ((path[0]=='C'||path[0]=='c')&&path[1]==':');
+    if(absolute) {
+        if((path[0]=='C'||path[0]=='c')&&path[1]==':') {
+            full[n++]='C';full[n++]=':';path+=2;
+        } else {full[n++]='C';full[n++]=':';}
+        if(*path!='\\\\'&&*path!='/')full[n++]='\\\\';
+    } else {
+        DWORD cwd=GetCurrentDirectoryA(sizeof full,full);
+        if(!cwd)return 0;
+        n=cwd;
+        if(n && full[n-1]!='\\\\')full[n++]='\\\\';
+    }
+    while((*path=='\\\\'||*path=='/'))path++;
+    while(*path && n<sizeof(full)-2) {
+        char ch=*path++;
+        if(ch=='/')ch='\\\\';
+        full[n++]=ch;
+    }
+    full[n]=0;
+    /* Normalize separators and resolve . / .. components in-place. */
+    char normalized[256];u32 o=0,i=0;
+    normalized[o++]='C';normalized[o++]=':';normalized[o++]='\\\\';
+    if(full[0]=='C'&&full[1]==':')i=2;
+    while(full[i]=='\\\\'||full[i]=='/')i++;
+    while(full[i]) {
+        char comp[128];u32 z=0;
+        while(full[i]&&full[i]!='\\\\'&&full[i]!='/') {
+            if(z+1>=sizeof comp){g_last_error=ERROR_INSUFFICIENT_BUFFER;return 0;}
+            comp[z++]=full[i++];
+        }
+        comp[z]=0;
+        while(full[i]=='\\\\'||full[i]=='/')i++;
+        if(!z || (z==1&&comp[0]=='.'))continue;
+        if(z==2&&comp[0]=='.'&&comp[1]=='.') {
+            if(o>3){if(normalized[o-1]=='\\\\')o--;while(o>3&&normalized[o-1]!='\\\\')o--;if(o<3)o=3;}
+            continue;
+        }
+        if(o>3&&normalized[o-1]!='\\\\')normalized[o++]='\\\\';
+        for(u32 j=0;j<z&&o<sizeof(normalized)-1;j++)normalized[o++]=comp[j];
+    }
+    normalized[o]=0;
+    if(!out||cap<=o){g_last_error=ERROR_INSUFFICIENT_BUFFER;return o+1;}
+    for(u32 j=0;j<=o;j++)out[j]=normalized[j];
+    if(file_part) {
+        int j=(int)o-1;while(j>=0&&out[j]!='\\\\')j++;
+        if(j>=0)*file_part=out+j+1;
+    }
+    g_last_error=ERROR_SUCCESS;return o;
+}
+__attribute__((dllexport)) int memcmp(const void *a,const void *b,SIZE_T n) {
+    const BYTE *x=(const BYTE *)a,*y=(const BYTE *)b;
+    for(u64 i=0;i<n;i++)if(x[i]!=y[i])return (int)x[i]-(int)y[i];
+    return 0;
+}
+__attribute__((dllexport)) void *memcpy(void *dst,const void *src,SIZE_T n) {
+    return RtlCopyMemory(dst,src,n);
+}
+__attribute__((dllexport)) void *memmove(void *dst,const void *src,SIZE_T n) {
+    return RtlMoveMemory(dst,src,n);
+}
+__attribute__((dllexport)) void *memset(void *dst,int value,SIZE_T n) {
+    if(dst)for(u64 i=0;i<n;i++)((BYTE *)dst)[i]=(BYTE)value;
+    return dst;
 }

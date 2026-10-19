@@ -11,6 +11,7 @@
 #define NS_ETH_IPV4 0x0800u
 #define NS_IP_ICMP 1u
 #define NS_IP_UDP 17u
+#define NS_IP_TCP 6u
 #define NS_DHCP_CLIENT_PORT 68u
 #define NS_DHCP_SERVER_PORT 67u
 #define NS_DNS_PORT 53u
@@ -29,6 +30,10 @@ static int ns_dns_done;
 static uint32_t ns_ping_target;
 static int ns_ping_seen;
 static int ns_dhcp_state;
+/* One bounded, polling TCP active-open test connection. */
+static uint32_t ns_tcp_remote_ip, ns_tcp_local_seq, ns_tcp_remote_seq;
+static uint16_t ns_tcp_remote_port, ns_tcp_local_port;
+static int ns_tcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 static void ns_query_config(SENTINELOS_NET_CONFIG *out);
 
@@ -153,6 +158,63 @@ static void ns_handle_udp(uint8_t *ip,uint16_t total) {
         }
     }
 }
+
+/* TCP checksum includes the IPv4 pseudo-header. */
+static uint16_t ns_tcp_checksum(uint32_t src, uint32_t dst,
+                                const uint8_t *tcp, uint16_t len) {
+    uint32_t sum=0;
+    sum+=(src>>16)&0xFFFFu; sum+=src&0xFFFFu;
+    sum+=(dst>>16)&0xFFFFu; sum+=dst&0xFFFFu;
+    sum+=NS_IP_TCP; sum+=len;
+    for(uint16_t i=0;i+1<len;i+=2) sum+=((uint16_t)tcp[i]<<8)|tcp[i+1];
+    if(len&1u) sum+=(uint16_t)tcp[len-1]<<8;
+    while(sum>>16) sum=(sum&0xFFFFu)+(sum>>16);
+    return (uint16_t)~sum;
+}
+static int ns_tcp_send(uint8_t flags, const uint8_t *data, uint16_t len) {
+    uint8_t p[1200]; uint16_t hlen=20;
+    if(len>sizeof(p)-hlen || !ns_tcp_remote_ip || !ns_tcp_remote_port) return -1;
+    ns_zero(p,hlen+len);
+    ns_wr16(p,ns_tcp_local_port); ns_wr16(p+2,ns_tcp_remote_port);
+    ns_wr32(p+4,ns_tcp_local_seq); ns_wr32(p+8,ns_tcp_remote_seq);
+    p[12]=0x50; p[13]=flags; ns_wr16(p+14,4096);
+    if(len) ns_copy(p+hlen,data,len);
+    ns_wr16(p+16,ns_tcp_checksum(ns_cfg.IPv4Address,ns_tcp_remote_ip,p,(uint16_t)(hlen+len)));
+    return ns_send_ipv4(ns_tcp_remote_ip,NS_IP_TCP,p,(uint16_t)(hlen+len));
+}
+static void ns_handle_tcp(uint8_t *ip,uint16_t total) {
+    if(total<40 || ip[9]!=NS_IP_TCP) return;
+    uint8_t *tcp=ip+20; uint16_t hlen=(uint16_t)((tcp[12]>>4)*4u);
+    uint16_t tlen=(uint16_t)(total-20);
+    if(hlen<20 || hlen>tlen || ns_tcp_checksum(ns_rd32(ip+12),ns_rd32(ip+16),tcp,tlen)!=0) return;
+    uint32_t src=ns_rd32(ip+12), dst=ns_rd32(ip+16);
+    uint16_t sport=ns_rd16(tcp), dport=ns_rd16(tcp+2);
+    if(ns_tcp_state!=1 || src!=ns_tcp_remote_ip || dst!=ns_cfg.IPv4Address ||
+       sport!=ns_tcp_remote_port || dport!=ns_tcp_local_port) return;
+    uint8_t flags=tcp[13];
+    if(flags&0x04u) { ns_tcp_state=-1; return; }
+    if((flags&0x12u)==0x12u && ns_rd32(tcp+8)==ns_tcp_local_seq+1) {
+        ns_tcp_remote_seq=ns_rd32(tcp+4)+1;
+        ns_tcp_local_seq++;
+        if(ns_tcp_send(0x10u,0,0)==0) ns_tcp_state=2;
+        else ns_tcp_state=-1;
+    } else if((flags&0x10u) && ns_rd32(tcp+4)==ns_tcp_remote_seq) {
+        /* A peer ACK is not enough to claim application data support yet. */
+    }
+}
+/* Performs only the TCP three-way handshake; no stream/HTTP API yet. */
+static int ns_tcp_connect(uint32_t dst,uint16_t port) {
+    ns_query_config(0);
+    if(!dst || !port || !(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED)) return -1;
+    ns_tcp_remote_ip=dst; ns_tcp_remote_port=port; ns_tcp_local_port=49153;
+    ns_tcp_local_seq=0x53454E54u; ns_tcp_remote_seq=0; ns_tcp_state=1;
+    if(ns_tcp_send(0x02u,0,0)!=0) { ns_tcp_state=0; return -1; }
+    for(volatile uint32_t t=0;t<3000000u && ns_tcp_state==1;t++) ns_poll();
+    int result=(ns_tcp_state==2)?0:-1;
+    ns_tcp_state=0;
+    return result;
+}
+
 static void ns_handle_ipv4(const uint8_t *eth,uint16_t len) {
     if(len<20) return;
     uint8_t *ip=(uint8_t *)(uintptr_t)eth;
@@ -169,6 +231,7 @@ static void ns_handle_ipv4(const uint8_t *eth,uint16_t len) {
        !((dst&0xF0000000u)==0xE0000000u)) return;
     if(ip[9]==NS_IP_ICMP) ns_handle_icmp(ip,total);
     else if(ip[9]==NS_IP_UDP) ns_handle_udp(ip,total);
+    else if(ip[9]==NS_IP_TCP) ns_handle_tcp(ip,total);
 }
 static void ns_handle_frame(const uint8_t *frame,uint16_t len) {
     if(len<14) return;

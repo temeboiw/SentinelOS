@@ -23,7 +23,11 @@ static uint8_t ns_arp_mac[6];
 static uint32_t ns_arp_ip;
 static uint32_t ns_ip_id = 1;
 static uint32_t ns_dhcp_xid = 0x534F5301u;
-static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;\nstatic int ns_dns_done;\nstatic uint32_t ns_ping_target;\nstatic int ns_ping_seen;
+static uint16_t ns_dns_id = 0x534Fu, ns_dns_wait_id;\nstatic uint32_t ns_dns_answer;
+static int ns_dns_done;
+static uint32_t ns_ping_target;
+static int ns_ping_seen;
+static void ns_query_config(SENTINELOS_NET_CONFIG *out);\nstatic int ns_dns_done;\nstatic uint32_t ns_ping_target;\nstatic int ns_ping_seen;
 static int ns_dhcp_state;
 static uint32_t ns_dhcp_offer_ip, ns_dhcp_server, ns_dhcp_mask, ns_dhcp_gw, ns_dhcp_dns;
 
@@ -89,30 +93,64 @@ static void ns_handle_udp(uint8_t *ip,uint16_t total) {
     if(ulen<8 || ulen>total-20) return;
     uint16_t src=ns_rd16(udp), dst=ns_rd16(udp+2);
     uint8_t *data=udp+8; uint16_t dlen=(uint16_t)(ulen-8);
-    if(dst==NS_DHCP_CLIENT_PORT && src==NS_DHCP_SERVER_PORT && dlen>=240 &&
-       ns_rd32(data+4)==ns_dhcp_xid && data[0]==2 && ns_mac_equal(data+28,ns_cfg.MacAddress)) {
+    if(dst==NS_DHCP_CLIENT_PORT && src==NS_DHCP_SERVER_PORT &&
+       dlen>=240 && ns_rd32(data+4)==ns_dhcp_xid && data[0]==2 &&
+       ns_mac_equal(data+28,ns_cfg.MacAddress) &&
+       data[236]==99 && data[237]==130 && data[238]==83 && data[239]==99) {
         uint32_t yi=ns_rd32(data+16), server=0, mask=0, gw=0, dns=0;
-        if(data[236]==99 && data[237]==130 && data[238]==83 && data[239]==99) {
-            for(uint32_t i=240;i<dlen;) {
-                uint8_t tag=data[i++]; if(tag==255)break; if(tag==0)continue;
-                if(i>=dlen)break; uint8_t l=data[i++]; if(i+l>dlen)break;
-                if(tag==54 && l==4)server=ns_rd32(data+i);
-                if(tag==1 && l==4)mask=ns_rd32(data+i);
-                if(tag==3 && l>=4)gw=ns_rd32(data+i);
-                if(tag==6 && l>=4)dns=ns_rd32(data+i);
-                i+=l;
-            }
-            uint8_t msg=data[242];
-            if(msg==2 && ns_dhcp_state==1) {
-                ns_dhcp_offer_ip=yi; ns_dhcp_server=server; ns_dhcp_mask=mask; ns_dhcp_gw=gw; ns_dhcp_dns=dns; ns_dhcp_state=2;
-            } else if(msg==5 && ns_dhcp_state==3 && yi) {
-                ns_cfg.IPv4Address=yi; ns_cfg.SubnetMask=mask?mask:ns_dhcp_mask;
-                ns_cfg.Gateway=gw?gw:ns_dhcp_gw; ns_cfg.DnsServer=dns?dns:ns_dhcp_dns;
-                ns_cfg.Flags|=SENTINELOS_NET_IPV4_CONFIGURED; ns_dhcp_state=4;
-            }
+        uint8_t msg=0;
+        for(uint32_t i=240;i<dlen;) {
+            uint8_t tag=data[i++]; if(tag==255)break; if(tag==0)continue;
+            if(i>=dlen)break; uint8_t l=data[i++]; if(i+l>dlen)break;
+            if(tag==53 && l==1)msg=data[i];
+            if(tag==54 && l==4)server=ns_rd32(data+i);
+            if(tag==1 && l==4)mask=ns_rd32(data+i);
+            if(tag==3 && l>=4)gw=ns_rd32(data+i);
+            if(tag==6 && l>=4)dns=ns_rd32(data+i);
+            i+=l;
+        }
+        if(msg==2 && ns_dhcp_state==1 && yi) {
+            ns_dhcp_offer_ip=yi; ns_dhcp_server=server;
+            ns_dhcp_mask=mask; ns_dhcp_gw=gw; ns_dhcp_dns=dns; ns_dhcp_state=2;
+        } else if(msg==5 && ns_dhcp_state==3 && yi) {
+            ns_cfg.IPv4Address=yi;
+            ns_cfg.SubnetMask=mask?mask:ns_dhcp_mask;
+            ns_cfg.Gateway=gw?gw:ns_dhcp_gw;
+            ns_cfg.DnsServer=dns?dns:ns_dhcp_dns;
+            ns_cfg.Flags|=SENTINELOS_NET_IPV4_CONFIGURED; ns_dhcp_state=4;
         }
     }
-    (void)src;
+    if(dst==49152 && src==NS_DNS_PORT && dlen>=12 &&
+       ns_rd16(data)==ns_dns_wait_id && ns_dns_wait_id &&
+       (ns_rd16(data+2)&0x8000u) && !(ns_rd16(data+2)&0x000Fu) &&
+       ns_rd16(data+6)>0) {
+        uint16_t qd=ns_rd16(data+4), an=ns_rd16(data+6); uint32_t pos=12;
+        for(uint16_t q=0;q<qd;q++) {
+            uint32_t guard=0;
+            while(pos<dlen && data[pos] && !(data[pos]&0xC0u) && guard++<255)
+                pos+=(uint32_t)data[pos]+1;
+            if(pos>=dlen)return;
+            if((data[pos]&0xC0u)==0xC0u)pos+=2; else pos++;
+            if(pos+4>dlen)return; pos+=4;
+        }
+        for(uint16_t a=0;a<an && pos+12<=dlen;a++) {
+            if((data[pos]&0xC0u)==0xC0u)pos+=2;
+            else {
+                uint32_t guard=0;
+                while(pos<dlen && data[pos] && !(data[pos]&0xC0u) && guard++<255)
+                    pos+=(uint32_t)data[pos]+1;
+                if(pos>=dlen)return; pos++;
+            }
+            if(pos+10>dlen)return;
+            uint16_t typ=ns_rd16(data+pos), cls=ns_rd16(data+pos+2);
+            uint16_t rdlen=ns_rd16(data+pos+8); pos+=10;
+            if(pos+rdlen>dlen)return;
+            if(typ==1 && cls==1 && rdlen==4) {
+                ns_dns_answer=ns_rd32(data+pos); ns_dns_done=1; return;
+            }
+            pos+=rdlen;
+        }
+    }
 }
 static void ns_handle_ipv4(const uint8_t *eth,uint16_t len) {
     if(len<20) return;
@@ -187,6 +225,7 @@ static int ns_dhcp_message(uint8_t type,uint32_t requested,uint32_t server) {
     return ns_send_eth(bcast,NS_ETH_IPV4,ip,(uint16_t)(28+i));
 }
 static int ns_dhcp(void) {
+    ns_query_config(0);
     if(!net_ready)return -1;
     ns_cfg.IPv4Address=ns_cfg.SubnetMask=ns_cfg.Gateway=ns_cfg.DnsServer=0;
     ns_cfg.Flags &= ~SENTINELOS_NET_IPV4_CONFIGURED;
@@ -200,10 +239,15 @@ static int ns_dhcp(void) {
     return ns_dhcp_state==4?0:-1;
 }
 static int ns_ping(uint32_t dst) {
+    ns_query_config(0);
     if(!dst || !(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED))return -1;
-    uint8_t p[16];ns_zero(p,sizeof p);p[0]=8;p[1]=0;ns_wr16(p+4,0x534F);ns_wr16(p+6,1);
-    ns_wr32(p+8,0x53454E54);ns_wr16(p+2,ns_checksum(p,sizeof p));
-    return ns_send_ipv4(dst,NS_IP_ICMP,p,sizeof p);
+    uint8_t p[16]; ns_zero(p,sizeof p); p[0]=8; p[1]=0;
+    ns_wr16(p+4,0x534F); ns_wr16(p+6,1); ns_wr32(p+8,0x53454E54);
+    ns_wr16(p+2,ns_checksum(p,sizeof p));
+    ns_ping_target=dst; ns_ping_seen=0;
+    if(ns_send_ipv4(dst,NS_IP_ICMP,p,sizeof p))return -1;
+    for(volatile uint32_t t=0;t<2000000u && !ns_ping_seen;t++)ns_poll();
+    return ns_ping_seen?0:-1;
 }
 static int ns_dns_name(const char *name,uint8_t *out,uint16_t cap,uint16_t *written) {
     uint16_t n=0; int label=0; uint16_t mark=0;
@@ -221,20 +265,30 @@ static int ns_dns_name(const char *name,uint8_t *out,uint16_t cap,uint16_t *writ
     out[mark]=(uint8_t)label;out[n++]=0;*written=n;return 0;
 }
 static int ns_dns_query(const char *name,uint32_t *answer) {
-    if(!name || !answer || !ns_cfg.DnsServer || !(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED))return -1;
-    uint8_t p[512];ns_zero(p,sizeof p);uint16_t qn=0;
+    ns_query_config(0);
+    if(!name || !answer || !ns_cfg.DnsServer ||
+       !(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED))return -1;
+    uint8_t p[512]; ns_zero(p,sizeof p); uint16_t qn=0;
     if(ns_dns_name(name,p+12,sizeof(p)-16,&qn))return -1;
-    uint16_t id=++ns_dns_id; ns_dns_wait_id=id; ns_dns_done=0; ns_dns_answer=0; ns_wr16(p,id);ns_wr16(p+2,0x0100);ns_wr16(p+4,1);
-    ns_wr16(p+12+qn,1);ns_wr16(p+14+qn,1);uint16_t plen=(uint16_t)(16+qn);
-    if(ns_send_udp(ns_cfg.DnsServer,49152,NS_DNS_PORT,p,plen))return -1;
-    for(volatile uint32_t t=0;t<3000000u;t++) {
-        ns_poll();
-        /* DNS response handling is captured from the received UDP frame by a follow-up parser. */
-        (void)id;
+    uint16_t id=++ns_dns_id; ns_dns_wait_id=id; ns_dns_done=0; ns_dns_answer=0;
+    ns_wr16(p,id); ns_wr16(p+2,0x0100); ns_wr16(p+4,1);
+    ns_wr16(p+12+qn,1); ns_wr16(p+14+qn,1);
+    uint16_t plen=(uint16_t)(16+qn);
+    if(ns_send_udp(ns_cfg.DnsServer,49152,NS_DNS_PORT,p,plen)) {
+        ns_dns_wait_id=0; return -1;
     }
-    return -1;
+    for(volatile uint32_t t=0;t<3000000u && !ns_dns_done;t++)ns_poll();
+    ns_dns_wait_id=0;
+    if(!ns_dns_done)return -1;
+    *answer=ns_dns_answer; return 0;
 }
 static void ns_query_config(SENTINELOS_NET_CONFIG *out) {
-    net_query_config(&ns_cfg);
-    if(out) *out=ns_cfg;
+    SENTINELOS_NET_CONFIG hw;
+    net_query_config(&hw);
+    ns_cfg.Version=hw.Version;
+    ns_cfg.Flags=(ns_cfg.Flags&SENTINELOS_NET_IPV4_CONFIGURED) |
+        (hw.Flags&(SENTINELOS_NET_DRIVER_READY|SENTINELOS_NET_LINK_UP));
+    ns_copy(ns_cfg.MacAddress,hw.MacAddress,6);
+    ns_cfg.RxPackets=hw.RxPackets; ns_cfg.TxPackets=hw.TxPackets;
+    if(out)*out=ns_cfg;
 }

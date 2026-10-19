@@ -265,6 +265,11 @@ lld -flavor link \
   /export:GetTickCount /export:lstrlenA /export:lstrcmpA /export:lstrcmpiA \
   /export:lstrcpyA /export:lstrcpynA /export:GetVersion /export:GetVersionExA \
   /export:CreateProcessA /export:CreateProcessW /export:GetProcessId \
+  /export:GetProcessHeap /export:HeapAlloc /export:HeapFree /export:HeapSize /export:HeapReAlloc \
+  /export:LocalAlloc /export:LocalReAlloc /export:LocalFree /export:GlobalAlloc /export:GlobalReAlloc /export:GlobalFree \
+  /export:RtlMoveMemory /export:RtlCopyMemory /export:RtlZeroMemory \
+  /export:lstrlenW /export:lstrcmpW /export:lstrcmpiW /export:lstrcpyW /export:lstrcpynW \
+  /export:CharLowerBuffA /export:CharUpperBuffA /export:MultiByteToWideChar /export:WideCharToMultiByte \
   "/implib:$B/obj/kernel32.lib" \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"

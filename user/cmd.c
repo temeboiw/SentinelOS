@@ -386,6 +386,22 @@ static void command_dhcp(void) {
         str_copy(line, "   RX packets . . . . . : ", sizeof line);
         str_copy(line + str_len(line), number, sizeof line - str_len(line));
         print_line(line);
+#define NET_DIAG(label, field) do { \
+            format_u64((u64)cfg.field, number, sizeof number); \
+            str_copy(line, label, sizeof line); \
+            str_copy(line + str_len(line), number, sizeof line - str_len(line)); \
+            print_line(line); \
+        } while (0)
+        NET_DIAG("   RX head . . . . . . : ", RxHead);
+        NET_DIAG("   RX tail . . . . . . : ", RxTail);
+        NET_DIAG("   RX descriptor status: ", RxDescStatus);
+        NET_DIAG("   RX descriptor errors: ", RxDescErrors);
+        NET_DIAG("   RX control . . . . . : ", RxControl);
+        NET_DIAG("   HW good RX . . . . . : ", RxGoodCount);
+        NET_DIAG("   HW missed RX . . . . : ", RxMissedCount);
+        NET_DIAG("   TX head / tail . . . : ", TxHead);
+        NET_DIAG("   TX descriptor status: ", TxDescStatus);
+#undef NET_DIAG
     }
     command_ipconfig();
 }

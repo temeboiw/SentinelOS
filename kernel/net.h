@@ -111,16 +111,20 @@ static inline uint32_t net_inl(uint16_t p) {
     return v;
 }
 
-/* PCI configuration mechanism #1; QEMU's Q35 E1000 is on bus 0. */
-static uint32_t net_pci_read(uint8_t slot, uint8_t function, uint8_t off) {
-    uint32_t address = (1u << 31) | ((uint32_t)slot << 11) |
-                       ((uint32_t)function << 8) | (off & 0xFC);
+/* PCI configuration mechanism #1. Scan every bus: Q35 may place a
+ * conventional PCI NIC behind a PCI/PCIe bridge rather than on bus zero. */
+static uint32_t net_pci_read(uint8_t bus, uint8_t slot, uint8_t function, uint8_t off) {
+    uint32_t address = (1u << 31) | ((uint32_t)bus << 16) |
+                       ((uint32_t)slot << 11) | ((uint32_t)function << 8) |
+                       (off & 0xFC);
     net_outl(0xCF8, address);
     return net_inl(0xCFC);
 }
-static void net_pci_write(uint8_t slot, uint8_t function, uint8_t off, uint32_t val) {
-    uint32_t address = (1u << 31) | ((uint32_t)slot << 11) |
-                       ((uint32_t)function << 8) | (off & 0xFC);
+static void net_pci_write(uint8_t bus, uint8_t slot, uint8_t function,
+                          uint8_t off, uint32_t val) {
+    uint32_t address = (1u << 31) | ((uint32_t)bus << 16) |
+                       ((uint32_t)slot << 11) | ((uint32_t)function << 8) |
+                       (off & 0xFC);
     net_outl(0xCF8, address);
     net_outl(0xCFC, val);
 }
@@ -128,24 +132,29 @@ static int net_is_supported_device(uint16_t device) {
     return device == 0x100E || device == 0x100F ||
            device == 0x10D3 || device == 0x153A;
 }
-static int net_find_pci_device(uint8_t *found_slot, uint8_t *found_function,
-                               uint16_t *found_device, uint32_t *found_bar) {
-    for (uint8_t slot = 0; slot < 32; slot++) {
-        uint32_t id0 = net_pci_read(slot, 0, 0);
-        if ((uint16_t)id0 == 0xFFFFu) continue;
-        uint8_t functions = (net_pci_read(slot, 0, 0x0C) & (1u << 23)) ? 8 : 1;
-        for (uint8_t fn = 0; fn < functions; fn++) {
-            uint32_t id = fn ? net_pci_read(slot, fn, 0) : id0;
-            if ((uint16_t)id != E1000_PCI_VENDOR ||
-                !net_is_supported_device((uint16_t)(id >> 16))) continue;
-            uint32_t bar = net_pci_read(slot, fn, 0x10);
-            /* This implementation intentionally supports a 32-bit memory BAR. */
-            if ((bar & 1u) || ((bar >> 1) & 3u) == 2u || !(bar & ~0xFu)) continue;
-            *found_slot = slot;
-            *found_function = fn;
-            *found_device = (uint16_t)(id >> 16);
-            *found_bar = bar;
-            return 0;
+static int net_find_pci_device(uint8_t *found_bus, uint8_t *found_slot,
+                               uint8_t *found_function, uint16_t *found_device,
+                               uint32_t *found_bar) {
+    for (uint32_t bus = 0; bus < 256; bus++) {
+        for (uint8_t slot = 0; slot < 32; slot++) {
+            uint32_t id0 = net_pci_read((uint8_t)bus, slot, 0, 0);
+            if ((uint16_t)id0 == 0xFFFFu) continue;
+            uint8_t functions =
+                (net_pci_read((uint8_t)bus, slot, 0, 0x0C) & (1u << 23)) ? 8 : 1;
+            for (uint8_t fn = 0; fn < functions; fn++) {
+                uint32_t id = fn ? net_pci_read((uint8_t)bus, slot, fn, 0) : id0;
+                if ((uint16_t)id != E1000_PCI_VENDOR ||
+                    !net_is_supported_device((uint16_t)(id >> 16))) continue;
+                uint32_t bar = net_pci_read((uint8_t)bus, slot, fn, 0x10);
+                /* This implementation intentionally supports a 32-bit memory BAR. */
+                if ((bar & 1u) || ((bar >> 1) & 3u) == 2u || !(bar & ~0xFu)) continue;
+                *found_bus = (uint8_t)bus;
+                *found_slot = slot;
+                *found_function = fn;
+                *found_device = (uint16_t)(id >> 16);
+                *found_bar = bar;
+                return 0;
+            }
         }
     }
     return -1;
@@ -216,10 +225,10 @@ static int net_e1000_init(void) {
     net_rx_packets = net_tx_packets = net_rx_dropped = net_tx_errors = 0;
     net_release_dma();
 
-    uint8_t slot = 0, function = 0;
+    uint8_t bus = 0, slot = 0, function = 0;
     uint16_t device = 0;
     uint32_t bar = 0;
-    if (net_find_pci_device(&slot, &function, &device, &bar)) {
+    if (net_find_pci_device(&bus, &slot, &function, &device, &bar)) {
         DbgPrint("net: supported Intel E1000 PCI device not found\n");
         return -1;
     }
@@ -232,9 +241,9 @@ static int net_e1000_init(void) {
         return -1;
     }
 
-    uint32_t command_status = net_pci_read(slot, function, 0x04);
+    uint32_t command_status = net_pci_read(bus, slot, function, 0x04);
     /* Only write the low command word; upper status bits can be write-one-to-clear. */
-    net_pci_write(slot, function, 0x04, (command_status & 0xFFFFu) | 0x0006u);
+    net_pci_write(bus, slot, function, 0x04, (command_status & 0xFFFFu) | 0x0006u);
     net_regs = (volatile uint32_t *)(HHDM_BASE + mmio);
 
     /* Disable all device interrupts: this driver deliberately polls. */
@@ -294,8 +303,8 @@ static int net_e1000_init(void) {
 
     net_pci_device = device;
     net_ready = 1;
-    DbgPrint("net: e1000 %04x:%04x ready; MAC %02x:%02x:%02x:%02x:%02x:%02x link=%s\n",
-        E1000_PCI_VENDOR, net_pci_device,
+    DbgPrint("net: e1000 bus=%u slot=%u %04x:%04x ready; MAC %02x:%02x:%02x:%02x:%02x:%02x link=%s\n",
+        bus, slot, E1000_PCI_VENDOR, net_pci_device,
         net_mac[0], net_mac[1], net_mac[2], net_mac[3], net_mac[4], net_mac[5],
         (net_rd(E1000_REG_STATUS) & E1000_STATUS_LU) ? "up" : "down");
     return 0;

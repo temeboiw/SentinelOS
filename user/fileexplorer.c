@@ -34,6 +34,8 @@ typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
 typedef u64 (*GetTickCount64_t)(void);
+typedef BOOL (*GetWindowRect_t)(void *, int *);
+typedef int (*GetScrollPosition_t)(void);
 
 typedef struct {
     DWORD hwnd, message;
@@ -147,6 +149,8 @@ void mainCRTStartup(void) {
     MessageBoxA_t pMsgBox=(MessageBoxA_t)gpa(u32,"MessageBoxA");
     InvalidateRect_t pInv=(InvalidateRect_t)gpa(u32,"InvalidateRect");
     GetTickCount64_t pTick=(GetTickCount64_t)gpa(k32,"GetTickCount64");
+    GetWindowRect_t pGetRect=(GetWindowRect_t)gpa(u32,"GetWindowRect");
+    GetScrollPosition_t pGetScroll=(GetScrollPosition_t)gpa(u32,"GetScrollPosition");
     if(!pQuery || !pCreate || !pShow || !pText || !pGetMsg) {
         print("fileexplorer: required API missing\n");
         for(;;)__asm__ volatile("pause");
@@ -170,22 +174,26 @@ void mainCRTStartup(void) {
          * Reject clicks outside the Explorer client content instead of
          * accidentally mapping title-bar/edge clicks to row zero.
          */
-        int client_top=g_win_y+44;
-        int client_bottom=g_win_y+40+520-8;
-        if(msg.pt_x < 54 || msg.pt_x >= 40+760-16 ||
+        int rect[4]={40,g_win_y,800,g_win_y+520};
+        if(pGetRect) (void)pGetRect(0,rect);
+        int client_top=rect[1]+44;
+        int client_bottom=rect[3]-8;
+        if(msg.pt_x < rect[0]+14 || msg.pt_x >= rect[2]-16 ||
            msg.pt_y < client_top || msg.pt_y >= client_bottom) {
             g_last_row=-1;
             continue;
         }
         int content_line=(msg.pt_y-client_top)/16;
-        int row=content_line-2;
+        /* TextOutA rows may scroll; map the visible row back to the data row. */
+        int scroll=pGetScroll ? pGetScroll() : 0;
+        int row=scroll+content_line-2;
         if(row<0 || row>=g_count) {g_last_row=-1;continue;}
         u64 now=pTick?pTick():msg.time;
         int dbl=(msg.message==0x0203) ||
                 (row==g_last_row && now>=g_last_click_ms && now-g_last_click_ms<=1000);
         g_last_row=row; g_last_click_ms=now;
-        /* Folder navigation is single-click: don't make it depend on timing. */
         if(g_isdir[row]) {
+            if(!dbl) continue;
             char target[128]; make_target_path(row,target,sizeof target);
             int ok=pChdir ? pChdir(target) : 0;
             if(!ok)ok=(sy3(SYS_Chdir,(u64)target,0,0)==0);

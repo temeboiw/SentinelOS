@@ -122,7 +122,7 @@ static int ps2_init(void) {
     ps2_wait_read();
     uint8_t mouse_id = ps2_inb(PS2_DATA);
     mouse_packet_len = (mouse_id == 3 || mouse_id == 4) ? 4 : 3;
-    DbgPrint("ps2: mouse id=%u packet=%d bytes\\n", mouse_id, mouse_packet_len);
+    DbgPrint("ps2: mouse id=%u packet=%d bytes\n", mouse_id, mouse_packet_len);
     /* enable streaming */
     ps2_cmd(0xD4); ps2_data(0xF4); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
 

@@ -8,7 +8,9 @@
  */
 #include <stdint.h>
 
-typedef int32_t  NTSTATUS;
+/* NTSTATUS is declared by shared/ntdef.h in the kernel build. Keep the
+   same underlying type here so either include order is accepted. */
+typedef long NTSTATUS;
 typedef uint64_t NT_ULONG_PTR;
 typedef uint64_t NT_SIZE_T;
 typedef uint32_t NT_ULONG;
@@ -31,8 +33,8 @@ typedef uint16_t NT_WCHAR;
 
 #define NT_CURRENT_PROCESS ((NT_HANDLE)(intptr_t)-1)
 
-#define NT_PROCESS_BASIC_INFORMATION 0u
-#define NT_MEMORY_BASIC_INFORMATION 0u
+#define NT_PROCESS_BASIC_INFORMATION_CLASS 0u
+#define NT_MEMORY_BASIC_INFORMATION_CLASS 0u
 
 #define NT_MEM_COMMIT  0x00001000u
 #define NT_MEM_RESERVE 0x00002000u

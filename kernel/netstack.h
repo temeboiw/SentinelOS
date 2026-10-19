@@ -121,7 +121,7 @@ static void ns_handle_udp(uint8_t *ip,uint16_t total) {
             ns_cfg.Flags|=SENTINELOS_NET_IPV4_CONFIGURED; ns_dhcp_state=4;
         }
     }
-    if(dst==49152 && src==NS_DNS_PORT && dlen>=12 &&
+    if(dst==49152 && src==NS_DNS_PORT && ns_rd32(ip+12)==ns_cfg.DnsServer && dlen>=12 &&
        ns_rd16(data)==ns_dns_wait_id && ns_dns_wait_id &&
        (ns_rd16(data+2)&0x8000u) && !(ns_rd16(data+2)&0x000Fu) &&
        ns_rd16(data+6)>0) {
@@ -157,7 +157,7 @@ static void ns_handle_ipv4(const uint8_t *eth,uint16_t len) {
     if(len<20) return;
     uint8_t *ip=(uint8_t *)(uintptr_t)eth;
     uint8_t ihl=(uint8_t)((ip[0]&15u)*4u); uint16_t total=ns_rd16(ip+2);
-    if((ip[0]>>4)!=4 || ihl<20 || ihl>len || total<ihl || total>len ||
+    if((ip[0]>>4)!=4 || ihl!=20 || ihl>len || total<ihl || total>len ||
        ns_checksum(ip,ihl)!=0 || (ns_rd16(ip+6)&0x3FFFu)) return;
     uint32_t dst=ns_rd32(ip+16);
     if(dst!=ns_cfg.IPv4Address && dst!=0xFFFFFFFFu && !((dst&0xF0000000u)==0xE0000000u)) return;

@@ -94,6 +94,9 @@ static void make_target_path(int row, char *out, int cap) {
     out[n]=0;
 }
 static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
+    /* Clear TextOutA's persistent line buffer before painting a new directory. */
+    pText(0, 0, -1, "", 0);
+    pText(0, 0, -2, "", 0);
     g_count=0;
     /* ext4 listing omits dot entries; synthesize .. so users can navigate back. */
     if(!is_root()) {

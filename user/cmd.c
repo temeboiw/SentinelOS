@@ -317,6 +317,79 @@ static void command_dir(void) {
     }
 }
 
+static char hex_digit(unsigned v) {
+    v &= 15u;
+    return (char)(v < 10 ? '0' + v : 'A' + v - 10);
+}
+
+static void command_ipconfig(void) {
+    SENTINELOS_NET_CONFIG cfg;
+    for (unsigned i = 0; i < sizeof cfg; i++)
+        ((unsigned char *)&cfg)[i] = 0;
+
+    if (NtQueryNetworkConfig(&cfg) != 0) {
+        print_line("ipconfig: network query failed.");
+        return;
+    }
+
+    print_line("Windows IP Configuration");
+    print_line("");
+    print_line("Ethernet adapter E1000:");
+
+    char line[LINE_SIZE];
+    int n = 0;
+    const char *prefix = "   Physical Address . . . : ";
+    while (prefix[n] && n < LINE_SIZE - 1) { line[n] = prefix[n]; n++; }
+    for (int i = 0; i < 6 && n < LINE_SIZE - 3; i++) {
+        line[n++] = hex_digit(cfg.MacAddress[i] >> 4);
+        line[n++] = hex_digit(cfg.MacAddress[i]);
+        if (i != 5) line[n++] = '-';
+    }
+    line[n] = 0;
+    print_line(line);
+
+    if (cfg.Flags & SENTINELOS_NET_LINK_UP)
+        print_line("   Media State . . . . . : Connected");
+    else if (cfg.Flags & SENTINELOS_NET_DRIVER_READY)
+        print_line("   Media State . . . . . : Disconnected");
+    else
+        print_line("   Media State . . . . . : Adapter not detected");
+
+    if (!(cfg.Flags & SENTINELOS_NET_IPV4_CONFIGURED)) {
+        print_line("   IPv4 Address . . . . : 0.0.0.0");
+        print_line("   DHCP . . . . . . . . : Not implemented yet");
+        print_line("   DNS Servers . . . . . : Not configured");
+        print_line("");
+        print_line("Network driver is experimental; no internet yet.");
+        return;
+    }
+
+    /* IPv4 fields are stored in network byte order. */
+    const uint32_t values[3] = { cfg.IPv4Address, cfg.SubnetMask, cfg.Gateway };
+    const char *labels[3] = {
+        "   IPv4 Address . . . . : ",
+        "   Subnet Mask . . . . . : ",
+        "   Default Gateway . . . : "
+    };
+    for (int j = 0; j < 3; j++) {
+        n = 0;
+        while (labels[j][n] && n < LINE_SIZE - 1) { line[n] = labels[j][n]; n++; }
+        for (int b = 24; b >= 0; b -= 8) {
+            unsigned v = (values[j] >> b) & 255u;
+            char digits[3]; int dn = 0;
+            if (v >= 100) digits[dn++] = (char)('0' + v / 100);
+            if (v >= 10) digits[dn++] = (char)('0' + (v / 10) % 10);
+            digits[dn++] = (char)('0' + v % 10);
+            for (int k = 0; k < dn && n < LINE_SIZE - 1; k++) line[n++] = digits[k];
+            if (b && n < LINE_SIZE - 1) line[n++] = '.';
+        }
+        line[n] = 0;
+        print_line(line);
+    }
+    print_line("   DNS Server . . . . . : configured");
+    print_line("");
+}
+
 static void run_command(const char *raw) {
     char cmd[CMD_SIZE], *arg;
     str_copy(cmd, raw, sizeof cmd);
@@ -329,7 +402,7 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, exit");
+        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");

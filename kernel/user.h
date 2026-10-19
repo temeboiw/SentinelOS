@@ -1570,6 +1570,11 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    case 27: /* TCP active-open handshake: IPv4 in RDI, port in RSI. */
+        f->rax = (uint64_t)(int64_t)ns_tcp_connect((uint32_t)f->rdi,
+                                                    (uint16_t)f->rsi);
+        return f;
+
     case SYS_NtShutdown:
         if (f->rdi == 0)
             HalReturnToFirmware(HalPowerDownRoutine);

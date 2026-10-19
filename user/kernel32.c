@@ -14,6 +14,18 @@ typedef const WCHAR *LPCWSTR;
 static DWORD g_last_error;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
+#define ERROR_SUCCESS 0u
+#define ERROR_INVALID_FUNCTION 1u
+#define ERROR_FILE_NOT_FOUND 2u
+#define ERROR_ACCESS_DENIED 5u
+#define ERROR_INVALID_HANDLE 6u
+#define ERROR_NOT_ENOUGH_MEMORY 8u
+#define ERROR_INVALID_PARAMETER 87u
+#define ERROR_NOT_SUPPORTED 50u
+#define GENERIC_READ 0x80000000u
+#define GENERIC_WRITE 0x40000000u
+#define OPEN_EXISTING 3u
+#define FILE_HANDLE_TAG 0x100u
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
@@ -33,34 +45,74 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
     sy3(SYS_Exit, code, 0, 0);
     for(;;) __asm__ volatile("hlt");
 }
-__attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) { (void)n; return (HANDLE)1; }
+__attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) {
+    /* Win32: STD_INPUT_HANDLE=-10, STD_OUTPUT_HANDLE=-11, STD_ERROR_HANDLE=-12. */
+    if (n == (DWORD)-11) return (HANDLE)1;
+    if (n == (DWORD)-12) return (HANDLE)2;
+    if (n == (DWORD)-10) { g_last_error=ERROR_NOT_SUPPORTED; return 0; }
+    g_last_error=ERROR_INVALID_PARAMETER; return 0;
+}
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
-    (void)h;(void)ov;
-    u64 n = sy3(SYS_Write, 1, (u64)buf, len);
-    if (w) *w = (DWORD)n;
-    return n != (u64)-1;
+    (void)ov;
+    if (w) *w=0;
+    if ((h!=(HANDLE)1 && h!=(HANDLE)2) || (!buf && len)) {
+        g_last_error=ERROR_INVALID_HANDLE; return 0;
+    }
+    if (!len) { g_last_error=ERROR_SUCCESS; return 1; }
+    u64 n=sy3(SYS_Write,1,(u64)buf,len);
+    if ((i64)n<0) { g_last_error=ERROR_INVALID_FUNCTION; return 0; }
+    if (w) *w=(DWORD)n;
+    g_last_error=ERROR_SUCCESS; return 1;
 }
 __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD p) {
     (void)t;(void)p; return (LPVOID)sy3(SYS_Alloc, (u64)a, sz, 0);
 }
-__attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, void *sec, DWORD d, DWORD f, HANDLE t) {
-    (void)a;(void)s;(void)sec;(void)d;(void)f;(void)t;
-    i64 h = (i64)sy3(SYS_OpenFile, (u64)name, 0, 0);
-    return h < 0 ? INVALID_HANDLE_VALUE : (HANDLE)h;
+__attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sec, DWORD disposition, DWORD flags, HANDLE templ) {
+    (void)share;(void)sec;(void)flags;(void)templ;
+    if (!name || !name[0] || disposition!=OPEN_EXISTING ||
+        (access & (GENERIC_WRITE|0x00010000u|0x00040000u))) {
+        g_last_error = (!name || !name[0]) ? ERROR_INVALID_PARAMETER :
+                       (disposition!=OPEN_EXISTING ? ERROR_NOT_SUPPORTED : ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (!(access & GENERIC_READ) && access!=0) {
+        g_last_error=ERROR_ACCESS_DENIED; return INVALID_HANDLE_VALUE;
+    }
+    i64 h=(i64)sy3(SYS_OpenFile,(u64)name,0,0);
+    if (h<1) { g_last_error=ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
+    /* Keep file handles distinct from the console handles 1 and 2. */
+    g_last_error=ERROR_SUCCESS;
+    return (HANDLE)(u64)(FILE_HANDLE_TAG+(u64)h);
 }
 __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD *rd, void *ov) {
     (void)ov;
-    i64 n = (i64)sy3(SYS_ReadFile, (u64)h, (u64)buf, len);
-    if (n < 0) return 0;
-    if (rd) *rd = (DWORD)n;
-    return 1;
+    if (rd) *rd=0;
+    u64 hv=(u64)h;
+    if (hv<=FILE_HANDLE_TAG || h==INVALID_HANDLE_VALUE || (!buf && len)) {
+        g_last_error=ERROR_INVALID_HANDLE; return 0;
+    }
+    if (!len) { g_last_error=ERROR_SUCCESS; return 1; }
+    i64 n=(i64)sy3(SYS_ReadFile,hv-FILE_HANDLE_TAG,(u64)buf,len);
+    if (n<0) { g_last_error=ERROR_INVALID_HANDLE; return 0; }
+    if (rd) *rd=(DWORD)n;
+    g_last_error=ERROR_SUCCESS; return 1;
 }
-__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { (void)h; return 1; }
+__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
+    u64 hv=(u64)h;
+    if (hv<=FILE_HANDLE_TAG || h==INVALID_HANDLE_VALUE) {
+        g_last_error=ERROR_INVALID_HANDLE; return 0;
+    }
+    i64 rc=(i64)sy3(34,hv-FILE_HANDLE_TAG,0,0);
+    if (rc<0) { g_last_error=ERROR_INVALID_HANDLE; return 0; }
+    g_last_error=ERROR_SUCCESS; return 1;
+}
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
     (void)max; return (DWORD)sy3(SYS_QueryDir, index, (u64)name, 0);
 }
 __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
-    return sy3(12, (u64)path, 0, 0) == 0;
+    if (!path || !path[0]) { g_last_error=ERROR_INVALID_PARAMETER; return 0; }
+    if ((i64)sy3(12,(u64)path,0,0)!=0) { g_last_error=ERROR_FILE_NOT_FOUND; return 0; }
+    g_last_error=ERROR_SUCCESS; return 1;
 }
 __attribute__((dllexport)) DWORD GetLastError(void) { return g_last_error; }
 __attribute__((dllexport)) void SetLastError(DWORD e) { g_last_error=e; }
@@ -108,15 +160,15 @@ __attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) { (void)name; re
 __attribute__((dllexport)) HANDLE GetModuleHandleW(const unsigned short *name) { (void)name; return (HANDLE)1; }
 __attribute__((dllexport)) BOOL GetProcessAffinityMask(HANDLE p,u64 *process,u64 *system) { (void)p;if(process)*process=1;if(system)*system=1;return 1; }
 __attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
-__attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path,void *sec) { (void)path;(void)sec;return 0; }
-__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path;return 0; }
-__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from,LPCSTR to) { (void)from;(void)to;return 0; }
+__attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path,void *sec) { (void)path;(void)sec;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
+__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
+__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from,LPCSTR to) { (void)from;(void)to;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
 __attribute__((dllexport)) BOOL GetComputerNameA(LPSTR name,DWORD *size) { const char p[]="SENTINELOS";DWORD n=sizeof p-1;if(!size)return 0;if(!name||*size<=n){*size=n+1;return 0;}for(DWORD i=0;i<=n;i++)name[i]=p[i];*size=n;return 1; }
 __attribute__((dllexport)) DWORD GetEnvironmentVariableA(LPCSTR name,LPSTR out,DWORD cap) { (void)name;if(out&&cap)out[0]=0;return 0; }
 __attribute__((dllexport)) BOOL SetEnvironmentVariableA(LPCSTR name,LPCSTR value) { (void)name;(void)value;return 0; }
-__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE h) { (void)h;return 1; }
-__attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE h,DWORD *code) { (void)h;if(code)*code=259;return 1; }
-__attribute__((dllexport)) BOOL TerminateProcess(HANDLE h,DWORD code) { (void)h;sy3(SYS_Exit,code,0,0);return 1; }
+__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE h) { (void)h;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
+__attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE h,DWORD *code) { (void)h;(void)code;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
+__attribute__((dllexport)) BOOL TerminateProcess(HANDLE h,DWORD code) { (void)h;(void)code;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
 __attribute__((dllexport)) BOOL ProcessIdToSessionId(DWORD pid,DWORD *sid) { (void)pid;if(sid)*sid=0;return 1; }
 
 

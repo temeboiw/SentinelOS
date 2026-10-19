@@ -7,19 +7,20 @@ VARS="$B/vars.fd"
 OVMF_CODE=""
 for c in /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
          /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/edk2-ovmf/x64/OVMF_CODE.fd
-do [[ -f "$c" ]] && { OVMF_CODE="$c"; break; }; done
+do
+  [[ -f "$c" ]] && { OVMF_CODE="$c"; break; }
+done
 [[ -n "$OVMF_CODE" ]] || { echo "no OVMF"; exit 1; }
+[[ -f "$DISKIMG" ]] || { echo "missing disk image: $DISKIMG (run ./scripts/build.sh first)"; exit 1; }
 [[ -f "$VARS" ]] || dd if=/dev/zero of="$VARS" bs=1M count=2 status=none
-echo "QEMU: PS/2 + VNC (click once to grab)"
+
+echo "QEMU: normal boot, audio disabled, PS/2 + VNC :0"
 qemu-system-x86_64 \
   -machine q35 -m 1024 \
   -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,file="$VARS" \
   -drive file="$DISKIMG",format=raw,if=none,id=d0 \
   -device virtio-blk-pci,drive=d0 \
-  -audiodev pa,id=audio0,server=127.0.0.1 \
-  -device ich9-intel-hda,id=hda,debug=0 \
-  -device hda-duplex,bus=hda.0,audiodev=audio0 \
   -vnc :0 \
   -serial mon:stdio \
   -no-reboot

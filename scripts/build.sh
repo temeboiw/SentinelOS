@@ -109,7 +109,9 @@ mkdir -p \
   "$B/rootfs/Program Files (x86)" \
   "$B/rootfs/Program Files/Common Files" \
   "$B/rootfs/Program Files (x86)/Common Files" \
-  "$B/rootfs/Users/Public" \
+  "$B/rootfs/Users/Public/Downloads" \
+  "$B/rootfs/Program Files/Google/Chrome/Application" \
+  "$B/rootfs/Program Files (x86)/Google/Chrome/Application" \
   "$B/rootfs/Windows/System32"
 
 COMMON=(

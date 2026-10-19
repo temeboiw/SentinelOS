@@ -117,14 +117,35 @@ static void launch_app(const char *name, void **hwnd) {
     } else {
         /*
          * user32 state is private per process, but the framebuffer is shared.
-         * Repainting here erases the newly launched application's window;
-         * continuing to poll input can also paint a stale cursor over it.
-         * Leave the framebuffer to the launched application.
+         * Do not draw or poll input while the child owns the desktop. Keep
+         * yielding until that PID disappears, then rebuild the shell window
+         * so the desktop and mouse input become active again after close.
          */
         g_search_len = 0;
         g_search[0] = 0;
-        NtWriteConsole("explorer: yielding desktop to launched application\n");
-        for (;;) (void)NtYieldExecution();
+        NtWriteConsole("explorer: waiting for launched application to exit\n");
+
+        for (;;) {
+            SENTINEL_PROCESS_INFORMATION procs[8];
+            i64 count = NtQueryProcesses(procs, sizeof procs);
+            int alive = 0;
+
+            if (count > 8) count = 8;
+            for (i64 i = 0; i < count; i++) {
+                if (procs[i].ProcessId == pid) {
+                    alive = 1;
+                    break;
+                }
+            }
+
+            if (!alive)
+                break;
+
+            (void)NtYieldExecution();
+        }
+
+        NtWriteConsole("explorer: application exited; restoring desktop\n");
+        redraw_desktop(hwnd);
     }
 
     g_launched = 0;

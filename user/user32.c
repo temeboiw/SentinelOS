@@ -196,27 +196,29 @@ static void cursor_save_draw(int x, int y) {
              */
             /* Classic filled desktop pointer: dark outline, white face,
                tapered tip and a visible stem. '.' remains transparent. */
+            /* A proper filled pointer: black outline, white face, grey edge/shadow. */
             static const char *arrow[16] = {
-                "B...............",
                 "BB..............",
-                "BWB.............",
-                "BWWB............",
-                "BWWWB...........",
-                "BWWWWB..........",
-                "BWWWWWB.........",
-                "BWWWWWWB........",
-                "BWWWWWWWB.......",
-                "BWWWWBBBB.......",
-                "BWWBWB..........",
-                "BWB.BWB.........",
-                "BB..BWB.........",
-                "B....BWB........",
-                ".....BWB........",
-                "......BB........"
+                "BSB.............",
+                "BWSB............",
+                "BWWBS...........",
+                "BWWWSB..........",
+                "BWWWWSB.........",
+                "BWWWWWSB........",
+                "BWWWWWWBS.......",
+                "BWWWWWWWSB......",
+                "BWWWWBBBBB......",
+                "BWWBS...........",
+                "BWS.BS..........",
+                "BS..BWS.........",
+                "B....BWS........",
+                ".....BWS........",
+                "......BS........"
             };
             char pix = arrow[j][i];
             if (pix == 'B') g_front[yy * g_pitch + xx] = 0xFF101820;
             else if (pix == 'W') g_front[yy * g_pitch + xx] = COL_WHITE;
+            else if (pix == 'S') g_front[yy * g_pitch + xx] = 0xFF8B949E;
         }
     }
 

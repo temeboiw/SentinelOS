@@ -6,7 +6,7 @@ typedef const char *LPCSTR;
 typedef long long i64;
 
 enum {
-    SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
+    SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_MapFb=8, SYS_GetInput=10,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
     SYS_WmRect=20, SYS_CreateProcess=4
@@ -43,7 +43,8 @@ typedef struct {
 } WINDOW;
 
 static FBInfo g_fb;
-static u32 *g_front, g_pitch, g_fw, g_fh;
+static u32 *g_front, *g_back, *g_draw;
+static u32 g_pitch, g_fw, g_fh, g_draw_pitch;
 static int g_mx = 640, g_my = 400;
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
 static int g_search_focus;
@@ -78,7 +79,8 @@ static void putpx(int x, int y, u32 col) {
         (u32)x >= g_fw || (u32)y >= g_fh)
         return;
 
-    g_front[y * g_pitch + x] = col;
+    if (g_draw && (u32)x < g_fw && (u32)y < g_fh)
+        g_draw[y * g_draw_pitch + x] = col;
 }
 
 static void fill(int x, int y, int w, int h, u32 col) {
@@ -191,6 +193,19 @@ static void ensure_fb(void) {
     g_fw = g_fb.w;
     g_fh = g_fb.h;
     g_pitch = g_fb.pitch / 4;
+    g_draw = g_front;
+    g_draw_pitch = g_pitch;
+
+    /*
+     * Compose the desktop off-screen, then copy a complete frame to the
+     * framebuffer. This avoids exposing the clear-and-redraw sequence.
+     */
+    if (!g_back && g_fw && g_fh &&
+        (u64)g_fw * (u64)g_fh * sizeof(u32) <= 16ull * 1024 * 1024) {
+        u64 bytes = (u64)g_fw * (u64)g_fh * sizeof(u32);
+        u64 va = sy3(SYS_Alloc, 0x60000000ULL, bytes, 0);
+        if (va) g_back = (u32 *)va;
+    }
 }
 
 static int hit(int x, int y, int x0, int y0, int x1, int y1) {    return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -359,6 +374,8 @@ static void compose(void) {
     }
 
     cursor_restore();
+    g_draw = g_back ? g_back : g_front;
+    g_draw_pitch = g_back ? g_fw : g_pitch;
     fill(0, 0, (int)g_fw, (int)g_fh, COL_BG);
 
     draw_text(16, 14, "SENTINEL OS", COL_ACCENT);
@@ -458,6 +475,18 @@ static void compose(void) {
     }
 
     draw_taskbar();
+
+    if (g_back) {
+        for (u32 y = 0; y < g_fh; y++) {
+            u32 *dst = g_front + y * g_pitch;
+            u32 *src = g_back + y * g_fw;
+            for (u32 x = 0; x < g_fw; x++)
+                dst[x] = src[x];
+        }
+    }
+
+    g_draw = g_front;
+    g_draw_pitch = g_pitch;
     cursor_save_draw(g_mx, g_my);
 }
 

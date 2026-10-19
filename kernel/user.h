@@ -688,12 +688,12 @@ static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
         if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS ||
-            f->rsi != NT_PROCESS_BASIC_INFORMATION ||
+            f->rsi != NT_PROCESS_BASIC_INFORMATION_CLASS ||
             f->rcx < sizeof(NT_PROCESS_BASIC_INFORMATION)) {
             f->rax = NtStatusResult(
                 (NT_HANDLE)f->rdi != NT_CURRENT_PROCESS
                     ? NT_STATUS_INVALID_HANDLE
-                    : (f->rsi != NT_PROCESS_BASIC_INFORMATION
+                    : (f->rsi != NT_PROCESS_BASIC_INFORMATION_CLASS
                         ? NT_STATUS_INVALID_PARAMETER
                         : NT_STATUS_INFO_LENGTH_MISMATCH));
             return f;
@@ -822,10 +822,10 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = NtStatusResult(NT_STATUS_INVALID_HANDLE);
             return f;
         }
-        if (f->rdx != NT_MEMORY_BASIC_INFORMATION ||
+        if (f->rdx != NT_MEMORY_BASIC_INFORMATION_CLASS ||
             f->r8 < sizeof(NT_MEMORY_BASIC_INFORMATION)) {
             f->rax = NtStatusResult(
-                f->rdx != NT_MEMORY_BASIC_INFORMATION
+                f->rdx != NT_MEMORY_BASIC_INFORMATION_CLASS
                     ? NT_STATUS_INVALID_PARAMETER
                     : NT_STATUS_INFO_LENGTH_MISMATCH);
             return f;

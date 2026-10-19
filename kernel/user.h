@@ -12,6 +12,7 @@
 #include "uthread.h"
 #include "wm.h"
 #include "ntabi.h"
+#include "net.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -1506,6 +1507,20 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
+        f->rax = 0;
+        return f;
+    }
+
+    case 22: { /* NtQueryNetworkConfig: SentinelOS extension */
+        if (!f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi,
+                                 sizeof(SENTINELOS_NET_CONFIG), 1)) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        SENTINELOS_NET_CONFIG cfg;
+        net_query_config(&cfg);
+        *(SENTINELOS_NET_CONFIG *)f->rdi = cfg;
         f->rax = 0;
         return f;
     }

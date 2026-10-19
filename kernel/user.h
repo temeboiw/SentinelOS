@@ -1519,7 +1519,10 @@ static Frame *syscall_handler(Frame *f) {
         return f;
 
     default:
-        f->rax = (uint64_t)-1LL;
+        if (f->rax >= 0x1000 && f->rax <= 0x10FF)
+            f->rax = NtStatusResult(NT_STATUS_INVALID_SYSTEM_SERVICE);
+        else
+            f->rax = (uint64_t)-1LL;
         return f;
     }
 }

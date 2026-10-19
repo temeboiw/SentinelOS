@@ -1275,6 +1275,19 @@ static Frame *syscall_handler(Frame *f) {
         if (vi_ok)
             virtio_input_poll();
 
+        /* PS/2 wheel events remain available even when a virtio tablet owns XY. */
+        if (mouse_wheel) {
+            int wheel = mouse_wheel;
+            mouse_wheel = 0;
+            out->type = 4; /* mouse wheel */
+            out->x = vi_ok ? vi_x : mouse_x;
+            out->y = vi_ok ? vi_y : mouse_y;
+            out->btn = vi_ok ? vi_btn : mouse_btn;
+            out->key = (char)wheel;
+            f->rax = 1;
+            return f;
+        }
+
         /* Tablet owns absolute position when present. */
         if (vi_ok && (vi_moved || vi_clicked)) {
             mouse_x = vi_x;

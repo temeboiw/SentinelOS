@@ -126,24 +126,63 @@ static int ps2_init(void) {
     return 1;
 }
 
+static int kbd_shift, kbd_caps;
+
+/* Finnish PC layout, PS/2 Set-1 scancodes. Finnish letters use Latin-1
+ * bytes because the current user input ABI carries one byte per key. */
 static char ps2_scancode_to_ascii(uint8_t sc) {
-    static const char map[0x40] = {
-        0,27,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,
-        'q','w','e','r','t','y','u','i','o','p','[',']','\n',0,
-        'a','s','d','f','g','h','j','k','l',';','\'','`',0,'\\',
-        'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0
+    static const unsigned char normal[0x59] = {
+        [0x01]=27, [0x02]='1', [0x03]='2', [0x04]='3', [0x05]='4',
+        [0x06]='5', [0x07]='6', [0x08]='7', [0x09]='8', [0x0A]='9',
+        [0x0B]='0', [0x0C]='+', [0x0D]=0xB4, [0x0E]=8, [0x0F]=9,
+        [0x10]='q', [0x11]='w', [0x12]='e', [0x13]='r', [0x14]='t',
+        [0x15]='y', [0x16]='u', [0x17]='i', [0x18]='o', [0x19]='p',
+        [0x1A]=0xE5, [0x1B]=0xA8, [0x1C]='\n',
+        [0x1E]='a', [0x1F]='s', [0x20]='d', [0x21]='f', [0x22]='g',
+        [0x23]='h', [0x24]='j', [0x25]='k', [0x26]='l',
+        [0x27]=0xF6, [0x28]=0xE4, [0x29]=0xA7, [0x2B]='\'',
+        [0x2C]='z', [0x2D]='x', [0x2E]='c', [0x2F]='v', [0x30]='b',
+        [0x31]='n', [0x32]='m', [0x33]=',', [0x34]='.', [0x35]='-',
+        [0x39]=' ', [0x56]='<'
     };
+    static const unsigned char shifted[0x59] = {
+        [0x01]=27, [0x02]='!', [0x03]='"', [0x04]='#', [0x05]='$',
+        [0x06]='%', [0x07]='&', [0x08]='/', [0x09]='(', [0x0A]=')',
+        [0x0B]='=', [0x0C]='?', [0x0D]=0x60, [0x0E]=8, [0x0F]=9,
+        [0x10]='Q', [0x11]='W', [0x12]='E', [0x13]='R', [0x14]='T',
+        [0x15]='Y', [0x16]='U', [0x17]='I', [0x18]='O', [0x19]='P',
+        [0x1A]=0xC5, [0x1B]='^', [0x1C]='\n',
+        [0x1E]='A', [0x1F]='S', [0x20]='D', [0x21]='F', [0x22]='G',
+        [0x23]='H', [0x24]='J', [0x25]='K', [0x26]='L',
+        [0x27]=0xD6, [0x28]=0xC4, [0x29]=0xA7, [0x2B]='*',
+        [0x2C]='Z', [0x2D]='X', [0x2E]='C', [0x2F]='V', [0x30]='B',
+        [0x31]='N', [0x32]='M', [0x33]=';', [0x34]=':', [0x35]='_',
+        [0x39]=' ', [0x56]='>'
+    };
+
+    if (sc == 0x2A || sc == 0x36) { kbd_shift = 1; return 0; }
+    if (sc == 0xAA || sc == 0xB6) { kbd_shift = 0; return 0; }
+    if (sc == 0x3A) { kbd_caps = !kbd_caps; return 0; }
     if (sc & 0x80) return 0;
-    if (sc < 0x40) return map[sc];
-    return 0;
+    if (sc >= 0x59) return 0;
+
+    unsigned char c = (kbd_shift ? shifted : normal)[sc];
+    if (kbd_caps && c >= 'a' && c <= 'z')
+        c = (unsigned char)(c - 'a' + 'A');
+    else if (kbd_caps && c >= 'A' && c <= 'Z')
+        c = (unsigned char)(c - 'A' + 'a');
+    return (char)c;
 }
 
 static int ps2_read_key(char *out) {
     ps2_poll();
-    if (kbd_r == kbd_w) return 0;
-    uint8_t sc = kbd_buf[kbd_r++ % 64];
-    char c = ps2_scancode_to_ascii(sc);
-    if (!c) return 0;
-    *out = c;
-    return 1;
+    while (kbd_r != kbd_w) {
+        uint8_t sc = kbd_buf[kbd_r++ % 64];
+        char c = ps2_scancode_to_ascii(sc);
+        if (c) {
+            *out = c;
+            return 1;
+        }
+    }
+    return 0;
 }

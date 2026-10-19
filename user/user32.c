@@ -158,15 +158,12 @@ static void cursor_restore(void) {
             if (xx < 0 || (u32)xx >= g_fw) continue;
 
             /*
-             * The backbuffer is the canonical desktop without the pointer.
-             * Restoring from it avoids stale save-under pixels when the
-             * desktop changes underneath the mouse.
+             * Save-under belongs to the shared physical framebuffer.
+             * A process-local backbuffer is NOT the canonical desktop:
+             * restoring from it overwrites windows owned by other processes
+             * and produces the slow CRT-like disappearance effect.
              */
-            if (g_back)
-                g_front[(u64)yy * g_pitch + xx] =
-                    g_back[(u64)yy * g_fw + xx];
-            else
-                g_front[(u64)yy * g_pitch + xx] = cur_under[j][i];
+            g_front[(u64)yy * g_pitch + xx] = cur_under[j][i];
         }
     }
 
@@ -361,6 +358,37 @@ static void draw_taskbar(void) {
         draw_text(mx + 14, my + 76, "RESTART", COL_WARN);
         draw_text(mx + 14, my + 100, "CANCEL", COL_MUTED);
     }
+}
+
+/*
+ * Search typing changes only the Start menu. Repaint and present just the
+ * taskbar/menu strip instead of rebuilding the entire desktop per keypress.
+ */
+static void redraw_taskbar_region(void) {
+    ensure_fb();
+    if (!g_front) return;
+    if (!g_back) {
+        compose();
+        return;
+    }
+
+    cursor_restore();
+    g_draw = g_back;
+    g_draw_pitch = g_fw;
+    draw_taskbar();
+
+    int y0 = (int)g_fh - 44 - 146 - 4;
+    if (y0 < 0) y0 = 0;
+    for (int y = y0; y < (int)g_fh; y++) {
+        u32 *dst = g_front + (u64)y * g_pitch;
+        u32 *src = g_back + (u64)y * g_fw;
+        for (u32 x = 0; x < g_fw; x++)
+            dst[x] = src[x];
+    }
+
+    g_draw = g_front;
+    g_draw_pitch = g_pitch;
+    cursor_save_draw(g_mx, g_my);
 }
 
 static void compose(void) {
@@ -915,13 +943,13 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_search_text[g_search_len] = 0;
                         }
 
-                        compose();
+                        redraw_taskbar_region();
                         continue;
                     }
 
                     if (key == '\n' || key == '\r') {
                         submit_search();
-                        compose();
+                        redraw_taskbar_region();
                         continue;
                     }
 
@@ -929,7 +957,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_search_len < 22) {
                         g_search_text[g_search_len++] = key;
                         g_search_text[g_search_len] = 0;
-                        compose();
+                        redraw_taskbar_region();
                     }
 
                     continue;

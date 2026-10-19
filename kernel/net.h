@@ -299,7 +299,10 @@ static int net_e1000_init(void) {
     net_wr(E1000_REG_TDT, 0);
 
     /* Accept broadcast + our unicast; strip Ethernet CRC. */
-    net_wr(E1000_REG_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_SECRC);
+    /* Accept broadcast, unicast and multicast while bringing up DHCP. */
+    net_wr(E1000_REG_CTRL, net_rd(E1000_REG_CTRL) | E1000_CTRL_SLU);
+    net_wr(E1000_REG_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM |
+           E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_SECRC);
     net_wr(E1000_REG_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP |
            (0x10u << 4) | (0x40u << 12));
     net_wr(E1000_REG_TIPG, 10u | (8u << 10) | (6u << 20));
@@ -389,7 +392,7 @@ static void net_query_config(SENTINELOS_NET_CONFIG *out) {
     out->RxDescStatus = net_rx_ring ? net_rx_ring[net_rx_next].status : 0;
     out->RxDescErrors = net_rx_ring ? net_rx_ring[net_rx_next].errors : 0;
     out->RxControl = net_rd(E1000_REG_RCTL);
-    out->RxGoodCount = net_rd(0x4000); /* GPRC: good packets received */
+    out->RxGoodCount = net_rd(0x4074); /* GPRC: good packets received */
     out->RxMissedCount = net_rd(0x4010); /* MPC: missed packets */
     out->TxHead = net_rd(E1000_REG_TDH);
     out->TxTail = net_rd(E1000_REG_TDT);

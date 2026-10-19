@@ -99,7 +99,7 @@ static void draw_char(int x, int y, char ch, u32 col) {
     for (int row = 0; row < 8; row++) {
         unsigned char bits = glyph[row];
         for (int colx = 0; colx < 8; colx++) {
-            if (bits & (0x80u >> colx))
+            if (bits & (1u << colx))
                 putpx(x + colx, y + row, col);
         }
     }

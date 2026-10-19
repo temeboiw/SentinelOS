@@ -193,6 +193,7 @@ USER_CFLAGS=(
   -O2
   -Wall
   -I"$ROOT/user"
+  -I"$ROOT/shared"
 )
 
 echo "  -> smss.exe"

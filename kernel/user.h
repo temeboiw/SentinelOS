@@ -44,6 +44,8 @@
 #define SYS_NtUdpReceive              32
 #define SYS_NtGetTickCount            33
 #define SYS_NtCloseFile               34
+#define SYS_NtGetCurrentDirectory     35
+#define SYS_NtGetFileAttributes       36
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1339,6 +1341,40 @@ static Frame *syscall_handler(Frame *f) {
         if(n>=0){for(int i=0;i<n;i++)((uint8_t*)dp)[i]=data[i];if(iptr)*(uint32_t*)iptr=ip;if(pptr)*(uint16_t*)pptr=port;}
         f->rax=(uint64_t)(int64_t)n;return f;
     }
+    case SYS_NtGetCurrentDirectory: {
+        uint64_t out = f->rdi;
+        uint64_t cap = f->rsi;
+        uint64_t len = 0;
+        while (len < sizeof(vfs_cwd) && vfs_cwd[len]) len++;
+        if (len >= sizeof(vfs_cwd) || !g_ext4_ok) {
+            f->rax = 0;
+            return f;
+        }
+        /* Win32 returns required size including NUL when the buffer is too small. */
+        if (!out || cap <= len) {
+            f->rax = len + 1;
+            return f;
+        }
+        if (cap > sizeof(vfs_cwd)) cap = sizeof(vfs_cwd);
+        if (!MmValidateUserRange(MmCurrentProcess, out, len + 1, 1)) {
+            f->rax = 0;
+            return f;
+        }
+        for (uint64_t i = 0; i <= len; i++) ((char *)out)[i] = vfs_cwd[i];
+        f->rax = len;
+        return f;
+    }
+
+    case SYS_NtGetFileAttributes: {
+        char path[128];
+        if (copy_user_str(f->rdi, path, sizeof(path)) != 0 || !g_ext4_ok) {
+            f->rax = 0xFFFFFFFFu;
+            return f;
+        }
+        f->rax = vfs_get_attributes(path);
+        return f;
+    }
+
     case SYS_NtGetTickCount:f->rax=KeTickCount*10ULL;return f;
 
     case SYS_NtQueryDirectoryFile: {

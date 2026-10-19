@@ -13,6 +13,7 @@
 #include "wm.h"
 #include "ntabi.h"
 #include "net.h"
+#include "netstack.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -1519,9 +1520,35 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
         SENTINELOS_NET_CONFIG cfg;
-        net_query_config(&cfg);
+        ns_query_config(&cfg);
         *(SENTINELOS_NET_CONFIG *)f->rdi = cfg;
         f->rax = 0;
+        return f;
+    }
+
+    case 23: /* Poll network RX and dispatch protocol packets. */
+        f->rax = (uint64_t)ns_poll();
+        return f;
+
+    case 24: /* DHCPv4 discover/request; bounded polling. */
+        f->rax = (uint64_t)(int64_t)ns_dhcp();
+        return f;
+
+    case 25: /* ICMP echo request; IPv4 address is in network byte order. */
+        f->rax = (uint64_t)(int64_t)ns_ping((uint32_t)f->rdi);
+        return f;
+
+    case 26: { /* DNS A lookup: hostname pointer, uint32_t answer pointer. */
+        char hostname[128];
+        if (copy_user_str(f->rdi, hostname, sizeof hostname) != 0 ||
+            !f->rsi || !MmValidateUserRange(MmCurrentProcess, f->rsi, sizeof(uint32_t), 1)) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        uint32_t answer = 0;
+        int r = ns_dns_query(hostname, &answer);
+        if (!r) *(uint32_t *)f->rsi = answer;
+        f->rax = (uint64_t)(int64_t)r;
         return f;
     }
 

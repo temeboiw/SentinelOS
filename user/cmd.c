@@ -428,6 +428,53 @@ static void command_nslookup(const char *arg) {
     str_copy(line, "Address: ", sizeof line);
     int n = str_len(line); str_copy(line+n, address, sizeof line-n); print_line(line);
 }
+static void command_nettest(void) {
+    SENTINELOS_NET_CONFIG cfg;
+    for (unsigned i = 0; i < sizeof cfg; i++)
+        ((unsigned char *)&cfg)[i] = 0;
+
+    print_line("SentinelOS network self-test");
+    if (NtQueryNetworkConfig(&cfg) != 0 ||
+        !(cfg.Flags & SENTINELOS_NET_DRIVER_READY)) {
+        print_line("[FAIL] E1000 driver is not ready.");
+        return;
+    }
+    print_line("[ OK ] E1000 driver detected.");
+
+    if (!(cfg.Flags & SENTINELOS_NET_LINK_UP)) {
+        print_line("[FAIL] Ethernet link is down.");
+        return;
+    }
+    print_line("[ OK ] Ethernet link is up.");
+
+    if (!(cfg.Flags & SENTINELOS_NET_IPV4_CONFIGURED)) {
+        print_line("[FAIL] No IPv4 lease. Run 'dhcp' first.");
+        return;
+    }
+    print_line("[ OK ] IPv4 configuration is present.");
+
+    u32 resolved = 0;
+    if (NtNetworkDnsQuery("example.com", &resolved) == 0) {
+        char line[LINE_SIZE], address[20];
+        format_ipv4(resolved, address, sizeof address);
+        str_copy(line, "[ OK ] DNS example.com -> ", sizeof line);
+        str_copy(line + str_len(line), address,
+                 sizeof line - str_len(line));
+        print_line(line);
+    } else {
+        print_line("[FAIL] DNS lookup for example.com failed.");
+    }
+
+    /* QEMU user networking commonly permits ICMP echo, but hosts or
+       upstream networks may filter it. Treat this as a diagnostic only. */
+    if (NtNetworkPing(0x01010101u) == 0)
+        print_line("[ OK ] ICMP echo to 1.1.1.1 succeeded.");
+    else
+        print_line("[FAIL] ICMP echo to 1.1.1.1 failed (may be filtered).");
+
+    print_line("Self-test complete; TCP/HTTPS is not implemented yet.");
+}
+
 static void command_ipconfig(void) {
     SENTINELOS_NET_CONFIG cfg;
     for (unsigned i = 0; i < sizeof cfg; i++)
@@ -512,7 +559,7 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, exit");
+        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, ipconfig, dhcp, ping, nslookup, nettest, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
@@ -538,6 +585,8 @@ static void run_command(const char *raw) {
         command_ping(arg);
     } else if (equals(cmd, "nslookup")) {
         command_nslookup(arg);
+    } else if (equals(cmd, "nettest")) {
+        command_nettest();
     } else if (equals(cmd, "exit")) {
         NtExit(0);
     } else {

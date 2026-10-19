@@ -84,9 +84,21 @@ static void putpx(int x, int y, u32 col) {
 }
 
 static void fill(int x, int y, int w, int h, u32 col) {
-    for (int yy = y; yy < y + h; yy++)
-        for (int xx = x; xx < x + w; xx++)
-            putpx(xx, yy, col);
+    if (!g_front || !g_draw || w <= 0 || h <= 0) return;
+
+    /* Clip once, then write contiguous scanlines without per-pixel checks. */
+    int x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)g_fw) x1 = (int)g_fw;
+    if (y1 > (int)g_fh) y1 = (int)g_fh;
+    if (x0 >= x1 || y0 >= y1) return;
+
+    int count = x1 - x0;
+    for (int yy = y0; yy < y1; yy++) {
+        u32 *p = g_draw + (u64)yy * g_draw_pitch + x0;
+        for (int xx = 0; xx < count; xx++) p[xx] = col;
+    }
 }
 
 static void panel(int x, int y, int w, int h, u32 f, u32 b) {
@@ -145,7 +157,16 @@ static void cursor_restore(void) {
             int xx = cur_ox + i;
             if (xx < 0 || (u32)xx >= g_fw) continue;
 
-            g_front[yy * g_pitch + xx] = cur_under[j][i];
+            /*
+             * The backbuffer is the canonical desktop without the pointer.
+             * Restoring from it avoids stale save-under pixels when the
+             * desktop changes underneath the mouse.
+             */
+            if (g_back)
+                g_front[(u64)yy * g_pitch + xx] =
+                    g_back[(u64)yy * g_fw + xx];
+            else
+                g_front[(u64)yy * g_pitch + xx] = cur_under[j][i];
         }
     }
 
@@ -741,10 +762,10 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
 static void redraw_window_contents(void) {
     if (!g_front || !g_wnd.visible || g_wnd.minimized) return;
 
-    /* Typing should repaint only the terminal client area, not the desktop. */
+    /* Keep the backbuffer as the cursor-free canonical desktop image. */
     cursor_restore();
-    g_draw = g_front;
-    g_draw_pitch = g_pitch;
+    g_draw = g_back ? g_back : g_front;
+    g_draw_pitch = g_back ? g_fw : g_pitch;
 
     int x = g_wnd.x, y = g_wnd.y, w = g_wnd.w, h = g_wnd.h;
     fill(x + 4, y + 36, w - 8, h - 42, COL_BG);
@@ -797,6 +818,21 @@ static void redraw_window_contents(void) {
         thumb_y += (thumb_range * g_scroll_top) / max_scroll;
     fill(sx + 2, thumb_y, 6, thumb_h, COL_MUTED);
     fill(sx + 3, thumb_y + 2, 4, thumb_h > 4 ? thumb_h - 4 : 1, COL_ACCENT);
+
+    /* Present only the changed client area; no full-screen copy per key. */
+    if (g_back) {
+        int x0 = x + 4, y0 = y + 36;
+        int x1 = x + w - 4, y1 = y + h - 6;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > (int)g_fw) x1 = (int)g_fw;
+        if (y1 > (int)g_fh) y1 = (int)g_fh;
+        for (int yy = y0; yy < y1; yy++) {
+            u32 *dst = g_front + (u64)yy * g_pitch + x0;
+            u32 *src = g_back + (u64)yy * g_fw + x0;
+            for (int xx = x0; xx < x1; xx++) dst[xx - x0] = src[xx - x0];
+        }
+    }
 
     g_draw = g_front;
     g_draw_pitch = g_pitch;

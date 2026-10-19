@@ -313,6 +313,7 @@ static char hex_digit(unsigned v) {
 }
 
 static void command_ipconfig(void);
+static int parse_ipv4(const char *s, u32 *out);
 static void format_ipv4(u32 ip, char *out, int cap);
 static void format_u64(u64 value, char *out, int cap);
 static void command_ps(void){

@@ -1287,12 +1287,28 @@ static Frame *syscall_handler(Frame *f) {
         static UIn pending_click;
         static int pending_click_valid;
         static int pending_click_pid;
+        static UIn pending_key;
+        static int pending_key_valid;
+        static int pending_key_pid;
 
         int mepid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
 
         if (!out || !MmValidateUserRange(MmCurrentProcess, (uint64_t)out, sizeof *out, 1)) {
             f->rax = 0;
             return f;
+        }
+
+        /* Deliver queued keyboard input only to the frontmost window. */
+        if (pending_key_valid) {
+            int target = wm_keyboard_target();
+            if (target > 0) pending_key_pid = target;
+            if (pending_key_pid == mepid) {
+                *out = pending_key;
+                pending_key_valid = 0;
+                f->rax = 1;
+                return f;
+            }
+            goto no_input_event;
         }
 
         /* A click assigned to another process remains queued. */
@@ -1365,6 +1381,15 @@ static Frame *syscall_handler(Frame *f) {
             out->x = mouse_x;
             out->y = mouse_y;
             out->btn = mouse_btn;
+
+            int target = wm_keyboard_target();
+            if (target > 0 && target != mepid) {
+                pending_key = *out;
+                pending_key_pid = target;
+                pending_key_valid = 1;
+                goto no_input_event;
+            }
+
             f->rax = 1;
             return f;
         }

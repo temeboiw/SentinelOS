@@ -167,7 +167,13 @@ __attribute__((dllexport)) BOOL IsDebuggerPresent(void) { return 0; }
 __attribute__((dllexport)) BOOL QueryPerformanceCounter(LARGE_INTEGER *v) { if(!v)return 0; v->quad=(i64)sy3(33,0,0,0)*10000; return 1; }
 __attribute__((dllexport)) BOOL QueryPerformanceFrequency(LARGE_INTEGER *v) { if(!v)return 0; v->quad=10000000; return 1; }
 __attribute__((dllexport)) void GetSystemTimeAsFileTime(FILETIME *v) { if(v){v->low=0;v->high=0;} }
-__attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap,LPSTR out) { const char p[]="C:\\"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
+__attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap,LPSTR out) {
+    u64 n=sy3(35,(u64)out,cap,0);
+    if(!n) { g_last_error=ERROR_INVALID_FUNCTION; return 0; }
+    if(out && cap>n) g_last_error=ERROR_SUCCESS;
+    else g_last_error=ERROR_INVALID_PARAMETER;
+    return (DWORD)n;
+}
 __attribute__((dllexport)) DWORD GetWindowsDirectoryA(LPSTR out,DWORD cap) { const char p[]="C:\\Windows"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
 __attribute__((dllexport)) DWORD GetSystemDirectoryA(LPSTR out,DWORD cap) { const char p[]="C:\\Windows\\System32"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
 __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap,LPSTR out) { const char p[]="C:\\Users\\Public\\Downloads\\"; DWORD n=sizeof p-1;if(!out||cap<=n)return n+1;for(DWORD i=0;i<=n;i++)out[i]=p[i];return n; }
@@ -175,7 +181,13 @@ __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module,LPSTR out,DWOR
 __attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) { (void)name; return (HANDLE)1; }
 __attribute__((dllexport)) HANDLE GetModuleHandleW(const unsigned short *name) { (void)name; return (HANDLE)1; }
 __attribute__((dllexport)) BOOL GetProcessAffinityMask(HANDLE p,u64 *process,u64 *system) { (void)p;if(process)*process=1;if(system)*system=1;return 1; }
-__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) {
+    if(!path || !path[0]) { g_last_error=ERROR_INVALID_PARAMETER; return 0xFFFFFFFFu; }
+    u64 a=sy3(36,(u64)path,0,0);
+    if(a==0xFFFFFFFFu) { g_last_error=ERROR_FILE_NOT_FOUND; return 0xFFFFFFFFu; }
+    g_last_error=ERROR_SUCCESS;
+    return (DWORD)a;
+}
 __attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path,void *sec) { (void)path;(void)sec;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
 __attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path;g_last_error=ERROR_NOT_SUPPORTED;return 0; }
 __attribute__((dllexport)) BOOL MoveFileA(LPCSTR from,LPCSTR to) { (void)from;(void)to;g_last_error=ERROR_NOT_SUPPORTED;return 0; }

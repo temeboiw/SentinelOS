@@ -688,20 +688,20 @@ static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
         if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS ||
-            f->rdx != NT_PROCESS_BASIC_INFORMATION ||
-            f->r8 < sizeof(NT_PROCESS_BASIC_INFORMATION)) {
+            f->rsi != NT_PROCESS_BASIC_INFORMATION ||
+            f->rcx < sizeof(NT_PROCESS_BASIC_INFORMATION)) {
             f->rax = NtStatusResult(
                 (NT_HANDLE)f->rdi != NT_CURRENT_PROCESS
                     ? NT_STATUS_INVALID_HANDLE
-                    : (f->rdx != NT_PROCESS_BASIC_INFORMATION
+                    : (f->rsi != NT_PROCESS_BASIC_INFORMATION
                         ? NT_STATUS_INVALID_PARAMETER
                         : NT_STATUS_INFO_LENGTH_MISMATCH));
             return f;
         }
 
-        if (!MmValidateUserRange(MmCurrentProcess, f->rcx,
+        if (!MmValidateUserRange(MmCurrentProcess, f->rdx,
                                  sizeof(NT_PROCESS_BASIC_INFORMATION), 1) ||
-            (f->r9 && !MmValidateUserRange(MmCurrentProcess, f->r9,
+            (f->r8 && !MmValidateUserRange(MmCurrentProcess, f->r8,
                                            sizeof(NT_ULONG), 1))) {
             f->rax = NtStatusResult(NT_STATUS_ACCESS_VIOLATION);
             return f;
@@ -723,8 +723,8 @@ static Frame *syscall_handler(Frame *f) {
                 info.InheritedFromUniqueProcessId = up_tab[parent].proc->Pid;
         }
 
-        *(NT_PROCESS_BASIC_INFORMATION *)f->rcx = info;
-        if (f->r9) *(NT_ULONG *)f->r9 = sizeof info;
+        *(NT_PROCESS_BASIC_INFORMATION *)f->rdx = info;
+        if (f->r8) *(NT_ULONG *)f->r8 = sizeof info;
         f->rax = NtStatusResult(NT_STATUS_SUCCESS);
         return f;
     }

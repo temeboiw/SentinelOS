@@ -222,26 +222,26 @@ static int vfs_make_absolute_path(const char *name, char *out, int cap) {
     int drive_prefix = (name[0] == 'C' || name[0] == 'c') && name[1] == ':';
     if (drive_prefix) {
         i = 2;
-        if (name[i] == '\\\\' || name[i] == '/') {
-            out[0]='C'; out[1]=':'; out[2]='\\\\'; out[3]=0; n=3;
-            while (name[i] == '\\\\' || name[i] == '/') i++;
+        if (name[i] == '\\' || name[i] == '/') {
+            out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; n=3;
+            while (name[i] == '\\' || name[i] == '/') i++;
         } else {
             for (; vfs_cwd[n] && n < cap-1; n++) out[n]=vfs_cwd[n];
             out[n]=0;
         }
-    } else if (name[0] == '\\\\' || name[0] == '/') {
-        out[0]='C'; out[1]=':'; out[2]='\\\\'; out[3]=0; n=3;
-        while (name[i] == '\\\\' || name[i] == '/') i++;
+    } else if (name[0] == '\\' || name[0] == '/') {
+        out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; n=3;
+        while (name[i] == '\\' || name[i] == '/') i++;
     } else {
         for (; vfs_cwd[n] && n < cap-1; n++) out[n]=vfs_cwd[n];
         out[n]=0;
     }
 
     while (name[i]) {
-        while (name[i] == '\\\\' || name[i] == '/') i++;
+        while (name[i] == '\\' || name[i] == '/') i++;
         if (!name[i]) break;
         char part[64]; int pn=0;
-        while (name[i] && name[i] != '\\\\' && name[i] != '/') {
+        while (name[i] && name[i] != '\\' && name[i] != '/') {
             if (pn >= (int)sizeof(part)-1) return -1;
             part[pn++]=name[i++];
         }
@@ -249,21 +249,21 @@ static int vfs_make_absolute_path(const char *name, char *out, int cap) {
         if (pn==1 && part[0]=='.') continue;
         if (pn==2 && part[0]=='.' && part[1]=='.') {
             if (n>3) {
-                while (n>3 && out[n-1]!='\\\\') n--;
+                while (n>3 && out[n-1]!='\\') n--;
                 if (n>3) n--;
                 out[n]=0;
             }
             continue;
         }
-        if (n>3 && out[n-1]!='\\\\') {
+        if (n>3 && out[n-1]!='\\') {
             if (n>=cap-1) return -1;
-            out[n++]='\\\\';
+            out[n++]='\\';
         }
-        if (n==3 && out[2]=='\\\\') {
+        if (n==3 && out[2]=='\\') {
             /* Root already ends in a separator. */
-        } else if (n>0 && out[n-1]!='\\\\') {
+        } else if (n>0 && out[n-1]!='\\') {
             if (n>=cap-1) return -1;
-            out[n++]='\\\\';
+            out[n++]='\\';
         }
         if (pn > cap-1-n) return -1;
         for (int j=0;j<pn;j++) out[n++]=part[j];

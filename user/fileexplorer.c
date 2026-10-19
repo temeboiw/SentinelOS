@@ -126,12 +126,10 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
     for(int i=g_count;i<28;i++)pText(0,0,2+i," ",-1);
     if(pInv)pInv(0,0,1);
 }
-static void launch_exe(const char *name, MessageBoxA_t pMsgBox) {
-    /* NtCreateProcess currently launches PE images registered as boot modules.
-       Disk-file PE loading is a separate kernel feature and is not implied here. */
-    u64 pid=sy3(SYS_CreateProcess,(u64)name,0,0);
+static void launch_exe(const char *path, MessageBoxA_t pMsgBox) {
+    u64 pid=sy3(SYS_CreateProcess,(u64)path,0,0);
     if((long long)pid<0 && pMsgBox)
-        pMsgBox(0,"This .exe is not loaded as a SentinelOS program yet. Disk-based PE loading is not implemented.","Cannot run executable",0);
+        pMsgBox(0,"The executable could not be loaded. It may be an unsupported PE, need unavailable Windows DLLs, or exceed loader limits.","Cannot run executable",0);
 }
 
 void mainCRTStartup(void) {
@@ -201,7 +199,11 @@ void mainCRTStartup(void) {
                 pMsgBox(0,target,"Cannot open folder",0);
             }
         } else if(ends_with(g_names[row],".exe")) {
-            if(dbl) launch_exe(g_names[row],pMsgBox);
+            if(dbl) {
+                char target[128];
+                make_target_path(row,target,sizeof target);
+                launch_exe(target,pMsgBox);
+            }
         } else if(dbl && pMsgBox) {
             pMsgBox(0,g_names[row],"File",0);
         }

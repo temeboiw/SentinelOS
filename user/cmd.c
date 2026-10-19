@@ -21,7 +21,7 @@ typedef int (*GetMessageA_t)(MSG *, void *, u32, u32);
 typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef int (*InvalidateRect_t)(void *, void *, int);
 
-#define LINE_COUNT 20
+#define LINE_COUNT 256
 #define LINE_SIZE  80
 #define CMD_SIZE   96
 #define DIR_MAX    16
@@ -105,6 +105,7 @@ static void print_line(const char *s) {
     str_copy(g_lines[g_line_count], s, LINE_SIZE);
     g_line_count++;
     if (g_text) {
+        g_text(g_window, 0, -2, "", 0); /* begin output batch; preserve scroll position */
         for (int n = 0; n < g_line_count; n++)
             g_text(g_window, 0, n, g_lines[n], -1);
     }
@@ -123,7 +124,10 @@ static void redraw_prompt(void) {
         line[n++] = g_command[i];
     line[n] = 0;
 
-    if (g_text) g_text(g_window, 0, g_line_count, line, -1);
+    if (g_text) {
+        g_text(g_window, 0, -2, "", 0);
+        g_text(g_window, 0, g_line_count, line, -1);
+    }
     if (g_invalidate) g_invalidate(g_window, 0, 1);
 }
 
@@ -517,6 +521,7 @@ static void run_command(const char *raw) {
     } else if (equals(cmd, "cls") || equals(cmd, "clear")) {
         g_line_count = 0;
         for (int i = 0; i < LINE_COUNT; i++) g_lines[i][0] = 0;
+        if (g_text) g_text(g_window, 0, -1, "", 0);
     } else if (equals(cmd, "dir")) {
         command_dir();
     } else if (equals(cmd, "mkdir")) {

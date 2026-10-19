@@ -1015,6 +1015,9 @@ static void user_enter(BootInfo *bi) {
             map_4k_in(proc->Pml4, stack_lo + off, pa, PTE_U | PTE_RW);
         }
     }
+    DbgPrint("user: iret frame=%p kernel_stack=%p..%p rsp0=%p user_rsp=%p cr3=%p\n",
+             (void *)s, (void *)user_kstack, (void *)(user_kstack + sizeof user_kstack),
+             (void *)tss.rsp[0], (void *)USER_STACK_TOP, (void *)proc->DirectoryTableBase);
     MmSwitchToProcess(proc);
 
     __asm__ volatile(

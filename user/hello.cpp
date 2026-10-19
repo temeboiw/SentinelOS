@@ -107,12 +107,19 @@ void hello_main(void) {
     /* 8. Network configuration query is read-only; a missing NIC/config is
        reported as a failure rather than crashing the test program. */
     struct NetConfigProbe {
-        u32 version;
-        u32 flags;
-        u32 ipv4;
-        u32 gateway;
-        u32 dns;
-        u32 reserved[11];
+        u32 Version;
+        u32 Flags;
+        unsigned char MacAddress[6];
+        unsigned char Reserved[2];
+        u32 IPv4Address;
+        u32 SubnetMask;
+        u32 Gateway;
+        u32 DnsServer;
+        u64 RxPackets;
+        u64 TxPackets;
+        u32 RxHead, RxTail, RxDescStatus, RxDescErrors, RxControl;
+        u32 RxGoodCount, RxMissedCount;
+        u32 TxHead, TxTail, TxDescStatus;
     } net;
     volatile unsigned char *nb=(volatile unsigned char *)&net;
     for(u64 i=0;i<sizeof(net);i++)nb[i]=0;

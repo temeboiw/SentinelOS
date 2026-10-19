@@ -954,6 +954,46 @@ static Frame *syscall_handler(Frame *f) {
 }
 
 
+/* Diagnostic-only page-table walk; called before switching to the process CR3. */
+static void user_dbg_walk(KPROCESS *proc, uint64_t va) {
+    uint64_t e4 = proc->Pml4[(va >> 39) & 511];
+    if (!(e4 & PTE_P)) {
+        DbgPrint("ptwalk va=%p: PML4=%p not-present\n", (void *)va, (void *)e4);
+        return;
+    }
+    uint64_t *pdpt = (uint64_t *)(e4 & PTE_ADDR);
+    uint64_t e3 = pdpt[(va >> 30) & 511];
+    if (!(e3 & PTE_P)) {
+        DbgPrint("ptwalk va=%p: PML4=%p PDPT=%p not-present\n",
+                 (void *)va, (void *)e4, (void *)e3);
+        return;
+    }
+    if (e3 & PTE_PS) {
+        DbgPrint("ptwalk va=%p: PML4=%p PDPT(1G)=%p effective_user=%u\n",
+                 (void *)va, (void *)e4, (void *)e3,
+                 (unsigned)(((e4 & e3 & PTE_U) != 0)));
+        return;
+    }
+    uint64_t *pd = (uint64_t *)(e3 & PTE_ADDR);
+    uint64_t e2 = pd[(va >> 21) & 511];
+    if (!(e2 & PTE_P)) {
+        DbgPrint("ptwalk va=%p: PML4=%p PDPT=%p PD=%p not-present\n",
+                 (void *)va, (void *)e4, (void *)e3, (void *)e2);
+        return;
+    }
+    if (e2 & PTE_PS) {
+        DbgPrint("ptwalk va=%p: PML4=%p PDPT=%p PD(2M)=%p effective_user=%u\n",
+                 (void *)va, (void *)e4, (void *)e3, (void *)e2,
+                 (unsigned)(((e4 & e3 & e2 & PTE_U) != 0)));
+        return;
+    }
+    uint64_t *pt = (uint64_t *)(e2 & PTE_ADDR);
+    uint64_t e1 = pt[(va >> 12) & 511];
+    DbgPrint("ptwalk va=%p: PML4=%p PDPT=%p PD=%p PT=%p effective_user=%u\n",
+             (void *)va, (void *)e4, (void *)e3, (void *)e2, (void *)e1,
+             (unsigned)(((e4 & e3 & e2 & e1 & PTE_U) != 0)));
+}
+
 static void user_enter(BootInfo *bi) {
     ps2_init();
     ata_init();
@@ -1015,6 +1055,10 @@ static void user_enter(BootInfo *bi) {
             map_4k_in(proc->Pml4, stack_lo + off, pa, PTE_U | PTE_RW);
         }
     }
+    user_dbg_walk(proc, entry);
+    user_dbg_walk(proc, USER_STACK_TOP - 8);
+    user_dbg_walk(proc, (uint64_t)s);
+    user_dbg_walk(proc, (uint64_t)user_kstack);
     DbgPrint("user: iret frame=%p kernel_stack=%p..%p rsp0=%p user_rsp=%p cr3=%p\n",
              (void *)s, (void *)user_kstack, (void *)(user_kstack + sizeof user_kstack),
              (void *)tss.rsp[0], (void *)USER_STACK_TOP, (void *)proc->DirectoryTableBase);

@@ -188,31 +188,15 @@ static int up_find_proc(KPROCESS *p) {
 }
 
 static int up_pick_next(void) {
+    /* Round-robin every live process; parents remain schedulable while children run. */
     int start = (up_cur < 0) ? 0 : up_cur;
-
     for (int k = 1; k <= UP_MAX; k++) {
         int i = (start + k) % UP_MAX;
-
-        if (!up_tab[i].alive || !up_tab[i].proc)
-            continue;
-
-        int has_live_child = 0;
-
-        for (int j = 0; j < UP_MAX; j++) {
-            if (up_tab[j].alive && up_tab[j].proc &&
-                up_tab[j].parent == i) {
-                has_live_child = 1;
-                break;
-            }
-        }
-
-        if (!has_live_child)
+        if (up_tab[i].alive && up_tab[i].proc)
             return i;
     }
-
     return -1;
 }
-
 /* ------------------------------------------------------------ PE helpers */
 
 static int pe_is_image(const uint8_t *image, uint64_t size) {
@@ -1146,6 +1130,7 @@ static Frame *syscall_handler(Frame *f) {
         }f->rax=count;return f;
     }
     case SYS_NtTerminatePid: {
+        KPROCESS *caller=MmCurrentProcess;
         uint64_t pid=f->rdi;KPROCESS*target=0;int idx=-1;
         for(int i=0;i<UP_MAX;i++)if(up_tab[i].alive&&up_tab[i].proc&&up_tab[i].proc->Pid==pid){target=up_tab[i].proc;idx=i;break;}
         if(!target||target==MmCurrentProcess||target==PspSystemProcess){f->rax=(uint64_t)-1LL;return f;}
@@ -1153,7 +1138,7 @@ static Frame *syscall_handler(Frame *f) {
         up_tab[idx].alive=0;up_tab[idx].proc=0;wm_unregister((int)pid);
         MmSwitchToProcess(PspSystemProcess);if(ki_current)ki_current->Process=PspSystemProcess;
         for(int i=0;i<UT_MAX;i++)if(ut_tab[i].proc==target){ut_tab[i].alive=0;ut_tab[i].proc=0;}
-        PspForgetUserImages(target);MmDeleteAddressSpace(target);MmSwitchToProcess(MmCurrentProcess);f->rax=0;return f;
+        PspForgetUserImages(target);MmDeleteAddressSpace(target);MmSwitchToProcess(caller);f->rax=0;return f;
     }
     case SYS_NtUdpSend: {
         char payload[NS_UDP_RX_MAX];uint32_t len=(uint32_t)f->r8;

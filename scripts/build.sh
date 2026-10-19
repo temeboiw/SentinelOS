@@ -81,7 +81,8 @@ for src in \
   user/gdi32.c \
   user/advapi32.c \
   user/shell32.c \
-  user/ole32.c
+  user/ole32.c \
+  user/hello.cpp
 do
   if [[ ! -f "$ROOT/$src" ]]; then
     echo "FATAL: required source file missing: $src"
@@ -327,6 +328,19 @@ lld -flavor link \
   "/out:$SYS32/cmd.exe" \
   "$B/obj/cmd.o"
 
+echo "  -> hello.exe (from hello.cpp)"
+
+clang "${USER_CFLAGS[@]}" -x c++ \
+  -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit \
+  -c "$ROOT/user/hello.cpp" \
+  -o "$B/obj/hello.o"
+
+lld -flavor link \
+  /subsystem:native /entry:hello_main /nodefaultlib \
+  /fixed:no /base:0x40400000 \
+  "/out:$SYS32/hello.exe" \
+  "$B/obj/hello.o"
+
 echo "  -> gdi32.dll"
 clang "${USER_CFLAGS[@]}" -c "$ROOT/user/gdi32.c" -o "$B/obj/gdi32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41200000 \
@@ -374,7 +388,8 @@ for image in \
   advapi32.dll \
   shell32.dll \
   ole32.dll \
-  cmd.exe
+  cmd.exe \
+  hello.exe
 do
   if [[ ! -s "$SYS32/$image" ]]; then
     echo "FATAL: missing or empty image: $SYS32/$image"
@@ -395,14 +410,15 @@ ls -lh \
   "$SYS32/advapi32.dll" \
   "$SYS32/shell32.dll" \
   "$SYS32/ole32.dll" \
-  "$SYS32/cmd.exe"
+  "$SYS32/cmd.exe" \
+  "$SYS32/hello.exe"
 
 # Stage the freshly built user-facing system files into the Windows path too.
 # Keep magic/System32 intact: the UEFI loader uses it as its boot-module source.
 echo "==> Staging updated system files into C:\\Windows\\System32"
 for image in \
   hal.dll krnl.exe smss.exe explorer.exe fileexplorer.exe taskbar.dll \
-  kernel32.dll user32.dll gdi32.dll advapi32.dll shell32.dll ole32.dll cmd.exe
+  kernel32.dll user32.dll gdi32.dll advapi32.dll shell32.dll ole32.dll cmd.exe hello.exe
 do
   install -m 0644 "$SYS32/$image" "$B/rootfs/Windows/System32/$image"
 done

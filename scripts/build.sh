@@ -77,7 +77,11 @@ for src in \
   user/user32.c \
   user/explorer.c \
   user/fileexplorer.c \
-  user/cmd.c
+  user/cmd.c \
+  user/gdi32.c \
+  user/advapi32.c \
+  user/shell32.c \
+  user/ole32.c
 do
   if [[ ! -f "$ROOT/$src" ]]; then
     echo "FATAL: required source file missing: $src"
@@ -315,6 +319,38 @@ lld -flavor link \
   "/out:$SYS32/cmd.exe" \
   "$B/obj/cmd.o"
 
+echo "  -> gdi32.dll"
+clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/gdi32.c" -o "$B/obj/gdi32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41200000 \
+  /export:CreateCompatibleDC /export:DeleteDC /export:SelectObject /export:DeleteObject \
+  /export:CreateSolidBrush /export:CreatePen /export:CreateFontA /export:MoveToEx /export:LineTo \
+  /export:Rectangle /export:FillRect /export:PatBlt /export:BitBlt /export:TextOutA \
+  /export:SetBkMode /export:SetTextColor /export:SetBkColor /export:GetTextExtentPoint32A \
+  /export:SaveDC /export:RestoreDC /export:GetDeviceCaps /export:CreateDCA \
+  "/out:$SYS32/gdi32.dll" "$B/obj/gdi32.o"
+
+echo "  -> advapi32.dll"
+clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/advapi32.c" -o "$B/obj/advapi32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41300000 \
+  /export:RegOpenKeyExA /export:RegCreateKeyExA /export:RegQueryValueExA /export:RegSetValueExA \
+  /export:RegCloseKey /export:RegDeleteKeyA /export:RegDeleteValueA /export:RegEnumKeyExA \
+  /export:RegEnumValueA /export:AdjustTokenPrivileges /export:OpenProcessToken \
+  /export:LookupPrivilegeValueA /export:GetUserNameA /export:GetComputerNameA \
+  "/out:$SYS32/advapi32.dll" "$B/obj/advapi32.o"
+
+echo "  -> shell32.dll"
+clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/shell32.c" -o "$B/obj/shell32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41400000 \
+  /export:ShellExecuteA /export:ShellExecuteExA /export:SHGetFolderPathA /export:CommandLineToArgvA \
+  "/out:$SYS32/shell32.dll" "$B/obj/shell32.o"
+
+echo "  -> ole32.dll"
+clang "\${USER_CFLAGS[@]}" -c "$ROOT/user/ole32.c" -o "$B/obj/ole32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41500000 \
+  /export:CoInitialize /export:CoInitializeEx /export:CoUninitialize /export:CoCreateInstance \
+  /export:CoGetClassObject /export:CoInitializeSecurity \
+  "/out:$SYS32/ole32.dll" "$B/obj/ole32.o"
+
 echo "==> Checking required images"
 
 for image in \
@@ -326,6 +362,10 @@ for image in \
   taskbar.dll \
   kernel32.dll \
   user32.dll \
+  gdi32.dll \
+  advapi32.dll \
+  shell32.dll \
+  ole32.dll \
   cmd.exe
 do
   if [[ ! -s "$SYS32/$image" ]]; then
@@ -343,6 +383,10 @@ ls -lh \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
   "$SYS32/user32.dll" \
+  "$SYS32/gdi32.dll" \
+  "$SYS32/advapi32.dll" \
+  "$SYS32/shell32.dll" \
+  "$SYS32/ole32.dll" \
   "$SYS32/cmd.exe"
 
 echo "==> GPT disk image (FAT32 ESP + ext4)"

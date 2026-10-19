@@ -224,7 +224,7 @@ static int ns_dhcp_message(uint8_t type,uint32_t requested,uint32_t server) {
     p[i++]=55;p[i++]=3;p[i++]=1;p[i++]=3;p[i++]=6;p[i++]=255;
     ns_set_broadcast(bcast);
     /* DHCP uses IP source 0.0.0.0; temporarily send the bootstrap datagram directly. */
-    uint8_t ip[328]; ns_zero(ip,20+(uint32_t)i); ip[0]=0x45;ns_wr16(ip+2,(uint16_t)(20+i));
+    uint8_t ip[328]; ns_zero(ip,28+(uint32_t)i); ip[0]=0x45;ns_wr16(ip+2,(uint16_t)(28+i));
     ns_wr16(ip+4,(uint16_t)ns_ip_id++);ns_wr16(ip+6,0x4000);ip[8]=64;ip[9]=NS_IP_UDP;
     ns_wr32(ip+12,0);ns_wr32(ip+16,0xFFFFFFFFu);ns_wr16(ip+10,ns_checksum(ip,20));
     ns_wr16(ip+20,NS_DHCP_CLIENT_PORT);ns_wr16(ip+22,NS_DHCP_SERVER_PORT);

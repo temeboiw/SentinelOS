@@ -215,6 +215,63 @@ static uint32_t vfs_resolve_path(const char *path) {
     return dir;
 }
 
+/* Normalize a path lexically after the VFS has verified it exists. */
+static int vfs_make_absolute_path(const char *name, char *out, int cap) {
+    if (!name || !name[0] || cap < 4) return -1;
+    int i = 0, n = 0;
+    int drive_prefix = (name[0] == 'C' || name[0] == 'c') && name[1] == ':';
+    if (drive_prefix) {
+        i = 2;
+        if (name[i] == '\\\\' || name[i] == '/') {
+            out[0]='C'; out[1]=':'; out[2]='\\\\'; out[3]=0; n=3;
+            while (name[i] == '\\\\' || name[i] == '/') i++;
+        } else {
+            for (; vfs_cwd[n] && n < cap-1; n++) out[n]=vfs_cwd[n];
+            out[n]=0;
+        }
+    } else if (name[0] == '\\\\' || name[0] == '/') {
+        out[0]='C'; out[1]=':'; out[2]='\\\\'; out[3]=0; n=3;
+        while (name[i] == '\\\\' || name[i] == '/') i++;
+    } else {
+        for (; vfs_cwd[n] && n < cap-1; n++) out[n]=vfs_cwd[n];
+        out[n]=0;
+    }
+
+    while (name[i]) {
+        while (name[i] == '\\\\' || name[i] == '/') i++;
+        if (!name[i]) break;
+        char part[64]; int pn=0;
+        while (name[i] && name[i] != '\\\\' && name[i] != '/') {
+            if (pn >= (int)sizeof(part)-1) return -1;
+            part[pn++]=name[i++];
+        }
+        part[pn]=0;
+        if (pn==1 && part[0]=='.') continue;
+        if (pn==2 && part[0]=='.' && part[1]=='.') {
+            if (n>3) {
+                while (n>3 && out[n-1]!='\\\\') n--;
+                if (n>3) n--;
+                out[n]=0;
+            }
+            continue;
+        }
+        if (n>3 && out[n-1]!='\\\\') {
+            if (n>=cap-1) return -1;
+            out[n++]='\\\\';
+        }
+        if (n==3 && out[2]=='\\\\') {
+            /* Root already ends in a separator. */
+        } else if (n>0 && out[n-1]!='\\\\') {
+            if (n>=cap-1) return -1;
+            out[n++]='\\\\';
+        }
+        if (pn > cap-1-n) return -1;
+        for (int j=0;j<pn;j++) out[n++]=part[j];
+        out[n]=0;
+    }
+    return 0;
+}
+
 /* Change CWD to an existing directory using a Windows-style path. */
 static int vfs_chdir(const char *name) {
     if (!name || !name[0]) return -1;
@@ -226,39 +283,18 @@ static int vfs_chdir(const char *name) {
         return -2;
 
     char normalized[128];
-    int out = 0, i = 0;
-    normalized[out++] = 'C'; normalized[out++] = ':'; normalized[out++] = '\\';
-    if ((name[0] == 'C' || name[0] == 'c') && name[1] == ':') i = 2;
-    while (name[i] == '\\' || name[i] == '/') i++;
-    while (name[i] && out < (int)sizeof(normalized) - 1) {
-        char ch = name[i++];
-        if (ch == '/') ch = '\\';
-        if (ch == '\\') {
-            if (out > 3 && normalized[out - 1] == '\\') continue;
-            if (out > 3 && normalized[out - 1] != '\\') normalized[out++] = '\\';
-        } else {
-            normalized[out++] = ch;
-        }
+    if (vfs_make_absolute_path(name, normalized, sizeof(normalized)) != 0)
+        return -1;
+    int out=0;
+    while (normalized[out] && out < (int)sizeof(vfs_cwd)-1) {
+        vfs_cwd[out]=normalized[out];
+        out++;
     }
-    while (out > 3 && normalized[out - 1] == '\\') out--;
-    normalized[out] = 0;
-    for (int j = 0; j <= out; j++) vfs_cwd[j] = normalized[j];
-
+    vfs_cwd[out]=0;
     vfs_cwd_ino = ino;
     vfs_parent_ino = e4_lookup(&g_ext4, ino, "..");
     if (!vfs_parent_ino) vfs_parent_ino = 2;
     return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
-}
-
-/* Win32-compatible basic file attributes for the read-only ext4 volume. */
-static uint32_t vfs_get_attributes(const char *path) {
-    uint32_t ino = vfs_resolve_path(path);
-    uint8_t inode[256];
-    if (!ino || e4_inode(&g_ext4, ino, inode) < 0) return 0xFFFFFFFFu;
-    uint16_t mode = E16(inode, 0) & 0xF000;
-    if (mode == 0x4000) return 0x10u; /* FILE_ATTRIBUTE_DIRECTORY */
-    if (mode == 0x8000) return 0x80u; /* FILE_ATTRIBUTE_NORMAL */
-    return 0xFFFFFFFFu;
 }
 
 #define VFS_OPEN_MAX 32

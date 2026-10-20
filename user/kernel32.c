@@ -24,7 +24,7 @@ static DWORD k32_error_mode;
 static int k32_eqi(const char *a, const char *b);
 static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
-static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0;
+static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0; static BOOL k32_process_boost_disabled,k32_thread_boost_disabled; static K32_SIZE_T k32_working_set_min,k32_working_set_max;
 typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
 typedef struct {
     unsigned char data[4096];
@@ -960,13 +960,13 @@ __attribute__((dllexport)) K32_SIZE_T GetThreadAffinityMask(HANDLE thread){if(th
 
 __attribute__((dllexport)) K32_SIZE_T SetThreadAffinityMask(HANDLE thread,K32_SIZE_T mask){if((thread!=GetCurrentThread()&&thread!=(HANDLE)1)||mask!=1){k32_last_error=87;return 0;}return 1;}
 
-__attribute__((dllexport)) BOOL GetProcessPriorityBoost(HANDLE process,BOOL *disabled){if(!disabled||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;*disabled=0;return 1;}
+__attribute__((dllexport)) BOOL GetProcessPriorityBoost(HANDLE process,BOOL *disabled){if(!disabled||(process!=GetCurrentProcess()&&process!=(HANDLE)1)){k32_last_error=87;return 0;}*disabled=k32_process_boost_disabled;k32_last_error=0;return 1;}
 
-__attribute__((dllexport)) BOOL SetProcessPriorityBoost(HANDLE process,BOOL disable){(void)disable;return process==GetCurrentProcess()||process==(HANDLE)1;}
+__attribute__((dllexport)) BOOL SetProcessPriorityBoost(HANDLE process,BOOL disable){if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}k32_process_boost_disabled=disable!=0;k32_last_error=0;return 1;}
 
-__attribute__((dllexport)) BOOL GetThreadPriorityBoost(HANDLE thread,BOOL *disabled){if(!disabled||(thread!=GetCurrentThread()&&thread!=(HANDLE)1))return 0;*disabled=0;return 1;}
+__attribute__((dllexport)) BOOL GetThreadPriorityBoost(HANDLE thread,BOOL *disabled){if(!disabled||(thread!=GetCurrentThread()&&thread!=(HANDLE)1)){k32_last_error=87;return 0;}*disabled=k32_thread_boost_disabled;k32_last_error=0;return 1;}
 
-__attribute__((dllexport)) BOOL SetThreadPriorityBoost(HANDLE thread,BOOL disable){(void)disable;return thread==GetCurrentThread()||thread==(HANDLE)1;}
+__attribute__((dllexport)) BOOL SetThreadPriorityBoost(HANDLE thread,BOOL disable){if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0;}k32_thread_boost_disabled=disable!=0;k32_last_error=0;return 1;}
 
 typedef struct { unsigned short Group,Number,Reserved; } K32_PROCESSOR_NUMBER;
 __attribute__((dllexport)) void GetCurrentProcessorNumberEx(K32_PROCESSOR_NUMBER *number){if(number){number->Group=0;number->Number=0;number->Reserved=0;}}
@@ -1029,14 +1029,14 @@ __attribute__((dllexport)) BOOL SetThreadInformation(HANDLE thread,int info_clas
         if(size<sizeof(K32_THREAD_POWER_THROTTLING_STATE)){k32_last_error=122;return 0;}
         const K32_THREAD_POWER_THROTTLING_STATE *p=(const K32_THREAD_POWER_THROTTLING_STATE*)buffer;
         if(p->Version!=1||(p->ControlMask&~1u)||(p->StateMask&~1u)){k32_last_error=87;return 0;}
-        k32_thread_power_control=p->ControlMask;k32_thread_power_state=p->StateMask& p->ControlMask;k32_last_error=0;return 1;
+        k32_thread_power_state=(k32_thread_power_state&~p->ControlMask)|(p->StateMask&p->ControlMask);k32_thread_power_control|=p->ControlMask;k32_last_error=0;return 1;
     }
     k32_last_error=50;return 0;
 }
 
-__attribute__((dllexport)) BOOL GetProcessWorkingSetSize(HANDLE process,K32_SIZE_T *min,K32_SIZE_T *max){if(!min||!max||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;*min=0;*max=0;return 1;}
+__attribute__((dllexport)) BOOL GetProcessWorkingSetSize(HANDLE process,K32_SIZE_T *min,K32_SIZE_T *max){if(!min||!max||(process!=GetCurrentProcess()&&process!=(HANDLE)1)){k32_last_error=87;return 0;}*min=k32_working_set_min;*max=k32_working_set_max;k32_last_error=0;return 1;}
 
-__attribute__((dllexport)) BOOL SetProcessWorkingSetSize(HANDLE process,K32_SIZE_T min,K32_SIZE_T max){(void)min;(void)max;return process==GetCurrentProcess()||process==(HANDLE)1;}
+__attribute__((dllexport)) BOOL SetProcessWorkingSetSize(HANDLE process,K32_SIZE_T min,K32_SIZE_T max){if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}if(min!=~(K32_SIZE_T)0&&max!=~(K32_SIZE_T)0&&min>max){k32_last_error=87;return 0;}k32_working_set_min=min;k32_working_set_max=max;k32_last_error=0;return 1;}
 
 __attribute__((dllexport)) BOOL EmptyWorkingSet(HANDLE process){return process==GetCurrentProcess()||process==(HANDLE)1;}
 

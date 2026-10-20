@@ -1641,7 +1641,7 @@ __attribute__((dllexport)) BOOL AppendMenuW(void *menu,unsigned int flags,unsign
 __attribute__((dllexport)) BOOL ModifyMenuW(void *menu,unsigned int item,unsigned int flags,unsigned long long id,const U32_WCHAR *text){char b[80];u32_wide_to_ansi(b,sizeof(b),text);return ModifyMenuA(menu,item,flags,id,b);}
 __attribute__((dllexport)) BOOL SetMenuItemInfoW(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOW *info){if(!info)return 0;U32_MENUITEMINFOA a={0};a.cbSize=sizeof(a);a.fMask=info->fMask;a.fType=info->fType;a.fState=info->fState;a.wID=info->wID;a.hSubMenu=info->hSubMenu;a.hbmpChecked=info->hbmpChecked;a.hbmpUnchecked=info->hbmpUnchecked;a.dwItemData=info->dwItemData;a.cch=info->cch;a.hbmpItem=info->hbmpItem;char text[80];if(info->dwTypeData){unsigned int j=0;while(info->dwTypeData[j]&&j+1<sizeof(text)){text[j]=info->dwTypeData[j]<128?(char)info->dwTypeData[j]:'?';j++;}text[j]=0;a.dwTypeData=text;}return SetMenuItemInfoA(menu,item,bypos,&a);}
 __attribute__((dllexport)) BOOL GetMenuItemInfoW(void *menu,unsigned int item,BOOL bypos,U32_MENUITEMINFOW *info){if(!info)return 0;char text[80];U32_MENUITEMINFOA a={0};a.cbSize=sizeof(a);a.fMask=info->fMask;a.cch=sizeof(text);a.dwTypeData=text;if(!GetMenuItemInfoA(menu,item,bypos,&a))return 0;info->fType=a.fType;info->fState=a.fState;info->wID=a.wID;info->hSubMenu=a.hSubMenu;info->dwItemData=a.dwItemData;if(info->dwTypeData&&info->cch){unsigned int j=0;while(text[j]&&j+1<info->cch){info->dwTypeData[j]=(unsigned char)text[j];j++;}info->dwTypeData[j]=0;}info->cch=a.cch;return 1;}
-__attribute__((dllexport)) unsigned long long TrackPopupMenuEx(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) unsigned long long TrackPopupMenuEx(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,unsigned long long e,unsigned long long f){U32_MENUDATA *m=u32_menu_data((void*)a);if(!m||!IsWindow((void*)e)||m->default_pos<0||m->default_pos>=m->count)return 0;U32_MENUITEM *it=&m->items[m->default_pos];if(it->flags&0x3u)return 0;if(b&0x0100u)return it->id;return SendMessageA((void*)e,0x0111u,(unsigned long long)it->id,0),1;}
 __attribute__((dllexport)) BOOL EndMenu(void){g_menu=0;return 1;}
 __attribute__((dllexport)) unsigned long long GetMenuContextHelpId(void *menu){return u32_menu_data(menu)?u32_context_help_id:0;}
 __attribute__((dllexport)) BOOL SetMenuContextHelpId(void *menu,unsigned long long id){if(!u32_menu_data(menu))return 0;u32_context_help_id=id;return 1;}
@@ -1902,13 +1902,12 @@ __attribute__((dllexport)) BOOL RegisterHotKey(void *hwnd,int id,unsigned int mo
 
 __attribute__((dllexport)) BOOL UnregisterHotKey(void *hwnd,int id){for(int i=0;i<16;i++)if(u32_hotkeys[i].used&&u32_hotkeys[i].hwnd==hwnd&&u32_hotkeys[i].id==id){u32_hotkeys[i].used=0;return 1;}return 0;}
 
-__attribute__((dllexport)) void *SetWindowsHookExA(int id,void *proc,void *module,DWORD thread){(void)id;(void)module;(void)thread;if(!proc)return 0;static void *hooks[16];for(int i=0;i<16;i++)if(!hooks[i]){hooks[i]=proc;return &hooks[i];}return 0;}
-
+typedef struct { int used,id; void *proc; DWORD thread; } U32_HOOK;
+static U32_HOOK u32_hooks[16];
+__attribute__((dllexport)) void *SetWindowsHookExA(int id,void *proc,void *module,DWORD thread){(void)module;if(!proc)return 0;for(int i=0;i<16;i++)if(u32_hooks[i].used&&u32_hooks[i].id==id&&u32_hooks[i].proc==proc&&u32_hooks[i].thread==thread)return &u32_hooks[i];for(int i=0;i<16;i++)if(!u32_hooks[i].used){u32_hooks[i].used=1;u32_hooks[i].id=id;u32_hooks[i].proc=proc;u32_hooks[i].thread=thread;return &u32_hooks[i];}return 0;}
 __attribute__((dllexport)) void *SetWindowsHookExW(int id,void *proc,void *module,DWORD thread){return SetWindowsHookExA(id,proc,module,thread);}
-
-__attribute__((dllexport)) BOOL UnhookWindowsHookEx(void *hook){if(!hook)return 0;void **p=(void**)hook;if(*p==0)return 0;*p=0;return 1;}
-
-__attribute__((dllexport)) long long CallNextHookEx(void *hook,int code,unsigned long long wp,long long lp){(void)hook;(void)code;(void)wp;(void)lp;return 0;}
+__attribute__((dllexport)) BOOL UnhookWindowsHookEx(void *hook){for(int i=0;i<16;i++)if(hook==&u32_hooks[i]&&u32_hooks[i].used){u32_hooks[i].used=0;u32_hooks[i].proc=0;u32_hooks[i].thread=0;return 1;}return 0;}
+__attribute__((dllexport)) long long CallNextHookEx(void *hook,int code,unsigned long long wp,long long lp){int start=-1,id=-1;for(int i=0;i<16;i++)if(hook==&u32_hooks[i]&&u32_hooks[i].used){start=i;id=u32_hooks[i].id;break;}for(int i=start+1;i<16;i++)if(u32_hooks[i].used&&u32_hooks[i].id==id){long long (*next)(int,unsigned long long,long long)=(long long (*)(int,unsigned long long,long long))u32_hooks[i].proc;return next(code,wp,lp);}return 0;}
 
 typedef struct { int used; void *hwnd; void *proc; unsigned long long id; void *data; } U32_SUBCLASS;
 static U32_SUBCLASS u32_subclasses[64];

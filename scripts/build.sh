@@ -883,6 +883,8 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:BeginRedrawBatch \
+  /export:EndRedrawBatch \
   /export:GetClientRect \
   /export:MoveWindow \
   /export:SetWindowPos \

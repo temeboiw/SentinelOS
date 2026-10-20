@@ -115,7 +115,8 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         char name[64];
         name[0] = 0;
         DWORD t = pQuery(i, name, 64);
-        if (t == 1) break;
+        /* QueryDirectoryA returns 0 at end, 1 for a file, and 2 for a directory. */
+        if (t == 0) break;
 
         /* Avoid duplicate parent entries if the filesystem supplies one. */
         if (name[0] == '.' && name[1] == '.' && !name[2]) continue;
@@ -123,13 +124,8 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         int k = 0;
         for (; name[k] && k < 63; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
+        /* Trust the filesystem's entry type; names without extensions are files too. */
         g_isdir[g_count] = (t == 2);
-        if (!g_isdir[g_count]) {
-            int dot = 0;
-            for (int j = 0; g_names[g_count][j]; j++)
-                if (g_names[g_count][j] == '.') { dot = 1; break; }
-            if (!dot) g_isdir[g_count] = 1;
-        }
         g_count++;
     }
 

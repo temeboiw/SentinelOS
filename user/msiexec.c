@@ -476,9 +476,12 @@ typedef struct {
     u32 size, offset;
     u16 folder;
 } CabFile;
+typedef struct { char name[240]; u32 size; } MsiStageFile;
 #define CAB_MAX_FILES 4096u
 static CabFile cab_files[CAB_MAX_FILES];
 static u32 cab_file_count;
+static MsiStageFile msi_stage_files[CAB_MAX_FILES];
+static u32 msi_stage_file_count;
 static const char cab_stage_path[]="C:\\MSIStage";
 
 /* Bounded raw-DEFLATE decoder for CAB MSZIP blocks. The 32-KiB history
@@ -879,13 +882,25 @@ static int msi_extract_embedded_cabinets(void) {
         (void)sy3(SYS_RemoveDirectory,(u64)cab_stage_path,0,0);
         return 0;
     }
+    msi_stage_file_count=0;
     for (u32 r=0;r<media->rows;r++) {
         char cabinet[256]; long long v=0; int is_text=0;
         if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) ||
             !is_text || !cabinet[0]) continue;
         if (!msi_list_embedded_cabinet(cabinet+1,1)) return 0;
+        if (cab_file_count>CAB_MAX_FILES-msi_stage_file_count) return 0;
+        for (u32 i=0;i<cab_file_count;i++) {
+            for (u32 j=0;j<msi_stage_file_count;j++)
+                if (same_name(msi_stage_files[j].name,cab_files[i].name)) return 0;
+            MsiStageFile *sf=&msi_stage_files[msi_stage_file_count++];
+            sf->size=cab_files[i].size;
+            for (u32 j=0;j<sizeof sf->name;j++) {
+                sf->name[j]=cab_files[i].name[j];
+                if (!sf->name[j]) break;
+            }
+        }
     }
-    return 1;
+    return msi_stage_file_count!=0;
 }
 static void print_msi_product_summary(void) {
     MsiTable *p=msi_find_table("Property");

@@ -1227,6 +1227,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     u32_render_clip=was_clipped;
                     u32_clip_x0=old_x0; u32_clip_y0=old_y0;
                     u32_clip_x1=old_x1; u32_clip_y1=old_y1;
+                    present_cursor_only();
                 }
 
                 (void)u32_msg_push(msg);

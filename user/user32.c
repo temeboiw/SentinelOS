@@ -1271,7 +1271,7 @@ __attribute__((dllexport)) void *SetFocus(void *hwnd) { void *old=u32_focus; u32
 __attribute__((dllexport)) void *GetFocus(void) { return u32_focus; }
 
 
-/* Compatibility export placeholders: signatures and semantics still need implementation. */
+/* Win32 compatibility exports backed by the current SentinelOS window model. */
 typedef const U32_WCHAR *U32_LPCWSTR;
 typedef U32_WCHAR *U32_LPWSTR;
 typedef unsigned long long U32_WPARAM64;
@@ -1580,8 +1580,7 @@ __attribute__((dllexport)) BOOL GetScrollInfo(void *hwnd,int bar,U32_SCROLLINFO 
 }
 
 
-/* Additional Win32 entry points. These ABI placeholders are intentionally conservative;
-   replace with OS-backed implementations as the corresponding subsystems mature. */
+/* Additional Win32 compatibility APIs. Unsupported platform services fail explicitly. */
 __attribute__((dllexport)) int SetScrollInfo(void *hwnd,int bar,const U32_SCROLLINFO *info,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||!info||(bar!=0&&bar!=1)||info->cbSize<sizeof(U32_SCROLLINFO))return 0;int i=bar==0?0:1,old=u32_scroll_pos[i];if(info->fMask&1u){u32_scroll_min[i]=info->nMin;u32_scroll_max[i]=info->nMax;}if(info->fMask&2u)u32_scroll_page[i]=(int)info->nPage;if(info->fMask&4u)u32_scroll_pos[i]=info->nPos;if(u32_scroll_pos[i]<u32_scroll_min[i])u32_scroll_pos[i]=u32_scroll_min[i];if(u32_scroll_pos[i]>u32_scroll_max[i])u32_scroll_pos[i]=u32_scroll_max[i];return old;}
 __attribute__((dllexport)) BOOL ShowScrollBar(void *hwnd,int bar,BOOL show){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;u32_scroll_visible[bar]=show!=0;return 1;}
 __attribute__((dllexport)) BOOL SetScrollRange(void *hwnd,int bar,int min,int max,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1||max<min)return 0;u32_scroll_min[bar]=min;u32_scroll_max[bar]=max;if(u32_scroll_pos[bar]<min)u32_scroll_pos[bar]=min;if(u32_scroll_pos[bar]>max)u32_scroll_pos[bar]=max;return 1;}
@@ -1958,9 +1957,9 @@ __attribute__((dllexport)) int TranslateAcceleratorA(void *hwnd,void *table,MSG 
         if(a->fVirt&1u)key_match=(msg->message!=0x0102u&&msg->wParam==a->key);
         else key_match=(msg->message==0x0102u&&msg->wParam==a->key);
         if(!key_match)continue;
-        if((a->fVirt&4u)!=0 && !(u32_key_state[0x10]&0x80u))continue;
-        if((a->fVirt&8u)!=0 && !(u32_key_state[0x11]&0x80u))continue;
-        if((a->fVirt&16u)!=0 && !(u32_key_state[0x12]&0x80u))continue;
+        if((a->fVirt&4u)!=0 && !u32_key_state[0x10])continue;
+        if((a->fVirt&8u)!=0 && !u32_key_state[0x11])continue;
+        if((a->fVirt&16u)!=0 && !u32_key_state[0x12])continue;
         SendMessageA(hwnd,0x0111u,a->cmd,0);return 1;
     }
     return 0;

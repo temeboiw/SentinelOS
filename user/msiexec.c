@@ -304,6 +304,78 @@ static u8 msi_column_width(u16 type) {
     if (type&0x0800u) return (u8)msi_string_width();
     return ((type&0xFFu)==4u)?4u:2u;
 }
+static MsiTable *msi_find_table(const char *name) {
+    for (u32 i=0;i<msi_table_count;i++)
+        if (same_name(msi_tables[i].name,name)) return &msi_tables[i];
+    return 0;
+}
+static MsiColumn *msi_find_column(const char *table, u32 number) {
+    for (u32 i=0;i<msi_column_count;i++)
+        if (same_name(msi_columns[i].table,table) && msi_columns[i].number==number)
+            return &msi_columns[i];
+    return 0;
+}
+/* Decode one cell from MSI's column-major table stream. */
+static int msi_table_cell(const char *table, u32 row, u32 column,
+                          char *text, u32 text_cap, long long *integer,
+                          int *is_text) {
+    MsiTable *t=msi_find_table(table);
+    if (!t || row>=t->rows || column>=t->columns || !t->stream_size ||
+        t->stream_size>MAX_TABLE_STREAM) return 0;
+    const u8 *entry=find_stream_entry(table,1);
+    if (!entry || read_entry_stream(entry,table_buffer,MAX_TABLE_STREAM)!=t->stream_size)
+        return 0;
+    MsiColumn *target=msi_find_column(table,column+1);
+    if (!target) return 0;
+    u32 width=target->width, base=0;
+    for (u32 c=1;c<=t->columns;c++) {
+        MsiColumn *col=msi_find_column(table,c);
+        if (!col) return 0;
+        if (c<column+1) base+=(u32)col->width*t->rows;
+    }
+    u64 pos=(u64)base+(u64)row*width;
+    if (pos+width>t->stream_size) return 0;
+    const u8 *p=table_buffer+(u32)pos;
+    if ((target->type&0x0800u) && (target->type&0x0400u)) {
+        u32 id=read_string_ref(p);
+        if (!msi_string(id,text,text_cap)) return 0;
+        if (is_text) *is_text=1;
+        if (integer) *integer=0;
+        return 1;
+    }
+    if (text && text_cap) text[0]=0;
+    if (is_text) *is_text=0;
+    if (width==4) {
+        u32 v=rd32(p);
+        if (integer) *integer=v ? (long long)((long long)v-0x80000000LL) : 0;
+    } else {
+        u16 v=rd16(p);
+        if (integer) *integer=v ? (long long)((long long)v-0x8000LL) : 0;
+    }
+    return 1;
+}
+static void print_msi_product_summary(void) {
+    MsiTable *p=msi_find_table("Property");
+    if (p) {
+        for (u32 r=0;r<p->rows;r++) {
+            char key[128], value[256]; long long n=0; int is_text=0;
+            if (!msi_table_cell("Property",r,0,key,sizeof(key),&n,&is_text) || !is_text)
+                continue;
+            if (!msi_table_cell("Property",r,1,value,sizeof(value),&n,&is_text) || !is_text)
+                continue;
+            if (same_name(key,"ProductName") || same_name(key,"ProductVersion") ||
+                same_name(key,"Manufacturer") || same_name(key,"ProductCode")) {
+                out("  "); out(key); out(": "); out(value); out("\n");
+            }
+        }
+    }
+    MsiTable *files=msi_find_table("File");
+    MsiTable *media=msi_find_table("Media");
+    MsiTable *dirs=msi_find_table("Directory");
+    if (files) { out("File records: "); out_u32(files->rows); out("\n"); }
+    if (media) { out("Media records: "); out_u32(media->rows); out("\n"); }
+    if (dirs) { out("Directory records: "); out_u32(dirs->rows); out("\n"); }
+}
 static int parse_msi_catalog(void) {
     if (!parse_msi_string_pool()) return 0;
     u32 tables_size=read_named_stream("_Tables",1,table_buffer,MAX_TABLE_STREAM);
@@ -412,6 +484,8 @@ static void inspect_msi(void) {
             out_u32(msi_tables[i].rows); out(" rows, ");
             out_u32(msi_tables[i].columns); out(" columns\n");
         }
+        out("Package metadata:\n");
+        print_msi_product_summary();
     } else {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }

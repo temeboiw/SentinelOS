@@ -130,7 +130,7 @@ static void session_loading_screen(void) {
     if(start==(u64)-1)start=0;
     for(unsigned frame=0;frame<100;frame++) {
         /* Clear only the spinner's small bounding box. */
-        rect(fb,f.pitch,f.w,f.h,cx-34,cy-34,68,68,0xFF0B2638);
+        rect(fb,f.pitch,f.w,f.h,cx-34,cy-34,68,68,0xFF061522);
         for(int i=0;i<12;i++) {
             int age=(i-(int)(frame%12)+12)%12;
             u32 col=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;
@@ -143,6 +143,7 @@ static void session_loading_screen(void) {
 }
 
 void sentlogon_main(void) {
+    session_loading_screen();
     LogonFB fbinfo={0};
     if(!NtMapFramebuffer((FBInfo *)&fbinfo)||!fbinfo.va||fbinfo.w<320||fbinfo.h<200) {
         NtWriteConsole("sentlogon: framebuffer unavailable; Enter to continue\n");
@@ -177,7 +178,6 @@ void sentlogon_main(void) {
         }
         cursor_restore(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h);
     }
-    session_loading_screen();
     NtWriteConsole("sentlogon: interactive session accepted\n");
     char name[]={'e','x','p','l','o','r','e','r','.','e','x','e',0};
     if((u64)NtCreateProcess(name)==0)NtWriteConsole("sentlogon: explorer launch failed\n");

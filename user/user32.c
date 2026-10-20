@@ -71,9 +71,9 @@ static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos
 static unsigned int u32_double_click_time=500;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
 static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
-typedef struct { void *parent; unsigned int id,value; int checked,used; } U32_DLGCTRL;
+typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
 static U32_DLGCTRL u32_dlgctrl[32];
-static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;return c;}return 0;}
+static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;c->text[0]=0;return c;}return 0;}
 static unsigned int u32_caret_blink=530;
 static int u32_clip_left,u32_clip_top,u32_clip_right,u32_clip_bottom,u32_clip_active;
 static struct {void *hwnd;char name[48];void *data;int used;} u32_props[32];
@@ -1068,11 +1068,11 @@ __attribute__((dllexport)) unsigned long long SetTimer(void *hwnd, unsigned long
     (void)hwnd; (void)ms; (void)callback; return id ? id : 1;
 }
 __attribute__((dllexport)) BOOL KillTimer(void *hwnd, unsigned long long id) { (void)hwnd; (void)id; return 1; }
-__attribute__((dllexport)) void *GetDlgItem(void *dlg, int id) { (void)dlg; (void)id; return (void *)0; }
-__attribute__((dllexport)) BOOL SetDlgItemTextA(void *dlg, int id, LPCSTR text) { (void)dlg; (void)id; (void)text; return 0; }
-__attribute__((dllexport)) unsigned int GetDlgItemTextA(void *dlg, int id, LPSTR out, int cap) {
-    (void)dlg; (void)id; if (out && cap>0) out[0]=0; return 0;
-}
+__attribute__((dllexport)) void *GetDlgItem(void *dlg,int id){if(!IsWindow(dlg)||id<0)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);return c?(void *)(unsigned long long)(0x20000u+(unsigned)id):0;}
+__attribute__((dllexport)) BOOL SetDlgItemTextA(void *dlg,int id,LPCSTR text){if(!IsWindow(dlg)||id<0||!text)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;int i=0;while(text[i]&&i<127){c->text[i]=text[i];i++;}c->text[i]=0;return 1;}
+__attribute__((dllexport)) unsigned int GetDlgItemTextA(void *dlg,int id,LPSTR out,int cap){if(!out||cap<=0||!IsWindow(dlg)||id<0)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);if(!c){out[0]=0;return 0;}int i=0;while(c->text[i]&&i+1<cap){out[i]=c->text[i];i++;}out[i]=0;return i;}
+__attribute__((dllexport)) BOOL SetDlgItemTextW(void *dlg,int id,const unsigned short *text){char a[128];if(!text)return 0;u32_wide_to_ansi(a,sizeof(a),text);return SetDlgItemTextA(dlg,id,a);}
+__attribute__((dllexport)) unsigned int GetDlgItemTextW(void *dlg,int id,unsigned short *out,int cap){char a[128];unsigned int n=GetDlgItemTextA(dlg,id,a,sizeof(a));if(!out||cap<=0)return 0;int i=0;while(a[i]&&i+1<cap){out[i]=(unsigned char)a[i];i++;}out[i]=0;return i;}
 __attribute__((dllexport)) void *CreateMenu(void) {
     for (int i=0;i<16;i++) if (!u32_menus[i].used) {
         u32_menus[i].used=1; u32_menus[i].count=0; u32_menus[i].default_pos=-1;
@@ -1214,7 +1214,7 @@ __attribute__((dllexport)) BOOL GetMessageW(MSG *msg, void *hwnd, U32_UINT min, 
 }
 static void *u32_dialog_hwnd; static int u32_dialog_active; static long long u32_dialog_result;
 __attribute__((dllexport)) void *GetNextDlgTabItem(void *,void *,BOOL);
-__attribute__((dllexport)) BOOL SetFocus(void *);
+__attribute__((dllexport)) void *SetFocus(void *);
 typedef long long (*U32_DIALOGPROC)(void *,unsigned int,unsigned long long,long long);
 __attribute__((dllexport)) void *CreateDialogParamA(void *instance,const char *templ,void *parent,void *proc,long long param){
  (void)param;const char *title="Dialog";if(templ&&(unsigned long long)templ>0x10000ULL)title=templ;

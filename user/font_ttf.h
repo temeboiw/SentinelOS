@@ -155,6 +155,7 @@ static int u32_ttf_draw(U32_TTF *f,int penx,int baseline,unsigned int ch,
                         unsigned int px,unsigned int col) {
     if (!f || !f->valid || !px) return -1;
     unsigned int glyph=u32_ttf_glyph(f,ch);
+    if(glyph>=f->num_glyphs)glyph=0;
     unsigned int adv=u32_ttf_advance(f,glyph);
     unsigned int metric=f->hmtx+(glyph<f->num_hmetrics?glyph:f->num_hmetrics-1)*4;
     if (metric+4>f->size) return -1;
@@ -189,12 +190,7 @@ static int u32_ttf_draw(U32_TTF *f,int penx,int baseline,unsigned int ch,
         if(flag&8) { if(p>=f->data+f->size)return -1; rep+=(unsigned int)*p++; }
         while(rep-- && got<np) u32_ttf_points[got++].on=(flag&1)!=0;
     }
-    int v=0;
-    for(unsigned int i=0;i<np;i++) {
-        unsigned char flag=u32_ttf_points[i].on?0:0;
-        (void)flag;
-        /* Flags were decoded into on; the packed flags are reread below. */
-    }
+    if(got!=np)return -1;
     /* Rewind to flags and decode coordinates with the same repeat rules. */
     const unsigned char *fp=g+10+contours*2+2+ins;
     unsigned char flags[U32_TTF_POINTS];
@@ -204,6 +200,7 @@ static int u32_ttf_draw(U32_TTF *f,int penx,int baseline,unsigned int ch,
         if(flag&8) { if(fp>=f->data+f->size)return -1; rep+=(unsigned int)*fp++; }
         while(rep-- && got<np) flags[got++]=flag;
     }
+    if(got!=np)return -1;
     int coord=0;
     for(unsigned int i=0;i<np;i++) {
         unsigned char fl=flags[i]; int dlt=0;
@@ -276,6 +273,7 @@ static void u32_ttf_load(void) {
     if(h<0x100 || h==(unsigned long long)-1) return;
     unsigned long long n=sy3(6,h,(unsigned long long)u32_ttf_data,
                              sizeof(u32_ttf_data));
+    (void)sy3(22,h,0,0);
     if(n>0 && n<=sizeof(u32_ttf_data))
         (void)u32_ttf_init(&u32_ttf_font,u32_ttf_data,(unsigned int)n);
 }

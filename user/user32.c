@@ -423,6 +423,7 @@ static void draw_taskbar(void) {
 }
 
 static void compose(void) {
+    if(!u32_redraw_enabled)return;
     ensure_fb();
     if (!g_front) return;
 

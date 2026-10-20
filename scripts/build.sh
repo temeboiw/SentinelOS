@@ -9,6 +9,32 @@
 
 set -euo pipefail
 
+# Use every online CPU by default. Override with JOBS=2 for low-memory hosts.
+if [[ -n "${JOBS:-}" ]]; then
+  BUILD_JOBS="$JOBS"
+else
+  BUILD_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
+fi
+[[ "$BUILD_JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "error: JOBS must be a positive integer" >&2; exit 1; }
+echo "==> Build parallelism: $BUILD_JOBS job(s)"
+
+# Run independent commands in parallel, then fail if any command failed.
+run_parallel() {
+  local -a pids=()
+  local cmd pid failed=0
+  for cmd in "$@"; do
+    bash -c "$cmd" &
+    pids+=("$!")
+    if (( ${#pids[@]} >= BUILD_JOBS )); then
+      for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+      pids=()
+      (( failed == 0 )) || return 1
+    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  return "$failed"
+}
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 B="$ROOT/build"
 EDK2="${EDK2:-/usr/include/efi}"

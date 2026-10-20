@@ -40,6 +40,7 @@
 #define SYS_NtFreeVirtualMemory        27
 #define SYS_NtProtectVirtualMemory     28
 #define SYS_NtQueryVirtualMemory       29
+#define SYS_NtQueryFileMetadata        30
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -734,7 +735,15 @@ typedef struct {
     uint64_t pos, size;
     int used;
 } VfsUserHandle;
+typedef struct {
+    uint64_t creation_time,access_time,write_time,size;
+    uint32_t inode,mode;
+    uint16_t links,reserved;
+} UserFileMetadata;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
+static uint64_t user_filetime_from_unix(uint32_t seconds) {
+    return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
+}
 
 static int vfs_open_user_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
@@ -1615,6 +1624,22 @@ static Frame *syscall_handler(Frame *f) {
         }
         *(UserMemoryBasicInformation*)out=info;
         f->rax=sizeof(UserMemoryBasicInformation);return f;
+    }
+
+    case SYS_NtQueryFileMetadata: {
+        uint64_t h=f->rdi,out=f->rsi,length=f->rdx;
+        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used||
+           length<sizeof(UserFileMetadata)||!MmValidateUserRange(MmCurrentProcess,out,sizeof(UserFileMetadata),1)) {
+            f->rax=0;return f;
+        }
+        VfsUserHandle *vh=&vfs_user_handles[h-0x100];uint8_t inode[256];
+        if(!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0){f->rax=0;return f;}
+        UserFileMetadata meta={0};
+        meta.creation_time=user_filetime_from_unix(E32(inode,12));
+        meta.access_time=user_filetime_from_unix(E32(inode,8));
+        meta.write_time=user_filetime_from_unix(E32(inode,16));
+        meta.size=e4_size(inode);meta.inode=vh->ino;meta.mode=E16(inode,0);meta.links=E16(inode,26);
+        *(UserFileMetadata*)out=meta;f->rax=1;return f;
     }
 
     case SYS_NtQueryDirectoryFile: {

@@ -68,6 +68,8 @@ static int load_fat(void) {
     const u8 *h=file_bytes;
     u32 num_fat=rd32(h+44), difat_sid=rd32(h+68), num_difat=rd32(h+72);
     u32 fat_sids[MAX_FAT/128];
+    if (!num_fat || num_fat > MAX_FAT/128 ||
+        num_fat > MAX_FAT/(sector_size/4)) return 0;
     u32 nfat=0;
     for (u32 i=0;i<109 && nfat<num_fat;i++) {
         u32 sid=rd32(h+76+i*4);
@@ -129,7 +131,8 @@ static void inspect_msi(void) {
         out("msiexec: invalid MSI/OLE compound-file signature\n"); return;
     }
     u16 major=rd16(file_bytes+26), shift=rd16(file_bytes+30);
-    if ((major!=3 && major!=4) || (shift!=9 && shift!=12)) {
+    if ((major!=3 && major!=4) ||
+        (major==3 && shift!=9) || (major==4 && shift!=12)) {
         out("msiexec: unsupported compound-file version\n"); return;
     }
     sector_size=1u<<shift;

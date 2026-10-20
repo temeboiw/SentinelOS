@@ -115,8 +115,16 @@ mkdir -p \
   "$B/rootfs/Program Files/Common Files" \
   "$B/rootfs/Program Files (x86)/Common Files" \
   "$B/rootfs/Users/Public/Downloads" \
+  "$B/rootfs/Users/Public/Desktop" \
+  "$B/rootfs/Users/Public/Documents" \
+  "$B/rootfs/Users/Public/Pictures" \
+  "$B/rootfs/Users/Public/AppData/Roaming" \
+  "$B/rootfs/Users/Public/AppData/Local" \
+  "$B/rootfs/ProgramData" \
   "$B/rootfs/Program Files/Google/Chrome/Application" \
   "$B/rootfs/Program Files (x86)/Google/Chrome/Application" \
+  "$B/rootfs/Windows/Favorites" \
+  "$B/rootfs/Windows/Fonts" \
   "$B/rootfs/Windows/System32"
 
 COMMON=(

@@ -9,6 +9,9 @@ static inline uint8_t ata_inb(uint16_t p) {
 static inline void ata_insw(uint16_t p, void *buf, int count) {
     __asm__ volatile("rep insw" : "+D"(buf), "+c"(count) : "d"(p) : "memory");
 }
+static inline void ata_outsw(uint16_t p, const void *buf, int count) {
+    __asm__ volatile("rep outsw" : "+S"(buf), "+c"(count) : "d"(p) : "memory");
+}
 #define ATA_DATA 0x1F0
 #define ATA_SEC  0x1F2
 #define ATA_LBA0 0x1F3
@@ -50,6 +53,48 @@ static int ata_read_lba(uint32_t lba, uint8_t *buf) {
         }
     }
     return -1;
+}
+static int ata_write_lba(uint32_t lba, const uint8_t *buf) {
+    if (!ata_present) return -1;
+    ata_outb(ATA_DEV, 0xE0 | ((lba >> 24) & 0x0F));
+    ata_outb(ATA_SEC, 1);
+    ata_outb(ATA_LBA0, (uint8_t)lba);
+    ata_outb(ATA_LBA1, (uint8_t)(lba >> 8));
+    ata_outb(ATA_LBA2, (uint8_t)(lba >> 16));
+    ata_outb(ATA_CMD, 0x30);
+    for (int i = 0; i < 500000; i++) {
+        uint8_t st = ata_inb(ATA_STAT);
+        if (st & 1) return -1;
+        if (!(st & 0x80) && (st & 0x08)) {
+            ata_outsw(ATA_DATA, buf, 256);
+            for (int j = 0; j < 500000; j++) {
+                st = ata_inb(ATA_STAT);
+                if (st & 1) return -1;
+                if (!(st & 0x80)) return 0;
+            }
+            return -1;
+        }
+    }
+    return -1;
+}
+static int ata_write(uint64_t off, const void *src, uint64_t len) {
+    uint8_t sec[512];
+    const uint8_t *in = (const uint8_t *)src;
+    while (len) {
+        uint32_t lba = (uint32_t)(off / 512);
+        uint32_t skip = (uint32_t)(off % 512);
+        uint32_t n = 512 - skip;
+        if (n > len) n = (uint32_t)len;
+        if (skip || n != 512) {
+            if (ata_read_lba(lba, sec) < 0) return -1;
+            for (uint32_t i = 0; i < n; i++) sec[skip + i] = in[i];
+        } else {
+            for (uint32_t i = 0; i < 512; i++) sec[i] = in[i];
+        }
+        if (ata_write_lba(lba, sec) < 0) return -1;
+        in += n; off += n; len -= n;
+    }
+    return 0;
 }
 static int ata_read(uint64_t off, void *dst, uint64_t len) {
     uint8_t sec[512];

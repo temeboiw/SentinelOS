@@ -33,7 +33,7 @@ typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
 typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
-typedef unsigned long long (*GetTickCount64_t)(void);
+
 
 typedef struct {
     DWORD hwnd, message;
@@ -50,7 +50,7 @@ static int g_count;
 static char g_path[128];
 static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
-static unsigned long long g_last_file_click;
+
 
 static void path_init(void) {
     g_path[0]='C'; g_path[1]=':'; g_path[2]='\\'; g_path[3]=0;
@@ -129,7 +129,6 @@ void mainCRTStartup(void) {
     DispatchMessageA_t pDisp = (DispatchMessageA_t)gpa(u32, "DispatchMessageA");
     MessageBoxA_t pMsgBox = (MessageBoxA_t)gpa(u32, "MessageBoxA");
     InvalidateRect_t pInv = (InvalidateRect_t)gpa(u32, "InvalidateRect");
-    GetTickCount64_t pTick = (GetTickCount64_t)gpa(k32, "GetTickCount64");
 
     if (!pQuery || !pCreate || !pShow || !pText || !pGetMsg) {
         print("fileexplorer: missing API\n");
@@ -164,6 +163,7 @@ void mainCRTStartup(void) {
                 print(g_names[row]);
                 print("\n");
                 if (g_isdir[row]) {
+                    g_last_file_row = -1;
                     int ok = 0;
                     if (pChdir) ok = pChdir(g_names[row]);
                     if (!ok) ok = (sy3(SYS_Chdir, (u64)g_names[row], 0, 0) == 0);
@@ -191,12 +191,8 @@ void mainCRTStartup(void) {
                         print("fileexplorer: chdir failed\n");
                     }
                 } else {
-                    unsigned long long now = pTick ? pTick() : 0;
-                    int double_click = (g_last_file_row == row &&
-                        pTick && now >= g_last_file_click &&
-                        now - g_last_file_click <= 500);
+                    int double_click = (g_last_file_row == row);
                     g_last_file_row = row;
-                    g_last_file_click = now;
 
                     if (double_click && ends_with(g_names[row], ".exe")) {
                         unsigned long long pid = sy3(

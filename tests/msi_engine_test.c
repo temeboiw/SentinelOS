@@ -20,10 +20,13 @@ int main(void) {
     ok &= expect_int("empty condition", msi_condition_eval(""), 1);
     ok &= expect_int("TRUE condition", msi_condition_eval("TRUE"), 1);
     ok &= expect_int("parenthesized TRUE", msi_condition_eval("(TRUE)"), 1);
+    ok &= expect_int("parenthesized FALSE", msi_condition_eval("(FALSE)"), 0);
     ok &= expect_int("FALSE condition", msi_condition_eval("FALSE"), 0);
     ok &= expect_int("Installed is false in fresh install", msi_condition_eval("Installed"), 0);
+    ok &= expect_int("parenthesized Installed", msi_condition_eval("(Installed)"), 0);
     ok &= expect_int("NOT Installed", msi_condition_eval("NOT Installed"), 1);
     ok &= expect_int("NOT FALSE", msi_condition_eval("NOT FALSE"), 1);
+    ok &= expect_int("NOT TRUE", msi_condition_eval("NOT TRUE"), 0);
     ok &= expect_int("unsupported numeric comparison", msi_condition_eval("VersionNT >= 601"), -1);
     ok &= expect_int("unsupported boolean operator", msi_condition_eval("A OR B"), -1);
 

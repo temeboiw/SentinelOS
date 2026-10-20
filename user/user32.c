@@ -61,6 +61,9 @@ static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos
 static unsigned int u32_double_click_time=500;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
 static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
+typedef struct { void *parent; unsigned int id,value; int checked,used; } U32_DLGCTRL;
+static U32_DLGCTRL u32_dlgctrl[32];
+static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;return c;}return 0;}
 static unsigned int u32_caret_blink=530;
 static int u32_clip_left,u32_clip_top,u32_clip_right,u32_clip_bottom,u32_clip_active;
 static char g_lines[40][80];
@@ -1366,15 +1369,15 @@ __attribute__((dllexport)) unsigned short SetWindowWord(void *hwnd,int index,uns
 __attribute__((dllexport)) long GetWindowLongW(void *hwnd, int index) { return GetWindowLongA(hwnd,index); }
 __attribute__((dllexport)) long SetWindowLongW(void *hwnd, int index, long value) { return SetWindowLongA(hwnd,index,value); }
 __attribute__((dllexport)) int GetDlgCtrlID(void *hwnd) { return IsWindow(hwnd) ? (int)u32_wnd_id : 0; }
-__attribute__((dllexport)) unsigned long long GetDlgItemInt(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetDlgItemInt(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long CheckDlgButton(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long IsDlgButtonChecked(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long CheckRadioButton(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetNextDlgTabItem(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetNextDlgGroupItem(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) unsigned int GetDlgItemInt(void *dlg,int id,BOOL *translated,BOOL signed_value){(void)signed_value;if(translated)*translated=0;if(!IsWindow(dlg))return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);if(!c)return 0;if(translated)*translated=1;return c->value;}
+__attribute__((dllexport)) BOOL SetDlgItemInt(void *dlg,int id,unsigned int value,BOOL signed_value){(void)signed_value;if(!IsWindow(dlg))return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->value=value;return 1;}
+__attribute__((dllexport)) BOOL CheckDlgButton(void *dlg,int id,unsigned int check){if(!IsWindow(dlg)||check>2)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(int)check;return 1;}
+__attribute__((dllexport)) unsigned int IsDlgButtonChecked(void *dlg,int id){if(!IsWindow(dlg))return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);return c?(unsigned int)c->checked:0;}
+__attribute__((dllexport)) BOOL CheckRadioButton(void *dlg,int first,int last,int check){if(!IsWindow(dlg)||first>last||last-first>128||check<first||check>last)return 0;for(int id=first;id<=last;id++){U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(id==check)?1:0;}return 1;}
+__attribute__((dllexport)) void *GetNextDlgTabItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return IsWindow(dlg)?0:0;}
+__attribute__((dllexport)) void *GetNextDlgGroupItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return IsWindow(dlg)?0:0;}
 __attribute__((dllexport)) long GetDialogBaseUnits(void) { return (long)0x00100008u; }
-__attribute__((dllexport)) unsigned long long MapDialogRect(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL MapDialogRect(void *dlg,U32_RECT *r){if(!IsWindow(dlg)||!r)return 0;r->left=(r->left*8)/4;r->right=(r->right*8)/4;r->top=(r->top*16)/8;r->bottom=(r->bottom*16)/8;return 1;}
 static BOOL u32_adjust_window_rect(U32_RECT *r, u32 style, BOOL menu) {
     if (!r) return 0;
     int border=(style & (0x00800000u|0x00040000u)) ? 1 : 0;

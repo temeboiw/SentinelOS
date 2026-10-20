@@ -24,7 +24,7 @@ static DWORD k32_error_mode;
 static int k32_eqi(const char *a, const char *b);
 static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
-static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0;
+static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0;
 typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
 typedef struct {
     unsigned char data[4096];
@@ -450,7 +450,7 @@ __attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count,const HANDLE
 __attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_VALUE)return 0;if(h==(HANDLE)1||h==(HANDLE)2)return 2;return 1;}
 
 
-/* Compatibility export placeholders: signatures and semantics still need implementation. */
+/* Win32 compatibility exports. Implementations are limited by SentinelOS kernel services. */
 __attribute__((dllexport)) K32_LPWSTR GetCommandLineW(void) { return (K32_LPWSTR)k32_cmdline_w; }
 __attribute__((dllexport)) HANDLE GetModuleHandleW(K32_LPCWSTR name){char n[256];if(!name)return GetModuleHandleA(0);k32_wide_to_ansi(n,sizeof(n),name);return GetModuleHandleA(n);}
 __attribute__((dllexport)) DWORD GetModuleFileNameW(HANDLE module, K32_LPWSTR out, DWORD cap) {
@@ -621,8 +621,7 @@ __attribute__((dllexport)) DWORD GetUserDefaultLCID(void){return 0x0409;}
 __attribute__((dllexport)) DWORD GetACP(void) { return 1252u; }
 
 
-/* Additional Win32 entry points. These ABI placeholders are intentionally conservative;
-   replace with OS-backed implementations as the corresponding subsystems mature. */
+/* Additional Win32 compatibility APIs. Unsupported kernel services return explicit failure. */
 __attribute__((dllexport)) DWORD GetOEMCP(void) { return 437u; }
 __attribute__((dllexport)) DWORD GetConsoleCP(void){return k32_console_cp_in;}
 __attribute__((dllexport)) DWORD GetConsoleOutputCP(void){return k32_console_cp_out;}
@@ -1003,9 +1002,37 @@ __attribute__((dllexport)) LONG GetCurrentApplicationUserModelId(DWORD *length,K
 
 __attribute__((dllexport)) BOOL GetSystemTimeAdjustmentPrecise(unsigned long long *adjustment,unsigned long long *increment,BOOL *disabled){if(!adjustment||!increment||!disabled)return 0;*adjustment=10000000;*increment=10000000;*disabled=1;return 1;}
 
-__attribute__((dllexport)) BOOL GetThreadInformation(HANDLE thread,int info_class,void *buffer,DWORD size){(void)info_class;if(thread!=GetCurrentThread()&&thread!=(HANDLE)1)return 0;if(!buffer||size==0)return 0;return 0;}
-
-__attribute__((dllexport)) BOOL SetThreadInformation(HANDLE thread,int info_class,const void *buffer,DWORD size){(void)info_class;(void)buffer;(void)size;return thread==GetCurrentThread()||thread==(HANDLE)1?0:0;}
+typedef struct { DWORD Version,ControlMask,StateMask; } K32_THREAD_POWER_THROTTLING_STATE;
+__attribute__((dllexport)) BOOL GetThreadInformation(HANDLE thread,int info_class,void *buffer,DWORD size) {
+    if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0;}
+    if(!buffer){k32_last_error=87;return 0;}
+    if(info_class==0) {
+        if(size<sizeof(DWORD)){k32_last_error=122;return 0;}
+        *(DWORD*)buffer=k32_thread_memory_priority;k32_last_error=0;return 1;
+    }
+    if(info_class==1) {
+        if(size<sizeof(K32_THREAD_POWER_THROTTLING_STATE)){k32_last_error=122;return 0;}
+        K32_THREAD_POWER_THROTTLING_STATE *p=(K32_THREAD_POWER_THROTTLING_STATE*)buffer;
+        p->Version=1;p->ControlMask=k32_thread_power_control;p->StateMask=k32_thread_power_state;k32_last_error=0;return 1;
+    }
+    k32_last_error=50;return 0;
+}
+__attribute__((dllexport)) BOOL SetThreadInformation(HANDLE thread,int info_class,const void *buffer,DWORD size) {
+    if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0;}
+    if(!buffer){k32_last_error=87;return 0;}
+    if(info_class==0) {
+        if(size<sizeof(DWORD)){k32_last_error=122;return 0;}
+        DWORD priority=*(const DWORD*)buffer;if(priority<1||priority>5){k32_last_error=87;return 0;}
+        k32_thread_memory_priority=priority;k32_last_error=0;return 1;
+    }
+    if(info_class==1) {
+        if(size<sizeof(K32_THREAD_POWER_THROTTLING_STATE)){k32_last_error=122;return 0;}
+        const K32_THREAD_POWER_THROTTLING_STATE *p=(const K32_THREAD_POWER_THROTTLING_STATE*)buffer;
+        if(p->Version!=1||(p->ControlMask&~1u)||(p->StateMask&~1u)){k32_last_error=87;return 0;}
+        k32_thread_power_control=p->ControlMask;k32_thread_power_state=p->StateMask& p->ControlMask;k32_last_error=0;return 1;
+    }
+    k32_last_error=50;return 0;
+}
 
 __attribute__((dllexport)) BOOL GetProcessWorkingSetSize(HANDLE process,K32_SIZE_T *min,K32_SIZE_T *max){if(!min||!max||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;*min=0;*max=0;return 1;}
 

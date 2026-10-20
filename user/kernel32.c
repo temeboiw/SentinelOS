@@ -739,20 +739,21 @@ __attribute__((dllexport)) BOOL GetFileInformationByHandleEx(HANDLE file,int inf
     }
     if(infoClass==2) {
         K32_OPEN_PATH *path=k32_find_path(file);if(!path){k32_last_error=50;return 0;}
-        DWORD n=0;while(path->path[n])n++;if(size<sizeof(DWORD)+(n+1u)*sizeof(K32_WCHAR)){k32_last_error=122;return 0;}
+        DWORD n=0;while(path->path[n])n++;DWORD required=sizeof(DWORD)+n*sizeof(K32_WCHAR);if(size<required){k32_last_error=122;return 0;}
         struct { DWORD FileNameLength; K32_WCHAR FileName[1]; } *p=info;p->FileNameLength=n*sizeof(K32_WCHAR);
-        for(DWORD i=0;i<=n;i++)p->FileName[i]=(unsigned char)path->path[i];k32_last_error=0;return 1;
+        for(DWORD i=0;i<n;i++)p->FileName[i]=(unsigned char)path->path[i];
+        if(size>=required+sizeof(K32_WCHAR))p->FileName[n]=0;k32_last_error=0;return 1;
     }
     k32_last_error=50;return 0;
 }
 __attribute__((dllexport)) DWORD GetFinalPathNameByHandleA(HANDLE file,LPSTR out,DWORD cap,DWORD flags) {
     if(!file||file==INVALID_HANDLE_VALUE||!out||!cap){k32_last_error=87;return 0;}
-    unsigned int volume=flags&0xFu;if(volume!=0&&volume!=4){out[0]=0;k32_last_error=50;return 0;}
+    unsigned int volume=flags&7u;if(volume!=0&&volume!=4){out[0]=0;k32_last_error=50;return 0;}
     K32_OPEN_PATH *p=k32_find_path(file);if(!p){out[0]=0;k32_last_error=6;return 0;}
-    char full[768];DWORD n=GetFullPathNameA(p->path,sizeof(full),full,0);if(!n||n>=sizeof(full)){out[0]=0;return 0;}
-    DWORD prefix=volume==4?0:0; (void)prefix;
-    if(cap<=n){DWORD i=0;while(i+1<cap){out[i]=full[i];i++;}out[i]=0;k32_last_error=122;return n+1;}
-    for(DWORD i=0;i<=n;i++)out[i]=full[i];k32_last_error=0;return n;
+    char full[768];DWORD full_len=GetFullPathNameA(p->path,sizeof(full),full,0);if(!full_len||full_len>=sizeof(full)){out[0]=0;return 0;}
+    const char *result=(volume==4&&full_len>=2&&full[1]==':')?full+2:full;DWORD n=0;while(result[n])n++;
+    if(cap<=n){DWORD i=0;while(i+1<cap){out[i]=result[i];i++;}out[i]=0;k32_last_error=122;return n+1;}
+    for(DWORD i=0;i<=n;i++)out[i]=result[i];k32_last_error=0;return n;
 }
 __attribute__((dllexport)) DWORD GetFinalPathNameByHandleW(HANDLE file,K32_LPWSTR out,DWORD cap,DWORD flags) {
     char path[768];DWORD n=GetFinalPathNameByHandleA(file,path,sizeof(path),flags);if(!n){if(out&&cap)out[0]=0;return 0;}

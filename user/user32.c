@@ -572,7 +572,6 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
-    int explicit_clip = u32_render_clip;
     cursor_restore();
     int layered = g_fw<=1920u && g_fh<=1080u;
     int layer_x0=0,layer_y0=0,layer_x1=(int)g_fw,layer_y1=(int)g_fh;

@@ -205,10 +205,29 @@ void mainCRTStartup(void) {
             if (row != g_hover_row) {
                 int old_row = g_hover_row;
                 g_hover_row = row;
+
+                /* Update both backing text lines first, then repaint once.
+                 * Two immediate invalidations made the intermediate state
+                 * visible as a blank/flashing marker. */
                 if (old_row >= g_scroll && old_row < g_scroll + VISIBLE_ROWS)
-                    draw_visible_row(pText, pInv, old_row - g_scroll);
+                    draw_visible_row(pText, 0, old_row - g_scroll);
                 if (row >= g_scroll && row < g_scroll + VISIBLE_ROWS)
-                    draw_visible_row(pText, pInv, row - g_scroll);
+                    draw_visible_row(pText, 0, row - g_scroll);
+
+                int first = old_row, last = row;
+                if (first < 0 || first < g_scroll || first >= g_scroll + VISIBLE_ROWS) first = row;
+                if (last < 0 || last < g_scroll || last >= g_scroll + VISIBLE_ROWS) last = old_row;
+                if (first >= g_scroll && first < g_scroll + VISIBLE_ROWS &&
+                    last >= g_scroll && last < g_scroll + VISIBLE_ROWS) {
+                    if (first > last) { int tmp=first; first=last; last=tmp; }
+                    FE_RECT dirty = { 0, 44 + (2 + first - g_scroll) * 16,
+                                      760, 44 + (3 + last - g_scroll) * 16 };
+                    if (pInv) pInv(g_window, &dirty, 0);
+                } else if (row >= g_scroll && row < g_scroll + VISIBLE_ROWS) {
+                    FE_RECT dirty = { 0, 44 + (2 + row - g_scroll) * 16,
+                                      760, 44 + (3 + row - g_scroll) * 16 };
+                    if (pInv) pInv(g_window, &dirty, 0);
+                }
             }
         }
 

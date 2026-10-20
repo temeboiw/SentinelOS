@@ -3,9 +3,16 @@
 #include <string.h>
 
 #define EXT4K_TEST 1
+/* The test exercises byte I/O only; GPT probing is stubbed out. */
+static int vb_ok;
+static int blk_read_lba(uint32_t lba, uint8_t *buf);
+static int ata_read_lba(uint32_t lba, uint8_t *buf);
+#define DbgPrint(...) ((void)0)
 #include "../kernel/ext4k.h"
 
 static uint8_t test_disk[256u * 1024u];
+static int blk_read_lba(uint32_t lba, uint8_t *buf) { (void)lba; (void)buf; return -1; }
+static int ata_read_lba(uint32_t lba, uint8_t *buf) { (void)lba; (void)buf; return -1; }
 
 int ext4k_test_read(uint64_t off, void *dst, uint64_t len) {
     if (off > sizeof test_disk || len > sizeof test_disk - off) return -1;

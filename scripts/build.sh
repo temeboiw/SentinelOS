@@ -487,6 +487,7 @@ lld -flavor link \
   /export:GlobalLock \
   /export:GlobalUnlock \
   /export:GlobalHandle \
+    /export:GetBinaryTypeW \
   /export:GetBinaryTypeA \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"

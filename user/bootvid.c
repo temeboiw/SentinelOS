@@ -6,25 +6,24 @@ static void rect(u32*f,u32 p,u32 w,u32 h,int x,int y,int rw,int rh,u32 c){int x1
 static void txt(u32*f,u32 p,u32 w,u32 h,int x,int y,const char*s,u32 c,int z){for(;*s;s++,x+=8*z){unsigned char q=*s;if(q>=128)q='?';const unsigned char*g=font8x8_basic[q];for(int j=0;j<8;j++)for(int i=0;i<8;i++)if(g[j]&(1u<<i))rect(f,p,w,h,x+i*z,y+j*z,z,z,c);}}
 void bootvid_main(void){
  FBInfo f={0};
- if(NtMapFramebuffer(&f)&&f.va&&f.w>=320&&f.h>=200){
+ if(NtMapFramebuffer(&f)&&f.va&&f.w>=320&&f.h>=200&&f.pitch>=f.w*4){
   f.pitch/=4;u32*fb=(u32*)(u64)f.va;
-  for(u32 y=0;y<f.h;y++){u32 c=mix(0xFF071725,0xFF147AA4,(u32)((u64)y*255/(f.h>1?f.h-1:1)));rect(fb,f.pitch,f.w,f.h,0,y,f.w,1,c);}
+  for(u32 y=0;y<f.h;y++){u32 c=mix(0xFF071725,0xFF147AA4,(u32)((u64)y*255/(f.h>1?f.h-1:1)));u32 *row=fb+(u64)y*f.pitch;for(u32 x=0;x<f.w;x++)row[x]=c;}
   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-40,(int)f.h/2-52,"SENTINELOS",0xFFFFFFFF,2);
   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-60,(int)f.h/2-22,"Starting system",0xFFB7D7E7,1);
   static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13},dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
-  int cx=f.w/2,cy=f.h/2+22;u64 start=sy3(24,0,0,0);if(start==(u64)-1)start=0;
-  for(u32 frame=0;frame<100;frame++){for(int yy=cy-34;yy<cy+34;yy++){u32 bg=mix(0xFF071725,0xFF147AA4,(u32)((u64)(yy<0?0:yy)*255/(f.h>1?f.h-1:1)));rect(fb,f.pitch,f.w,f.h,cx-34,yy,68,1,bg);}for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}(void)sy3(SYS_Yield,0,0,0);u64 now=sy3(24,0,0,0);if(now!=(u64)-1&&now-start>=1500)break;}
-  /* Fast in-place fade: only four full-frame passes, no 8 MiB backup buffer. */
-  for(u32 step=0;step<4;step++){
-   for(u32 y=0;y<f.h;y++)for(u32 x=0;x<f.w;x++){
-    u64 i=(u64)y*f.pitch+x;u32 c=fb[i];
-    fb[i]=0xFF000000|((((c>>16)&255)*3/5)<<16)|((((c>>8)&255)*3/5)<<8)|((c&255)*3/5);
-   }
-   u64 t=sy3(24,0,0,0);
-   if(t!=(u64)-1)while(sy3(24,0,0,0)-t<8)(void)sy3(SYS_Yield,0,0,0);
+  int cx=f.w/2,cy=f.h/2+22;u64 start_tick=sy3(24,0,0,0);if(start_tick==(u64)-1)start_tick=0;
+  for(u32 frame=0;frame<36;frame++){
+   for(int yy=cy-34;yy<cy+34;yy++){if(yy<0||yy>=(int)f.h)continue;u32 bg=mix(0xFF071725,0xFF147AA4,(u32)((u64)yy*255/(f.h>1?f.h-1:1)));u32 *row=fb+(u64)yy*f.pitch;int x0=cx-34;if(x0<0)x0=0;int x1=cx+34;if(x1>(int)f.w)x1=(int)f.w;for(int xx=x0;xx<x1;xx++)row[xx]=bg;}
+   for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}
+   (void)sy3(SYS_Yield,0,0,0);u64 now=sy3(24,0,0,0);if(now!=(u64)-1&&start_tick&&(now-start_tick)>=450)break;
   }
-  rect(fb,f.pitch,f.w,f.h,0,0,f.w,f.h,0xFF000000);
+  for(u32 y=0;y<f.h;y++){u32 *row=fb+(u64)y*f.pitch;for(u32 x=0;x<f.w;x++)row[x]=0xFF000000;}
  }
- NtWriteConsole("bootvid: splash complete; launching logon\n");
- char name[]={'s','e','n','t','l','o','g','o','n','.','e','x','e',0};(void)NtCreateProcess(name);NtExit(0);for(;;)(void)sy3(SYS_Yield,0,0,0);
+ NtWriteConsole("bootvid: splash complete; launching sentlogon\\n");
+ char name[]={'s','e','n','t','l','o','g','o','n','.','e','x','e',0};
+ NTSTATUS status=NtCreateProcess(name);
+ if(status!=0){NtWriteConsole("bootvid: ERROR creating sentlogon.exe\\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
+ NtWriteConsole("bootvid: sentlogon.exe created\\n");
+ NtExit(0);for(;;)(void)sy3(SYS_Yield,0,0,0);
 }

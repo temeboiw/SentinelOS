@@ -57,6 +57,9 @@ jobs:
             echo "QEMU exited unexpectedly with status $rc"
             exit "$rc"
           fi
+          echo "===== QEMU serial log ====="
+          cat build/serial.log || true
+          echo "===== end serial log ====="
           grep -q "fs: C: volume root" build/serial.log
           grep -q -- "-- usermode (smss) --" build/serial.log
           echo "Boot smoke test passed: ext4 mounted and usermode entered."

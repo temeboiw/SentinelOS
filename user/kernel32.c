@@ -565,7 +565,7 @@ __attribute__((dllexport)) DWORD GetLogicalDriveStringsA(DWORD cap, LPSTR out) {
     out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
 }
 __attribute__((dllexport)) BOOL GetVolumeInformationA(LPCSTR root,LPSTR label,DWORD labelCap,DWORD *serial,DWORD *maxComponent,DWORD *flags,LPSTR fsName,DWORD fsCap) { (void)label;(void)labelCap;(void)serial;(void)maxComponent;(void)flags;(void)fsName;(void)fsCap;if(!root){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
-typedef struct { unsigned long long creation_time,access_time,write_time,size; DWORD inode,mode; WORD links,reserved; } K32_FILE_METADATA;
+typedef struct { unsigned long long creation_time,access_time,write_time,change_time,size; DWORD inode,mode; WORD links,reserved; } K32_FILE_METADATA;
 static BOOL k32_query_file_metadata(HANDLE file,K32_FILE_METADATA *meta) {
     if(!file||file==INVALID_HANDLE_VALUE||!meta)return 0;
     return sy3(SYS_QueryFileMetadata,(u64)file,(u64)meta,sizeof(*meta))!=0;
@@ -687,13 +687,16 @@ __attribute__((dllexport)) BOOL GetFileInformationByHandleEx(HANDLE file,int inf
     if(infoClass==0) {
         typedef struct { long long CreationTime,LastAccessTime,LastWriteTime,ChangeTime; DWORD FileAttributes; } BASIC_INFO;
         if(size<sizeof(BASIC_INFO)){k32_last_error=122;return 0;}
-        BASIC_INFO *p=(BASIC_INFO*)info;p->CreationTime=p->LastAccessTime=p->LastWriteTime=p->ChangeTime=0;p->FileAttributes=0x80u;k32_last_error=0;return 1;
+        K32_FILE_METADATA meta;if(!k32_query_file_metadata(file,&meta)){k32_last_error=6;return 0;}
+        BASIC_INFO *p=(BASIC_INFO*)info;p->CreationTime=meta.creation_time;p->LastAccessTime=meta.access_time;p->LastWriteTime=meta.write_time;p->ChangeTime=meta.change_time;
+        p->FileAttributes=((meta.mode&0xF000u)==0x4000u)?0x10u:0x80u;k32_last_error=0;return 1;
     }
     if(infoClass==1) {
         typedef struct { long long AllocationSize,EndOfFile; DWORD NumberOfLinks; unsigned char DeletePending,Directory; } STANDARD_INFO;
         if(size<sizeof(STANDARD_INFO)){k32_last_error=122;return 0;}
-        DWORD high=0,low=GetFileSize(file,&high);if(low==0xFFFFFFFFu&&GetLastError()!=0)return 0;
-        STANDARD_INFO *p=(STANDARD_INFO*)info;p->EndOfFile=(long long)(((unsigned long long)high<<32)|low);p->AllocationSize=(p->EndOfFile+4095LL)&~4095LL;p->NumberOfLinks=1;p->DeletePending=0;p->Directory=0;k32_last_error=0;return 1;
+        K32_FILE_METADATA meta;if(!k32_query_file_metadata(file,&meta)){k32_last_error=6;return 0;}
+        STANDARD_INFO *p=(STANDARD_INFO*)info;p->EndOfFile=(long long)meta.size;p->AllocationSize=(p->EndOfFile+4095LL)&~4095LL;
+        p->NumberOfLinks=meta.links;p->DeletePending=0;p->Directory=((meta.mode&0xF000u)==0x4000u);k32_last_error=0;return 1;
     }
     if(infoClass==2) {
         K32_OPEN_PATH *path=k32_find_path(file);if(!path){k32_last_error=50;return 0;}

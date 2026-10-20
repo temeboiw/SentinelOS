@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -46,17 +46,21 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
 }
 __attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) { (void)n; return (HANDLE)1; }
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
-    (void)h;(void)ov;
-    u64 n = sy3(SYS_Write, 1, (u64)buf, len);
-    if (w) *w = (DWORD)n;
+    (void)ov;
+    u64 n;
+    if ((u64)h >= 0x100 && (u64)h < 0x100 + 32)
+        n = sy3(SYS_WriteFileHandle, (u64)h, (u64)buf, len);
+    else
+        n = sy3(SYS_Write, 1, (u64)buf, len);
+    if (w) *w = n == (u64)-1 ? 0 : (DWORD)n;
     return n != (u64)-1;
 }
 __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD p) {
     (void)t;(void)p; return (LPVOID)sy3(SYS_Alloc, (u64)a, sz, 0);
 }
 __attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, void *sec, DWORD d, DWORD f, HANDLE t) {
-    (void)a;(void)s;(void)sec;(void)d;(void)f;(void)t;
-    i64 h = (i64)sy3(SYS_OpenFile, (u64)name, 0, 0);
+    (void)s;(void)sec;(void)f;(void)t;
+    i64 h = (i64)sy3(SYS_OpenFile, (u64)name, (u64)a, (u64)d);
     return h < 0 ? INVALID_HANDLE_VALUE : (HANDLE)h;
 }
 __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD *rd, void *ov) {

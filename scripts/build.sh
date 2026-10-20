@@ -1432,7 +1432,8 @@ for image in \
   taskbar.dll \
   kernel32.dll \
   user32.dll \
-  cmd.exe
+  cmd.exe \
+  msiexec.exe
 do
   if [[ ! -s "$SYS32/$image" ]]; then
     echo "FATAL: missing or empty image: $SYS32/$image"

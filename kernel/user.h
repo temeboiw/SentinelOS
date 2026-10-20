@@ -738,7 +738,7 @@ typedef struct {
 } VfsUserHandle;
 typedef struct {
     uint64_t creation_time,access_time,write_time,change_time,size;
-    uint32_t inode,mode;
+    uint32_t inode,mode,volume_serial;
     uint16_t links,reserved;
 } UserFileMetadata;
 typedef struct {
@@ -1656,7 +1656,7 @@ static Frame *syscall_handler(Frame *f) {
         meta.access_time=user_filetime_from_unix(E32(inode,8));
         meta.write_time=user_filetime_from_unix(E32(inode,16));
         meta.change_time=user_filetime_from_unix(E32(inode,12));
-        meta.size=e4_size(inode);meta.inode=vh->ino;meta.mode=E16(inode,0);meta.links=E16(inode,26);
+        meta.size=e4_size(inode);meta.inode=vh->ino;meta.mode=E16(inode,0);meta.volume_serial=g_ext4.volume_serial;meta.links=E16(inode,26);
         *(UserFileMetadata*)out=meta;f->rax=1;return f;
     }
 

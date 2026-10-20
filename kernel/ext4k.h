@@ -8,6 +8,9 @@
 typedef struct {
     uint64_t part_off;
     uint32_t blksz, ipg, isize, dsize, first_data;
+    uint64_t total_blocks,free_blocks,reserved_blocks;
+    uint32_t total_inodes,free_inodes,volume_serial;
+    char volume_label[17];
     int is64;
     uint8_t blk[4096];
     int ok;
@@ -30,6 +33,10 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     fs->isize = E16(sb, 88);
     if (fs->isize < 128) fs->isize = 128;
     fs->is64 = (E32(sb, 96) & 0x80) != 0;
+    fs->total_blocks=E32(sb,4);fs->free_blocks=E32(sb,12);fs->reserved_blocks=E32(sb,8);
+    if(fs->is64){fs->total_blocks|=(uint64_t)E32(sb,0x150)<<32;fs->free_blocks|=(uint64_t)E32(sb,0x158)<<32;fs->reserved_blocks|=(uint64_t)E32(sb,0x154)<<32;}
+    fs->total_inodes=E32(sb,0);fs->free_inodes=E32(sb,16);fs->volume_serial=E32(sb,104);
+    for(int i=0;i<16;i++)fs->volume_label[i]=(char)sb[120+i];fs->volume_label[16]=0;
     fs->dsize = fs->is64 ? E16(sb, 254) : 32;
     if (!fs->dsize) fs->dsize = 32;
     if (fs->blksz > 4096 || !fs->ipg) return -1;

@@ -14,6 +14,7 @@ static inline void ps2_outb(uint16_t p, uint8_t v) {
 
 static uint8_t  kbd_buf[64];
 static unsigned kbd_r, kbd_w;
+static int mouse_screen_w = 1280, mouse_screen_h = 800;
 static int mouse_x = 640, mouse_y = 400;
 static int mouse_btn;
 static uint8_t mouse_pkt[4];
@@ -59,8 +60,8 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
         mouse_y -= dy * scale; /* PS/2 Y is opposite screen Y */
         if (mouse_x < 0) mouse_x = 0;
         if (mouse_y < 0) mouse_y = 0;
-        if (mouse_x > 1279) mouse_x = 1279;
-        if (mouse_y > 799) mouse_y = 799;
+        if (mouse_x >= mouse_screen_w) mouse_x = mouse_screen_w - 1;
+        if (mouse_y >= mouse_screen_h) mouse_y = mouse_screen_h - 1;
         mouse_btn = mouse_pkt[0] & 0x07;
         if (mouse_packet_len == 4) {
             int wheel = mouse_pkt[3] & 0x0F;

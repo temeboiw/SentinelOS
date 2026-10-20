@@ -61,7 +61,7 @@ static int cur_on, cur_ox, cur_oy;
 static WINDOW g_wnd;
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;
-static int u32_msg_time;
+static int u32_msg_time;\nstatic int u32_last_msg_time;
 static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
@@ -92,6 +92,7 @@ static BOOL u32_msg_push(const MSG *msg) {
 static BOOL u32_msg_peek(MSG *msg, int remove) {
     if (!u32_msg_count) return 0;
     if (msg) *msg = u32_msg_queue[u32_msg_head];
+    u32_last_msg_time = (int)u32_msg_queue[u32_msg_head].time;
     if (remove) {
         u32_msg_head = (u32_msg_head + 1) % 32;
         u32_msg_count--;
@@ -1099,7 +1100,7 @@ __attribute__((dllexport)) void *LoadImageA(void *instance, LPCSTR name, unsigne
 }
 __attribute__((dllexport)) BOOL DrawMenuBar(void *hwnd) { (void)hwnd; compose(); return 1; }
 __attribute__((dllexport)) unsigned long GetMessagePos(void) { return ((unsigned long)(g_my & 0xFFFF)<<16) | (unsigned long)(g_mx & 0xFFFF); }
-__attribute__((dllexport)) long GetMessageTime(void) { return 0; }
+__attribute__((dllexport)) long GetMessageTime(void) { return (long)u32_last_msg_time; }
 __attribute__((dllexport)) unsigned int GetDoubleClickTime(void) { return 500; }
 __attribute__((dllexport)) BOOL MessageBeep(unsigned int type) { (void)type; return 0; }
 __attribute__((dllexport)) BOOL RedrawWindow(void *hwnd, const U32_RECT *update, void *region, unsigned int flags) {
@@ -1251,9 +1252,27 @@ __attribute__((dllexport)) int GetClassNameW(void *hwnd, U32_LPWSTR out, int cap
     if (!out || cap<=0) return 0;
     return u32_ansi_to_wide(out,cap,name) < n ? cap-1 : n;
 }
-__attribute__((dllexport)) unsigned long long LoadCursorW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long LoadIconW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long LoadImageW(void) { return 0; }
+__attribute__((dllexport)) void *LoadCursorW(void *instance, const U32_WCHAR *name) {
+    char narrow[128];
+    const char *arg;
+    if ((unsigned long long)name <= 0xFFFFULL) arg=(const char *)name;
+    else { if (!name) return 0; u32_wide_to_ansi(narrow,sizeof(narrow),name); arg=narrow; }
+    return LoadCursorA(instance,arg);
+}
+__attribute__((dllexport)) void *LoadIconW(void *instance, const U32_WCHAR *name) {
+    char narrow[128];
+    const char *arg;
+    if ((unsigned long long)name <= 0xFFFFULL) arg=(const char *)name;
+    else { if (!name) return 0; u32_wide_to_ansi(narrow,sizeof(narrow),name); arg=narrow; }
+    return LoadIconA(instance,arg);
+}
+__attribute__((dllexport)) void *LoadImageW(void *instance, const U32_WCHAR *name, unsigned int type, int cx, int cy, unsigned int flags) {
+    char narrow[128];
+    const char *arg;
+    if ((unsigned long long)name <= 0xFFFFULL) arg=(const char *)name;
+    else { if (!name) return 0; u32_wide_to_ansi(narrow,sizeof(narrow),name); arg=narrow; }
+    return LoadImageA(instance,arg,type,cx,cy,flags);
+}
 __attribute__((dllexport)) void *FindWindowA(LPCSTR class_name, LPCSTR title) {
     if (!g_wnd.visible) return 0;
     if (title) {

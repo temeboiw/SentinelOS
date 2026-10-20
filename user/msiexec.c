@@ -21,7 +21,8 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 #define FAT_SECTOR 0xFFFFFFFDu
 #define DIFAT_SECTOR 0xFFFFFFFCu
 
-static int msi_ok;\nstatic u32 fat[MAX_FAT];
+static int msi_ok;
+static u32 fat[MAX_FAT];
 static u8 dir_buffer[MAX_DIR];
 static u32 fat_count, sector_size, sector_count;
 static const u8 *file_bytes;
@@ -42,7 +43,7 @@ static void out(const char *s) {
 typedef int (*MessageBoxA_t)(void *, const char *, const char *, u32);
 static void show_and_exit(const char *title, const char *message, u64 code) {
     out(message);
-    out("\\n");
+    out("\n");
     MessageBoxA_t box=(MessageBoxA_t)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"MessageBoxA",0);
     if (box) (void)box(0,message,title,0);

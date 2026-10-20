@@ -78,7 +78,7 @@ static int u32_ttf_init(U32_TTF *f, const unsigned char *d, unsigned int n) {
 static unsigned int u32_ttf_glyph(U32_TTF *f, unsigned int ch) {
     if (!f || !f->valid || ch>0xFFFF) return 0;
     const unsigned char *d=f->data, *c=d+f->cmap;
-    unsigned int n=u32_ttf_u16(c+6);
+    unsigned int n=u32_ttf_u16(c+2);
     if (n<16 || f->cmap+n>f->size) return 0;
     unsigned int seg=u32_ttf_u16(c+6)/2;
     const unsigned char *end=c+14, *start=end+2*seg+2;
@@ -133,9 +133,9 @@ static int u32_ttf_inside(int x,int y,unsigned int ne) {
     int inside=0;
     for(unsigned int i=0;i<ne;i++) {
         U32_TTF_EDGE *e=&u32_ttf_edges[i];
-        if ((e->y1>y)!=(e->y2>y)) {
-            long long lhs=(long long)(x-e->x1)*(e->y2-e->y1);
-            long long rhs=(long long)(e->x2-e->x1)*(y-e->y1);
+        if ((e->y1*4>y)!=(e->y2*4>y)) {
+            long long lhs=(long long)(x-e->x1*4)*(e->y2-e->y1);
+            long long rhs=(long long)(e->x2-e->x1)*(y-e->y1*4);
             if ((e->y2>e->y1 && lhs<rhs) || (e->y2<e->y1 && lhs>rhs))
                 inside=!inside;
         }
@@ -255,8 +255,8 @@ static int u32_ttf_draw(U32_TTF *f,int penx,int baseline,unsigned int ch,
     for(int yy=y0;yy<y1;yy++) for(int xx=x0;xx<x1;xx++) {
         unsigned int hits=0;
         for(int sy=0;sy<2;sy++) for(int sx=0;sx<2;sx++) {
-            int fx=(int)(((long long)(xx-penx)*units*64/scale_num)+(sx?48:16));
-            int fy=(int)(((long long)(baseline-yy)*units*64/scale_num)-(sy?16:48));
+            int fx=(int)(((long long)(xx-penx)*units*4/scale_num)+(sx?3:1)*units/scale_num);
+            int fy=(int)(((long long)(baseline-yy)*units*4/scale_num)-(sy?3:1)*units/scale_num);
             if(u32_ttf_inside(fx,fy,ne)) hits++;
         }
         if(hits) u32_ttf_blend(xx,yy,col,hits*255/4);

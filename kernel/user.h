@@ -1025,7 +1025,7 @@ static uint32_t vfs_create_directory(const char *path) {
         (E32(pino,32) & 0x1000u) ||
         E16(pino,26) == 0xFFFFu ||
         e4_lookup_ci(&g_ext4,parent_ino,base) ||
-        !e4_dir_has_space(parent_ino,bn)) return 0;
+        (!e4_dir_has_space(parent_ino,bn) && !e4_dir_can_grow(parent_ino))) return 0;
 
     uint32_t ino = e4_alloc_inode(&g_ext4, 1);
     if (!ino) return 0;

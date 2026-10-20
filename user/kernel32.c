@@ -68,7 +68,7 @@ static void k32_untrack_path(HANDLE h) {
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29, SYS_QueryFileMetadata=30
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -565,7 +565,19 @@ __attribute__((dllexport)) DWORD GetLogicalDriveStringsA(DWORD cap, LPSTR out) {
     out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
 }
 __attribute__((dllexport)) BOOL GetVolumeInformationA(LPCSTR root,LPSTR label,DWORD labelCap,DWORD *serial,DWORD *maxComponent,DWORD *flags,LPSTR fsName,DWORD fsCap) { (void)label;(void)labelCap;(void)serial;(void)maxComponent;(void)flags;(void)fsName;(void)fsCap;if(!root){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) BOOL GetFileTime(HANDLE file,K32_FILETIME *created,K32_FILETIME *accessed,K32_FILETIME *written) { (void)created;(void)accessed;(void)written;if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+typedef struct { unsigned long long creation_time,access_time,write_time,size; DWORD inode,mode; WORD links,reserved; } K32_FILE_METADATA;
+static BOOL k32_query_file_metadata(HANDLE file,K32_FILE_METADATA *meta) {
+    if(!file||file==INVALID_HANDLE_VALUE||!meta)return 0;
+    return sy3(SYS_QueryFileMetadata,(u64)file,(u64)meta,sizeof(*meta))!=0;
+}
+static void k32_store_filetime(K32_FILETIME *out,unsigned long long ticks) {
+    if(!out)return;out->dwLowDateTime=(DWORD)ticks;out->dwHighDateTime=(DWORD)(ticks>>32);
+}
+__attribute__((dllexport)) BOOL GetFileTime(HANDLE file,K32_FILETIME *created,K32_FILETIME *accessed,K32_FILETIME *written) {
+    K32_FILE_METADATA meta;if(!k32_query_file_metadata(file,&meta)){k32_last_error=6;return 0;}
+    k32_store_filetime(created,meta.creation_time);k32_store_filetime(accessed,meta.access_time);k32_store_filetime(written,meta.write_time);
+    k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) BOOL SetFileTime(HANDLE file,const K32_FILETIME *created,const K32_FILETIME *accessed,const K32_FILETIME *written) { (void)created;(void)accessed;(void)written;if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL SystemTimeToFileTime(const K32_SYSTEMTIME *st,K32_FILETIME *ft);
 __attribute__((dllexport)) void GetSystemTimeAsFileTime(K32_FILETIME *ft) { if(!ft)return;K32_SYSTEMTIME st;GetSystemTime(&st);SystemTimeToFileTime(&st,ft); }
@@ -578,16 +590,15 @@ __attribute__((dllexport)) BOOL GetFileAttributesExA(LPCSTR path,int level,void 
     if(!path||!*path||!out||level!=0){k32_last_error=87;return 0;}
     K32_FILE_ATTRIBUTE_DATA *d=(K32_FILE_ATTRIBUTE_DATA*)out;
     DWORD attr=GetFileAttributesA(path);if(attr==0xFFFFFFFFu)return 0;
+    d->dwFileAttributes=attr;d->nFileSizeHigh=d->nFileSizeLow=0;
     d->ftCreationTime.dwLowDateTime=d->ftCreationTime.dwHighDateTime=0;
     d->ftLastAccessTime.dwLowDateTime=d->ftLastAccessTime.dwHighDateTime=0;
     d->ftLastWriteTime.dwLowDateTime=d->ftLastWriteTime.dwHighDateTime=0;
-    d->dwFileAttributes=attr;d->nFileSizeHigh=d->nFileSizeLow=0;
-    if(!(attr&0x10u)){
-        HANDLE h=CreateFileA(path,0,0,0,3,0,0);
-        if(h==INVALID_HANDLE_VALUE){k32_last_error=2;return 0;}
-        unsigned char buf[512];DWORD got=0;unsigned long long total=0;
-        for(;;){got=0;if(!ReadFile(h,buf,sizeof(buf),&got,0)||!got)break;total+=got;}
-        CloseHandle(h);d->nFileSizeLow=(DWORD)total;d->nFileSizeHigh=(DWORD)(total>>32);
+    if(!(attr&0x10u)) {
+        HANDLE h=CreateFileA(path,0,0,0,3,0,0);if(h==INVALID_HANDLE_VALUE){k32_last_error=2;return 0;}
+        K32_FILE_METADATA meta;BOOL ok=k32_query_file_metadata(h,&meta);CloseHandle(h);if(!ok){k32_last_error=6;return 0;}
+        k32_store_filetime(&d->ftCreationTime,meta.creation_time);k32_store_filetime(&d->ftLastAccessTime,meta.access_time);k32_store_filetime(&d->ftLastWriteTime,meta.write_time);
+        d->nFileSizeLow=(DWORD)meta.size;d->nFileSizeHigh=(DWORD)(meta.size>>32);
     }
     k32_last_error=0;return 1;
 }
@@ -595,13 +606,13 @@ typedef struct { DWORD dwFileAttributes; K32_FILETIME ftCreationTime,ftLastAcces
 __attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *info) {
     if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}
     unsigned int slot,side;if(k32_pipe_decode(file,&slot,&side)){k32_last_error=50;return 0;}
+    K32_FILE_METADATA meta;if(!k32_query_file_metadata(file,&meta)){k32_last_error=6;return 0;}
     K32_BY_HANDLE_FILE_INFORMATION *p=(K32_BY_HANDLE_FILE_INFORMATION*)info;
     for(unsigned int i=0;i<sizeof(*p)/sizeof(DWORD);i++)((DWORD*)p)[i]=0;
-    DWORD high=0,low=GetFileSize(file,&high);
-    if(low==0xFFFFFFFFu && GetLastError()!=0)return 0;
-    p->dwFileAttributes=0x80u;p->nFileSizeHigh=high;p->nFileSizeLow=low;p->nNumberOfLinks=1;
-    unsigned long long id=(unsigned long long)file;p->nFileIndexHigh=(DWORD)(id>>32);p->nFileIndexLow=(DWORD)id;
-    k32_last_error=0;return 1;
+    p->dwFileAttributes=((meta.mode&0xF000u)==0x4000u)?0x10u:0x80u;
+    k32_store_filetime(&p->ftCreationTime,meta.creation_time);k32_store_filetime(&p->ftLastAccessTime,meta.access_time);k32_store_filetime(&p->ftLastWriteTime,meta.write_time);
+    p->nFileSizeHigh=(DWORD)(meta.size>>32);p->nFileSizeLow=(DWORD)meta.size;p->nNumberOfLinks=meta.links;
+    p->nFileIndexLow=meta.inode;k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) BOOL SetEndOfFile(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL GetOverlappedResult(HANDLE file, void *overlapped, DWORD *transferred, BOOL wait) { (void)file; (void)overlapped; (void)wait; if (transferred) *transferred=0; k32_last_error=997; return 0; }

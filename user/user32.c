@@ -821,6 +821,7 @@ typedef unsigned short U32_WCHAR;
 typedef struct { int left, top, right, bottom; } U32_RECT;
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
+typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle, dwWindowStatus, cxWindowBorders, cyWindowBorders; unsigned short atomWindowType, wCreatorVersion; } U32_WINDOWINFO;
 typedef struct { unsigned int flags; unsigned long long id; void *submenu; char text[80]; } U32_MENUITEM;
 typedef struct { int used, count, default_pos; U32_MENUITEM items[16]; } U32_MENUDATA;
 static U32_MENUDATA u32_menus[16];
@@ -1254,8 +1255,24 @@ __attribute__((dllexport)) BOOL GetWindowPlacement(void *hwnd, U32_WINDOWPLACEME
     p->rcNormalPosition.right=g_wnd.x+g_wnd.w; p->rcNormalPosition.bottom=g_wnd.y+g_wnd.h;
     return 1;
 }
-__attribute__((dllexport)) unsigned long long GetWindowInfo(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowModuleFileNameA(void) { return 0; }
+__attribute__((dllexport)) BOOL GetWindowInfo(void *hwnd, U32_WINDOWINFO *info) {
+    if (hwnd!=(void *)1 || !g_wnd.visible || !info || info->cbSize<sizeof(U32_WINDOWINFO)) return 0;
+    info->rcWindow.left=g_wnd.x; info->rcWindow.top=g_wnd.y;
+    info->rcWindow.right=g_wnd.x+g_wnd.w; info->rcWindow.bottom=g_wnd.y+g_wnd.h;
+    info->rcClient.left=g_wnd.x+1; info->rcClient.top=g_wnd.y+32;
+    info->rcClient.right=g_wnd.x+g_wnd.w-1; info->rcClient.bottom=g_wnd.y+g_wnd.h-1;
+    info->dwStyle=u32_wnd_style; info->dwExStyle=u32_wnd_exstyle;
+    info->dwWindowStatus=(GetForegroundWindow()==hwnd)?1u:0u;
+    info->cxWindowBorders=1; info->cyWindowBorders=1;
+    info->atomWindowType=1; info->wCreatorVersion=1;
+    return 1;
+}
+__attribute__((dllexport)) u32 GetWindowModuleFileNameA(void *hwnd, char *out, u32 cap) {
+    const char *path="C:\\sentinel.exe"; u32 i=0;
+    if (hwnd!=(void *)1 || !g_wnd.visible || !out || !cap) return 0;
+    while (path[i] && i+1<cap) { out[i]=path[i]; i++; }
+    out[i]=0; return path[i] ? cap : i;
+}
 __attribute__((dllexport)) unsigned long long GetWindowContextHelpId(void *hwnd) { return IsWindow(hwnd) ? u32_context_help_id : 0; }
 __attribute__((dllexport)) BOOL SetWindowContextHelpId(void *hwnd, unsigned long long id) {
     if (!IsWindow(hwnd)) return 0; u32_context_help_id=id; return 1;
@@ -1300,8 +1317,8 @@ __attribute__((dllexport)) unsigned long long WindowFromPoint(unsigned long long
 __attribute__((dllexport)) unsigned long long ChildWindowFromPoint(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long SetDoubleClickTime(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetLastActivePopup(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowTextLengthA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowTextLengthW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd) { return GetWindowTextA(hwnd,0,0); }
+__attribute__((dllexport)) int GetWindowTextLengthW(void *hwnd) { return GetWindowTextLengthA(hwnd); }
 __attribute__((dllexport)) long long GetWindowLongPtrA(void *hwnd, int index) { if (!IsWindow(hwnd)) return 0; if (index==-4) return (long long)(unsigned long long)u32_wnd_proc; if (index==-21) return (long long)(unsigned long long)u32_wnd_userdata; return (long long)GetWindowLongA(hwnd,index); }
 __attribute__((dllexport)) long long SetWindowLongPtrA(void *hwnd, int index, long long value) { if (!IsWindow(hwnd)) return 0; long long old=GetWindowLongPtrA(hwnd,index); if (index==-4) u32_wnd_proc=(void *)(unsigned long long)value; else if (index==-21) u32_wnd_userdata=(void *)(unsigned long long)value; else return (long long)SetWindowLongA(hwnd,index,(long)value); compose(); return old; }
 __attribute__((dllexport)) long long GetWindowLongPtrW(void *hwnd, int index) { return GetWindowLongPtrA(hwnd,index); }
@@ -1314,7 +1331,12 @@ __attribute__((dllexport)) unsigned long long GetClassLongW(unsigned long long a
 __attribute__((dllexport)) unsigned long long SetClassLongW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetClassLongPtrW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long SetClassLongPtrW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowModuleFileNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) u32 GetWindowModuleFileNameW(void *hwnd, U32_LPWSTR out, u32 cap) {
+    char narrow[260]; u32 n=GetWindowModuleFileNameA(hwnd,narrow,sizeof(narrow));
+    if (!n || !out || !cap) return 0;
+    int copied=u32_ansi_to_wide(out,(int)cap,narrow);
+    return (u32)copied+1<n ? cap : (u32)copied;
+}
 __attribute__((dllexport)) unsigned long long GetWindowRgnBox(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetWindowDisplayAffinity(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long SetWindowDisplayAffinity(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -1326,7 +1348,7 @@ __attribute__((dllexport)) unsigned long long GetWindowWord(unsigned long long a
 __attribute__((dllexport)) unsigned long long SetWindowWord(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) long GetWindowLongW(void *hwnd, int index) { return GetWindowLongA(hwnd,index); }
 __attribute__((dllexport)) long SetWindowLongW(void *hwnd, int index, long value) { return SetWindowLongA(hwnd,index,value); }
-__attribute__((dllexport)) unsigned long long GetDlgCtrlID(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int GetDlgCtrlID(void *hwnd) { return IsWindow(hwnd) ? (int)u32_wnd_id : 0; }
 __attribute__((dllexport)) unsigned long long GetDlgItemInt(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long SetDlgItemInt(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long CheckDlgButton(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -1334,14 +1356,40 @@ __attribute__((dllexport)) unsigned long long IsDlgButtonChecked(unsigned long l
 __attribute__((dllexport)) unsigned long long CheckRadioButton(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetNextDlgTabItem(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetNextDlgGroupItem(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetDialogBaseUnits(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) long GetDialogBaseUnits(void) { return (long)0x00100008u; }
 __attribute__((dllexport)) unsigned long long MapDialogRect(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long AdjustWindowRect(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long AdjustWindowRectEx(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long AdjustWindowRectExForDpi(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetDpiForWindow(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetDpiForSystem(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemMetricsForDpi(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+static BOOL u32_adjust_window_rect(U32_RECT *r, u32 style, BOOL menu) {
+    if (!r) return 0;
+    int border=(style & (0x00800000u|0x00040000u)) ? 1 : 0;
+    r->left-=border; r->right+=border; r->bottom+=border;
+    if (style&0x00C00000u) r->top-=32+border;
+    else r->top-=border;
+    if (menu) r->top-=20;
+    return 1;
+}
+__attribute__((dllexport)) BOOL AdjustWindowRect(U32_RECT *r, u32 style, BOOL menu) {
+    return u32_adjust_window_rect(r,style,menu);
+}
+__attribute__((dllexport)) BOOL AdjustWindowRectEx(U32_RECT *r, u32 style, BOOL menu, u32 ex_style) {
+    (void)ex_style; return u32_adjust_window_rect(r,style,menu);
+}
+__attribute__((dllexport)) BOOL AdjustWindowRectExForDpi(U32_RECT *r, u32 style, BOOL menu, u32 ex_style, u32 dpi) {
+    if (!r) return 0;
+    U32_RECT original=*r, adjusted=*r;
+    if (!AdjustWindowRectEx(&adjusted,style,menu,ex_style)) return 0;
+    if (!dpi) dpi=96;
+    r->left=original.left+(adjusted.left-original.left)*(int)dpi/96;
+    r->top=original.top+(adjusted.top-original.top)*(int)dpi/96;
+    r->right=original.right+(adjusted.right-original.right)*(int)dpi/96;
+    r->bottom=original.bottom+(adjusted.bottom-original.bottom)*(int)dpi/96;
+    return 1;
+}
+__attribute__((dllexport)) u32 GetDpiForWindow(void *hwnd) { return IsWindow(hwnd) ? 96u : 0u; }
+__attribute__((dllexport)) u32 GetDpiForSystem(void) { return 96u; }
+__attribute__((dllexport)) int GetSystemMetricsForDpi(int index, u32 dpi) {
+    if (!dpi) dpi=96;
+    return GetSystemMetrics(index)*(int)dpi/96;
+}
 __attribute__((dllexport)) unsigned long long GetShellWindow(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long ClipCursor(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetClipCursor(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }

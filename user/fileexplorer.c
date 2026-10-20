@@ -52,6 +52,8 @@ static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 
+static int ends_with(const char *n, const char *ext);
+
 /* Reserve one character at the start of every row for the hover marker.
    Changing it never shifts the filename or any neighboring controls. */
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {

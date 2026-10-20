@@ -26,19 +26,33 @@ static void text(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,const char *s,u32 col
             if(g[row]&(1u<<col))rect(fb,pitch,w,h,x+col*scale,y+row*scale,scale,scale,color);
     }
 }
-/* Row-major wallpaper renderer: sequential writes, no per-pixel helper calls. */
+/* Fast row-major wallpaper. Curved shoreline thresholds are computed once per column,
+ * avoiding integer division and quadratic math in the per-pixel hot loop. */
 static void wallpaper(u32 *fb,u32 pitch,u32 w,u32 h) {
+    enum { MAX_WALLPAPER_WIDTH = 4096 };
+    static u16 wave1[MAX_WALLPAPER_WIDTH];
+    static u16 wave2[MAX_WALLPAPER_WIDTH];
     int base=(int)(h*2/3);
+    if(w>MAX_WALLPAPER_WIDTH) {
+        for(u32 y=0;y<h;y++) {
+            u32 c=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
+            u32 *row=fb+(u64)y*pitch;
+            for(u32 x=0;x<w;x++)row[x]=c;
+        }
+        return;
+    }
+    for(u32 x=0;x<w;x++) {
+        int dx=(int)x-(int)w/2;
+        wave1[x]=(u16)(base+(int)((long long)dx*dx/(w>0?w*14:1)));
+        wave2[x]=(u16)(base+28+(int)((long long)dx*dx/(w>0?w*19:1)));
+    }
     for(u32 y=0;y<h;y++) {
         u32 sky=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
+        u32 land=mix(0xFF80D5E9,0xFF2B8CB9,(u32)((u64)y*100/(h?h:1)));
         u32 *row=fb+(u64)y*pitch;
         for(u32 x=0;x<w;x++) {
-            int dx=(int)x-(int)w/2;
-            int wave1=base+(int)((long long)dx*dx/(w>0?w*14:1));
-            int wave2=base+28+(int)((long long)dx*dx/(w>0?w*19:1));
-            u32 c=sky;
-            if((int)y>=wave1)c=mix(0xFF80D5E9,0xFF2B8CB9,(u32)((u64)y*100/(h?h:1)));
-            if((int)y>=wave2)c=mix(c,0xFF2E9DC2,48);
+            u32 c=(y>=wave1[x])?land:sky;
+            if(y>=wave2[x])c=mix(c,0xFF2E9DC2,48);
             row[x]=c;
         }
     }

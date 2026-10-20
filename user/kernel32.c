@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -66,7 +66,7 @@ __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD 
     if (rd) *rd = (DWORD)n;
     return 1;
 }
-__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { (void)h; return 1; }
+__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { return sy3(SYS_CloseFile, (u64)h, 0, 0) != 0; }
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
     (void)max; return (DWORD)sy3(SYS_QueryDir, index, (u64)name, 0);
 }

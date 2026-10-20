@@ -83,7 +83,11 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
     sy3(SYS_Exit, code, 0, 0);
     for(;;) __asm__ volatile("hlt");
 }
-__attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) { (void)n; return (HANDLE)1; }
+__attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) {
+    if(n==0xFFFFFFF6u)return (HANDLE)3;
+    if(n==0xFFFFFFF5u||n==0xFFFFFFF4u)return (HANDLE)1;
+    k32_last_error=87;return 0;
+}
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
     (void)ov;
     unsigned int slot,side;
@@ -99,7 +103,7 @@ __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWOR
         k32_last_error=(n==len)?0: 232;
         return n!=0 || len==0;
     }
-    if((h!=(HANDLE)1 && h!=(HANDLE)2) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
+    if((h!=(HANDLE)1 && h!=(HANDLE)2 && h!=(HANDLE)3) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
     u64 n = sy3(SYS_Write, 1, (u64)buf, len);
     if (w) *w = (DWORD)n;
     if(n==(u64)-1){k32_last_error=5;return 0;}
@@ -128,6 +132,20 @@ __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD 
         }
         if(rd)*rd=n;k32_last_error=0;return 1;
     }
+    if(h==(HANDLE)3) {
+        if(!buf&&len){if(rd)*rd=0;k32_last_error=87;return 0;}
+        if(!len){if(rd)*rd=0;k32_last_error=0;return 1;}
+        typedef struct { int type,x,y,btn; char key; } K32_INPUT_EVENT;
+        K32_INPUT_EVENT ev;
+        for(;;) {
+            ev.type=ev.x=ev.y=ev.btn=0;ev.key=0;
+            if(sy3(SYS_GetInput,(u64)&ev,0,0)) {
+                if(ev.type==1&&ev.key){((char*)buf)[0]=ev.key;if(rd)*rd=1;k32_last_error=0;return 1;}
+            }
+            sy3(21,0,0,0);
+        }
+    }
+    if(h==(HANDLE)1||h==(HANDLE)2){if(rd)*rd=0;k32_last_error=6;return 0;}
     i64 n = (i64)sy3(SYS_ReadFile, (u64)h, (u64)buf, len);
     if (n < 0) { if(rd)*rd=0; k32_last_error=6; return 0; }
     if (rd) *rd = (DWORD)n;
@@ -142,7 +160,7 @@ __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
         if(!p->read_open&&!p->write_open){p->used=0;p->read_pos=p->write_pos=0;}
         k32_last_error=0;return 1;
     }
-    if(h==(HANDLE)1||h==(HANDLE)2){k32_last_error=6;return 0;}
+    if(h==(HANDLE)1||h==(HANDLE)2||h==(HANDLE)3){k32_last_error=6;return 0;}
     if(sy3(SYS_CloseFile, (u64)h, 0, 0) == 0){k32_last_error=6;return 0;}
     k32_untrack_path(h);k32_last_error=0;return 1;
 }
@@ -447,7 +465,7 @@ __attribute__((dllexport)) BOOL ReleaseSemaphore(HANDLE h,LONG count,LONG *previ
 static int k32_sync_ready(K32_SYNC_OBJECT *o){if(!o)return 0;if(o->type==3)return o->count>0;if(o->type==2)return o->owner==0||o->owner==(int)GetCurrentThreadId();return o->signaled;}
 static void k32_sync_consume(K32_SYNC_OBJECT *o){if(!o)return;if(o->type==3){if(o->count>0)o->count--;o->signaled=o->count>0;}else if(o->type==1&&!o->manual)o->signaled=0;else if(o->type==2){o->owner=(int)GetCurrentThreadId();o->signaled=1;}}
 __attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count,const HANDLE *handles,BOOL wait_all,DWORD ms){if(!count||count>64||!handles){k32_last_error=87;return 0xFFFFFFFFu;}for(DWORD i=0;i<count;i++)if(!k32_sync_get(handles[i])&&handles[i]!=(HANDLE)1&&handles[i]!=(HANDLE)2){k32_last_error=6;return 0xFFFFFFFFu;}if(wait_all){for(DWORD i=0;i<count;i++)if(!k32_sync_ready(k32_sync_get(handles[i])))return 0x102u;for(DWORD i=0;i<count;i++)k32_sync_consume(k32_sync_get(handles[i]));return 0;}for(DWORD i=0;i<count;i++)if(k32_sync_ready(k32_sync_get(handles[i]))){k32_sync_consume(k32_sync_get(handles[i]));return 0x102u+i;}return 0x102u;}
-__attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_VALUE)return 0;if(h==(HANDLE)1||h==(HANDLE)2)return 2;return 1;}
+__attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_VALUE)return 0;if(h==(HANDLE)1||h==(HANDLE)2||h==(HANDLE)3)return 2;unsigned int slot,side;if(k32_pipe_decode(h,&slot,&side))return 3;DWORD high=0,low=GetFileSize(h,&high);if(low==0xFFFFFFFFu&&GetLastError()!=0)return 0;return 1;}
 
 
 /* Win32 compatibility exports. Implementations are limited by SentinelOS kernel services. */
@@ -739,7 +757,7 @@ __attribute__((dllexport)) BOOL SetConsoleScreenBufferInfoEx(HANDLE h,const K32_
 typedef struct { DWORD dwSize; BOOL bVisible; } K32_CONSOLE_CURSOR_INFO;
 __attribute__((dllexport)) BOOL GetConsoleCursorInfo(HANDLE h,K32_CONSOLE_CURSOR_INFO *info){if(!h||!info)return 0;info->dwSize=k32_cursor_size;info->bVisible=k32_cursor_visible;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleCursorInfo(HANDLE h,const K32_CONSOLE_CURSOR_INFO *info){if(!h||!info||info->dwSize<1||info->dwSize>100)return 0;k32_cursor_size=info->dwSize;k32_cursor_visible=info->bVisible!=0;return 1;}
-__attribute__((dllexport)) HANDLE GetConsoleWindow(void){return (HANDLE)1;}
+__attribute__((dllexport)) HANDLE GetConsoleWindow(void){return 0;}
 __attribute__((dllexport)) DWORD GetConsoleProcessList(DWORD *list,DWORD cap){if(!list||!cap)return 1;list[0]=GetCurrentProcessId();return 1;}
 __attribute__((dllexport)) BOOL GetNumberOfConsoleInputEvents(HANDLE h,DWORD *count){if(!h||!count)return 0;*count=0;return 1;}
 __attribute__((dllexport)) BOOL GetNumberOfConsoleMouseButtons(DWORD *count){if(!count)return 0;*count=3;return 1;}

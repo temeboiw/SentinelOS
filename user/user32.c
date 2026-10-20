@@ -2729,3 +2729,31 @@ __attribute__((dllexport)) BOOL GetGestureExtraArgs(void *handle,unsigned int si
 __attribute__((dllexport)) BOOL SetGestureConfig(void *hwnd,DWORD reserved,unsigned int count,const void *config,unsigned int size){(void)reserved;(void)count;(void)config;(void)size;return IsWindow(hwnd);}
 
 __attribute__((dllexport)) BOOL GetTouchInputInfo(void *touch,unsigned int count,void *info,int size){(void)touch;(void)count;(void)info;(void)size;return 0;}
+
+
+/* Win32 API batch 1: rectangle operations and dialog geometry APIs. */
+typedef struct { long left,top,right,bottom; } U32_BATCH_RECT;
+typedef struct { long x,y; } U32_BATCH_POINT;
+__attribute__((dllexport)) BOOL SetRect(U32_BATCH_RECT *r,int l,int t,int right,int bottom){if(!r)return 0;r->left=l;r->top=t;r->right=right;r->bottom=bottom;return 1;}
+
+__attribute__((dllexport)) BOOL SetRectEmpty(U32_BATCH_RECT *r){if(!r)return 0;r->left=r->top=r->right=r->bottom=0;return 1;}
+
+__attribute__((dllexport)) BOOL CopyRect(U32_BATCH_RECT *d,const U32_BATCH_RECT *s){if(!d||!s)return 0;*d=*s;return 1;}
+
+__attribute__((dllexport)) BOOL IsRectEmpty(const U32_BATCH_RECT *r){return !r||r->right<=r->left||r->bottom<=r->top;}
+
+__attribute__((dllexport)) BOOL EqualRect(const U32_BATCH_RECT *a,const U32_BATCH_RECT *b){return a&&b&&a->left==b->left&&a->top==b->top&&a->right==b->right&&a->bottom==b->bottom;}
+
+__attribute__((dllexport)) BOOL PtInRect(const U32_BATCH_RECT *r,U32_BATCH_POINT p){return r&&p.x>=r->left&&p.x<r->right&&p.y>=r->top&&p.y<r->bottom;}
+
+__attribute__((dllexport)) BOOL OffsetRect(U32_BATCH_RECT *r,int dx,int dy){if(!r)return 0;r->left+=dx;r->right+=dx;r->top+=dy;r->bottom+=dy;return 1;}
+
+__attribute__((dllexport)) BOOL InflateRect(U32_BATCH_RECT *r,int dx,int dy){if(!r)return 0;r->left-=dx;r->right+=dx;r->top-=dy;r->bottom+=dy;return 1;}
+
+__attribute__((dllexport)) BOOL IntersectRect(U32_BATCH_RECT *d,const U32_BATCH_RECT *a,const U32_BATCH_RECT *b){if(!d||!a||!b)return 0;d->left=a->left>b->left?a->left:b->left;d->top=a->top>b->top?a->top:b->top;d->right=a->right<b->right?a->right:b->right;d->bottom=a->bottom<b->bottom?a->bottom:b->bottom;if(d->right<=d->left||d->bottom<=d->top){SetRectEmpty(d);return 0;}return 1;}
+
+__attribute__((dllexport)) BOOL UnionRect(U32_BATCH_RECT *d,const U32_BATCH_RECT *a,const U32_BATCH_RECT *b){if(!d||!a||!b)return 0;if(IsRectEmpty(a)){*d=*b;return !IsRectEmpty(b);}if(IsRectEmpty(b)){*d=*a;return 1;}d->left=a->left<b->left?a->left:b->left;d->top=a->top<b->top?a->top:b->top;d->right=a->right>b->right?a->right:b->right;d->bottom=a->bottom>b->bottom?a->bottom:b->bottom;return 1;}
+
+__attribute__((dllexport)) BOOL SubtractRect(U32_BATCH_RECT *d,const U32_BATCH_RECT *a,const U32_BATCH_RECT *b){if(!d||!a||!b)return 0;U32_BATCH_RECT i;if(!IntersectRect(&i,a,b)){*d=*a;return !IsRectEmpty(a);}if(i.left<=a->left&&i.right>=a->right&&i.top<=a->top&&i.bottom>=a->bottom){SetRectEmpty(d);return 0;}*d=*a;if(i.top<=a->top&&i.bottom<a->bottom)d->top=i.bottom;else if(i.bottom>=a->bottom&&i.top>a->top)d->bottom=i.top;else if(i.left<=a->left&&i.right<a->right)d->left=i.right;else if(i.right>=a->right&&i.left>a->left)d->right=i.left;return !IsRectEmpty(d);}
+
+__attribute__((dllexport)) UINT EnumClipboardFormats(UINT previous){if(!u32_clipboard_format)return 0;if(previous==0)return u32_clipboard_format;return 0;}

@@ -1647,3 +1647,181 @@ __attribute__((dllexport)) DWORD GetFileAttributesTransactedW(K32_LPCWSTR path,v
 __attribute__((dllexport)) BOOL SetFileAttributesTransactedA(LPCSTR path,DWORD attr,HANDLE transaction){(void)path;(void)attr;(void)transaction;k32_last_error=50;return 0;}
 
 __attribute__((dllexport)) BOOL SetFileAttributesTransactedW(K32_LPCWSTR path,DWORD attr,HANDLE transaction){(void)path;(void)attr;(void)transaction;k32_last_error=50;return 0;}
+
+
+/* Win32 API batch 1: atomic synchronization, package-state, and processor queries. */
+__attribute__((dllexport)) LONG InterlockedIncrement(volatile LONG *p){return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedDecrement(volatile LONG *p){return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedExchange(volatile LONG *p,LONG v){return __atomic_exchange_n(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedCompareExchange(volatile LONG *p,LONG e,LONG c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);return c;}
+
+__attribute__((dllexport)) LONG InterlockedExchangeAdd(volatile LONG *p,LONG v){return __atomic_fetch_add(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedAdd(volatile LONG *p,LONG v){return __atomic_add_fetch(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedAnd(volatile LONG *p,LONG v){return __atomic_fetch_and(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedOr(volatile LONG *p,LONG v){return __atomic_fetch_or(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedXor(volatile LONG *p,LONG v){return __atomic_fetch_xor(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedIncrement64(volatile i64 *p){return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedDecrement64(volatile i64 *p){return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedExchange64(volatile i64 *p,i64 v){return __atomic_exchange_n(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedCompareExchange64(volatile i64 *p,i64 e,i64 c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);return c;}
+
+__attribute__((dllexport)) i64 InterlockedExchangeAdd64(volatile i64 *p,i64 v){return __atomic_fetch_add(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedAdd64(volatile i64 *p,i64 v){return __atomic_add_fetch(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedAnd64(volatile i64 *p,i64 v){return __atomic_fetch_and(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedOr64(volatile i64 *p,i64 v){return __atomic_fetch_or(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) i64 InterlockedXor64(volatile i64 *p,i64 v){return __atomic_fetch_xor(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) void MemoryBarrier(void){__atomic_thread_fence(__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) LONG InterlockedIncrementAcquire(volatile LONG *p){return __atomic_add_fetch(p,1,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedIncrementRelease(volatile LONG *p){return __atomic_add_fetch(p,1,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedIncrementNoFence(volatile LONG *p){return __atomic_add_fetch(p,1,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) LONG InterlockedDecrementAcquire(volatile LONG *p){return __atomic_sub_fetch(p,1,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedDecrementRelease(volatile LONG *p){return __atomic_sub_fetch(p,1,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedDecrementNoFence(volatile LONG *p){return __atomic_sub_fetch(p,1,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) LONG InterlockedExchangeAcquire(volatile LONG *p,LONG v){return __atomic_exchange_n(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedExchangeRelease(volatile LONG *p,LONG v){return __atomic_exchange_n(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedExchangeNoFence(volatile LONG *p,LONG v){return __atomic_exchange_n(p,v,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) LONG InterlockedCompareExchangeAcquire(volatile LONG *p,LONG e,LONG c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_ACQUIRE,__ATOMIC_ACQUIRE);return c;}
+
+__attribute__((dllexport)) LONG InterlockedCompareExchangeRelease(volatile LONG *p,LONG e,LONG c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELEASE,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) LONG InterlockedCompareExchangeNoFence(volatile LONG *p,LONG e,LONG c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELAXED,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) LONG InterlockedExchangeAddAcquire(volatile LONG *p,LONG v){return __atomic_fetch_add(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedExchangeAddRelease(volatile LONG *p,LONG v){return __atomic_fetch_add(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedExchangeAddNoFence(volatile LONG *p,LONG v){return __atomic_fetch_add(p,v,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) LONG InterlockedAddAcquire(volatile LONG *p,LONG v){return __atomic_add_fetch(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedAddRelease(volatile LONG *p,LONG v){return __atomic_add_fetch(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedAndAcquire(volatile LONG *p,LONG v){return __atomic_fetch_and(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedAndRelease(volatile LONG *p,LONG v){return __atomic_fetch_and(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedOrAcquire(volatile LONG *p,LONG v){return __atomic_fetch_or(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedOrRelease(volatile LONG *p,LONG v){return __atomic_fetch_or(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) LONG InterlockedXorAcquire(volatile LONG *p,LONG v){return __atomic_fetch_xor(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) LONG InterlockedXorRelease(volatile LONG *p,LONG v){return __atomic_fetch_xor(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedIncrementAcquire64(volatile i64 *p){return __atomic_add_fetch(p,1,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedIncrementRelease64(volatile i64 *p){return __atomic_add_fetch(p,1,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedIncrementNoFence64(volatile i64 *p){return __atomic_add_fetch(p,1,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) i64 InterlockedDecrementAcquire64(volatile i64 *p){return __atomic_sub_fetch(p,1,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedDecrementRelease64(volatile i64 *p){return __atomic_sub_fetch(p,1,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedDecrementNoFence64(volatile i64 *p){return __atomic_sub_fetch(p,1,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) i64 InterlockedExchangeAcquire64(volatile i64 *p,i64 v){return __atomic_exchange_n(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedExchangeRelease64(volatile i64 *p,i64 v){return __atomic_exchange_n(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedExchangeNoFence64(volatile i64 *p,i64 v){return __atomic_exchange_n(p,v,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) i64 InterlockedCompareExchangeAcquire64(volatile i64 *p,i64 e,i64 c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_ACQUIRE,__ATOMIC_ACQUIRE);return c;}
+
+__attribute__((dllexport)) i64 InterlockedCompareExchangeRelease64(volatile i64 *p,i64 e,i64 c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELEASE,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) i64 InterlockedCompareExchangeNoFence64(volatile i64 *p,i64 e,i64 c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELAXED,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) i64 InterlockedExchangeAddAcquire64(volatile i64 *p,i64 v){return __atomic_fetch_add(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedExchangeAddRelease64(volatile i64 *p,i64 v){return __atomic_fetch_add(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedExchangeAddNoFence64(volatile i64 *p,i64 v){return __atomic_fetch_add(p,v,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) i64 InterlockedAddAcquire64(volatile i64 *p,i64 v){return __atomic_add_fetch(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedAddRelease64(volatile i64 *p,i64 v){return __atomic_add_fetch(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedAndAcquire64(volatile i64 *p,i64 v){return __atomic_fetch_and(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedAndRelease64(volatile i64 *p,i64 v){return __atomic_fetch_and(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedOrAcquire64(volatile i64 *p,i64 v){return __atomic_fetch_or(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedOrRelease64(volatile i64 *p,i64 v){return __atomic_fetch_or(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) i64 InterlockedXorAcquire64(volatile i64 *p,i64 v){return __atomic_fetch_xor(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) i64 InterlockedXorRelease64(volatile i64 *p,i64 v){return __atomic_fetch_xor(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) void *InterlockedExchangePointerAcquire(void *volatile *p,void *v){return __atomic_exchange_n(p,v,__ATOMIC_ACQUIRE);}
+
+__attribute__((dllexport)) void *InterlockedExchangePointerRelease(void *volatile *p,void *v){return __atomic_exchange_n(p,v,__ATOMIC_RELEASE);}
+
+__attribute__((dllexport)) void *InterlockedExchangePointerNoFence(void *volatile *p,void *v){return __atomic_exchange_n(p,v,__ATOMIC_RELAXED);}
+
+__attribute__((dllexport)) void *InterlockedCompareExchangePointerAcquire(void *volatile *p,void *e,void *c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_ACQUIRE,__ATOMIC_ACQUIRE);return c;}
+
+__attribute__((dllexport)) void *InterlockedCompareExchangePointerRelease(void *volatile *p,void *e,void *c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELEASE,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) void *InterlockedCompareExchangePointerNoFence(void *volatile *p,void *e,void *c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_RELAXED,__ATOMIC_RELAXED);return c;}
+
+__attribute__((dllexport)) char InterlockedIncrement8(volatile char *p){return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) char InterlockedDecrement8(volatile char *p){return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) char InterlockedExchange8(volatile char *p,char v){return __atomic_exchange_n(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) char InterlockedCompareExchange8(volatile char *p,char e,char c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);return c;}
+
+__attribute__((dllexport)) char InterlockedExchangeAdd8(volatile char *p,char v){return __atomic_fetch_add(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) short InterlockedIncrement16(volatile short *p){return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) short InterlockedDecrement16(volatile short *p){return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) short InterlockedExchange16(volatile short *p,short v){return __atomic_exchange_n(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) short InterlockedCompareExchange16(volatile short *p,short e,short c){__atomic_compare_exchange_n(p,&c,e,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);return c;}
+
+__attribute__((dllexport)) short InterlockedExchangeAdd16(volatile short *p,short v){return __atomic_fetch_add(p,v,__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned LONG)bit&31u);unsigned int old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned LONG)bit&31u);unsigned int old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((unsigned i64)bit&63u);u64 old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((unsigned i64)bit&63u);u64 old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+
+__attribute__((dllexport)) BOOL SetFilePointerEx(HANDLE file,K32_LARGE_INTEGER distance,K32_LARGE_INTEGER *newpos,DWORD method){if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}u64 pos=sy3(SYS_SetFilePosition,(u64)file,(u64)distance.QuadPart,method);if((i64)pos<0){k32_last_error=87;return 0;}if(newpos)newpos->QuadPart=(K32_SIZE_T)pos;k32_last_error=0;return 1;}
+
+__attribute__((dllexport)) LONG GetApplicationUserModelId(HANDLE token,DWORD *length,K32_LPWSTR id){(void)id;if(token&&token!=GetCurrentProcess()&&token!=(HANDLE)1){k32_last_error=6;return 6;}if(length)*length=0;return 15700;}
+
+__attribute__((dllexport)) LONG GetCurrentPackagePath(DWORD *length,K32_LPWSTR path){(void)path;if(length)*length=0;return 15700;}

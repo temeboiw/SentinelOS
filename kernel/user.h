@@ -36,6 +36,7 @@
 #define SYS_WmSetRect                20
 #define SYS_NtYield                  21
 #define SYS_NtGetSystemTime           23
+#define SYS_NtGetTickCount             24
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -926,6 +927,18 @@ static uint8_t user_rtc_read(uint8_t reg) {
 static uint8_t user_rtc_decode(uint8_t value,int binary) {
     return binary?value:(uint8_t)((value&0x0Fu)+((value>>4)*10u));
 }
+static uint64_t user_boot_rtc_seconds;
+static int user_boot_rtc_valid;
+static int user_rtc_leap(uint32_t y){return (y%4u==0u&&y%100u!=0u)||y%400u==0u;}
+static uint64_t user_rtc_epoch_seconds(const UserSystemTime *t){
+    static const uint8_t md[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+    if(!t||t->wYear<1970||t->wMonth<1||t->wMonth>12)return 0;
+    uint64_t days=0;
+    for(uint32_t y=1970;y<t->wYear;y++)days+=user_rtc_leap(y)?366u:365u;
+    for(uint32_t m=1;m<t->wMonth;m++)days+=md[m-1]+(m==2&&user_rtc_leap(t->wYear));
+    days+=t->wDay-1u;
+    return days*86400u+(uint64_t)t->wHour*3600u+(uint64_t)t->wMinute*60u+t->wSecond;
+}
 static int user_rtc_system_time(UserSystemTime *out) {
     if(!out)return 0;
     int tries=100000;
@@ -1809,6 +1822,14 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    case SYS_NtGetTickCount: {
+        UserSystemTime now;
+        if(!user_boot_rtc_valid||!user_rtc_system_time(&now)){f->rax=(uint64_t)-1LL;return f;}
+        uint64_t current=user_rtc_epoch_seconds(&now);
+        f->rax=current>=user_boot_rtc_seconds?(current-user_boot_rtc_seconds)*1000u:0u;
+        return f;
+    }
+
     case SYS_NtGetSystemTime: {
         UserSystemTime value;
         if(!f->rdi || !MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(value),1) || !user_rtc_system_time(&value)) {
@@ -1845,6 +1866,9 @@ static Frame *syscall_handler(Frame *f) {
 /* ------------------------------------------------------------ user entry */
 
 static void user_enter(BootInfo *bi) {
+    UserSystemTime boot_time;
+    user_boot_rtc_valid=user_rtc_system_time(&boot_time);
+    if(user_boot_rtc_valid)user_boot_rtc_seconds=user_rtc_epoch_seconds(&boot_time);
     ps2_init();
     ata_init();
     virtio_blk_init();

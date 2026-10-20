@@ -1379,8 +1379,8 @@ __attribute__((dllexport)) BOOL SetDlgItemInt(void *dlg,int id,unsigned int valu
 __attribute__((dllexport)) BOOL CheckDlgButton(void *dlg,int id,unsigned int check){if(!IsWindow(dlg)||check>2)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(int)check;return 1;}
 __attribute__((dllexport)) unsigned int IsDlgButtonChecked(void *dlg,int id){if(!IsWindow(dlg))return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);return c?(unsigned int)c->checked:0;}
 __attribute__((dllexport)) BOOL CheckRadioButton(void *dlg,int first,int last,int check){if(!IsWindow(dlg)||first>last||last-first>128||check<first||check>last)return 0;for(int id=first;id<=last;id++){U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(id==check)?1:0;}return 1;}
-__attribute__((dllexport)) void *GetNextDlgTabItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return IsWindow(dlg)?0:0;}
-__attribute__((dllexport)) void *GetNextDlgGroupItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return IsWindow(dlg)?0:0;}
+__attribute__((dllexport)) void *GetNextDlgTabItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return (void *)0;}
+__attribute__((dllexport)) void *GetNextDlgGroupItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return (void *)0;}
 __attribute__((dllexport)) long GetDialogBaseUnits(void) { return (long)0x00100008u; }
 __attribute__((dllexport)) BOOL MapDialogRect(void *dlg,U32_RECT *r){if(!IsWindow(dlg)||!r)return 0;r->left=(r->left*8)/4;r->right=(r->right*8)/4;r->top=(r->top*16)/8;r->bottom=(r->bottom*16)/8;return 1;}
 static BOOL u32_adjust_window_rect(U32_RECT *r, u32 style, BOOL menu) {
@@ -1545,6 +1545,7 @@ __attribute__((dllexport)) DWORD GetWindowThreadProcessIdEx(void *hwnd,DWORD *pi
 
 __attribute__((dllexport)) BOOL IsHungAppWindow(void *hwnd){return !IsWindow(hwnd);}
 
+__attribute__((dllexport)) DWORD GetCurrentThreadId(void){return 1;}
 __attribute__((dllexport)) DWORD GetActiveWindowThread(void){return GetCurrentThreadId();}
 
 __attribute__((dllexport)) long GetWindowLongOffset(void *hwnd,int offset){return GetWindowLongA(hwnd,offset);}
@@ -1589,7 +1590,7 @@ __attribute__((dllexport)) BOOL DrawIconEx(void *dc,int x,int y,void *icon,int c
 
 __attribute__((dllexport)) int DrawTextA(void *dc,const char *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0;while((count<0?text[n]!=0:n<count)&&text[n])n++;int x=r->left,y=r->top;for(int i=0;i<n;i++){if(text[i]=='\n'){x=r->left;y+=8;continue;}draw_char(x,y,text[i],COL_TEXT);x+=8;}return n;}
 
-__attribute__((dllexport)) int DrawTextW(void *dc,const unsigned short *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0,x=r->left,y=r->top;while((count<0?text[n]!=0:n<count)&&text[n]){if(text[n]=='\n'){x=r->left;y+=8;}else{draw_char(x,y,text[n]<128?(char)text[n]:'?');x+=8;}n++;}return n;}
+__attribute__((dllexport)) int DrawTextW(void *dc,const unsigned short *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0,x=r->left,y=r->top;while((count<0?text[n]!=0:n<count)&&text[n]){if(text[n]=='\n'){x=r->left;y+=8;}else{draw_char(x,y,text[n]<128?(char)text[n]:'?',COL_TEXT);x+=8;}n++;}return n;}
 
 __attribute__((dllexport)) BOOL GetTextExtentPoint32A(void *dc,const char *text,int count,U32_POINT *size){(void)dc;if(!text||!size||count<0)return 0;size->x=count*8;size->y=8;return 1;}
 
@@ -1707,9 +1708,9 @@ __attribute__((dllexport)) int GetAwarenessFromDpiAwarenessContext(void *context
 
 __attribute__((dllexport)) int GetProcessDpiAwareness(HANDLE process,int *awareness){if(!awareness||(process!=(void*)-1&&process!=(void*)1))return 0;*awareness=1;return 0;}
 
-__attribute__((dllexport)) BOOL SetPropA(void *hwnd,const char *name,void *data){if(!IsWindow(hwnd)||!name||!name[0])return 0;int free_slot=-1;for(int i=0;i<32;i++){if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j]){u32_props[i].data=data;return 1;}}if(!u32_props[i].used&&free_slot<0)free_slot=i;}if(free_slot<0)return 0;u32_props[free_slot].used=1;u32_props[free_slot].hwnd=hwnd;u32_props[free_slot].data=data;int j=0;while(name[j]&&j<47){u32_props[free_slot].name[j]=name[j];j++;}u32_props[free_slot].name[j]=0;return 1;}p[slot].name[j]=0;return 1;}
+__attribute__((dllexport)) BOOL SetPropA(void *hwnd,const char *name,void *data){if(!IsWindow(hwnd)||!name||!name[0])return 0;int free_slot=-1;for(int i=0;i<32;i++){if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j]){u32_props[i].data=data;return 1;}}if(!u32_props[i].used&&free_slot<0)free_slot=i;}if(free_slot<0)return 0;u32_props[free_slot].used=1;u32_props[free_slot].hwnd=hwnd;u32_props[free_slot].data=data;int j=0;while(name[j]&&j<47){u32_props[free_slot].name[j]=name[j];j++;}u32_props[free_slot].name[j]=0;return 1;} 
 
-__attribute__((dllexport)) void *GetPropA(void *hwnd,const char *name){if(!IsWindow(hwnd)||!name)return 0;for(int i=0;i<32;i++)if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j])return u32_props[i].data;}return 0;} p[32];(void)p;return 0;}
+__attribute__((dllexport)) void *GetPropA(void *hwnd,const char *name){if(!IsWindow(hwnd)||!name)return 0;for(int i=0;i<32;i++)if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j])return u32_props[i].data;}return 0;} 
 
 __attribute__((dllexport)) void *RemovePropA(void *hwnd,const char *name){if(!IsWindow(hwnd)||!name)return 0;for(int i=0;i<32;i++)if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j]){void *d=u32_props[i].data;u32_props[i].used=0;return d;}}return 0;}
 

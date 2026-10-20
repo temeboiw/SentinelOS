@@ -214,7 +214,7 @@ static void k32_shutdown_screen(void) {
     }
     u64 start = sy3(24, 0, 0, 0);
     if (start != (u64)-1) {
-        while (sy3(24, 0, 0, 0) - start < 900) sy3(21, 0, 0, 0);
+        while (sy3(24, 0, 0, 0) - start < 5000) sy3(21, 0, 0, 0);
     } else {
         for (volatile u64 i = 0; i < 20000000ULL; ++i) __asm__ volatile("pause");
     }

@@ -87,6 +87,8 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+/* Suppress the per-process welcome card while exposing desktop after close. */
+static int u32_suppress_desktop_card;
 static int g_search_focus;
 static char g_search_text[32];
 static int g_search_len;
@@ -653,7 +655,7 @@ static void compose(void) {
     }
 
     /* Desktop welcome/search card, populated by explorer.exe through TextOutA. */
-    if (!g_wnd.visible) {
+    if (!g_wnd.visible && !u32_suppress_desktop_card) {
         int cx=132, cy=72, cw=390, ch=158;
         round_fill(cx+4,cy+7,cw,ch,13,0x55314F62);
         round_fill(cx,cy,cw,ch,13,0xBFFFFFFF);
@@ -1034,18 +1036,16 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
         int oy = (g_wnd.visible && hwnd) ? g_wnd.y : 0;
         int x0 = r.left + ox, y0 = r.top + oy;
         int x1 = r.right + ox, y1 = r.bottom + oy;
-        int cx0 = cur_ox < g_mx ? cur_ox : g_mx;
-        int cy0 = cur_oy < g_my ? cur_oy : g_my;
-        int cx1 = (cur_ox > g_mx ? cur_ox : g_mx) + 16;
-        int cy1 = (cur_oy > g_my ? cur_oy : g_my) + 16;
+        /*
+         * Cursor save/restore is handled directly by compose(). Do not union
+         * its old and new positions into this content dirty rectangle: doing
+         * so repaints every pixel between a fast mouse move and produces a
+         * visible horizontal streak through text.
+         */
         int was_clipped = u32_render_clip;
         int ox0 = u32_clip_x0, oy0 = u32_clip_y0;
         int ox1 = u32_clip_x1, oy1 = u32_clip_y1;
 
-        if (cx0 < x0) x0 = cx0;
-        if (cy0 < y0) y0 = cy0;
-        if (cx1 > x1) x1 = cx1;
-        if (cy1 > y1) y1 = cy1;
         if (was_clipped) {
             if (ox0 < x0) x0 = ox0;
             if (oy0 < y0) y0 = oy0;
@@ -1261,31 +1261,23 @@ __attribute__((dllexport))
 BOOL DestroyWindow(void *hwnd) {
     (void)hwnd;
 
-    /* Remember the client area before hiding the window. Its text is drawn
-     * directly into the shared framebuffer, so hiding the frame alone can
-     * leave old glyphs behind if another process' clip state is active. */
-    int old_x=g_wnd.x, old_y=g_wnd.y, old_w=g_wnd.w, old_h=g_wnd.h;
-    cursor_restore();
+    /* Save the old frame before hiding it so every pixel it covered is
+     * repainted from the desktop layers, including the title bar and shadow. */
+    int had_window = g_wnd.visible && g_wnd.w > 2 && g_wnd.h > 2;
+    int x0 = g_wnd.x - 8, y0 = g_wnd.y - 8;
+    int x1 = g_wnd.x + g_wnd.w + 12;
+    int y1 = g_wnd.y + g_wnd.h + 16;
+
     sy3(SYS_WmUnreg, 0, 0, 0);
     g_wnd.visible = 0;
-    compose();
+    g_wnd.minimized = 0;
 
-    /*
-     * Explicitly scrub the former client area from the wallpaper cache after
-     * composition. This is a final guard against stale row labels such as
-     * "[DIR]" surviving a close on the shared framebuffer.
-     */
-    if (g_front && u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh &&
-        g_fw<=U32_AERO_CACHE_W && g_fh<=U32_AERO_CACHE_H) {
-        int x0=old_x+7, y0=old_y+41;
-        int x1=old_x+old_w-7, y1=old_y+old_h-8;
-        if(x0<0)x0=0;if(y0<0)y0=0;
-        if(x1>(int)g_fw)x1=(int)g_fw;
-        if(y1>(int)g_fh)y1=(int)g_fh;
-        for(int y=y0;y<y1;y++)
-            for(int x=x0;x<x1;x++)
-                g_front[y*g_pitch+x]=u32_aero_bg_cache[y*g_fw+x];
-        cursor_save_draw(g_mx,g_my);
+    if (had_window) {
+        u32_suppress_desktop_card = 1;
+        compose_region(x0, y0, x1, y1);
+        u32_suppress_desktop_card = 0;
+    } else {
+        compose();
     }
 
     return 1;

@@ -45,7 +45,7 @@ typedef struct {
 
 #define MAX_ENT 256
 #define VISIBLE_ROWS 28
-static char g_names[MAX_ENT][64];
+static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
 static int g_count;
 static char g_path[128];
@@ -118,9 +118,9 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
     g_isdir[g_count++] = 1;
 
     for (DWORD i = 0; i < MAX_ENT - 1 && g_count < MAX_ENT; i++) {
-        char name[64];
+        char name[256];
         name[0] = 0;
-        DWORD t = pQuery(i, name, 64);
+        DWORD t = pQuery(i, name, 256);
         /* QueryDirectoryA returns 0 at end, 1 for a file, and 2 for a directory. */
         if (t == 0) break;
 
@@ -128,7 +128,7 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         if (name[0] == '.' && name[1] == '.' && !name[2]) continue;
 
         int k = 0;
-        for (; name[k] && k < 63; k++) g_names[g_count][k] = name[k];
+        for (; name[k] && k < 255; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
         /* Trust the filesystem's entry type; names without extensions are files too. */
         g_isdir[g_count] = (t == 2);

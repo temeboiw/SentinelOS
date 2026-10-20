@@ -2,6 +2,7 @@
 typedef unsigned int u32;
 typedef unsigned int DWORD;
 typedef unsigned int UINT;
+typedef void *HANDLE;
 typedef unsigned short WORD;
 typedef unsigned long long u64;
 typedef int BOOL;
@@ -1955,7 +1956,7 @@ __attribute__((dllexport)) BOOL LineTo(void *dc,int x,int y){(void)dc;static int
 
 __attribute__((dllexport)) BOOL Rectangle(void *dc,int left,int top,int right,int bottom){(void)dc;U32_RECT r={left,top,right,bottom};return FrameRect(0,&r,(void *)(unsigned long long)COL_TEXT);}
 
-__attribute__((dllexport)) BOOL Ellipse(void *dc,int left,int top,int right,int bottom){(void)dc;int rx=(right-left)/2,ry=(bottom-top)/2,cx=left+rx,cy=top+ry;if(rx<=0||ry<=0)return 0;for(int a=0;a<360;a++){double rad=a*3.141592653589793/180.0;putpx(cx+(int)(rx*__builtin_cos(rad)),cy+(int)(ry*__builtin_sin(rad)),COL_TEXT);}return 1;}
+__attribute__((dllexport)) BOOL Ellipse(void *dc,int left,int top,int right,int bottom){(void)dc;int rx=(right-left)/2,ry=(bottom-top)/2,cx=left+rx,cy=top+ry;if(rx<=0||ry<=0)return 0;for(int y=-ry;y<=ry;y++)for(int x=-rx;x<=rx;x++){long long lhs=(long long)x*x*ry*ry+(long long)y*y*rx*rx;long long rhs=(long long)rx*rx*ry*ry;if(lhs<=rhs&&lhs>=rhs-(long long)(rx+ry)*2)putpx(cx+x,cy+y,COL_TEXT);}return 1;}
 
 __attribute__((dllexport)) BOOL RoundRect(void *dc,int left,int top,int right,int bottom,int ew,int eh){(void)ew;(void)eh;return Rectangle(dc,left,top,right,bottom);}
 
@@ -2072,3 +2073,63 @@ __attribute__((dllexport)) BOOL RemoveMenuItem(void *menu,unsigned int item,unsi
 __attribute__((dllexport)) DWORD CheckMenuItemState(void *menu,unsigned int item,unsigned int flags){return CheckMenuItem(menu,item,flags);}
 
 __attribute__((dllexport)) DWORD EnableMenuItemState(void *menu,unsigned int item,unsigned int flags){return EnableMenuItem(menu,item,flags);}
+
+__attribute__((dllexport)) unsigned short RegisterClassExA(void *wc){return RegisterClassA(wc);}
+
+__attribute__((dllexport)) unsigned short RegisterClassExW(void *wc){return RegisterClassW(wc);}
+
+__attribute__((dllexport)) void *CreateWindowA(const char *cls,const char *title,unsigned long style,int x,int y,int w,int h,void *parent,void *menu,void *instance,void *param){return CreateWindowExA(0,cls,title,style,x,y,w,h,parent,menu,instance,param);}
+
+__attribute__((dllexport)) void *CreateWindowW(const unsigned short *cls,const unsigned short *title,unsigned long style,int x,int y,int w,int h,void *parent,void *menu,void *instance,void *param){return CreateWindowExW(0,cls,title,style,x,y,w,h,parent,menu,instance,param);}
+
+__attribute__((dllexport)) long long DispatchMessageW(const MSG *msg){if(!msg)return 0;return (long long)SendMessageW((void *)(unsigned long long)msg->hwnd,msg->message,msg->wParam,msg->lParam);}
+
+__attribute__((dllexport)) void *CreateDialogIndirectParamA(void *instance,const void *templ,void *parent,void *proc,long long param){(void)instance;(void)templ;(void)proc;(void)param;return IsWindow(parent)?parent:CreateWindowExA(0,"DIALOG","Dialog",0x10000000,0,0,320,200,parent,0,0,0);}
+
+__attribute__((dllexport)) void *CreateDialogIndirectParamW(void *instance,const void *templ,void *parent,void *proc,long long param){(void)instance;(void)templ;(void)proc;(void)param;return IsWindow(parent)?parent:CreateWindowExW(0,0,0,0x10000000,0,0,320,200,parent,0,0,0);}
+
+__attribute__((dllexport)) int DialogBoxIndirectParamA(void *instance,const void *templ,void *parent,void *proc,long long param){(void)instance;(void)templ;(void)proc;(void)param;return IsWindow(parent)?1:-1;}
+
+__attribute__((dllexport)) int DialogBoxIndirectParamW(void *instance,const void *templ,void *parent,void *proc,long long param){return DialogBoxIndirectParamA(instance,templ,parent,proc,param);}
+
+__attribute__((dllexport)) unsigned int GetRawInputData(void *raw,unsigned int command,void *data,unsigned int *size,unsigned int header){(void)raw;(void)command;(void)data;(void)header;if(size)*size=0;return 0xFFFFFFFFu;}
+
+__attribute__((dllexport)) unsigned int GetRawInputBuffer(void *data,unsigned int *size,unsigned int header){(void)data;(void)header;if(size)*size=0;return 0xFFFFFFFFu;}
+
+__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoA(void *device,unsigned int command,void *data,unsigned int *size){(void)device;(void)command;(void)data;if(size)*size=0;return 0xFFFFFFFFu;}
+
+__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoW(void *device,unsigned int command,void *data,unsigned int *size){return GetRawInputDeviceInfoA(device,command,data,size);}
+
+__attribute__((dllexport)) unsigned int GetRawInputDeviceList(void *list,unsigned int *count,unsigned int size){(void)list;(void)size;if(count)*count=0;return 0;}
+
+__attribute__((dllexport)) BOOL RegisterRawInputDevices(const void *devices,unsigned int count,unsigned int size){(void)devices;(void)count;(void)size;return 0;}
+
+__attribute__((dllexport)) long long DefRawInputProc(void **packets,int count,unsigned int size){(void)packets;(void)count;(void)size;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerType(unsigned int id,unsigned int *type){(void)id;if(!type)return 0;*type=2;return 1;}
+
+__attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerInfoHistory(unsigned int id,unsigned int *count,void *info){(void)id;(void)info;if(count)*count=0;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerPenInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerTouchInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerFrameInfo(unsigned int id,unsigned int *count,void *info){(void)id;(void)info;if(count)*count=0;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerDevice(unsigned int id,void **device){(void)id;if(device)*device=0;return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerDeviceRects(void *device,U32_RECT *pointer,U32_RECT *display){(void)device;if(pointer){pointer->left=pointer->top=pointer->right=pointer->bottom=0;}if(display){display->left=display->top=0;display->right=(int)g_fw;display->bottom=(int)g_fh;}return 0;}
+
+__attribute__((dllexport)) BOOL GetPointerDevices(unsigned int *count,void *devices){(void)devices;if(count)*count=0;return 1;}
+
+__attribute__((dllexport)) BOOL GetGestureInfo(void *handle,void *info){(void)handle;(void)info;return 0;}
+
+__attribute__((dllexport)) BOOL CloseGestureInfoHandle(void *handle){return handle!=0;}
+
+__attribute__((dllexport)) BOOL GetGestureExtraArgs(void *handle,unsigned int size,void *args){(void)handle;(void)size;(void)args;return 0;}
+
+__attribute__((dllexport)) BOOL SetGestureConfig(void *hwnd,DWORD reserved,unsigned int count,const void *config,unsigned int size){(void)reserved;(void)count;(void)config;(void)size;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetTouchInputInfo(void *touch,unsigned int count,void *info,int size){(void)touch;(void)count;(void)info;(void)size;return 0;}

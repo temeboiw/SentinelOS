@@ -1457,9 +1457,10 @@ static Frame *syscall_handler(Frame *f) {
         if(f->rdx==1)base=vh->pos;
         else if(f->rdx==2)base=vh->size;
         else if(f->rdx!=0){f->rax=(uint64_t)-1LL;return f;}
-        int64_t target=(int64_t)base+offset;
-        if(target<0||(uint64_t)target>vh->size){f->rax=(uint64_t)-1LL;return f;}
-        vh->pos=(uint64_t)target;f->rax=vh->pos;return f;
+        uint64_t target;
+        if(offset<0){uint64_t mag=(uint64_t)(-(offset+1))+1;if(mag>base){f->rax=(uint64_t)-1LL;return f;}target=base-mag;}
+        else {uint64_t mag=(uint64_t)offset;if(mag>0x7FFFFFFFFFFFFFFFULL-base){f->rax=(uint64_t)-1LL;return f;}target=base+mag;}
+        vh->pos=target;f->rax=vh->pos;return f;
     }
 
     case SYS_NtQueryDirectoryFile: {

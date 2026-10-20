@@ -241,7 +241,6 @@ static int msi_load_sequence(MsiSequenceRow *rows,u8 *enabled,u32 cap,u32 *count
         if(!rows[i].action[0] || rows[i].sequence==0) continue;
         int cond=msi_condition_eval(rows[i].condition);
         if(cond<0) { out("Install blocked: unsupported condition: ");out(rows[i].condition);out("\n");return 0; }
-        if(!cond) continue;
         if(!msi_action_supported(rows[i].action) &&
            !msi_custom_action_kind(rows[i].action)) {
             out("Install blocked: unsupported MSI action/custom action: ");out(rows[i].action);out("\n");
@@ -502,13 +501,15 @@ static int msi_preflight_custom_actions(MsiSequenceRow *rows,u32 count) {
         }
         int cond=msi_condition_eval(rows[i].condition);
         if(cond<0) return 0;
-        if(!cond) continue;
-        if(kind==35 || kind==51) {
-            if(!msi_execute_custom_action(rows[i].action)) return 0;
+        if((int)i<init) {
             msi_custom_preexecuted[i]=1;
-        } else if(kind==19 && (int)i<init) {
-            (void)msi_execute_custom_action(rows[i].action);
-            return 0;
+            if(!cond) continue;
+            if(kind==35 || kind==51) {
+                if(!msi_execute_custom_action(rows[i].action)) return 0;
+            } else if(kind==19) {
+                (void)msi_execute_custom_action(rows[i].action);
+                return 0;
+            }
         }
     }
     return 1;
@@ -532,7 +533,7 @@ static int msi_install_package(void) {
         const char *a=rows[i].action;
         if(!msi_action_supported(a)) {
             int kind=msi_custom_action_kind(a);
-            if((kind==35 || kind==51) && msi_custom_preexecuted[i]) continue;
+            if(msi_custom_preexecuted[i]) continue;
             if(kind==19) { (void)msi_execute_custom_action(a); goto fail; }
             goto fail;
         }

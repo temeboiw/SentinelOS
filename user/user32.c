@@ -903,7 +903,46 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
     if(r.right<=r.left||r.bottom<=r.top)return 1;
     if(!u32_update_pending)u32_invalid_rect=r;
     else {if(r.left<u32_invalid_rect.left)u32_invalid_rect.left=r.left;if(r.top<u32_invalid_rect.top)u32_invalid_rect.top=r.top;if(r.right>u32_invalid_rect.right)u32_invalid_rect.right=r.right;if(r.bottom>u32_invalid_rect.bottom)u32_invalid_rect.bottom=r.bottom;}
-    u32_update_pending=1;if(erase)u32_update_erase=1;compose();return 1;
+    u32_update_pending=1;if(erase)u32_update_erase=1;
+
+    /*
+     * Windows-style damage repaint: translate the invalid client rectangle
+     * to screen coordinates, then compose only that region. Include both
+     * cursor positions because the cursor is saved directly in the FB.
+     */
+    {
+        int ox = (g_wnd.visible && hwnd) ? g_wnd.x : 0;
+        int oy = (g_wnd.visible && hwnd) ? g_wnd.y : 0;
+        int x0 = r.left + ox, y0 = r.top + oy;
+        int x1 = r.right + ox, y1 = r.bottom + oy;
+        int cx0 = cur_ox < g_mx ? cur_ox : g_mx;
+        int cy0 = cur_oy < g_my ? cur_oy : g_my;
+        int cx1 = (cur_ox > g_mx ? cur_ox : g_mx) + 16;
+        int cy1 = (cur_oy > g_my ? cur_oy : g_my) + 16;
+        int was_clipped = u32_render_clip;
+        int ox0 = u32_clip_x0, oy0 = u32_clip_y0;
+        int ox1 = u32_clip_x1, oy1 = u32_clip_y1;
+
+        if (cx0 < x0) x0 = cx0;
+        if (cy0 < y0) y0 = cy0;
+        if (cx1 > x1) x1 = cx1;
+        if (cy1 > y1) y1 = cy1;
+        if (was_clipped) {
+            if (ox0 < x0) x0 = ox0;
+            if (oy0 < y0) y0 = oy0;
+            if (ox1 > x1) x1 = ox1;
+            if (oy1 > y1) y1 = oy1;
+        }
+
+        u32_render_clip = 1;
+        u32_clip_x0 = x0; u32_clip_y0 = y0;
+        u32_clip_x1 = x1; u32_clip_y1 = y1;
+        compose();
+        u32_render_clip = was_clipped;
+        u32_clip_x0 = ox0; u32_clip_y0 = oy0;
+        u32_clip_x1 = ox1; u32_clip_y1 = oy1;
+    }
+    return 1;
 }
 
 __attribute__((dllexport))

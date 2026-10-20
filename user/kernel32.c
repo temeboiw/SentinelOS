@@ -205,9 +205,6 @@ __attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (
 __attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
     (void)file; if (high) *high=0; return 0xFFFFFFFFu;
 }
-__attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG *high, DWORD method) {
-    (void)file; (void)distance; (void)method; if (high) *high=0; return 0xFFFFFFFFu;
-}
 __attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { (void)file; return 0; }
 __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {
     const char *s="C:\\TEMP\\"; DWORD i=0; if (!out || !cap) return 0;

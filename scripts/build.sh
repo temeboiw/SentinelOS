@@ -98,6 +98,7 @@ for src in \
   hal/hal.c \
   kernel/kernel.c \
   user/smss.c \
+  user/bootvid.c \
   user/sentlogon.c \
   user/taskbar.c \
   user/kernel32.c \
@@ -248,6 +249,18 @@ USER_CFLAGS=(
   -I"$ROOT/user"
   -I"$ROOT/shared"
 )
+
+echo "  -> bootvid.exe"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/bootvid.c" \
+  -o "$B/obj/bootvid.o"
+
+lld -flavor link \
+  /subsystem:native /entry:bootvid_main /nodefaultlib \
+  /fixed:no /base:0x40600000 \
+  "/out:$SYS32/bootvid.exe" \
+  "$B/obj/bootvid.o"
 
 echo "  -> sentlogon.exe"
 

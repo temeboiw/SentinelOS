@@ -1056,3 +1056,66 @@ __attribute__((dllexport)) BOOL CreateDirectoryTransactedW(K32_LPCWSTR template_
 __attribute__((dllexport)) BOOL RemoveDirectoryTransactedA(LPCSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}
 
 __attribute__((dllexport)) BOOL RemoveDirectoryTransactedW(K32_LPCWSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL IsDebuggerPresent(void){return 0;}
+
+__attribute__((dllexport)) BOOL CheckRemoteDebuggerPresent(HANDLE process,BOOL *present){if(!present||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;*present=0;return 1;}
+
+__attribute__((dllexport)) void OutputDebugStringA(LPCSTR text){if(text){DWORD n=(DWORD)lstrlenA(text),written;WriteFile(GetStdHandle((DWORD)-11),text,n,&written,0);}}
+
+__attribute__((dllexport)) void OutputDebugStringW(K32_LPCWSTR text){if(text){char b[512];k32_wide_to_ansi(b,sizeof(b),text);DWORD written;WriteFile(GetStdHandle((DWORD)-11),b,(DWORD)lstrlenA(b),&written,0);}}
+
+__attribute__((dllexport)) void DebugBreak(void){}
+
+__attribute__((dllexport)) DWORD GetThreadErrorMode(void){return k32_error_mode;}
+
+__attribute__((dllexport)) BOOL SetThreadErrorMode(DWORD mode,DWORD *old){if(old)*old=k32_error_mode;k32_error_mode=mode;return 1;}
+
+__attribute__((dllexport)) BOOL SetThreadStackGuarantee(DWORD *size){if(!size)return 0;if(*size<4096)*size=4096;return 1;}
+
+__attribute__((dllexport)) BOOL GetThreadStackGuarantee(DWORD *size){if(!size)return 0;*size=4096;return 1;}
+
+__attribute__((dllexport)) BOOL GetProcessDefaultLayout(DWORD *layout){if(!layout)return 0;*layout=0;return 1;}
+
+__attribute__((dllexport)) BOOL SetProcessDefaultLayout(DWORD layout){return layout==0;}
+
+__attribute__((dllexport)) typedef struct { BYTE ACLineStatus,BatteryFlag,BatteryLifePercent,Reserved1; DWORD BatteryLifeTime,BatteryFullLifeTime; } K32_SYSTEM_POWER_STATUS;
+BOOL GetSystemPowerStatus(K32_SYSTEM_POWER_STATUS *s){if(!s)return 0;s->ACLineStatus=1;s->BatteryFlag=128;s->BatteryLifePercent=255;s->Reserved1=0;s->BatteryLifeTime=0xFFFFFFFFu;s->BatteryFullLifeTime=0xFFFFFFFFu;return 1;}
+
+__attribute__((dllexport)) BOOL SetSystemPowerState(BOOL suspend,BOOL force){(void)suspend;(void)force;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) int GetSystemDefaultLocaleName(K32_LPWSTR name,int cap){if(!name||cap<6)return 6;const char *s="en-US";for(int i=0;i<5;i++)name[i]=s[i];name[5]=0;return 6;}
+
+__attribute__((dllexport)) int GetUserDefaultLocaleName(K32_LPWSTR name,int cap){return GetSystemDefaultLocaleName(name,cap);}
+
+__attribute__((dllexport)) int GetLocaleInfoByName(K32_LPCWSTR locale,DWORD type,K32_LPWSTR out,int cap){(void)locale;return GetLocaleInfoW(0,type,out,cap);}
+
+__attribute__((dllexport)) int GetCalendarInfoEx(K32_LPCWSTR locale,DWORD calendar,DWORD reserved,DWORD type,K32_LPWSTR out,int cap,DWORD *value){(void)locale;(void)reserved;return GetCalendarInfoW(0,calendar,type,out,cap,value);}
+
+__attribute__((dllexport)) int GetDateFormatEx(K32_LPCWSTR locale,DWORD flags,const K32_SYSTEMTIME *st,K32_LPCWSTR format,K32_LPWSTR out,int cap, K32_LPCWSTR calendar){(void)locale;(void)calendar;return GetDateFormatW(0,flags,st,format,out,cap);}
+
+__attribute__((dllexport)) int GetTimeFormatEx(K32_LPCWSTR locale,DWORD flags,const K32_SYSTEMTIME *st,K32_LPCWSTR format,K32_LPWSTR out,int cap){(void)locale;return GetTimeFormatW(0,flags,st,format,out,cap);}
+
+__attribute__((dllexport)) int GetNumberFormatEx(K32_LPCWSTR locale,DWORD flags,K32_LPCWSTR value,const void *fmt,K32_LPWSTR out,int cap){(void)locale;return GetNumberFormatW(0,flags,value,fmt,out,cap);}
+
+__attribute__((dllexport)) int GetCurrencyFormatEx(K32_LPCWSTR locale,DWORD flags,K32_LPCWSTR value,const void *fmt,K32_LPWSTR out,int cap){(void)locale;return GetCurrencyFormatW(0,flags,value,fmt,out,cap);}
+
+__attribute__((dllexport)) int GetDurationFormat(DWORD locale,DWORD flags,const K32_SYSTEMTIME *st,K32_SIZE_T duration,K32_LPCWSTR format,K32_LPWSTR out,int cap){(void)locale;(void)flags;(void)st;(void)duration;(void)format;if(out&&cap)out[0]=0;return 1;}
+
+__attribute__((dllexport)) int GetDurationFormatEx(K32_LPCWSTR locale,DWORD flags,const K32_SYSTEMTIME *st,K32_SIZE_T duration,K32_LPCWSTR format,K32_LPWSTR out,int cap){(void)locale;return GetDurationFormat(0,flags,st,duration,format,out,cap);}
+
+__attribute__((dllexport)) int FindNLSString(DWORD locale,DWORD flags,K32_LPCWSTR src,int src_len,K32_LPCWSTR value,int value_len,int *found){(void)locale;(void)flags;if(found)*found=-1;if(!src||!value)return -1;int sl=src_len<0?lstrlenW(src):src_len,vl=value_len<0?lstrlenW(value):value_len;if(vl==0){if(found)*found=0;return 0;}for(int i=0;i+vl<=sl;i++){int j=0;while(j<vl&&src[i+j]==value[j])j++;if(j==vl){if(found)*found=i;return i;}}return -1;}
+
+__attribute__((dllexport)) int FindNLSStringEx(K32_LPCWSTR locale,DWORD flags,K32_LPCWSTR src,int src_len,K32_LPCWSTR value,int value_len,int *found,void *version,void *reserved,LPVOID handle){(void)locale;(void)version;(void)reserved;(void)handle;return FindNLSString(0,flags,src,src_len,value,value_len,found);}
+
+__attribute__((dllexport)) int CompareStringEx(K32_LPCWSTR locale,DWORD flags,K32_LPCWSTR a,int na,K32_LPCWSTR c,int nc,void *version,void *reserved,LPVOID handle){(void)locale;(void)version;(void)reserved;(void)handle;return CompareStringW(0,flags,a,na,c,nc);}
+
+__attribute__((dllexport)) BOOL SetFileInformationByHandle(HANDLE file,int cls,const void *info,DWORD size){(void)file;(void)cls;(void)info;(void)size;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) DWORD GetFileAttributesTransactedA(LPCSTR path,void *data,HANDLE transaction){(void)path;(void)data;(void)transaction;k32_last_error=50;return 0xFFFFFFFFu;}
+
+__attribute__((dllexport)) DWORD GetFileAttributesTransactedW(K32_LPCWSTR path,void *data,HANDLE transaction){(void)path;(void)data;(void)transaction;k32_last_error=50;return 0xFFFFFFFFu;}
+
+__attribute__((dllexport)) BOOL SetFileAttributesTransactedA(LPCSTR path,DWORD attr,HANDLE transaction){(void)path;(void)attr;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL SetFileAttributesTransactedW(K32_LPCWSTR path,DWORD attr,HANDLE transaction){(void)path;(void)attr;(void)transaction;k32_last_error=50;return 0;}

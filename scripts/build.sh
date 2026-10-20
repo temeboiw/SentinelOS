@@ -23,7 +23,7 @@ run_parallel() {
   local -a pids=()
   local cmd pid failed=0
   for cmd in "$@"; do
-    bash -c "$cmd" &
+    eval "$cmd" &
     pids+=("$!")
     if (( ${#pids[@]} >= BUILD_JOBS )); then
       for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
@@ -196,15 +196,16 @@ build_efi() {
 
 echo "==> UEFI stages"
 
-build_efi bootx64 "$B/esp/EFI/BOOT/BOOTX64.EFI"
-
 EXTRA=()
 if [[ $KEEP_FALLBACK -eq 1 ]]; then
   EXTRA=(-DKEEP_FALLBACK)
 fi
 
-build_efi bootuni "$B/esp/EFI/magic/bootuni.efi" "${EXTRA[@]}"
-build_efi loadufi "$B/esp/EFI/magic/loadufi.efi"
+# These EFI images are independent, so compile/link them concurrently.
+run_parallel \
+  'build_efi bootx64 "$B/esp/EFI/BOOT/BOOTX64.EFI"' \
+  'build_efi bootuni "$B/esp/EFI/magic/bootuni.efi" "${EXTRA[@]}"' \
+  'build_efi loadufi "$B/esp/EFI/magic/loadufi.efi"'
 
 echo "==> HAL + kernel"
 

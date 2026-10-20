@@ -41,6 +41,7 @@
 #define SYS_NtProtectVirtualMemory     28
 #define SYS_NtQueryVirtualMemory       29
 #define SYS_NtQueryFileMetadata        30
+#define SYS_NtQueryVolumeMetadata       31
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -740,6 +741,11 @@ typedef struct {
     uint32_t inode,mode;
     uint16_t links,reserved;
 } UserFileMetadata;
+typedef struct {
+    uint64_t total_blocks,free_blocks,reserved_blocks;
+    uint32_t block_size,volume_serial,total_inodes,free_inodes;
+    char volume_label[17];
+} UserVolumeMetadata;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
 static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
@@ -1624,6 +1630,17 @@ static Frame *syscall_handler(Frame *f) {
         }
         *(UserMemoryBasicInformation*)out=info;
         f->rax=sizeof(UserMemoryBasicInformation);return f;
+    }
+
+    case SYS_NtQueryVolumeMetadata: {
+        uint64_t out=f->rdi,length=f->rsi;
+        if(!g_ext4_ok||!g_ext4.blksz||length<sizeof(UserVolumeMetadata)||
+           !MmValidateUserRange(MmCurrentProcess,out,sizeof(UserVolumeMetadata),1)){f->rax=0;return f;}
+        UserVolumeMetadata meta={0};
+        meta.total_blocks=g_ext4.total_blocks;meta.free_blocks=g_ext4.free_blocks;meta.reserved_blocks=g_ext4.reserved_blocks;
+        meta.block_size=g_ext4.blksz;meta.volume_serial=g_ext4.volume_serial;meta.total_inodes=g_ext4.total_inodes;meta.free_inodes=g_ext4.free_inodes;
+        for(int i=0;i<17;i++)meta.volume_label[i]=g_ext4.volume_label[i];
+        *(UserVolumeMetadata*)out=meta;f->rax=1;return f;
     }
 
     case SYS_NtQueryFileMetadata: {

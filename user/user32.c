@@ -1941,9 +1941,35 @@ __attribute__((dllexport)) void *CopyCursor(void *cursor){return cursor;}
 
 __attribute__((dllexport)) BOOL GetIconInfo(void *icon,void *info){(void)icon;if(!info)return 0;for(int i=0;i<8;i++)((unsigned long long*)info)[i]=0;return 1;}
 
-__attribute__((dllexport)) void *LoadBitmapA(void *instance,const char *name){(void)instance;return name?(void *)1:0;}
-
-__attribute__((dllexport)) void *LoadBitmapW(void *instance,const unsigned short *name){(void)instance;return name?(void *)1:0;}
+static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes);
+typedef struct { const unsigned char *data; unsigned int bytes; int width,height,bpp; int used; } U32_BITMAP_RESOURCE;
+static U32_BITMAP_RESOURCE u32_bitmap_resources[16];
+static unsigned int u32_bitmap_read16(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8);}
+static unsigned int u32_bitmap_read32(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16)|((unsigned int)p[3]<<24);}
+__attribute__((dllexport)) void *LoadBitmapA(void *instance,const char *name) {
+    unsigned long long id=(unsigned long long)name;if(!name||id>0xFFFFULL)return 0;
+    const unsigned char *data=0;unsigned int bytes=0;
+    if(!u32_pe_resource_data(instance,2u,(unsigned int)id,&data,&bytes)||bytes<40)return 0;
+    unsigned int header=u32_bitmap_read32(data);
+    if(header<40||header>bytes)return 0;
+    int width=(int)u32_bitmap_read32(data+4),height=(int)u32_bitmap_read32(data+8);
+    unsigned int planes=u32_bitmap_read16(data+12),bpp=u32_bitmap_read16(data+14),compression=u32_bitmap_read32(data+16);
+    if(width<=0||height==0||height==(-2147483647-1)||width>8192||height>8192||height< -8192||planes!=1||
+       (bpp!=1&&bpp!=4&&bpp!=8&&bpp!=16&&bpp!=24&&bpp!=32)||compression!=0)return 0;
+    unsigned long long rows=(unsigned long long)(height<0?-height:height);
+    unsigned long long stride=(((unsigned long long)width*bpp+31ULL)/32ULL)*4ULL;
+    unsigned int colors=u32_bitmap_read32(data+32);if(!colors&&bpp<=8)colors=1u<<bpp;
+    unsigned long long need=(unsigned long long)header+(bpp<=8?(unsigned long long)colors*4ULL:0ULL)+stride*rows;
+    if(need>bytes)return 0;
+    for(int i=0;i<16;i++)if(!u32_bitmap_resources[i].used) {
+        U32_BITMAP_RESOURCE *b=&u32_bitmap_resources[i];b->data=data;b->bytes=bytes;b->width=width;b->height=height<0?-height:height;b->bpp=(int)bpp;b->used=1;return b;
+    }
+    return 0;
+}
+__attribute__((dllexport)) void *LoadBitmapW(void *instance,const unsigned short *name) {
+    unsigned long long id=(unsigned long long)name;if(!name||id>0xFFFFULL)return 0;
+    return LoadBitmapA(instance,(const char*)name);
+}
 
 static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes);
 static unsigned int u32_menu_read_word(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8);}

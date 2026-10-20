@@ -15,6 +15,7 @@ typedef unsigned short K32_WCHAR;
 typedef const K32_WCHAR *K32_LPCWSTR;
 typedef K32_WCHAR *K32_LPWSTR;
 static DWORD k32_last_error;
+static char k32_current_dir[260]="C:\\";
 static char k32_dll_directory[260];
 typedef struct { int used,refs; char name[64]; } K32_MODULE_HANDLE;
 static K32_MODULE_HANDLE k32_modules[16];
@@ -148,8 +149,15 @@ __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
     return (DWORD)sy3(SYS_QueryDir, index, (u64)name, (u64)max);
 }
+__attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR out, LPSTR *part);
 __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
-    return sy3(12, (u64)path, 0, 0) == 0;
+    if(!path||!*path){k32_last_error=87;return 0;}
+    if(sy3(12,(u64)path,0,0)!=0){k32_last_error=3;return 0;}
+    char full[768];DWORD n=GetFullPathNameA(path,sizeof(full),full,0);
+    if(!n||n>=sizeof(full)){k32_last_error=206;return 0;}
+    if(n>=sizeof(k32_current_dir)){k32_last_error=206;return 0;}
+    for(DWORD i=0;i<=n;i++)k32_current_dir[i]=full[i];
+    k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) DWORD GetLastError(void) { return k32_last_error; }
 __attribute__((dllexport)) void SetLastError(DWORD e) { k32_last_error=e; }
@@ -238,8 +246,10 @@ __attribute__((dllexport)) BOOL VirtualProtect(LPVOID address, u64 size, DWORD p
 }
 __attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address,void *info,K32_SIZE_T len) { (void)address;(void)info;(void)len;k32_last_error=50;return 0; }
 __attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
-    const char *s="C:\\"; DWORD i=0; if (!out || !cap) return 0;
-    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
+    DWORD n=0;while(k32_current_dir[n])n++;
+    if(!out||!cap)return n+1;
+    if(cap<=n){DWORD i=0;while(i+1<cap){out[i]=k32_current_dir[i];i++;}out[i]=0;k32_last_error=122;return n+1;}
+    for(DWORD i=0;i<=n;i++)out[i]=k32_current_dir[i];k32_last_error=0;return n;
 }
 __attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path, void *security) {
     (void)security;
@@ -297,6 +307,15 @@ __attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR 
     if(path[n]){k32_last_error=206;return 0;}input[n]=0;
     for(DWORD i=0;i<n;i++)if(input[i]=='/')input[i]='\\';
     int has_drive=((input[0]>='A'&&input[0]<='Z')||(input[0]>='a'&&input[0]<='z'))&&input[1]==':';
+    if(!has_drive && input[0]!='\\') {
+        char combined[512];DWORD c=0;
+        while(k32_current_dir[c]&&c+2<sizeof(combined)){combined[c]=k32_current_dir[c];c++;}
+        if(c>3&&combined[c-1]!='\\')combined[c++]='\\';
+        for(DWORD j=0;input[j]&&c+1<sizeof(combined);j++)combined[c++]=input[j];
+        if(input[0]&&combined[c-1]!=input[n]){} /* preserve the original relative input length below */
+        combined[c]=0;DWORD j=0;while(combined[j]&&j+1<sizeof(input)){input[j]=combined[j];j++;}input[j]=0;n=j;
+        has_drive=((input[0]>='A'&&input[0]<='Z')||(input[0]>='a'&&input[0]<='z'))&&input[1]==':';
+    }
     if(has_drive){full[f++]=input[0];full[f++]=':';full[f++]='\\';pos=(input[2]=='\\')?3:2;}
     else {full[f++]='C';full[f++]=':';full[f++]='\\';pos=(input[0]=='\\')?1:0;}
     while(input[pos]=='\\')pos++;

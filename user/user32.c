@@ -1797,3 +1797,143 @@ __attribute__((dllexport)) BOOL GetUserObjectSecurity(void *object,void *require
 __attribute__((dllexport)) BOOL SetUserObjectInformationA(void *object,int index,void *info,DWORD len){(void)object;(void)index;(void)info;(void)len;return 0;}
 
 __attribute__((dllexport)) BOOL SetUserObjectInformationW(void *object,int index,void *info,DWORD len){return SetUserObjectInformationA(object,index,info,len);}
+
+__attribute__((dllexport)) BOOL EnumDisplayMonitors(void *dc,const U32_RECT *clip,void *callback,long long data){(void)dc;(void)clip;if(!callback)return 0;typedef BOOL(*CB)(void*,void*,U32_RECT*,long long);U32_RECT r={0,0,(int)g_fw,(int)g_fh};return ((CB)callback)(0,(void*)1,&r,data);}
+
+__attribute__((dllexport)) void *MonitorFromWindow(void *hwnd,DWORD flags){(void)flags;return IsWindow(hwnd)?(void *)1:(void *)1;}
+
+__attribute__((dllexport)) void *MonitorFromPoint(U32_POINT pt,DWORD flags){(void)pt;(void)flags;return (void *)1;}
+
+__attribute__((dllexport)) void *MonitorFromRect(const U32_RECT *r,DWORD flags){(void)r;(void)flags;return (void *)1;}
+
+__attribute__((dllexport)) BOOL GetMonitorInfoA(void *monitor,void *info){(void)monitor;if(!info)return 0;unsigned int *p=(unsigned int*)info;if(p[0]<sizeof(unsigned int)*7)return 0;U32_RECT *r=(U32_RECT*)((unsigned char*)info+4);r->left=0;r->top=0;r->right=(int)g_fw;r->bottom=(int)g_fh;return 1;}
+
+__attribute__((dllexport)) BOOL GetMonitorInfoW(void *monitor,void *info){return GetMonitorInfoA(monitor,info);}
+
+__attribute__((dllexport)) BOOL EnumDisplaySettingsA(const char *device,DWORD mode,void *devmode){(void)device;if(!devmode||mode!=0xFFFFFFFFu)return 0;unsigned int *p=(unsigned int*)devmode;p[0]=sizeof(unsigned int)*32;p[4]=g_fw;p[5]=g_fh;p[6]=32;p[7]=60;return 1;}
+
+__attribute__((dllexport)) BOOL EnumDisplaySettingsW(const unsigned short *device,DWORD mode,void *devmode){(void)device;return EnumDisplaySettingsA(0,mode,devmode);}
+
+__attribute__((dllexport)) long ChangeDisplaySettingsA(void *devmode, DWORD flags){(void)devmode;(void)flags;return 0;}
+
+__attribute__((dllexport)) long ChangeDisplaySettingsW(void *devmode,DWORD flags){return ChangeDisplaySettingsA(devmode,flags);}
+
+__attribute__((dllexport)) long ChangeDisplaySettingsExA(const char *device,void *devmode,void *hwnd,DWORD flags,void *param){(void)device;(void)hwnd;(void)param;return ChangeDisplaySettingsA(devmode,flags);}
+
+__attribute__((dllexport)) long ChangeDisplaySettingsExW(const unsigned short *device,void *devmode,void *hwnd,DWORD flags,void *param){(void)device;return ChangeDisplaySettingsExA(0,devmode,hwnd,flags,param);}
+
+__attribute__((dllexport)) void *LoadAcceleratorsA(void *instance,const char *name){(void)instance;return name?(void *)1:0;}
+
+__attribute__((dllexport)) void *LoadAcceleratorsW(void *instance,const unsigned short *name){(void)instance;return name?(void *)1:0;}
+
+__attribute__((dllexport)) void *CreateAcceleratorTableA(const void *entries,int count){if(!entries||count<=0)return 0;return (void *)entries;}
+
+__attribute__((dllexport)) void *CreateAcceleratorTableW(const void *entries,int count){return CreateAcceleratorTableA(entries,count);}
+
+__attribute__((dllexport)) BOOL DestroyAcceleratorTable(void *table){return table!=0;}
+
+__attribute__((dllexport)) int CopyAcceleratorTableA(void *table,void *entries,int count){(void)table;(void)entries;(void)count;return 0;}
+
+__attribute__((dllexport)) int CopyAcceleratorTableW(void *table,void *entries,int count){return CopyAcceleratorTableA(table,entries,count);}
+
+__attribute__((dllexport)) int LoadStringA(void *instance,unsigned int id,char *buffer,int cap){(void)instance;(void)id;if(buffer&&cap>0)buffer[0]=0;return 0;}
+
+__attribute__((dllexport)) int LoadStringW(void *instance,unsigned int id,unsigned short *buffer,int cap){(void)instance;(void)id;if(buffer&&cap>0)buffer[0]=0;return 0;}
+
+__attribute__((dllexport)) void *LoadMenuIndirectA(const void *template_data){return template_data?CreateMenu():0;}
+
+__attribute__((dllexport)) void *LoadMenuIndirectW(const void *template_data){return LoadMenuIndirectA(template_data);}
+
+__attribute__((dllexport)) void *RegisterDeviceNotificationA(void *recipient,void *filter,DWORD flags){(void)filter;(void)flags;return recipient?(void *)1:0;}
+
+__attribute__((dllexport)) void *RegisterDeviceNotificationW(void *recipient,void *filter,DWORD flags){return RegisterDeviceNotificationA(recipient,filter,flags);}
+
+__attribute__((dllexport)) BOOL UnregisterDeviceNotification(void *handle){return handle!=0;}
+
+__attribute__((dllexport)) BOOL SetProcessDPIAware(void){return 1;}
+
+__attribute__((dllexport)) BOOL IsProcessDPIAware(void){return 1;}
+
+__attribute__((dllexport)) BOOL SetThreadDesktop(void *desktop){return desktop!=0;}
+
+__attribute__((dllexport)) void *OpenWindowStationA(const char *name,BOOL inherit,DWORD access){(void)inherit;(void)access;return name?(void *)1:0;}
+
+__attribute__((dllexport)) void *OpenWindowStationW(const unsigned short *name,BOOL inherit,DWORD access){(void)inherit;(void)access;return name?(void *)1:0;}
+
+__attribute__((dllexport)) BOOL CloseWindowStation(void *station){return station!=0;}
+
+__attribute__((dllexport)) BOOL SetProcessWindowStation(void *station){return station!=0;}
+
+__attribute__((dllexport)) BOOL EnumWindowStationsA(void *callback,long long data){if(!callback)return 0;typedef BOOL(*CB)(char*,long long);return ((CB)callback)("WinSta0",data);}
+
+__attribute__((dllexport)) BOOL EnumWindowStationsW(void *callback,long long data){if(!callback)return 0;typedef BOOL(*CB)(unsigned short*,long long);unsigned short n[]={'W','i','n','S','t','a','0',0};return ((CB)callback)(n,data);}
+
+__attribute__((dllexport)) BOOL EnumDesktopsA(void *station,void *callback,long long data){(void)station;if(!callback)return 0;typedef BOOL(*CB)(char*,long long);return ((CB)callback)("Default",data);}
+
+__attribute__((dllexport)) BOOL EnumDesktopsW(void *station,void *callback,long long data){(void)station;if(!callback)return 0;typedef BOOL(*CB)(unsigned short*,long long);unsigned short n[]={'D','e','f','a','u','l','t',0};return ((CB)callback)(n,data);}
+
+__attribute__((dllexport)) void *OpenDesktopA(const char *name,DWORD flags,BOOL inherit,DWORD access){(void)flags;(void)inherit;(void)access;return name?(void *)1:0;}
+
+__attribute__((dllexport)) void *OpenDesktopW(const unsigned short *name,DWORD flags,BOOL inherit,DWORD access){(void)flags;(void)inherit;(void)access;return name?(void *)1:0;}
+
+__attribute__((dllexport)) BOOL CloseDesktop(void *desktop){return desktop!=0;}
+
+__attribute__((dllexport)) BOOL SwitchDesktop(void *desktop){return desktop!=0;}
+
+__attribute__((dllexport)) BOOL GetUserObjectInformation(void *object,int index,void *info,DWORD len,DWORD *needed){return GetUserObjectInformationA(object,index,info,len,needed);}
+
+__attribute__((dllexport)) BOOL SetUserObjectInformation(void *object,int index,void *info,DWORD len){return SetUserObjectInformationA(object,index,info,len);}
+
+__attribute__((dllexport)) long GetMonitorDpiType(void *monitor,int type,unsigned int *dpi){(void)monitor;(void)type;if(!dpi)return -1;*dpi=96;return 0;}
+
+__attribute__((dllexport)) int GetSystemMetricsForMonitor(void *monitor,int index){(void)monitor;return GetSystemMetrics(index);}
+
+__attribute__((dllexport)) unsigned int GetWindowDpi(void *hwnd){return GetDpiForWindow(hwnd);}
+
+__attribute__((dllexport)) unsigned int GetDpiForWindowEx(void *hwnd){return GetDpiForWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetPhysicalCursorPos(U32_POINT *pt){return GetCursorPos(pt);}
+
+__attribute__((dllexport)) BOOL SetPhysicalCursorPos(int x,int y){return SetCursorPos(x,y);}
+
+__attribute__((dllexport)) BOOL GetCursorInfoEx(void *info){return GetCursorInfo(info);}
+
+__attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD size,const void *data){(void)setting;(void)flags;(void)size;(void)data;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data){(void)setting;(void)flags;if(!IsWindow(hwnd)||!size)return 0;if(data&&*size)((unsigned char*)data)[0]=0;*size=0;return 1;}
+
+__attribute__((dllexport)) BOOL GetWindowCompositionAttribute(void *hwnd,void *data){(void)data;return IsWindow(hwnd)?0:0;}
+
+__attribute__((dllexport)) BOOL SetWindowCompositionAttribute(void *hwnd,const void *data){(void)data;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetMenuInfoEx(void *menu,U32_MENUINFO *info){return GetMenuInfo(menu,info);}
+
+__attribute__((dllexport)) BOOL SetMenuInfoEx(void *menu,const U32_MENUINFO *info){return SetMenuInfo(menu,info);}
+
+__attribute__((dllexport)) unsigned int GetMenuItemIDEx(void *menu,unsigned int pos){return GetMenuItemID(menu,pos);}
+
+__attribute__((dllexport)) void *GetSubMenuEx(void *menu,int pos){return GetSubMenu(menu,pos);}
+
+__attribute__((dllexport)) BOOL SetWindowRedraw(void *hwnd,BOOL redraw){(void)redraw;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetWindowRedraw(void *hwnd){return IsWindow(hwnd);}
+
+__attribute__((dllexport)) DWORD GetWindowArrange(void){return 0;}
+
+__attribute__((dllexport)) unsigned int ArrangeIconicWindows(void *hwnd){return IsWindow(hwnd)?0:0;}
+
+__attribute__((dllexport)) WORD CascadeWindows(void *parent,WORD flags,const U32_RECT *rect,UINT count,const void **windows){(void)flags;(void)rect;(void)count;(void)windows;return IsWindow(parent)?1:0;}
+
+__attribute__((dllexport)) WORD TileWindows(void *parent,WORD flags,const U32_RECT *rect,UINT count,const void **windows){return CascadeWindows(parent,flags,rect,count,windows);}
+
+__attribute__((dllexport)) BOOL GetWindowPlacementEx(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
+
+__attribute__((dllexport)) BOOL GetWindowRectEx(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
+
+__attribute__((dllexport)) BOOL SetWindowPosEx(void *hwnd,void *after,int x,int y,int cx,int cy,unsigned int flags){return SetWindowPos(hwnd,after,x,y,cx,cy,flags);}
+
+__attribute__((dllexport)) BOOL MoveWindowEx(void *hwnd,int x,int y,int w,int h,BOOL repaint){return MoveWindow(hwnd,x,y,w,h,repaint);}
+
+__attribute__((dllexport)) BOOL SetForegroundWindowEx(void *hwnd){return SetForegroundWindow(hwnd);}
+
+__attribute__((dllexport)) void *GetForegroundWindowEx(void){return GetForegroundWindow();}

@@ -72,7 +72,8 @@ static int cur_on, cur_ox, cur_oy;
 static WINDOW g_wnd;
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;
-static int u32_msg_time;\nstatic int u32_last_msg_time;
+static int u32_msg_time;
+static int u32_last_msg_time;
 typedef struct { void *hwnd; unsigned long long id; unsigned int interval; unsigned long long next_due; void *callback; int used; } U32_TIMER;
 static U32_TIMER u32_timers[16];
 static unsigned long long u32_tick_now(void) { u64 t=sy3(SYS_GetTickCount,0,0,0); return t==(u64)-1?0:t; }
@@ -760,7 +761,8 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     if (!g_front) ensure_fb();
 
     for (;;) {
-        u32_pump_timers();\n        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
+        u32_pump_timers();
+        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
@@ -1088,7 +1090,8 @@ __attribute__((dllexport)) BOOL PostMessageA(void *hwnd, U32_UINT msg, U32_WPARA
 }
 __attribute__((dllexport)) BOOL PeekMessageA(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max, U32_UINT remove) {
     if (!msg) return 0;
-    u32_pump_timers();\n    if (!u32_msg_peek(msg, 0)) return 0;
+    u32_pump_timers();
+    if (!u32_msg_peek(msg, 0)) return 0;
     if (hwnd && msg->hwnd != (u32)(u64)hwnd) return 0;
     if ((min || max) && (msg->message < min || msg->message > max)) return 0;
     if (remove & 1u) u32_msg_peek(msg, 1);

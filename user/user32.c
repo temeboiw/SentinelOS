@@ -1889,12 +1889,12 @@ __attribute__((dllexport)) BOOL UnhookWindowsHookEx(void *hook){if(!hook)return 
 
 __attribute__((dllexport)) long long CallNextHookEx(void *hook,int code,unsigned long long wp,long long lp){(void)hook;(void)code;(void)wp;(void)lp;return 0;}
 
-__attribute__((dllexport)) BOOL GetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void **data){(void)hwnd;(void)proc;(void)id;if(data)*data=0;return 0;}
-
-__attribute__((dllexport)) BOOL SetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void *data){(void)proc;(void)id;(void)data;return IsWindow(hwnd);}
-
-__attribute__((dllexport)) BOOL RemoveWindowSubclass(void *hwnd,void *proc,unsigned long long id){(void)proc;(void)id;return IsWindow(hwnd);}
-
+typedef struct { int used; void *hwnd; void *proc; unsigned long long id; void *data; } U32_SUBCLASS;
+static U32_SUBCLASS u32_subclasses[64];
+static U32_SUBCLASS *u32_subclass_find(void *hwnd,void *proc,unsigned long long id){for(int i=0;i<64;i++)if(u32_subclasses[i].used&&u32_subclasses[i].hwnd==hwnd&&u32_subclasses[i].proc==proc&&u32_subclasses[i].id==id)return &u32_subclasses[i];return 0;}
+__attribute__((dllexport)) BOOL GetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void **data){if(!IsWindow(hwnd)||!proc)return 0;U32_SUBCLASS *s=u32_subclass_find(hwnd,proc,id);if(!s)return 0;if(data)*data=s->data;return 1;}
+__attribute__((dllexport)) BOOL SetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void *data){if(!IsWindow(hwnd)||!proc)return 0;U32_SUBCLASS *s=u32_subclass_find(hwnd,proc,id);if(s){s->data=data;return 1;}for(int i=0;i<64;i++)if(!u32_subclasses[i].used){u32_subclasses[i].used=1;u32_subclasses[i].hwnd=hwnd;u32_subclasses[i].proc=proc;u32_subclasses[i].id=id;u32_subclasses[i].data=data;return 1;}return 0;}
+__attribute__((dllexport)) BOOL RemoveWindowSubclass(void *hwnd,void *proc,unsigned long long id){U32_SUBCLASS *s=u32_subclass_find(hwnd,proc,id);if(!s)return 0;s->used=0;s->hwnd=0;s->proc=0;s->data=0;s->id=0;return 1;}
 __attribute__((dllexport)) long long DefSubclassProc(void *hwnd,unsigned int msg,unsigned long long wp,long long lp){return DefWindowProcA(hwnd,msg,wp,lp);}
 
 __attribute__((dllexport)) BOOL GetTextMetricsA(void *dc,void *metrics){(void)dc;if(!metrics)return 0;unsigned int *v=(unsigned int*)metrics;for(int i=0;i<16;i++)v[i]=0;v[0]=8;v[1]=8;v[2]=8;v[3]=8;return 1;}

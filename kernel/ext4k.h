@@ -141,11 +141,22 @@ static int vfs_listdir(uint32_t dir_ino) {
                     for (int i = 0; i < nl; i++) e->name[i] = (char)buf[o + 8 + i];
                     e->name[nl] = 0;
                     e->ino = ino;
+                    /*
+                     * Do not rely solely on the directory-entry file_type.
+                     * Some ext filesystems omit that field or have entries
+                     * whose type is unknown. The inode's i_mode is authoritative.
+                     */
                     e->is_dir = (ft == 2);
-                    if (!ft) {
+                    {
                         uint8_t in2[256];
-                        if (e4_inode(&g_ext4, ino, in2) == 0)
-                            e->is_dir = ((E16(in2, 0) & 0xF000) == 0x4000);
+                        if (e4_inode(&g_ext4, ino, in2) == 0) {
+                            uint16_t mode = E16(in2, 0) & 0xF000;
+                            if (mode == 0x4000) e->is_dir = 1;
+                            else if (mode == 0x8000 || mode == 0xA000 ||
+                                     mode == 0x2000 || mode == 0x6000 ||
+                                     mode == 0x1000 || mode == 0xC000)
+                                e->is_dir = 0;
+                        }
                     }
                 }
             }

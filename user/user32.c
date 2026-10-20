@@ -959,3 +959,66 @@ __attribute__((dllexport)) BOOL GetUpdateRect(void *hwnd, U32_RECT *r, BOOL eras
 }
 __attribute__((dllexport)) void *SetFocus(void *hwnd) { void *old=u32_focus; u32_focus=hwnd; return old; }
 __attribute__((dllexport)) void *GetFocus(void) { return u32_focus; }
+
+
+/* Compatibility export placeholders: signatures and semantics still need implementation. */
+__attribute__((dllexport)) unsigned long long MessageBoxW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateWindowExW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long RegisterClassW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DefWindowProcW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SendMessageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long PostMessageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long PeekMessageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMessageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateDialogParamA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateDialogParamW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DialogBoxParamA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DialogBoxParamW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long EndDialog(void) { return 0; }
+__attribute__((dllexport)) unsigned long long IsDialogMessageA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long IsDialogMessageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowTextW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetWindowTextW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetClassNameW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long LoadCursorW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long LoadIconW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long LoadImageW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FindWindowA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FindWindowW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FindWindowExA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FindWindowExW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetParent(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetParent(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindow(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowThreadProcessId(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetAncestor(void) { return 0; }
+__attribute__((dllexport)) unsigned long long EnumWindows(void) { return 0; }
+__attribute__((dllexport)) unsigned long long EnumChildWindows(void) { return 0; }
+__attribute__((dllexport)) unsigned long long EnumThreadWindows(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetTopWindow(void) { return 0; }
+__attribute__((dllexport)) unsigned long long BringWindowToTop(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetWindowPlacement(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowPlacement(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowInfo(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowModuleFileNameA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowContextHelpId(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetWindowContextHelpId(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetSubMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuItemCount(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuItemID(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuState(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CheckMenuItem(void) { return 0; }
+__attribute__((dllexport)) unsigned long long EnableMenuItem(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DeleteMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long RemoveMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long InsertMenuA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long ModifyMenuA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetMenuItemInfoA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuItemInfoA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuStringA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetMenuDefaultItem(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetMenuDefaultItem(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetSystemMenu(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetScrollInfo(void) { return 0; }

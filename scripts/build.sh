@@ -1512,6 +1512,7 @@ ls -lh \
   "$SYS32/hal.dll" \
   "$SYS32/krnl.exe" \
   "$SYS32/smss.exe" \
+  "$SYS32/sentlogon.exe" \
   "$SYS32/explorer.exe" \
   "$SYS32/fileexplorer.exe" \
   "$SYS32/taskbar.dll" \

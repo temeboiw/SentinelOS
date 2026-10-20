@@ -1942,9 +1942,51 @@ __attribute__((dllexport)) void *LoadBitmapA(void *instance,const char *name){(v
 
 __attribute__((dllexport)) void *LoadBitmapW(void *instance,const unsigned short *name){(void)instance;return name?(void *)1:0;}
 
-__attribute__((dllexport)) void *LoadMenuA(void *instance,const char *name){(void)instance;(void)name;return CreateMenu();}
-
-__attribute__((dllexport)) void *LoadMenuW(void *instance,const unsigned short *name){(void)instance;(void)name;return CreateMenu();}
+static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes);
+static unsigned int u32_menu_read_word(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8);}
+static int u32_parse_menu_items(const unsigned char **cursor,const unsigned char *end,void *menu,int depth) {
+    if(depth>8)return 0;
+    const unsigned char *p=*cursor;
+    for(;;) {
+        if(p>=end||((unsigned long long)(end-p)<2))return 0;
+        unsigned int option=u32_menu_read_word(p);p+=2;
+        int popup=(option&0x0010u)!=0;
+        unsigned long long item_id=0;
+        if(!popup) { if((unsigned long long)(end-p)<2)return 0;item_id=u32_menu_read_word(p);p+=2; }
+        char text[128];unsigned int n=0;int terminated=0;
+        while((unsigned long long)(end-p)>=2) {
+            unsigned int wc=u32_menu_read_word(p);p+=2;
+            if(!wc){terminated=1;break;}
+            if(n+1<sizeof(text))text[n++]=wc<128?(char)wc:'?';
+        }
+        if(!terminated)return 0;text[n]=0;
+        if(popup) {
+            void *sub=CreatePopupMenu();if(!sub)return 0;
+            if(!AppendMenuA(menu,(option&~0x0080u)|0x0010u,(unsigned long long)sub,text)){DestroyMenu(sub);return 0;}
+            if(!u32_parse_menu_items(&p,end,sub,depth+1))return 0;
+        } else if(!AppendMenuA(menu,option&~0x0080u,item_id,text))return 0;
+        if(option&0x0080u){*cursor=p;return 1;}
+    }
+}
+static void *u32_load_menu_template(const unsigned char *data,unsigned int bytes) {
+    if(!data||bytes<4)return 0;
+    unsigned int version=u32_menu_read_word(data),offset=u32_menu_read_word(data+2);
+    if(version!=0||offset<4||offset>=bytes)return 0;
+    void *menu=CreateMenu();if(!menu)return 0;
+    const unsigned char *p=data+offset,*end=data+bytes;
+    if(!u32_parse_menu_items(&p,end,menu,0)){DestroyMenu(menu);return 0;}
+    return menu;
+}
+__attribute__((dllexport)) void *LoadMenuA(void *instance,const char *name) {
+    unsigned long long id=(unsigned long long)name;if(!name||id>0xFFFFULL)return 0;
+    const unsigned char *data=0;unsigned int bytes=0;
+    if(!u32_pe_resource_data(instance,4u,(unsigned int)id,&data,&bytes))return 0;
+    return u32_load_menu_template(data,bytes);
+}
+__attribute__((dllexport)) void *LoadMenuW(void *instance,const unsigned short *name) {
+    unsigned long long id=(unsigned long long)name;if(!name||id>0xFFFFULL)return 0;
+    return LoadMenuA(instance,(const char*)name);
+}
 
 __attribute__((dllexport)) int TranslateAcceleratorA(void *hwnd,void *table,MSG *msg) {
     if(!IsWindow(hwnd)||!msg)return 0;
@@ -2245,7 +2287,7 @@ static int u32_pe_string_resource(void *instance,unsigned int id,const unsigned 
 __attribute__((dllexport)) int LoadStringA(void *instance,unsigned int id,char *buffer,int cap){if(!buffer||cap<=0){return 0;}buffer[0]=0;const unsigned short *src=0;unsigned int len=0;if(!u32_pe_string_resource(instance,id,&src,&len))return 0;unsigned int n=len<(unsigned int)(cap-1)?len:(unsigned int)(cap-1);for(unsigned int i=0;i<n;i++)buffer[i]=src[i]<128?(char)src[i]:'?';buffer[n]=0;return (int)n;}
 __attribute__((dllexport)) int LoadStringW(void *instance,unsigned int id,unsigned short *buffer,int cap){if(!buffer||cap<=0)return 0;buffer[0]=0;const unsigned short *src=0;unsigned int len=0;if(!u32_pe_string_resource(instance,id,&src,&len))return 0;unsigned int n=len<(unsigned int)(cap-1)?len:(unsigned int)(cap-1);for(unsigned int i=0;i<n;i++)buffer[i]=src[i];buffer[n]=0;return (int)n;}
 
-__attribute__((dllexport)) void *LoadMenuIndirectA(const void *template_data){return template_data?CreateMenu():0;}
+__attribute__((dllexport)) void *LoadMenuIndirectA(const void *template_data){return u32_load_menu_template((const unsigned char*)template_data,4096u);}
 
 __attribute__((dllexport)) void *LoadMenuIndirectW(const void *template_data){return LoadMenuIndirectA(template_data);}
 

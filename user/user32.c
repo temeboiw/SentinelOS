@@ -2154,9 +2154,19 @@ __attribute__((dllexport)) long ChangeDisplaySettingsExA(const char *device,void
 
 __attribute__((dllexport)) long ChangeDisplaySettingsExW(const unsigned short *device,void *devmode,void *hwnd,DWORD flags,void *param){(void)device;return ChangeDisplaySettingsExA(0,devmode,hwnd,flags,param);}
 
-__attribute__((dllexport)) void *LoadAcceleratorsA(void *instance,const char *name){(void)instance;return name?(void *)1:0;}
-
-__attribute__((dllexport)) void *LoadAcceleratorsW(void *instance,const unsigned short *name){(void)instance;return name?(void *)1:0;}
+static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes);
+__attribute__((dllexport)) void *CreateAcceleratorTableA(const void *entries,int count);
+__attribute__((dllexport)) void *LoadAcceleratorsA(void *instance,const char *name) {
+    unsigned long long raw=(unsigned long long)name;if(!name||raw>0xFFFFULL)return 0;
+    const unsigned char *data=0;unsigned int bytes=0;
+    if(!u32_pe_resource_data(instance,9u,(unsigned int)raw,&data,&bytes)||!bytes||bytes%sizeof(U32_ACCEL))return 0;
+    unsigned int count=bytes/sizeof(U32_ACCEL);if(count>256)return 0;
+    return CreateAcceleratorTableA(data,(int)count);
+}
+__attribute__((dllexport)) void *LoadAcceleratorsW(void *instance,const unsigned short *name) {
+    unsigned long long raw=(unsigned long long)name;if(!name||raw>0xFFFFULL)return 0;
+    return LoadAcceleratorsA(instance,(const char*)name);
+}
 
 __attribute__((dllexport)) void *CreateAcceleratorTableA(const void *entries,int count){if(!entries||count<=0||count>256)return 0;for(int i=0;i<16;i++)if(!u32_accel_tables[i].used){u32_accel_tables[i].entries=(const U32_ACCEL*)entries;u32_accel_tables[i].count=count;u32_accel_tables[i].used=1;return &u32_accel_tables[i];}return 0;}
 
@@ -2171,6 +2181,37 @@ __attribute__((dllexport)) int CopyAcceleratorTableW(void *table,void *entries,i
 static unsigned short u32_pe_u16(const unsigned char *p){return (unsigned short)(p[0]|((unsigned short)p[1]<<8));}
 static unsigned int u32_pe_u32(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16)|((unsigned int)p[3]<<24);}
 static int u32_pe_range(unsigned int size,unsigned int off,unsigned int len){return off<=size&&len<=size-off;}
+static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes) {
+    if(!instance||!data||!bytes||(unsigned long long)instance<0x10000ULL)return 0;
+    const unsigned char *base=(const unsigned char*)instance;
+    if(u32_pe_u16(base)!=0x5A4D)return 0;
+    unsigned int peoff=u32_pe_u32(base+0x3C);if(peoff>0x1000000u)return 0;
+    const unsigned char *nt=base+peoff;if(u32_pe_u32(nt)!=0x00004550u)return 0;
+    unsigned int optsize=u32_pe_u16(nt+20);const unsigned char *opt=nt+24;
+    unsigned short magic=u32_pe_u16(opt);unsigned int dd=(magic==0x20Bu)?112u:(magic==0x10Bu)?96u:0xFFFFFFFFu;
+    if(dd==0xFFFFFFFFu||optsize<dd+24u)return 0;
+    unsigned int image_size=u32_pe_u32(opt+56),rrva=u32_pe_u32(opt+dd+16),rsize=u32_pe_u32(opt+dd+20);
+    if(!image_size||!rrva||rsize<16||!u32_pe_range(image_size,rrva,rsize))return 0;
+    const unsigned char *root=base+rrva;unsigned int count=(unsigned int)u32_pe_u16(root+12)+u32_pe_u16(root+14),type_off=0,name_off=0;
+    if(!u32_pe_range(rsize,16,count*8u))return 0;
+    for(unsigned int i=0;i<count;i++){const unsigned char *e=root+16+i*8;unsigned int name=u32_pe_u32(e);if(!(name&0x80000000u)&&(name&0xFFFFu)==type_id){unsigned int o=u32_pe_u32(e+4);if(o&0x80000000u)type_off=o&0x7FFFFFFFu;break;}}
+    if(!type_off||!u32_pe_range(rsize,type_off,16))return 0;
+    const unsigned char *td=root+type_off;count=(unsigned int)u32_pe_u16(td+12)+u32_pe_u16(td+14);
+    if(!u32_pe_range(rsize,type_off+16,count*8u))return 0;
+    for(unsigned int i=0;i<count;i++){const unsigned char *e=td+16+i*8;unsigned int name=u32_pe_u32(e);if(!(name&0x80000000u)&&(name&0xFFFFu)==resource_id){unsigned int o=u32_pe_u32(e+4);if(o&0x80000000u)name_off=o&0x7FFFFFFFu;break;}}
+    if(!name_off||!u32_pe_range(rsize,name_off,16))return 0;
+    const unsigned char *nd=root+name_off;count=(unsigned int)u32_pe_u16(nd+12)+u32_pe_u16(nd+14);
+    if(!count||!u32_pe_range(rsize,name_off+16,count*8u))return 0;
+    unsigned int o=u32_pe_u32(nd+20)&0x7FFFFFFFu;
+    if(!u32_pe_range(rsize,o,16))return 0;
+    const unsigned char *ld=root+o;count=(unsigned int)u32_pe_u16(ld+12)+u32_pe_u16(ld+14);
+    if(!count||!u32_pe_range(rsize,o+16,count*8u))return 0;
+    unsigned int entry=u32_pe_u32(ld+20);if(entry&0x80000000u)return 0;
+    unsigned int data_off=entry&0x7FFFFFFFu;if(!u32_pe_range(rsize,data_off,16))return 0;
+    const unsigned char *de=root+data_off;unsigned int rva=u32_pe_u32(de),length=u32_pe_u32(de+4);
+    if(!u32_pe_range(image_size,rva,length))return 0;
+    *data=base+rva;*bytes=length;return 1;
+}
 static int u32_pe_string_resource(void *instance,unsigned int id,const unsigned short **text,unsigned int *length){
     if(!instance||!text||!length||(unsigned long long)instance<0x10000ULL)return 0;
     const unsigned char *base=(const unsigned char*)instance;

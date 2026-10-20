@@ -385,6 +385,9 @@ clang "${USER_CFLAGS[@]}" -c "$ROOT/user/ole32.c" -o "$B/obj/ole32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x41500000 \
   /export:CoInitialize /export:CoInitializeEx /export:CoUninitialize /export:CoCreateInstance \
   /export:CoGetClassObject /export:CoInitializeSecurity \
+  /export:CoTaskMemAlloc /export:CoTaskMemFree /export:CoTaskMemRealloc \
+  /export:CLSIDFromString /export:IIDFromString /export:IsEqualGUID \
+  /export:StringFromGUID2 /export:CoCreateGuid /export:CoGetMalloc /export:CoFreeUnusedLibraries \
   "/out:$SYS32/ole32.dll" "$B/obj/ole32.o"
 
 echo "==> Checking required images"

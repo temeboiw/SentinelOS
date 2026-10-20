@@ -68,7 +68,7 @@ __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD 
 }
 __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { return sy3(SYS_CloseFile, (u64)h, 0, 0) != 0; }
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
-    (void)max; return (DWORD)sy3(SYS_QueryDir, index, (u64)name, 0);
+    return (DWORD)sy3(SYS_QueryDir, index, (u64)name, (u64)max);
 }
 __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
     return sy3(12, (u64)path, 0, 0) == 0;

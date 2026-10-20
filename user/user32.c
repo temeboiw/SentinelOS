@@ -542,7 +542,37 @@ static void compose(void) {
      * stale framebuffer pixels over freshly rendered text during rapid
      * mouse movement and leaves glyph fragments after a window closes. */
     int explicit_clip = u32_render_clip;
-    if (!explicit_clip) cursor_restore();
+    int clip_x0_before=u32_clip_x0, clip_y0_before=u32_clip_y0;
+    int clip_x1_before=u32_clip_x1, clip_y1_before=u32_clip_y1;
+    int redraw_cursor_after_clip=0;
+
+    if (!explicit_clip) {
+        cursor_restore();
+    } else {
+        /* A dirty repaint that touches either the old cursor or its new
+         * position must repaint the complete 16x16 cursor footprint. Expand
+         * the dirty rectangle before painting, and discard the saved-under
+         * pixels: they are stale once the scene beneath them is repainted. */
+        int old_hit = cur_on &&
+            cur_ox < u32_clip_x1 && cur_ox+16 > u32_clip_x0 &&
+            cur_oy < u32_clip_y1 && cur_oy+16 > u32_clip_y0;
+        int new_hit =
+            g_mx < u32_clip_x1 && g_mx+16 > u32_clip_x0 &&
+            g_my < u32_clip_y1 && g_my+16 > u32_clip_y0;
+        if (old_hit || new_hit) {
+            int cx0=cur_on?cur_ox:g_mx, cy0=cur_on?cur_oy:g_my;
+            int cx1=cx0+16, cy1=cy0+16;
+            if (g_mx<cx0)cx0=g_mx;if(g_my<cy0)cy0=g_my;
+            if (g_mx+16>cx1)cx1=g_mx+16;
+            if (g_my+16>cy1)cy1=g_my+16;
+            if(cx0<u32_clip_x0)u32_clip_x0=cx0;
+            if(cy0<u32_clip_y0)u32_clip_y0=cy0;
+            if(cx1>u32_clip_x1)u32_clip_x1=cx1;
+            if(cy1>u32_clip_y1)u32_clip_y1=cy1;
+            cur_on=0;
+            redraw_cursor_after_clip=1;
+        }
+    }
 
     /* Ordinary app redraws are clipped to their own window. The desktop
      * process owns full-screen composition; explicit dirty clips are kept. */
@@ -743,10 +773,19 @@ static void compose(void) {
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
-    /* Only full compositions may move the software cursor. Dirty repaints
-     * leave its saved-under pixels untouched instead of restoring a stale
-     * cursor background across the clipped rectangle. */
-    if (!explicit_clip) cursor_save_draw(g_mx, g_my);
+    /* The clip has now repainted the complete area beneath any cursor
+     * it touched. Restore the caller's clip and save fresh underlay pixels
+     * before drawing the cursor, so it remains visible without pixel trails. */
+    if (explicit_clip) {
+        u32_clip_x0=clip_x0_before; u32_clip_y0=clip_y0_before;
+        u32_clip_x1=clip_x1_before; u32_clip_y1=clip_y1_before;
+    }
+    if (!explicit_clip || redraw_cursor_after_clip) {
+        int saved_clip=u32_render_clip;
+        u32_render_clip=0;
+        cursor_save_draw(g_mx,g_my);
+        u32_render_clip=saved_clip;
+    }
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is

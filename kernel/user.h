@@ -1069,7 +1069,7 @@ static int vfs_delete_regular_file(const char *path) {
         if(vfs_user_handles[i].used && vfs_user_handles[i].ino==ino) return 0;
     uint8_t inode[256];
     if(e4_inode(&g_ext4,ino,inode)<0 ||
-       (E16(inode,0)&0xF000)!=0x8000 ||
+       (E16(inode,0)&0xF000)!=0x8000 || E16(inode,26)!=1 ||
        E16(inode+40,6)!=0 || E16(inode+40,2)>E16(inode+40,4) ||
        E16(inode+40,2)>4) return 0;
     if(e4_remove_dirent(parent,base,ino)<0) return 0;

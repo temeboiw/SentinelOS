@@ -32,12 +32,12 @@ jobs:
           mkdir -p build
           dd if=/dev/zero of=build/vars.fd bs=1M count=2 status=none
           set +e
-          timeout 35s qemu-system-x86_64 \\
-            -machine q35 -m 1024 \\
-            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \\
-            -drive if=pflash,format=raw,file=build/vars.fd \\
-            -drive file=build/magic-disk.img,format=raw,if=none,id=d0 \\
-            -device virtio-blk-pci,drive=d0 \\
+          timeout 35s qemu-system-x86_64 \
+            -machine q35 -m 1024 \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+            -drive if=pflash,format=raw,file=build/vars.fd \
+            -drive file=build/magic-disk.img,format=raw,if=none,id=d0 \
+            -device virtio-blk-pci,drive=d0 \
             -display none -serial file:build/serial.log -monitor none -no-reboot
           rc=$?
           set -e

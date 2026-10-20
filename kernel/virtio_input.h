@@ -14,6 +14,7 @@ struct vi_used_elem { uint32_t id, len; };
 struct vi_used { uint16_t flags, idx; struct vi_used_elem ring[64]; };
 
 static int vi_ok, vi_x = 640, vi_y = 400, vi_btn, vi_moved, vi_clicked, vi_evt_count;
+static int vi_screen_w = 1280, vi_screen_h = 800;
 static volatile uint8_t *vi_common, *vi_notify;
 static uint32_t vi_notify_mult;
 static uint16_t vi_qsize, vi_notify_off, vi_last_used;
@@ -171,8 +172,8 @@ static void virtio_input_poll(void) {
                 int v = ev.value;
                 if (v < 0) v = 0;
                 if (v > 32767) v = 32767;
-                if (ev.code == VI_ABS_X) { vi_x = (v * 1279) / 32767; vi_moved = 1; }
-                if (ev.code == VI_ABS_Y) { vi_y = (v * 799) / 32767; vi_moved = 1; }
+                if (ev.code == VI_ABS_X) { vi_x = (v * (vi_screen_w > 1 ? vi_screen_w - 1 : 1)) / 32767; vi_moved = 1; }
+                if (ev.code == VI_ABS_Y) { vi_y = (v * (vi_screen_h > 1 ? vi_screen_h - 1 : 1)) / 32767; vi_moved = 1; }
             } else if (ev.type == VI_EV_KEY && ev.code == VI_BTN_LEFT) {
                 if (ev.value) {
                     if (!(vi_btn & 1))

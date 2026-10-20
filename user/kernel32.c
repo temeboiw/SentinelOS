@@ -17,6 +17,7 @@ static DWORD k32_error_mode;
 static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
 static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0;
+typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
 static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static DWORD k32_cursor_size=25; static unsigned short k32_console_attr=7;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
@@ -131,7 +132,7 @@ __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2
 __attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
 __attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
 __attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
-__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) { (void)name; return (HANDLE)1; }
+__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name){if(!name||k32_eqi(name,"sentinel.exe")||k32_eqi(name,"C:\\sentinel.exe"))return (HANDLE)1;k32_last_error=126;return 0;}
 __attribute__((dllexport)) LPSTR GetCommandLineA(void) { return k32_cmdline; }
 __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DWORD cap) {
     const char *s = "C:\\sentinel.exe"; DWORD i=0; (void)module;
@@ -267,15 +268,12 @@ __attribute__((dllexport)) BOOL ReleaseSemaphore(HANDLE semaphore, LONG count, L
 __attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count, const HANDLE *handles, BOOL wait_all, DWORD ms) {
     (void)count; (void)handles; (void)wait_all; (void)ms; return 0xFFFFFFFFu;
 }
-__attribute__((dllexport)) DWORD GetFileType(HANDLE file) { (void)file; return 0; }
+__attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_VALUE)return 0;if(h==(HANDLE)1||h==(HANDLE)2)return 2;return 1;}
 
 
 /* Compatibility export placeholders: signatures and semantics still need implementation. */
 __attribute__((dllexport)) K32_LPWSTR GetCommandLineW(void) { return (K32_LPWSTR)k32_cmdline_w; }
-__attribute__((dllexport)) HANDLE GetModuleHandleW(K32_LPCWSTR name) {
-    char narrow[260]; if (!name) return GetModuleHandleA(0);
-    k32_wide_to_ansi(narrow,sizeof(narrow),name); return GetModuleHandleA(narrow);
-}
+__attribute__((dllexport)) HANDLE GetModuleHandleW(K32_LPCWSTR name){char n[256];if(!name)return GetModuleHandleA(0);k32_wide_to_ansi(n,sizeof(n),name);return GetModuleHandleA(n);}
 __attribute__((dllexport)) DWORD GetModuleFileNameW(HANDLE module, K32_LPWSTR out, DWORD cap) {
     char narrow[512]; DWORD n=GetModuleFileNameA(module,narrow,sizeof(narrow));
     if (!out || !cap) return 0;
@@ -320,8 +318,8 @@ __attribute__((dllexport)) DWORD GetTempPathW(DWORD cap, K32_LPWSTR out) {
 }
 __attribute__((dllexport)) DWORD GetEnvironmentVariableW(K32_LPCWSTR name,K32_LPWSTR out,DWORD cap){char n[128],v[256];k32_wide_to_ansi(n,sizeof(n),name);DWORD z=GetEnvironmentVariableA(n,v,sizeof(v));if(!z){if(out&&cap)out[0]=0;return 0;}DWORD len=0;while(v[len])len++;if(!out||!cap)return len;if(cap<=len){k32_ansi_to_wide(out,cap,v);k32_last_error=122;return len+1;}k32_ansi_to_wide(out,cap,v);return len;}
 __attribute__((dllexport)) BOOL SetEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR value){char n[128],v[256];if(!name)return 0;k32_wide_to_ansi(n,sizeof(n),name);if(!value)return SetEnvironmentVariableA(n,0);k32_wide_to_ansi(v,sizeof(v),value);return SetEnvironmentVariableA(n,v);}
-__attribute__((dllexport)) unsigned long long GetFileAttributesW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetFileAttributesW(void) { return 0; }
+__attribute__((dllexport)) DWORD GetFileAttributesW(K32_LPCWSTR path){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return GetFileAttributesA(p);}
+__attribute__((dllexport)) BOOL SetFileAttributesW(K32_LPCWSTR path,DWORD attrs){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return SetFileAttributesA(p,attrs);}
 __attribute__((dllexport)) unsigned long long GetTempFileNameA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetTempFileNameW(void) { return 0; }
 __attribute__((dllexport)) DWORD GetShortPathNameA(LPCSTR path,LPSTR out,DWORD cap){return GetFullPathNameA(path,cap,out,0);}
@@ -354,9 +352,9 @@ __attribute__((dllexport)) unsigned long long GetOverlappedResult(void) { return
 __attribute__((dllexport)) unsigned long long CancelIo(void) { return 0; }
 __attribute__((dllexport)) unsigned long long CreatePipe(void) { return 0; }
 __attribute__((dllexport)) unsigned long long PeekNamedPipe(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetHandleInformation(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetHandleInformation(void) { return 0; }
-__attribute__((dllexport)) unsigned long long DuplicateHandle(void) { return 0; }
+__attribute__((dllexport)) BOOL SetHandleInformation(HANDLE h,DWORD mask,DWORD flags){if(!h||h==INVALID_HANDLE_VALUE)return 0;for(int i=0;i<32;i++){if(k32_handle_flags[i].handle==h){k32_handle_flags[i].flags=(k32_handle_flags[i].flags&~mask)|(flags&mask);return 1;}}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=flags&mask;return 1;}return 0;}
+__attribute__((dllexport)) BOOL GetHandleInformation(HANDLE h,DWORD *flags){if(!h||h==INVALID_HANDLE_VALUE||!flags)return 0;for(int i=0;i<32;i++)if(k32_handle_flags[i].handle==h){*flags=k32_handle_flags[i].flags;return 1;}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=0;*flags=0;return 1;}return 0;}
+__attribute__((dllexport)) BOOL DuplicateHandle(HANDLE source_process,HANDLE source,HANDLE target_process,HANDLE *target,DWORD access,BOOL inherit,DWORD options){(void)access;(void)inherit;(void)options;if((source_process==GetCurrentProcess()||source_process==(HANDLE)1)&&(target_process==GetCurrentProcess()||target_process==(HANDLE)1)&&source&&target){*target=source;return 1;}k32_last_error=50;return 0;}
 __attribute__((dllexport)) unsigned long long CreateProcessA(void) { return 0; }
 typedef struct { DWORD cb; char *lpReserved,*lpDesktop,*lpTitle; DWORD dwX,dwY,dwXSize,dwYSize,dwXCountChars,dwYCountChars,dwFillAttribute,dwFlags; unsigned short wShowWindow,cbReserved2; unsigned char *lpReserved2; HANDLE hStdInput,hStdOutput,hStdError; } K32_STARTUPINFOA;
 __attribute__((dllexport)) void GetStartupInfoA(K32_STARTUPINFOA *si){if(!si)return;si->cb=sizeof(*si);si->lpReserved=si->lpDesktop=si->lpTitle=0;si->dwX=si->dwY=si->dwXSize=si->dwYSize=0;si->dwXCountChars=80;si->dwYCountChars=25;si->dwFillAttribute=7;si->dwFlags=0;si->wShowWindow=1;si->cbReserved2=0;si->lpReserved2=0;si->hStdInput=(HANDLE)0;si->hStdOutput=(HANDLE)1;si->hStdError=(HANDLE)2;}
@@ -381,7 +379,7 @@ __attribute__((dllexport)) DWORD GetWindowsDirectoryA(LPSTR out, DWORD cap) {
     const char *p="C:\\Windows"; DWORD i=0; if (!out || !cap) return 10;
     while (p[i] && i+1<cap) { out[i]=p[i]; i++; } out[i]=0; return p[i] ? 11 : i;
 }
-__attribute__((dllexport)) unsigned long long GetUserDefaultLCID(void) { return 0; }
+__attribute__((dllexport)) DWORD GetUserDefaultLCID(void){return 0x0409;}
 __attribute__((dllexport)) DWORD GetACP(void) { return 1252u; }
 
 
@@ -449,7 +447,7 @@ __attribute__((dllexport)) unsigned long long GetSystemTimePreciseAsFileTime(uns
 __attribute__((dllexport)) DWORD GetThreadLocale(void){return 0x0409;}
 __attribute__((dllexport)) BOOL SetThreadLocale(DWORD locale){return locale==0x0409;}
 __attribute__((dllexport)) unsigned short GetUserDefaultLangID(void){return 0x0409;}
-__attribute__((dllexport)) unsigned long long GetThreadUILanguage(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) unsigned short GetThreadUILanguage(void){return 0x0409;}
 __attribute__((dllexport)) unsigned short GetUserDefaultUILanguage(void){return 0x0409;}
 __attribute__((dllexport)) unsigned short GetSystemDefaultUILanguage(void){return 0x0409;}
 __attribute__((dllexport)) unsigned short GetSystemDefaultLangID(void){return 0x0409;}
@@ -522,4 +520,6 @@ __attribute__((dllexport)) K32_SIZE_T GlobalSize(HANDLE mem){return k32_mem_size
 __attribute__((dllexport)) LPVOID GlobalLock(HANDLE mem){return mem;}
 __attribute__((dllexport)) BOOL GlobalUnlock(HANDLE mem){return mem!=0&&k32_mem_size(mem)!=0;}
 __attribute__((dllexport)) HANDLE GlobalHandle(LPCVOID mem){return (HANDLE)mem;}
-__attribute__((dllexport)) BOOL GetBinaryTypeA(LPCSTR file,DWORD *type){if(!file||!type)return 0;DWORD n=0;while(file[n])n++;if(n<4||file[n-4]!='.'||file[n-3]!='e'||file[n-2]!='x'||file[n-1]!='e')return 0;*type=0;return 1;}
+__attribute__((dllexport)) BOOL GetBinaryTypeA(LPCSTR file,DWORD *type){if(!file||!type)return 0;DWORD n=0;while(file[n])n++;if(n<4||file[n-4]!='.'||((file[n-3]|32)!='e')||((file[n-2]|32)!='x')||((file[n-1]|32)!='e'))return 0;*type=0;return 1;}
+
+__attribute__((dllexport)) BOOL GetBinaryTypeW(K32_LPCWSTR file,DWORD *type){char p[512];if(!file)return 0;k32_wide_to_ansi(p,sizeof(p),file);return GetBinaryTypeA(p,type);}

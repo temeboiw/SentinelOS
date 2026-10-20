@@ -75,6 +75,7 @@ for src in \
   user/taskbar.c \
   user/kernel32.c \
   user/user32.c \
+  user/font_ttf.h \
   user/explorer.c \
   user/fileexplorer.c \
   user/cmd.c \
@@ -112,6 +113,25 @@ mkdir -p \
   "$B/rootfs/Program Files (x86)/Common Files" \
   "$B/rootfs/Users/Public" \
   "$B/rootfs/Windows/System32"
+
+# Lato is a friendly humanist sans that suits the Vista/Frutiger Aero era.
+# Prefer a vendored copy, otherwise use a standard Linux font package when
+# present. USER32 keeps its readable bitmap fallback if no TTF is available.
+FONT_SRC="$ROOT/assets/fonts/Lato-Regular.ttf"
+if [[ ! -s "$FONT_SRC" ]]; then
+  for candidate in \
+    /usr/share/fonts/truetype/lato/Lato-Regular.ttf \
+    /usr/share/fonts/truetype/Lato-Regular.ttf
+  do
+    if [[ -s "$candidate" ]]; then FONT_SRC="$candidate"; break; fi
+  done
+fi
+if [[ -s "$FONT_SRC" ]]; then
+  cp "$FONT_SRC" "$B/rootfs/Lato-Regular.ttf"
+  echo "  -> Lato TrueType font ($(wc -c < "$FONT_SRC") bytes)"
+else
+  echo "warning: Lato-Regular.ttf not found; USER32 will use its fallback glyphs"
+fi
 
 COMMON=(
   --target=x86_64-unknown-windows

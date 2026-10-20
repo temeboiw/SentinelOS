@@ -712,6 +712,7 @@ static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
             if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,&ch,1)) return 0;
             pos++;
             if (!ch) { ended=1; break; }
+            if (extract && (ch<32 || ch>=127)) return 0;
             name[n++]=(ch>=32 && ch<127)?(char)ch:'?';
         }
         name[n]=0;
@@ -788,6 +789,24 @@ static void print_msi_cabinets(void) {
         else if (cabinet[0])
             { out("External cabinet required: "); out(cabinet); out("\n"); }
     }
+}
+static int msi_extract_embedded_cabinets(void) {
+    MsiTable *media=msi_find_table("Media");
+    if (!media) { out("Install blocked: MSI has no Media table.\n"); return 0; }
+    int found=0;
+    for (u32 r=0;r<media->rows;r++) {
+        char cabinet[256]; long long v=0; int is_text=0;
+        if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) || !is_text ||
+            !cabinet[0]) continue;
+        if (cabinet[0]=='#' && cabinet[1]) {
+            found=1;
+            if (!msi_list_embedded_cabinet(cabinet+1,1)) return 0;
+        } else {
+            out("Install blocked: external cabinet is unsupported: "); out(cabinet); out("\n");
+            return 0;
+        }
+    }
+    return found;
 }
 static void print_msi_product_summary(void) {
     MsiTable *p=msi_find_table("Property");

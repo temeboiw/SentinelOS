@@ -22,6 +22,8 @@
 #define SYS_NtWriteExistingFile     23
 #define SYS_NtSeekFile               24
 #define SYS_NtCreateDirectory        25
+#define SYS_NtDeleteFile             26
+#define SYS_NtRemoveDirectory        27
 #define SYS_NtReadFile              6
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
@@ -1870,6 +1872,19 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = 0;
         else
             f->rax = vfs_create_directory(name) ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtDeleteFile:
+    case SYS_NtRemoveDirectory: {
+        char name[256];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
+            f->rax = 0;
+        } else if (f->rax == SYS_NtDeleteFile) {
+            f->rax = vfs_delete_regular_file(name) ? 1 : 0;
+        } else {
+            f->rax = vfs_remove_empty_directory(name) ? 1 : 0;
+        }
         return f;
     }
 

@@ -24,7 +24,7 @@ static DWORD k32_error_mode;
 static int k32_eqi(const char *a, const char *b);
 static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
-static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0; static BOOL k32_process_boost_disabled,k32_thread_boost_disabled; static K32_SIZE_T k32_working_set_min,k32_working_set_max;
+static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0; static BOOL k32_process_boost_disabled,k32_thread_boost_disabled; static unsigned long long k32_working_set_min,k32_working_set_max;
 typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
 typedef struct {
     unsigned char data[4096];

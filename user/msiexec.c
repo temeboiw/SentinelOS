@@ -495,6 +495,7 @@ static const char cab_stage_path[]="C:\\MSIStage";
 /* Bounded raw-DEFLATE decoder for CAB MSZIP blocks. The 32-KiB history
  * persists across CFDATA blocks in one folder, as required by MSZIP. */
 #include "mszip.h"
+static u8 cab_comp[65536];
 
 static u32 cab_checksum(const u8 *p, u32 n, u16 unpacked) {
     u32 sum=(n&0xFFFFu)|((u32)unpacked<<16), i=0;

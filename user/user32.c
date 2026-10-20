@@ -94,7 +94,7 @@ typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
 static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
-static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
+static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static void *u32_current_cursor=(void *)0x337F00u;
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
 static U32_DLGCTRL u32_dlgctrl[32];
 static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;c->text[0]=0;return c;}return 0;}
@@ -1691,10 +1691,14 @@ typedef struct { unsigned int cbSize,flags; void *hwndActive,*hwndFocus,*hwndCap
 __attribute__((dllexport)) BOOL GetGUIThreadInfo(unsigned int thread,U32_GUITHREADINFO *info){(void)thread;if(!info||info->cbSize<sizeof(*info))return 0;info->flags=0;info->hwndActive=GetActiveWindow();info->hwndFocus=info->hwndActive;info->hwndCapture=0;info->hwndMenuOwner=0;info->hwndMoveSize=0;info->hwndCaret=u32_caret_created?info->hwndFocus:0;info->rcCaret.left=u32_caret_x;info->rcCaret.top=u32_caret_y;info->rcCaret.right=u32_caret_x+u32_caret_w;info->rcCaret.bottom=u32_caret_y+u32_caret_h;return 1;}
 typedef struct { unsigned int cbSize,dwTime; } U32_LASTINPUTINFO;
 __attribute__((dllexport)) BOOL GetLastInputInfo(U32_LASTINPUTINFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->dwTime=0;return 1;}
-__attribute__((dllexport)) void *GetCursor(void){return (void *)1;}
+__attribute__((dllexport)) void *GetCursor(void){return u32_current_cursor;}
 typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos; } U32_CURSORINFO;
-__attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=(void *)1;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
-__attribute__((dllexport)) void *SetCursor(void *cursor){static void *current=(void *)1;void *old=current;current=cursor;return old;}
+__attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=u32_current_cursor;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
+__attribute__((dllexport)) void *SetCursor(void *cursor){
+    void *old=u32_current_cursor;
+    if(!cursor || (((unsigned long long)cursor&0xFFFF0000ULL)==0x00330000ULL))u32_current_cursor=cursor;
+    return old;
+}
 __attribute__((dllexport)) int GetMouseMovePointsEx(unsigned int cbSize,const U32_MOUSEMOVEPOINT *point,U32_MOUSEMOVEPOINT *out,int count,unsigned int resolution){
     (void)resolution;
     if(cbSize!=sizeof(U32_MOUSEMOVEPOINT)||!point||!out||count<=0)return -1;
@@ -1941,7 +1945,24 @@ __attribute__((dllexport)) void *LoadMenuA(void *instance,const char *name){(voi
 
 __attribute__((dllexport)) void *LoadMenuW(void *instance,const unsigned short *name){(void)instance;(void)name;return CreateMenu();}
 
-__attribute__((dllexport)) int TranslateAcceleratorA(void *hwnd,void *table,MSG *msg){(void)table;return IsWindow(hwnd)&&msg?0:0;}
+__attribute__((dllexport)) int TranslateAcceleratorA(void *hwnd,void *table,MSG *msg) {
+    if(!IsWindow(hwnd)||!msg)return 0;
+    U32_ACCELTABLE *t=0;
+    for(int i=0;i<16;i++)if(table==&u32_accel_tables[i]&&u32_accel_tables[i].used){t=&u32_accel_tables[i];break;}
+    if(!t)return 0;
+    if(msg->message!=0x0100u&&msg->message!=0x0104u&&msg->message!=0x0102u)return 0;
+    for(int i=0;i<t->count;i++) {
+        const U32_ACCEL *a=&t->entries[i];int key_match=0;
+        if(a->fVirt&1u)key_match=(msg->message!=0x0102u&&msg->wParam==a->key);
+        else key_match=(msg->message==0x0102u&&msg->wParam==a->key);
+        if(!key_match)continue;
+        if((a->fVirt&4u)!=0 && !(u32_key_state[0x10]&0x80u))continue;
+        if((a->fVirt&8u)!=0 && !(u32_key_state[0x11]&0x80u))continue;
+        if((a->fVirt&16u)!=0 && !(u32_key_state[0x12]&0x80u))continue;
+        SendMessageA(hwnd,0x0111u,a->cmd,0);return 1;
+    }
+    return 0;
+}
 
 __attribute__((dllexport)) int TranslateAcceleratorW(void *hwnd,void *table,MSG *msg){return TranslateAcceleratorA(hwnd,table,msg);}
 

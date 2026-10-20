@@ -222,6 +222,27 @@ static int e4_add_inline_extent(Ext4k *fs, uint8_t *inode,
     return 0;
 }
 
+static int e4_free_block(Ext4k *fs, uint64_t blockno) {
+    if (!e4_can_mutate(fs) || blockno < fs->first_data ||
+        blockno >= fs->blocks_count) return -1;
+    uint32_t rel=(uint32_t)(blockno-fs->first_data);
+    uint32_t g=rel/fs->blocks_per_group, b=rel%fs->blocks_per_group;
+    uint8_t sb[1024],gd[32],bitmap[4096];
+    uint64_t gdt=(uint64_t)(fs->first_data+1)*fs->blksz;
+    if (e4_read(fs,1024,sb,sizeof sb)<0 ||
+        e4_read(fs,gdt+(uint64_t)g*32,gd,sizeof gd)<0) return -1;
+    uint32_t bb=E32(gd,0);
+    if (!bb || e4_read(fs,(uint64_t)bb*fs->blksz,bitmap,fs->blksz)<0 ||
+        b>=fs->blksz*8u || !(bitmap[b>>3]&(1u<<(b&7)))) return -1;
+    if (E16(gd,12)==0xFFFFu || E32(sb,12)==0xFFFFFFFFu) return -1;
+    bitmap[b>>3]&=(uint8_t)~(1u<<(b&7));
+    if (e4_write(fs,(uint64_t)bb*fs->blksz,bitmap,fs->blksz)<0) return -1;
+    E16(gd,12)=(uint16_t)(E16(gd,12)+1);
+    if (e4_write(fs,gdt+(uint64_t)g*32,gd,sizeof gd)<0) return -1;
+    E32(sb,12)=E32(sb,12)+1;
+    return e4_write(fs,1024,sb,sizeof sb);
+}
+
 static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
     if (!e4_can_mutate(fs) || !ino || ino > fs->inode_count) return -1;
     uint32_t g = (ino - 1) / fs->ipg, b = (ino - 1) % fs->ipg;
@@ -230,7 +251,9 @@ static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
     if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0 ||
         e4_read(fs, 1024, sb, sizeof sb) < 0) return -1;
     uint32_t bb = E32(gd, 4);
-    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0 ||
+        !(bitmap[b >> 3] & (1u << (b & 7))) ||
+        E16(gd,14)==0xFFFFu || E32(sb,16)==0xFFFFFFFFu) return -1;
     bitmap[b >> 3] &= (uint8_t)~(1u << (b & 7));
     if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
     E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);

@@ -68,7 +68,7 @@ static void k32_untrack_path(HANDLE h) {
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -280,7 +280,7 @@ __attribute__((dllexport)) BOOL VirtualProtect(LPVOID address,u64 size,DWORD pro
 }
 __attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address,void *info,K32_SIZE_T len) {
     if(!info||len<48){k32_last_error=87;return 0;}
-    u64 n=sy3(29,(u64)address,(u64)info,len);
+    u64 n=sy3(SYS_QueryVirtualMemory,(u64)address,(u64)info,len);
     if(!n){k32_last_error=87;return 0;}
     k32_last_error=0;return n;
 }

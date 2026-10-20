@@ -27,6 +27,7 @@ typedef int (*InvalidateRect_t)(void *, void *, int);
 typedef int (*UpdateWindow_t)(void *);
 typedef void (*BeginRedrawBatch_t)(void);
 typedef void (*EndRedrawBatch_t)(void);
+typedef struct { int left, top, right, bottom; } EXPLORER_RECT;
 
 static CreateWindowExA_t pCreate;
 static ShowWindow_t pShow;
@@ -80,7 +81,7 @@ static void redraw_desktop(void **hwnd) {
     }
 
     if (pBar) pBar();
-    if (pInv) pInv(0, 0, 1);
+    /* EndRedrawBatch performs the one initial desktop composition. */
     if (pUpd) pUpd(*hwnd);
     if (pEndBatch) pEndBatch();
 }
@@ -101,7 +102,10 @@ static void draw_search(void *hwnd) {
     line[i] = 0;
 
     if (pText) pText(hwnd, 0, 8, line, -1);
-    if (pInv) pInv(hwnd, 0, 1);
+    if (pInv) {
+        EXPLORER_RECT dirty = { 132, 171, 522, 210 };
+        pInv(hwnd, &dirty, 0);
+    }
     if (pUpd) pUpd(hwnd);
 }
 

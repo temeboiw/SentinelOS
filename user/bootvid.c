@@ -17,7 +17,7 @@ void bootvid_main(void){
    * Keep the splash visible for about three seconds; never use a zero tick
    * as an "uninitialized" sentinel because zero is a valid boot tick. */
   u64 start_tick=sy3(24,0,0,0);
-  for(u32 frame=0;frame<180;frame++){
+  for(u32 frame=0;;frame++){
    for(int yy=cy-34;yy<cy+34;yy++){if(yy<0||yy>=(int)f.h)continue;u32 bg=mix(0xFF071725,0xFF147AA4,(u32)((u64)yy*255/(f.h>1?f.h-1:1)));u32 *row=fb+(u64)yy*f.pitch;int x0=cx-34;if(x0<0)x0=0;int x1=cx+34;if(x1>(int)f.w)x1=(int)f.w;for(int xx=x0;xx<x1;xx++)row[xx]=bg;}
    for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}
    (void)sy3(SYS_Yield,0,0,0);

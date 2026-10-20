@@ -198,7 +198,7 @@ static int e4_add_inline_extent(Ext4k *fs, uint8_t *inode,
             E16(ent, 4) = (uint16_t)(count + 1);
             return 0;
         }
-        if (start == logical + 1 && physical + 1 == pstart) {
+        if (start == logical + 1 && physical + 1 == pstart && count < 0x7FFF) {
             E32(ent, 0) = logical;
             E16(ent, 6) = (uint16_t)(physical >> 32);
             E32(ent, 8) = (uint32_t)physical;

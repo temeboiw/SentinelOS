@@ -541,7 +541,7 @@ static void compose(void) {
 
     /* Desktop welcome/search card, populated by explorer.exe through TextOutA. */
     if (!g_wnd.visible) {
-        int cx=112, cy=72, cw=390, ch=158;
+        int cx=132, cy=72, cw=390, ch=158;
         round_fill(cx+4,cy+7,cw,ch,13,0x55314F62);
         round_fill(cx,cy,cw,ch,13,0xBFFFFFFF);
         round_fill(cx+2,cy+2,cw-4,ch-4,11,0xEAF9FDFF);

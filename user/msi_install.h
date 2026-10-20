@@ -193,6 +193,7 @@ static int msi_set_dir_override(const char *id,const char *path) {
     for(u32 k=0;k<=n;k++)msi_dir_overrides[slot].path[k]=path[k];
     for(u32 k=0;k<msi_dir_count;k++)msi_dir_paths[k].state=0;
     for(u32 k=0;k<msi_dir_count;k++)if(!msi_resolve_dir(k,0))return 0;
+    (void)msi_set_runtime_property(id,path);
     return 1;
 }
 static int msi_execute_custom_action(const char *action) {

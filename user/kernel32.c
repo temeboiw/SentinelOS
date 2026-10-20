@@ -15,6 +15,7 @@ typedef unsigned short K32_WCHAR;
 typedef const K32_WCHAR *K32_LPCWSTR;
 typedef K32_WCHAR *K32_LPWSTR;
 static DWORD k32_last_error;
+static char k32_dll_directory[260];
 typedef struct { int used,refs; char name[64]; } K32_MODULE_HANDLE;
 static K32_MODULE_HANDLE k32_modules[16];
 static DWORD k32_console_cp_in=65001, k32_console_cp_out=65001;
@@ -962,13 +963,10 @@ __attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){(void)name;k32_
 
 __attribute__((dllexport)) void FreeLibraryAndExitThread(HANDLE module,DWORD code){FreeLibrary(module);ExitProcess(code);}
 
-__attribute__((dllexport)) DWORD GetDllDirectoryA(DWORD cap,LPSTR out){(void)cap;if(out)out[0]=0;return 0;}
-
-__attribute__((dllexport)) DWORD GetDllDirectoryW(DWORD cap,K32_LPWSTR out){if(out&&cap)out[0]=0;return 0;}
-
-__attribute__((dllexport)) BOOL SetDllDirectoryA(LPCSTR path){return !path||path[0]==0;}
-
-__attribute__((dllexport)) BOOL SetDllDirectoryW(K32_LPCWSTR path){return !path||path[0]==0;}
+__attribute__((dllexport)) DWORD GetDllDirectoryA(DWORD cap,LPSTR out){DWORD n=0;while(k32_dll_directory[n])n++;if(!out||!cap)return n?n+1:0;if(cap<=n){DWORD i=0;while(i+1<cap){out[i]=k32_dll_directory[i];i++;}out[i]=0;k32_last_error=122;return n+1;}for(DWORD i=0;i<=n;i++)out[i]=k32_dll_directory[i];k32_last_error=0;return n;}
+__attribute__((dllexport)) DWORD GetDllDirectoryW(DWORD cap,K32_LPWSTR out){DWORD n=0;while(k32_dll_directory[n])n++;if(!out||!cap)return n?n+1:0;if(cap<=n){k32_ansi_to_wide(out,cap,k32_dll_directory);k32_last_error=122;return n+1;}k32_ansi_to_wide(out,cap,k32_dll_directory);k32_last_error=0;return n;}
+__attribute__((dllexport)) BOOL SetDllDirectoryA(LPCSTR path){DWORD i=0;if(path)while(path[i]&&i+1<sizeof(k32_dll_directory)){k32_dll_directory[i]=path[i];i++;}if(path&&path[i]){k32_last_error=206;return 0;}k32_dll_directory[i]=0;k32_last_error=0;return 1;}
+__attribute__((dllexport)) BOOL SetDllDirectoryW(K32_LPCWSTR path){char narrow[260];if(path){DWORD i=0;while(path[i]&&i+1<sizeof(narrow)){narrow[i]=path[i]<128?(char)path[i]:'?';i++;}if(path[i]){k32_last_error=206;return 0;}narrow[i]=0;}else narrow[0]=0;return SetDllDirectoryA(path?narrow:0);}
 
 __attribute__((dllexport)) DWORD GetSystemWindowsDirectoryA(LPSTR out,DWORD cap){return GetWindowsDirectoryA(out,cap);}
 

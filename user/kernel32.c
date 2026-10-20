@@ -604,13 +604,25 @@ __attribute__((dllexport)) DWORD GetModuleFileNameExW(HANDLE process,HANDLE modu
 __attribute__((dllexport)) BOOL HeapValidate(HANDLE heap,DWORD flags,LPCVOID mem) { (void)flags;if(heap!=GetProcessHeap())return 0;if(!mem)return 1;return k32_mem_size((void*)mem)!=0; }
 __attribute__((dllexport)) K32_SIZE_T HeapCompact(HANDLE heap,DWORD flags) { (void)flags;if(heap!=GetProcessHeap())return 0;k32_last_error=0;return 0; }
 __attribute__((dllexport)) DWORD GetProcessHeaps(DWORD count,HANDLE *heaps) { if(!count||!heaps)return 0;heaps[0]=GetProcessHeap();return 1; }
-__attribute__((dllexport)) LPVOID LocalReAlloc(LPVOID mem,K32_SIZE_T size,DWORD flags) { (void)flags;if(!mem)return LocalAlloc(0,size);if(!size){k32_last_error=50;return 0;}k32_last_error=50;return 0; }
+static LPVOID k32_realloc_tracked(LPVOID mem,K32_SIZE_T size,DWORD flags){
+    if(!mem)return size?LocalAlloc(flags,size):0;
+    if(!size){k32_last_error=87;return 0;}
+    K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return 0;}
+    K32_SIZE_T old=e->size;LPVOID p=VirtualAlloc(0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}
+    K32_SIZE_T n=old<size?old:size;unsigned char *d=p,*s=mem;for(K32_SIZE_T i=0;i<n;i++)d[i]=s[i];
+    if((flags&0x40u)&&size>old)for(K32_SIZE_T i=old;i<size;i++)d[i]=0;
+    e->freed=1;k32_mem_register(p,size);k32_last_error=0;return p;
+}
+__attribute__((dllexport)) LPVOID LocalFree(LPVOID mem){if(!mem)return 0;K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return mem;}e->freed=1;k32_last_error=0;return 0;}
+__attribute__((dllexport)) LPVOID LocalReAlloc(LPVOID mem,K32_SIZE_T size,DWORD flags){return k32_realloc_tracked(mem,size,flags);}
 __attribute__((dllexport)) K32_SIZE_T LocalSize(HANDLE mem){return k32_mem_size(mem);}
-__attribute__((dllexport)) LPVOID GlobalReAlloc(LPVOID mem,K32_SIZE_T size,DWORD flags) { (void)flags;if(!mem)return GlobalAlloc(0,size);if(!size){k32_last_error=50;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) LPVOID GlobalFree(LPVOID mem){if(!mem)return 0;K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return mem;}e->freed=1;k32_last_error=0;return 0;}
+__attribute__((dllexport)) LPVOID GlobalReAlloc(LPVOID mem,K32_SIZE_T size,DWORD flags){return k32_realloc_tracked(mem,size,flags);}
 __attribute__((dllexport)) K32_SIZE_T GlobalSize(HANDLE mem){return k32_mem_size(mem);}
-__attribute__((dllexport)) LPVOID GlobalLock(HANDLE mem){return mem;}
-__attribute__((dllexport)) BOOL GlobalUnlock(HANDLE mem){return mem!=0&&k32_mem_size(mem)!=0;}
-__attribute__((dllexport)) HANDLE GlobalHandle(LPCVOID mem){return (HANDLE)mem;}
+__attribute__((dllexport)) LPVOID GlobalLock(HANDLE mem){return k32_mem_size(mem)?mem:0;}
+__attribute__((dllexport)) BOOL GlobalUnlock(HANDLE mem){if(!k32_mem_size(mem)){k32_last_error=87;return 0;}k32_last_error=0;return 1;}
+__attribute__((dllexport)) HANDLE GlobalHandle(LPCVOID mem){return k32_mem_size((void*)mem)?(HANDLE)mem:0;}
+
 __attribute__((dllexport)) BOOL GetBinaryTypeA(LPCSTR file,DWORD *type){if(!file||!type)return 0;DWORD n=0;while(file[n])n++;if(n<4||file[n-4]!='.'||((file[n-3]|32)!='e')||((file[n-2]|32)!='x')||((file[n-1]|32)!='e'))return 0;*type=0;return 1;}
 
 __attribute__((dllexport)) BOOL GetBinaryTypeW(K32_LPCWSTR file,DWORD *type){char p[512];if(!file)return 0;k32_wide_to_ansi(p,sizeof(p),file);return GetBinaryTypeA(p,type);}

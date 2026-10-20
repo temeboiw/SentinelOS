@@ -26,28 +26,20 @@ static void text(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,const char *s,u32 col
             if(g[row]&(1u<<col))rect(fb,pitch,w,h,x+col*scale,y+row*scale,scale,scale,color);
     }
 }
-/* Match the Frutiger-Aero water/sky wallpaper used by the desktop. */
+/* Row-major wallpaper renderer: sequential writes, no per-pixel helper calls. */
 static void wallpaper(u32 *fb,u32 pitch,u32 w,u32 h) {
-    for(u32 y=0;y<h;y++) {
-        u32 c=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
-        for(u32 x=0;x<w;x++)fb[(u64)y*pitch+x]=c;
-    }
     int base=(int)(h*2/3);
-    for(int x=0;x<(int)w;x++) {
-        int dx=x-(int)w/2;
-        int wave1=base+(int)((long long)dx*dx/(w>0?w*14:1));
-        int wave2=base+28+(int)((long long)dx*dx/(w>0?w*19:1));
-        if(wave1>=0&&wave1<(int)h) {
-            for(int y=wave1;y<(int)h;y++) {
-                u32 c=mix(0xFF80D5E9,0xFF2B8CB9,(u32)(y*100/(h?h:1)));
-                fb[(u64)y*pitch+(u32)x]=c;
-            }
-        }
-        if(wave2>=0&&wave2<(int)h) {
-            for(int y=wave2;y<(int)h;y++) {
-                u32 old=fb[(u64)y*pitch+(u32)x];
-                fb[(u64)y*pitch+(u32)x]=mix(old,0xFF2E9DC2,48);
-            }
+    for(u32 y=0;y<h;y++) {
+        u32 sky=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
+        u32 *row=fb+(u64)y*pitch;
+        for(u32 x=0;x<w;x++) {
+            int dx=(int)x-(int)w/2;
+            int wave1=base+(int)((long long)dx*dx/(w>0?w*14:1));
+            int wave2=base+28+(int)((long long)dx*dx/(w>0?w*19:1));
+            u32 c=sky;
+            if((int)y>=wave1)c=mix(0xFF80D5E9,0xFF2B8CB9,(u32)((u64)y*100/(h?h:1)));
+            if((int)y>=wave2)c=mix(c,0xFF2E9DC2,48);
+            row[x]=c;
         }
     }
     rect(fb,pitch,w,h,0,0,(int)w,2,0xFFFFFFFF);
@@ -119,62 +111,7 @@ static void cursor_draw(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y) {
         else if(p=='+')fb[(u64)py*pitch+(u32)px]=0xFF8DEBFA;
     }
 }
-static void login_fade_in(u32 *fb,LogonFB *f) {
-    static u32 original[1920u*1080u];
-    u64 count=(u64)f->pitch*f->h;
-    if(f->w>1920||f->h>1080||count>1920ULL*1080ULL)return;
-    for(u64 i=0;i<count;i++)original[i]=fb[i];
-    /* Five-frame fade keeps the login transition responsive on low-end systems. */
-    for(u32 step=0;step<=4;step++) {
-        u32 a=step*255/4;
-        for(u32 y=0;y<f->h;y++)for(u32 x=0;x<f->w;x++) {
-            u64 i=(u64)y*f->pitch+x;u32 c=original[i];
-            u32 r=((c>>16)&255)*a/255,g=((c>>8)&255)*a/255,b=(c&255)*a/255;
-            fb[i]=0xFF000000|(r<<16)|(g<<8)|b;
-        }
-        u64 begin=sy3(24,0,0,0);
-        if(begin!=(u64)-1)while(sy3(24,0,0,0)-begin<8)(void)sy3(SYS_Yield,0,0,0);
-    }
-}
-/* Graphical session-start screen. This runs in framebuffer mode (not UEFI text).
- * Paint the background once, then animate only the twelve-dot spinner. */
-static void session_loading_screen(void) {
-    FBInfo f={0};
-    if(!NtMapFramebuffer(&f)||!f.va||f.w<320||f.h<200)return;
-    f.pitch/=4;
-    u32 *fb=(u32 *)(u64)f.va;
-    rect(fb,f.pitch,f.w,f.h,0,0,(int)f.w,(int)f.h,0xFF061522);
-    /* Gentle blue light field and centered title. */
-    for(u32 y=0;y<f.h/2;y++) {
-        u32 c=mix(0xFF123D59,0xFF061522,(u32)((u64)y*255/(f.h/2?f.h/2:1)));
-        rect(fb,f.pitch,f.w,f.h,0,(int)y,(int)f.w,1,c);
-    }
-    const char *brand="SENTINELOS";
-    int tx=(int)f.w/2-40, ty=(int)f.h/2-72;
-    text(fb,f.pitch,f.w,f.h,tx,ty,brand,0xFFF1FBFF,2);
-    text(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2-34,
-         "Starting your session",0xFFB7D7E7,1);
-    static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13};
-    static const int dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
-    int cx=(int)f.w/2, cy=(int)f.h/2+18;
-    u64 start=sy3(24,0,0,0);
-    if(start==(u64)-1)start=0;
-    for(unsigned frame=0;frame<100;frame++) {
-        /* Clear only the spinner's small bounding box. */
-        rect(fb,f.pitch,f.w,f.h,cx-34,cy-34,68,68,0xFF061522);
-        for(int i=0;i<12;i++) {
-            int age=(i-(int)(frame%12)+12)%12;
-            u32 col=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;
-            rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,col);
-        }
-        (void)sy3(SYS_Yield,0,0,0);
-        u64 now=sy3(24,0,0,0);
-        if(now!=(u64)-1 && now-start>=1800)break;
-    }
-}
-
 void sentlogon_main(void) {
-    session_loading_screen();
     LogonFB fbinfo={0};
     if(!NtMapFramebuffer((FBInfo *)&fbinfo)||!fbinfo.va||fbinfo.w<320||fbinfo.h<200) {
         NtWriteConsole("sentlogon: framebuffer unavailable; Enter to continue\n");
@@ -187,7 +124,6 @@ void sentlogon_main(void) {
         fbinfo.pitch/=4;
         u32 *pixels=(u32 *)(u64)fbinfo.va;
         paint(pixels,&fbinfo);
-        login_fade_in(pixels,&fbinfo);
         int mx=(int)fbinfo.w/2,my=(int)fbinfo.h/2;
         cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);
         for(;;) {

@@ -43,7 +43,7 @@ void sentlogon_main(void) {
  LogonFB fbinfo={0};
  if(!NtMapFramebuffer((FBInfo *)&fbinfo) || !fbinfo.va || fbinfo.w<320 || fbinfo.h<200) {
    NtWriteConsole("sentlogon: framebuffer unavailable; Enter to continue\n");
- } else paint((u32 *)(u64)fbinfo.va,&fbinfo);
+ } else { fbinfo.pitch /= 4; paint((u32 *)(u64)fbinfo.va,&fbinfo); }
  for(;;) {
    InputEvent ev={0};
    if(sy3(SYS_GetInput,(u64)&ev,0,0) && ev.type==1 && (ev.key=='\r'||ev.key=='\n')) break;

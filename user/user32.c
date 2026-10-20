@@ -1006,7 +1006,7 @@ __attribute__((dllexport)) void *CreateMenu(void) {
 }
 __attribute__((dllexport)) void *CreatePopupMenu(void) { return CreateMenu(); }
 __attribute__((dllexport)) BOOL AppendMenuA(void *menu, unsigned int flags, unsigned long long id, LPCSTR text) {
-    return u32_menu_insert(menu,0xFFFFFFFFu,flags|0x0400u,id,text);
+    return u32_menu_insert(menu,0xFFFFFFFFu,flags,id,text);
 }
 __attribute__((dllexport)) BOOL DestroyMenu(void *menu) {
     U32_MENUDATA *m=u32_menu_data(menu); if (!m) return 0;

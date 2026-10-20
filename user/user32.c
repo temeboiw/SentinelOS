@@ -802,8 +802,15 @@ static void on_click(int x, int y) {
              * avoids killing the scheduler's current process from input code.
              */
             SendMessageA((void *)1, 0x0010u, 0, 0); /* WM_CLOSE */
-            if (g_wnd.visible)
-                DestroyWindow((void *)1);
+
+            /*
+             * A window procedure may handle WM_CLOSE without calling
+             * DefWindowProc, or may mark the window hidden without removing
+             * its registered window. Always run USER32's final teardown
+             * after the notification so the X button cannot leave a stale
+             * window in the system window list.
+             */
+            DestroyWindow((void *)1);
             return;
         }
 

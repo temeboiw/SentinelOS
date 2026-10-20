@@ -468,7 +468,7 @@ __attribute__((dllexport)) DWORD GetLogicalDriveStringsW(DWORD cap, K32_LPWSTR o
     if (cap<5) { out[0]=0; return 4; }
     out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
 }
-__attribute__((dllexport)) BOOL GetVolumeInformationW(K32_LPCWSTR root,K32_LPWSTR label,DWORD labelCap,DWORD *serial,DWORD *maxComponent,DWORD *flags,K32_LPWSTR fsName,DWORD fsCap) { char p[260];if(!root){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),root);return GetVolumeInformationA(p,0,0,serial,maxComponent,flags,0,0); }
+__attribute__((dllexport)) BOOL GetVolumeInformationW(K32_LPCWSTR root,K32_LPWSTR label,DWORD labelCap,DWORD *serial,DWORD *maxComponent,DWORD *flags,K32_LPWSTR fsName,DWORD fsCap) { (void)label;(void)labelCap;(void)fsName;(void)fsCap;char p[260];if(!root){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),root);return GetVolumeInformationA(p,0,0,serial,maxComponent,flags,0,0); }
 __attribute__((dllexport)) BOOL GetDiskFreeSpaceW(K32_LPCWSTR root,DWORD *spc,DWORD *bps,DWORD *freeClusters,DWORD *totalClusters) { char p[260];if(!root){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),root);return GetDiskFreeSpaceA(p,spc,bps,freeClusters,totalClusters); }
 __attribute__((dllexport)) BOOL GetDiskFreeSpaceExW(K32_LPCWSTR path,unsigned long long *available,unsigned long long *total,unsigned long long *freeBytes) { char p[260];if(!path){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),path);return GetDiskFreeSpaceExA(p,available,total,freeBytes); }
 __attribute__((dllexport)) BOOL GetFileAttributesExW(K32_LPCWSTR path,int level,void *data) { char p[260];if(!path){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),path);return GetFileAttributesExA(p,level,data); }

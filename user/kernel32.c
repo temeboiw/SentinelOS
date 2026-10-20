@@ -16,6 +16,10 @@ typedef const K32_WCHAR *K32_LPCWSTR;
 typedef K32_WCHAR *K32_LPWSTR;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
+typedef struct { int used,type,signaled,manual,owner; LONG count,maximum; unsigned long long due_tick; DWORD period; int timer_active; char name[64]; } K32_SYNC_OBJECT;
+static K32_SYNC_OBJECT k32_sync[32];
+static K32_SYNC_OBJECT *k32_sync_get(HANDLE h);
+static DWORD k32_wait_single(HANDLE h,DWORD ms);
 static DWORD k32_last_error;
 static char k32_current_dir[260]="C:\\";
 static char k32_dll_directory[260];
@@ -167,6 +171,7 @@ __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
         k32_last_error=0;return 1;
     }
     if(h==(HANDLE)1||h==(HANDLE)2||h==(HANDLE)3){k32_last_error=6;return 0;}
+    K32_SYNC_OBJECT *sync=k32_sync_get(h);if(sync){sync->used=0;sync->signaled=0;sync->timer_active=0;k32_last_error=0;return 1;}
     if(sy3(SYS_CloseFile, (u64)h, 0, 0) == 0){k32_last_error=6;return 0;}
     k32_untrack_path(h);k32_last_error=0;return 1;
 }
@@ -203,9 +208,7 @@ __attribute__((dllexport)) HANDLE CreateThread(
     if (id) *id = (DWORD)h;
     return (HANDLE)h;
 }
-__attribute__((dllexport)) DWORD WaitForSingleObject(HANDLE h, DWORD ms) {
-    return (DWORD)sy3(SYS_Wait, (u64)h, (u64)ms, 0);
-}
+__attribute__((dllexport)) DWORD WaitForSingleObject(HANDLE h,DWORD ms) { return k32_wait_single(h,ms); }
 
 
 /* -------------------------------------------------------------------------
@@ -469,13 +472,11 @@ __attribute__((dllexport)) BOOL WriteConsoleA(HANDLE h, LPCVOID buf, DWORD len, 
 }
 __attribute__((dllexport)) void GetSystemTime(K32_SYSTEMTIME *t) { if(!t)return; if(sy3(SYS_GetSystemTime,(u64)t,0,0)!=(u64)-1){return;} t->wYear=1601;t->wMonth=1;t->wDayOfWeek=1;t->wDay=1;t->wHour=t->wMinute=t->wSecond=t->wMilliseconds=0;k32_last_error=50; }
 __attribute__((dllexport)) void GetLocalTime(K32_SYSTEMTIME *t) { GetSystemTime(t); }
-typedef struct { int used, type, signaled, manual, owner; LONG count, maximum; char name[64]; } K32_SYNC_OBJECT;
-static K32_SYNC_OBJECT k32_sync[32];
 static HANDLE k32_sync_handle(int i) { return (HANDLE)(unsigned long long)(0x534E0000u+(unsigned)i+1u); }
 static K32_SYNC_OBJECT *k32_sync_get(HANDLE h) { unsigned long long v=(unsigned long long)h; if(v<0x534E0001ULL||v>0x534E0020ULL)return 0; K32_SYNC_OBJECT *o=&k32_sync[(unsigned)(v-0x534E0001ULL)]; return o->used?o:0; }
 static HANDLE k32_sync_create(int type,int manual,int initial,LONG count,LONG maximum,LPCSTR name) {
  if(name&&*name){for(int i=0;i<32;i++)if(k32_sync[i].used&&k32_sync[i].type==type&&k32_eqi(k32_sync[i].name,name))return k32_sync_handle(i);}
- for(int i=0;i<32;i++)if(!k32_sync[i].used){K32_SYNC_OBJECT *o=&k32_sync[i];o->used=1;o->type=type;o->manual=manual;o->signaled=initial;o->count=count;o->maximum=maximum;o->owner=0;int j=0;if(name)while(name[j]&&j<63){o->name[j]=name[j];j++;}o->name[j]=0;return k32_sync_handle(i);}k32_last_error=8;return 0; }
+ for(int i=0;i<32;i++)if(!k32_sync[i].used){K32_SYNC_OBJECT *o=&k32_sync[i];o->used=1;o->type=type;o->manual=manual;o->signaled=initial;o->count=count;o->maximum=maximum;o->owner=0;o->due_tick=0;o->period=0;o->timer_active=0;int j=0;if(name)while(name[j]&&j<63){o->name[j]=name[j];j++;}o->name[j]=0;return k32_sync_handle(i);}k32_last_error=8;return 0; }
 __attribute__((dllexport)) HANDLE CreateEventA(void *security,BOOL manual,BOOL initial,LPCSTR name){(void)security;return k32_sync_create(1,manual!=0,initial!=0,0,0,name);}
 __attribute__((dllexport)) BOOL SetEvent(HANDLE h){K32_SYNC_OBJECT *o=k32_sync_get(h);if(!o||o->type!=1){k32_last_error=6;return 0;}o->signaled=1;return 1;}
 __attribute__((dllexport)) BOOL ResetEvent(HANDLE h){K32_SYNC_OBJECT *o=k32_sync_get(h);if(!o||o->type!=1){k32_last_error=6;return 0;}o->signaled=0;return 1;}
@@ -483,9 +484,41 @@ __attribute__((dllexport)) HANDLE CreateMutexA(void *security,BOOL owner,LPCSTR 
 __attribute__((dllexport)) BOOL ReleaseMutex(HANDLE h){K32_SYNC_OBJECT *o=k32_sync_get(h);if(!o||o->type!=2||o->owner!=(int)GetCurrentThreadId()){k32_last_error=288;return 0;}o->owner=0;o->signaled=0;return 1;}
 __attribute__((dllexport)) HANDLE CreateSemaphoreA(void *security,LONG initial,LONG maximum,LPCSTR name){(void)security;if(initial<0||maximum<=0||initial>maximum){k32_last_error=87;return 0;}return k32_sync_create(3,1,initial>0,initial,maximum,name);}
 __attribute__((dllexport)) BOOL ReleaseSemaphore(HANDLE h,LONG count,LONG *previous){K32_SYNC_OBJECT *o=k32_sync_get(h);if(!o||o->type!=3||count<=0||o->count>o->maximum-count){k32_last_error=87;return 0;}if(previous)*previous=o->count;o->count+=count;o->signaled=o->count>0;return 1;}
-static int k32_sync_ready(K32_SYNC_OBJECT *o){if(!o)return 0;if(o->type==3)return o->count>0;if(o->type==2)return o->owner==0||o->owner==(int)GetCurrentThreadId();return o->signaled;}
-static void k32_sync_consume(K32_SYNC_OBJECT *o){if(!o)return;if(o->type==3){if(o->count>0)o->count--;o->signaled=o->count>0;}else if(o->type==1&&!o->manual)o->signaled=0;else if(o->type==2){o->owner=(int)GetCurrentThreadId();o->signaled=1;}}
-__attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count,const HANDLE *handles,BOOL wait_all,DWORD ms){if(!count||count>64||!handles){k32_last_error=87;return 0xFFFFFFFFu;}for(DWORD i=0;i<count;i++)if(!k32_sync_get(handles[i])&&handles[i]!=(HANDLE)1&&handles[i]!=(HANDLE)2){k32_last_error=6;return 0xFFFFFFFFu;}if(wait_all){for(DWORD i=0;i<count;i++)if(!k32_sync_ready(k32_sync_get(handles[i])))return 0x102u;for(DWORD i=0;i<count;i++)k32_sync_consume(k32_sync_get(handles[i]));return 0;}for(DWORD i=0;i<count;i++)if(k32_sync_ready(k32_sync_get(handles[i]))){k32_sync_consume(k32_sync_get(handles[i]));return 0x102u+i;}return 0x102u;}
+static int k32_sync_ready(K32_SYNC_OBJECT *o){
+    if(!o)return 0;
+    if(o->type==3)return o->count>0;
+    if(o->type==2)return o->owner==0||o->owner==(int)GetCurrentThreadId();
+    if(o->type==4&&o->timer_active&&GetTickCount64()>=o->due_tick) {
+        o->signaled=1;
+        if(o->period) { unsigned long long now=GetTickCount64();do{o->due_tick+=o->period;}while(o->due_tick<=now&&o->due_tick<=~0ULL-o->period); }
+        else o->timer_active=0;
+    }
+    return o->signaled;
+}
+static void k32_sync_consume(K32_SYNC_OBJECT *o){if(!o)return;if(o->type==3){if(o->count>0)o->count--;o->signaled=o->count>0;}else if((o->type==1||o->type==4)&&!o->manual)o->signaled=0;else if(o->type==2){o->owner=(int)GetCurrentThreadId();o->signaled=1;}}
+static DWORD k32_wait_single(HANDLE h,DWORD ms) {
+    K32_SYNC_OBJECT *o=k32_sync_get(h);if(!o)return (DWORD)sy3(SYS_Wait,(u64)h,(u64)ms,0);
+    unsigned long long start=GetTickCount64();
+    for(;;) {
+        o=k32_sync_get(h);if(!o){k32_last_error=6;return 0xFFFFFFFFu;}
+        if(k32_sync_ready(o)){k32_sync_consume(o);k32_last_error=0;return 0;}
+        if(ms==0){k32_last_error=0;return 0x102u;}
+        if(ms!=0xFFFFFFFFu&&GetTickCount64()-start>=ms){k32_last_error=0;return 0x102u;}
+        sy3(21,0,0,0);
+    }
+}
+__attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count,const HANDLE *handles,BOOL wait_all,DWORD ms) {
+    if(!count||count>64||!handles){k32_last_error=87;return 0xFFFFFFFFu;}
+    for(DWORD i=0;i<count;i++)if(!k32_sync_get(handles[i])){if(count==1)return k32_wait_single(handles[i],ms);k32_last_error=6;return 0xFFFFFFFFu;}
+    unsigned long long start=GetTickCount64();
+    for(;;) {
+        int ready=1;for(DWORD i=0;i<count;i++)if(!k32_sync_ready(k32_sync_get(handles[i]))){ready=0;break;}
+        if(wait_all&&ready){for(DWORD i=0;i<count;i++)k32_sync_consume(k32_sync_get(handles[i]));k32_last_error=0;return 0;}
+        if(!wait_all)for(DWORD i=0;i<count;i++)if(k32_sync_ready(k32_sync_get(handles[i]))){k32_sync_consume(k32_sync_get(handles[i]));k32_last_error=0;return i;}
+        if(ms==0||(ms!=0xFFFFFFFFu&&GetTickCount64()-start>=ms)){k32_last_error=0;return 0x102u;}
+        sy3(21,0,0,0);
+    }
+}
 __attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_VALUE)return 0;if(h==(HANDLE)1||h==(HANDLE)2||h==(HANDLE)3)return 2;unsigned int slot,side;if(k32_pipe_decode(h,&slot,&side))return 3;DWORD high=0,low=GetFileSize(h,&high);if(low==0xFFFFFFFFu&&GetLastError()!=0)return 0;return 1;}
 
 
@@ -1245,7 +1278,15 @@ __attribute__((dllexport)) DWORD WaitForMultipleObjectsEx(DWORD count,const HAND
 
 __attribute__((dllexport)) DWORD SleepEx(DWORD ms,BOOL alertable){(void)alertable;Sleep(ms);return 0;}
 
-__attribute__((dllexport)) DWORD SignalObjectAndWait(HANDLE signal,HANDLE wait,DWORD ms,BOOL alertable){(void)signal;(void)alertable;return WaitForSingleObject(wait,ms);}
+__attribute__((dllexport)) DWORD SignalObjectAndWait(HANDLE signal,HANDLE wait,DWORD ms,BOOL alertable){
+    (void)alertable;K32_SYNC_OBJECT *o=k32_sync_get(signal);
+    if(!o){k32_last_error=6;return 0xFFFFFFFFu;}
+    if(o->type==1){o->signaled=1;}
+    else if(o->type==2){if(o->owner!=(int)GetCurrentThreadId()){k32_last_error=288;return 0xFFFFFFFFu;}o->owner=0;o->signaled=0;}
+    else if(o->type==3){if(o->count>=o->maximum){k32_last_error=298;return 0xFFFFFFFFu;}o->count++;o->signaled=1;}
+    else {k32_last_error=87;return 0xFFFFFFFFu;}
+    return WaitForSingleObject(wait,ms);
+}
 
 __attribute__((dllexport)) HANDLE CreateEventW(void *security,BOOL manual,BOOL initial,K32_LPCWSTR name){char n[128];k32_wide_to_ansi(n,sizeof(n),name);return CreateEventA(security,manual,initial,name?n:0);}
 
@@ -1267,13 +1308,27 @@ __attribute__((dllexport)) HANDLE OpenSemaphoreW(DWORD access,BOOL inherit,K32_L
 
 __attribute__((dllexport)) BOOL PulseEvent(HANDLE event){return SetEvent(event);}
 
-__attribute__((dllexport)) HANDLE CreateWaitableTimerA(void *security,BOOL manual,LPCSTR name){(void)security;(void)manual;(void)name;k32_last_error=50;return 0;}
+__attribute__((dllexport)) HANDLE CreateWaitableTimerA(void *security,BOOL manual,LPCSTR name){(void)security;return k32_sync_create(4,manual!=0,0,0,0,name);}
 
 __attribute__((dllexport)) HANDLE CreateWaitableTimerW(void *security,BOOL manual,K32_LPCWSTR name){char n[128];k32_wide_to_ansi(n,sizeof(n),name);return CreateWaitableTimerA(security,manual,n);}
 
-__attribute__((dllexport)) BOOL SetWaitableTimer(HANDLE timer,const K32_LARGE_INTEGER *due,LONG period,void *completion,void *arg,BOOL resume){(void)timer;(void)due;(void)period;(void)completion;(void)arg;(void)resume;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL SetWaitableTimer(HANDLE timer,const K32_LARGE_INTEGER *due,LONG period,void *completion,void *arg,BOOL resume) {
+    (void)arg;K32_SYNC_OBJECT *o=k32_sync_get(timer);
+    if(!o||o->type!=4||!due||period<0){k32_last_error=87;return 0;}
+    if(completion||resume){k32_last_error=50;return 0;}
+    long long signed_due=(long long)due->QuadPart;unsigned long long delay=0;
+    if(signed_due<0){unsigned long long units=(unsigned long long)(-(signed_due+1))+1;delay=(units+9999ULL)/10000ULL;}
+    else {
+        K32_FILETIME nowft;GetSystemTimeAsFileTime(&nowft);
+        unsigned long long now=((unsigned long long)nowft.dwHighDateTime<<32)|nowft.dwLowDateTime;
+        unsigned long long target=(unsigned long long)signed_due;
+        delay=target>now?(target-now+9999ULL)/10000ULL:0;
+    }
+    unsigned long long now=GetTickCount64();o->due_tick=now>~0ULL-delay?~0ULL:now+delay;
+    o->period=(DWORD)period;o->timer_active=1;o->signaled=0;k32_last_error=0;return 1;
+}
 
-__attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){(void)timer;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){K32_SYNC_OBJECT *o=k32_sync_get(timer);if(!o||o->type!=4){k32_last_error=6;return 0;}o->timer_active=0;k32_last_error=0;return 1;}
 
 __attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){
     char narrow[260]; DWORD i=0;

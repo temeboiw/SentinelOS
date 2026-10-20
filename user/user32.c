@@ -10,6 +10,16 @@ typedef char *LPSTR;
 typedef const char *LPCSTR;
 typedef long long i64;
 
+/* Freestanding user DLLs are linked with /nodefaultlib, so provide the
+ * C runtime byte-copy primitive locally. Volatile accesses prevent Clang
+ * from recognizing this loop and lowering it back into a memcpy call. */
+void *memcpy(void *destination, const void *source, unsigned long long count) {
+    volatile unsigned char *dst = (volatile unsigned char *)destination;
+    const volatile unsigned char *src = (const volatile unsigned char *)source;
+    for (unsigned long long i = 0; i < count; ++i) dst[i] = src[i];
+    return destination;
+}
+
 __attribute__((dllexport)) i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
 __attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd);
 __attribute__((dllexport)) BOOL IsWindow(void *hwnd);
@@ -1271,7 +1281,7 @@ __attribute__((dllexport)) void *GetDlgItem(void *dlg,int id){if(!IsWindow(dlg)|
 __attribute__((dllexport)) BOOL SetDlgItemTextA(void *dlg,int id,LPCSTR text){if(!IsWindow(dlg)||id<0||!text)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;int i=0;while(text[i]&&i<127){c->text[i]=text[i];i++;}c->text[i]=0;return 1;}
 __attribute__((dllexport)) unsigned int GetDlgItemTextA(void *dlg,int id,LPSTR out,int cap){if(!out||cap<=0||!IsWindow(dlg)||id<0)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);if(!c){out[0]=0;return 0;}int i=0;while(c->text[i]&&i+1<cap){out[i]=c->text[i];i++;}out[i]=0;return i;}
 __attribute__((dllexport)) BOOL SetDlgItemTextW(void *dlg,int id,const unsigned short *text){char a[128];if(!text)return 0;u32_wide_to_ansi(a,sizeof(a),text);return SetDlgItemTextA(dlg,id,a);}
-__attribute__((dllexport)) unsigned int GetDlgItemTextW(void *dlg,int id,unsigned short *out,int cap){char a[128];unsigned int n=GetDlgItemTextA(dlg,id,a,sizeof(a));if(!out||cap<=0)return 0;int i=0;while(a[i]&&i+1<cap){out[i]=(unsigned char)a[i];i++;}out[i]=0;return i;}
+__attribute__((dllexport)) unsigned int GetDlgItemTextW(void *dlg,int id,unsigned short *out,int cap){char a[128];(void)GetDlgItemTextA(dlg,id,a,sizeof(a));if(!out||cap<=0)return 0;int i=0;while(a[i]&&i+1<cap){out[i]=(unsigned char)a[i];i++;}out[i]=0;return i;}
 __attribute__((dllexport)) void *CreateMenu(void) {
     for (int i=0;i<16;i++) if (!u32_menus[i].used) {
         u32_menus[i].used=1; u32_menus[i].count=0; u32_menus[i].default_pos=-1;

@@ -57,6 +57,8 @@ static int g_search_len;
 static u32 cur_under[16][16];
 static int cur_on, cur_ox, cur_oy;
 static WINDOW g_wnd;
+static int u32_quit_pending;
+static int u32_quit_code;
 static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
@@ -687,9 +689,21 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     (void)min;
     (void)max;
 
+    if (!msg) return 0;
     if (!g_front) ensure_fb();
 
     for (;;) {
+        if (u32_quit_pending) {
+            msg->hwnd = 0;
+            msg->message = 0x0012;
+            msg->wParam = (u64)(unsigned int)u32_quit_code;
+            msg->lParam = 0;
+            msg->time = 0;
+            msg->pt_x = g_mx;
+            msg->pt_y = g_my;
+            u32_quit_pending = 0;
+            return 0;
+        }
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
@@ -775,14 +789,18 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
 
 __attribute__((dllexport))
 BOOL TranslateMessage(const MSG *m) {
-    (void)m;
-    return 1;
+    if (!m || m->message != 0x0100) return 0;
+    return m->wParam >= 32 && m->wParam <= 126;
 }
 
 __attribute__((dllexport))
 i64 DispatchMessageA(const MSG *m) {
-    (void)m;
-    return 0;
+    if (!m || m->message == 0x0012) return 0;
+    if (!u32_wnd_proc)
+        return (i64)DefWindowProcA((void *)(u64)m->hwnd, m->message, m->wParam, m->lParam);
+    typedef i64 (*U32_WNDPROC)(void *, unsigned int, u64, i64);
+    U32_WNDPROC proc = (U32_WNDPROC)u32_wnd_proc;
+    return proc((void *)(u64)m->hwnd, m->message, m->wParam, m->lParam);
 }
 
 __attribute__((dllexport))
@@ -824,7 +842,8 @@ BOOL DestroyWindow(void *hwnd) {
 
 __attribute__((dllexport))
 BOOL PostQuitMessage(int code) {
-    (void)code;
+    u32_quit_code = code;
+    u32_quit_pending = 1;
     return 1;
 }
 

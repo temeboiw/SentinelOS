@@ -35,6 +35,7 @@
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
 #define SYS_NtYield                  21
+#define SYS_NtGetSystemTime           23
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -915,6 +916,37 @@ bad_raw:
     return 0;
 }
 
+typedef struct { uint16_t wYear,wMonth,wDayOfWeek,wDay,wHour,wMinute,wSecond,wMilliseconds; } UserSystemTime;
+static uint8_t user_rtc_read(uint8_t reg) {
+    uint8_t value;
+    __asm__ volatile("outb %0, $0x70" : : "a"(reg));
+    __asm__ volatile("inb $0x71, %0" : "=a"(value));
+    return value;
+}
+static uint8_t user_rtc_decode(uint8_t value,int binary) {
+    return binary?value:(uint8_t)((value&0x0Fu)+((value>>4)*10u));
+}
+static int user_rtc_system_time(UserSystemTime *out) {
+    if(!out)return 0;
+    int tries=100000;
+    while((user_rtc_read(0x0A)&0x80u)&&--tries){}
+    if(!tries)return 0;
+    uint8_t sec=user_rtc_read(0x00),min=user_rtc_read(0x02),hour=user_rtc_read(0x04);
+    uint8_t dow=user_rtc_read(0x06),day=user_rtc_read(0x07),month=user_rtc_read(0x08);
+    uint8_t year=user_rtc_read(0x09),century=user_rtc_read(0x32),mode=user_rtc_read(0x0B);
+    int binary=(mode&0x04u)!=0,pm=(hour&0x80u)!=0;
+    hour&=0x7Fu;
+    sec=user_rtc_decode(sec,binary);min=user_rtc_decode(min,binary);
+    hour=user_rtc_decode(hour,binary);day=user_rtc_decode(day,binary);
+    month=user_rtc_decode(month,binary);year=user_rtc_decode(year,binary);
+    if(!(mode&0x02u)){hour=(uint8_t)(hour%12u+(pm?12u:0u));}
+    if(century!=0&&century!=0xFFu){century=user_rtc_decode(century,binary);out->wYear=(uint16_t)(century*100u+year);}
+    else out->wYear=(uint16_t)((year>=70u?1900u:2000u)+year);
+    out->wMonth=month;out->wDay=day;out->wDayOfWeek=dow?((dow-1u)%7u):0;
+    out->wHour=hour;out->wMinute=min;out->wSecond=sec;out->wMilliseconds=0;
+    return month>=1&&month<=12&&day>=1&&day<=31&&hour<24&&min<60&&sec<60;
+}
+
 static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
@@ -1774,6 +1806,17 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         f->rax = 0;
+        return f;
+    }
+
+    case SYS_NtGetSystemTime: {
+        UserSystemTime value;
+        if(!f->rdi || !MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(value),1) || !user_rtc_system_time(&value)) {
+            f->rax=(uint64_t)-1LL;
+            return f;
+        }
+        *(UserSystemTime *)(uint64_t)f->rdi=value;
+        f->rax=0;
         return f;
     }
 

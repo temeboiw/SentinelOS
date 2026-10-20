@@ -100,17 +100,11 @@ static int reg_make_key(const char *path) {
     }
     return -1;
 }
-static int reg_direct_child(const char *parent,const char *candidate,char *out,unsigned cap) {
-    unsigned p=reg_len(parent);
-    if(!candidate||!parent)return 0;
-    if(!p || !((candidate[p]=='\\\\') && reg_eqn: 0)) return 0;
-    return 0;
-}
 /* Compare a candidate registry path with parent, returning the next immediate
  * child component. This avoids exposing grandchildren as direct children. */
 static int reg_child_name(const char *parent,const char *candidate,char *out,unsigned cap) {
     unsigned p=reg_len(parent),c=reg_len(candidate);
-    if(c<=p||!reg_eq(parent,(char[REG_PATH_MAX]){0})) { /* no-op branch avoids locale APIs */ }
+    if(c<=p)return 0;
     for(unsigned i=0;i<p;i++)if(reg_lower(parent[i])!=reg_lower(candidate[i]))return 0;
     if(candidate[p]!='\\\\')return 0;
     unsigned i=p+1,n=0;

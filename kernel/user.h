@@ -37,10 +37,14 @@
 #define SYS_NtYield                  21
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
+#define SYS_NtFreeVirtualMemory        27
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
 #define USER_IMAGE_PAGE 0x1000ULL
+#define USER_VM_ALLOCATION_MAX 64
+typedef struct { KPROCESS *process; uint64_t base,size; int used; } UserVmAllocation;
+static UserVmAllocation user_vm_allocations[USER_VM_ALLOCATION_MAX];
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
 static uint64_t user_saved_ksp, user_saved_rip;
@@ -1266,6 +1270,16 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
+        int alloc_slot=-1;
+        for(int i=0;i<USER_VM_ALLOCATION_MAX;i++)if(!user_vm_allocations[i].used){alloc_slot=i;break;}
+        if(alloc_slot<0) {
+            while(mapped){mapped-=USER_IMAGE_PAGE;MmUnmapAllocatedUserPage(caller,prefer+mapped);}
+            MmSwitchToProcess(caller);f->rax=0;return f;
+        }
+        user_vm_allocations[alloc_slot].process=caller;
+        user_vm_allocations[alloc_slot].base=prefer;
+        user_vm_allocations[alloc_slot].size=size;
+        user_vm_allocations[alloc_slot].used=1;
         MmSwitchToProcess(caller);
         f->rax = prefer;
         return f;
@@ -1461,6 +1475,27 @@ static Frame *syscall_handler(Frame *f) {
         if(offset<0){uint64_t mag=(uint64_t)(-(offset+1))+1;if(mag>base){f->rax=(uint64_t)-1LL;return f;}target=base-mag;}
         else {uint64_t mag=(uint64_t)offset;if(mag>0x7FFFFFFFFFFFFFFFULL-base){f->rax=(uint64_t)-1LL;return f;}target=base+mag;}
         vh->pos=target;f->rax=vh->pos;return f;
+    }
+
+    case SYS_NtFreeVirtualMemory: {
+        KPROCESS *caller=MmCurrentProcess;
+        uint64_t base=f->rdi,size=f->rsi,type=f->rdx;
+        if(!caller||caller==PspSystemProcess||(base&0xFFFULL)||size!=0||type!=0x8000ULL) {f->rax=0;return f;}
+        int slot=-1;
+        for(int i=0;i<USER_VM_ALLOCATION_MAX;i++) {
+            UserVmAllocation *a=&user_vm_allocations[i];
+            if(a->used&&a->process==caller&&a->base==base){slot=i;break;}
+        }
+        if(slot<0){f->rax=0;return f;}
+        UserVmAllocation *a=&user_vm_allocations[slot];
+        MmSwitchToProcess(PspSystemProcess);
+        int ok=1;
+        for(uint64_t off=0;off<a->size;off+=USER_IMAGE_PAGE) {
+            if(!MmUnmapAllocatedUserPage(caller,base+off)){ok=0;break;}
+        }
+        if(ok){a->used=0;a->process=0;a->base=0;a->size=0;}
+        MmSwitchToProcess(caller);
+        f->rax=ok?1:0;return f;
     }
 
     case SYS_NtQueryDirectoryFile: {

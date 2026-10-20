@@ -1532,7 +1532,15 @@ __attribute__((dllexport)) u32 GetWindowModuleFileNameW(void *hwnd, U32_LPWSTR o
     int copied=u32_ansi_to_wide(out,(int)cap,narrow);
     return (u32)copied+1<n ? cap : (u32)copied;
 }
-__attribute__((dllexport)) int GetWindowRgnBox(void *hwnd,U32_RECT *rect){(void)hwnd;if(rect){rect->left=rect->top=rect->right=rect->bottom=0;}return 0;}
+__attribute__((dllexport)) int GetWindowRgnBox(void *hwnd,U32_RECT *rect){
+    if(!IsWindow(hwnd)||!rect)return 0;
+    if(!u32_wnd_region){rect->left=rect->top=rect->right=rect->bottom=0;return 0;}
+    /* SentinelOS currently represents a window region as an opaque whole-window
+       region handle, so its bounding box is the window's client-independent bounds. */
+    rect->left=0;rect->top=0;rect->right=g_wnd.w;rect->bottom=g_wnd.h;
+    if(rect->right<=rect->left||rect->bottom<=rect->top)return 1;
+    return 2;
+}
 __attribute__((dllexport)) BOOL GetWindowDisplayAffinity(void *hwnd,unsigned int *affinity){if(!IsWindow(hwnd)||!affinity)return 0;*affinity=u32_window_affinity;return 1;}
 __attribute__((dllexport)) BOOL SetWindowDisplayAffinity(void *hwnd,unsigned int affinity){if(!IsWindow(hwnd)||(affinity!=0&&affinity!=1&&affinity!=0x11u))return 0;u32_window_affinity=affinity;return 1;}
 __attribute__((dllexport)) BOOL IsChild(void *parent,void *child){return IsWindow(parent)&&IsWindow(child)&&u32_wnd_parent==parent&&child!=parent;}

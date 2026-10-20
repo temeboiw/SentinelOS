@@ -1,6 +1,9 @@
 typedef unsigned long long u64;
 typedef long long i64;
 typedef unsigned int DWORD;
+typedef unsigned short WORD;
+typedef unsigned char BYTE;
+typedef unsigned int UINT;
 typedef int BOOL;
 typedef void *HANDLE;
 typedef void *LPVOID;
@@ -947,3 +950,109 @@ __attribute__((dllexport)) BOOL SetEnvironmentVariable(LPCSTR name,LPCSTR value)
 __attribute__((dllexport)) DWORD GetFileAttributes(LPCSTR path){return GetFileAttributesA(path);}
 
 __attribute__((dllexport)) BOOL SetFileAttributes(LPCSTR path,DWORD attr){return SetFileAttributesA(path,attr);}
+
+__attribute__((dllexport)) K32_SIZE_T GetLargePageMinimum(void){return 0;}
+
+__attribute__((dllexport)) BOOL GetSystemRegistryQuota(DWORD *allowed,DWORD *used){if(allowed)*allowed=0;if(used)*used=0;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL GetVolumeNameForVolumeMountPointA(LPCSTR path,LPSTR out,DWORD cap){if(!path||!out||cap<50||!(path[0]=='C'||path[0]=='c')||path[1]!=':'){k32_last_error=3;return 0;}const char *s="\\\\?\\Volume{00000000-0000-0000-0000-000000000001}\\";
+int i=0;while(s[i]&&i+1<cap){out[i]=s[i];i++;}out[i]=0;return s[i]==0;}
+
+__attribute__((dllexport)) BOOL GetVolumeNameForVolumeMountPointW(K32_LPCWSTR path,K32_LPWSTR out,DWORD cap){if(!path||!out||cap<50||path[1]!=':'){k32_last_error=3;return 0;}const char *s="\\\\?\\Volume{00000000-0000-0000-0000-000000000001}\\";
+int i=0;while(s[i]&&i+1<cap){out[i]=(unsigned char)s[i];i++;}out[i]=0;return s[i]==0;}
+
+__attribute__((dllexport)) BOOL SetVolumeMountPointA(LPCSTR mount,LPCSTR volume){(void)mount;(void)volume;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL SetVolumeMountPointW(K32_LPCWSTR mount,K32_LPCWSTR volume){(void)mount;(void)volume;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL DeleteVolumeMountPointA(LPCSTR mount){(void)mount;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL DeleteVolumeMountPointW(K32_LPCWSTR mount){(void)mount;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) HANDLE FindFirstVolumeA(LPSTR name,DWORD cap){if(!name||cap<50){k32_last_error=122;return INVALID_HANDLE_VALUE;}if(!GetVolumeNameForVolumeMountPointA("C:\\",name,cap))return INVALID_HANDLE_VALUE;return (HANDLE)1;}
+
+__attribute__((dllexport)) HANDLE FindFirstVolumeW(K32_LPWSTR name,DWORD cap){if(!name||cap<50){k32_last_error=122;return INVALID_HANDLE_VALUE;}if(!GetVolumeNameForVolumeMountPointW((K32_LPCWSTR)0,name,cap))return INVALID_HANDLE_VALUE;return (HANDLE)1;}
+
+__attribute__((dllexport)) BOOL FindNextVolumeA(HANDLE find,LPSTR name,DWORD cap){(void)find;(void)name;(void)cap;k32_last_error=18;return 0;}
+
+__attribute__((dllexport)) BOOL FindNextVolumeW(HANDLE find,K32_LPWSTR name,DWORD cap){(void)find;(void)name;(void)cap;k32_last_error=18;return 0;}
+
+__attribute__((dllexport)) BOOL FindVolumeClose(HANDLE find){return find==(HANDLE)1;}
+
+__attribute__((dllexport)) HANDLE FindFirstVolumeMountPointA(LPCSTR volume,LPSTR mount,DWORD cap){(void)volume;(void)mount;(void)cap;k32_last_error=18;return INVALID_HANDLE_VALUE;}
+
+__attribute__((dllexport)) HANDLE FindFirstVolumeMountPointW(K32_LPCWSTR volume,K32_LPWSTR mount,DWORD cap){(void)volume;(void)mount;(void)cap;k32_last_error=18;return INVALID_HANDLE_VALUE;}
+
+__attribute__((dllexport)) BOOL FindNextVolumeMountPointA(HANDLE find,LPSTR mount,DWORD cap){(void)find;(void)mount;(void)cap;k32_last_error=18;return 0;}
+
+__attribute__((dllexport)) BOOL FindNextVolumeMountPointW(HANDLE find,K32_LPWSTR mount,DWORD cap){(void)find;(void)mount;(void)cap;k32_last_error=18;return 0;}
+
+__attribute__((dllexport)) BOOL FindVolumeMountPointClose(HANDLE find){return find==(HANDLE)1;}
+
+__attribute__((dllexport)) BOOL SetVolumeLabelA(LPCSTR root,LPCSTR label){(void)root;(void)label;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL SetVolumeLabelW(K32_LPCWSTR root,K32_LPCWSTR label){(void)root;(void)label;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL GetVolumeInformationByHandleW(HANDLE file,K32_LPWSTR name,DWORD cap,DWORD *serial,DWORD *max_component,DWORD *flags,K32_LPWSTR fs,DWORD fs_cap){(void)file;if(name&&cap)name[0]=0;if(fs&&fs_cap)fs[0]=0;if(serial)*serial=0;if(max_component)*max_component=255;if(flags)*flags=0;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL GetFirmwareType(DWORD *type){if(!type)return 0;*type=2;return 1;}
+
+__attribute__((dllexport)) DWORD GetFirmwareEnvironmentVariableA(LPCSTR name,LPCSTR guid,LPVOID buffer,DWORD size){(void)name;(void)guid;(void)buffer;(void)size;k32_last_error=1;return 0;}
+
+__attribute__((dllexport)) DWORD GetFirmwareEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR guid,LPVOID buffer,DWORD size){(void)name;(void)guid;(void)buffer;(void)size;k32_last_error=1;return 0;}
+
+__attribute__((dllexport)) BOOL SetFirmwareEnvironmentVariableA(LPCSTR name,LPCSTR guid,LPVOID buffer,DWORD size){(void)name;(void)guid;(void)buffer;(void)size;k32_last_error=1;return 0;}
+
+__attribute__((dllexport)) BOOL SetFirmwareEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR guid,LPVOID buffer,DWORD size){(void)name;(void)guid;(void)buffer;(void)size;k32_last_error=1;return 0;}
+
+__attribute__((dllexport)) BOOL GetSystemPreferredUILanguages(DWORD flags,DWORD *count,K32_LPWSTR languages,DWORD *length){(void)flags;if(count)*count=1;if(length)*length=languages?6:6;if(languages&&length&&*length>=6){const char *s="en-US";for(int i=0;i<5;i++)languages[i]=s[i];languages[5]=0;}return 1;}
+
+__attribute__((dllexport)) BOOL GetUserPreferredUILanguages(DWORD flags,DWORD *count,K32_LPWSTR languages,DWORD *length){return GetSystemPreferredUILanguages(flags,count,languages,length);}
+
+__attribute__((dllexport)) BOOL GetThreadPreferredUILanguages(DWORD flags,DWORD *count,K32_LPWSTR languages,DWORD *length){return GetSystemPreferredUILanguages(flags,count,languages,length);}
+
+__attribute__((dllexport)) BOOL GetProcessPreferredUILanguages(DWORD flags,DWORD *count,K32_LPWSTR languages,DWORD *length){return GetSystemPreferredUILanguages(flags,count,languages,length);}
+
+__attribute__((dllexport)) BOOL SetThreadPreferredUILanguages(DWORD flags,K32_LPCWSTR languages,DWORD *count){(void)flags;(void)languages;if(count)*count=1;return 1;}
+
+__attribute__((dllexport)) BOOL SetProcessPreferredUILanguages(DWORD flags,K32_LPCWSTR languages,DWORD *count){return SetThreadPreferredUILanguages(flags,languages,count);}
+
+__attribute__((dllexport)) BOOL GetProcessMemoryInfo(HANDLE process,void *counters,DWORD size){if((process!=GetCurrentProcess()&&process!=(HANDLE)1)||!counters||size<16)return 0;for(DWORD i=0;i<size;i++)((unsigned char*)counters)[i]=0;return 1;}
+
+__attribute__((dllexport)) BOOL GetProcessWorkingSetSizeEx(HANDLE process,K32_SIZE_T *min,K32_SIZE_T *max,DWORD *flags){if(!GetProcessWorkingSetSize(process,min,max))return 0;if(flags)*flags=0;return 1;}
+
+__attribute__((dllexport)) BOOL SetProcessWorkingSetSizeEx(HANDLE process,K32_SIZE_T min,K32_SIZE_T max,DWORD flags){(void)flags;return SetProcessWorkingSetSize(process,min,max);}
+
+__attribute__((dllexport)) BOOL GetProcessMemoryInfoEx(HANDLE process,void *counters,DWORD size){return GetProcessMemoryInfo(process,counters,size);}
+
+__attribute__((dllexport)) DWORD GetSystemWow64Directory(LPSTR out,DWORD cap){return GetSystemWow64DirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetSystemWindowsDirectory(LPSTR out,DWORD cap){return GetSystemWindowsDirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetDllDirectory(DWORD cap,LPSTR out){return GetDllDirectoryA(cap,out);}
+
+__attribute__((dllexport)) BOOL SetDllDirectory(LPCSTR path){return SetDllDirectoryA(path);}
+
+__attribute__((dllexport)) HANDLE CreateFileTransactedA(LPCSTR name,DWORD access,DWORD share,void *security,DWORD disposition,DWORD flags,HANDLE template_file,HANDLE transaction,void *mini,void *extended){(void)name;(void)access;(void)share;(void)security;(void)disposition;(void)flags;(void)template_file;(void)transaction;(void)mini;(void)extended;k32_last_error=50;return INVALID_HANDLE_VALUE;}
+
+__attribute__((dllexport)) HANDLE CreateFileTransactedW(K32_LPCWSTR name,DWORD access,DWORD share,void *security,DWORD disposition,DWORD flags,HANDLE template_file,HANDLE transaction,void *mini,void *extended){(void)name;(void)access;(void)share;(void)security;(void)disposition;(void)flags;(void)template_file;(void)transaction;(void)mini;(void)extended;k32_last_error=50;return INVALID_HANDLE_VALUE;}
+
+__attribute__((dllexport)) BOOL DeleteFileTransactedA(LPCSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL DeleteFileTransactedW(K32_LPCWSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL MoveFileTransactedA(LPCSTR from,LPCSTR to,void *progress,void *data,DWORD flags,HANDLE transaction){(void)from;(void)to;(void)progress;(void)data;(void)flags;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL MoveFileTransactedW(K32_LPCWSTR from,K32_LPCWSTR to,void *progress,void *data,DWORD flags,HANDLE transaction){(void)from;(void)to;(void)progress;(void)data;(void)flags;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL CopyFileTransactedA(LPCSTR from,LPCSTR to,void *progress,void *data,BOOL *cancel,DWORD flags,HANDLE transaction){(void)from;(void)to;(void)progress;(void)data;(void)cancel;(void)flags;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL CopyFileTransactedW(K32_LPCWSTR from,K32_LPCWSTR to,void *progress,void *data,BOOL *cancel,DWORD flags,HANDLE transaction){(void)from;(void)to;(void)progress;(void)data;(void)cancel;(void)flags;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL CreateDirectoryTransactedA(LPCSTR template_path,LPCSTR path,void *security,HANDLE transaction){(void)template_path;(void)path;(void)security;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL CreateDirectoryTransactedW(K32_LPCWSTR template_path,K32_LPCWSTR path,void *security,HANDLE transaction){(void)template_path;(void)path;(void)security;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL RemoveDirectoryTransactedA(LPCSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL RemoveDirectoryTransactedW(K32_LPCWSTR path,HANDLE transaction){(void)path;(void)transaction;k32_last_error=50;return 0;}

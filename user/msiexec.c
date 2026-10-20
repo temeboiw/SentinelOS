@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25, SYS_DeleteFile=26, SYS_RemoveDirectory=27, SYS_PathType=28 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -93,7 +93,7 @@ static int init_msi_workspace(void) {
     return 1;
 }
 static u64 msi_path_type(const char *path) {
-    return sy3(28,(u64)path,0,0);
+    return sy3(SYS_PathType,(u64)path,0,0);
 }
 static int msi_record_change(const char *path, int is_dir, int temporary) {
     if (!msi_tx_active || !path || !path[0] || msi_change_count>=MSI_MAX_CHANGES) return 0;
@@ -677,7 +677,7 @@ static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression
             !cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,hdr,8)) return 0;
         u32 checksum=rd32(hdr); u16 cbdata=rd16(hdr+4), cbuncomp=rd16(hdr+6);
         pos+=8u+reserve_data;
-        if(!cbuncomp || cbuncomp>32768 || cbdata>sizeof cab_comp ||
+        if(!cbuncomp || cbuncomp>32768 ||
            pos>cab_size || cbdata>cab_size-pos) return 0;
         if(!cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,cab_comp,cbdata)) return 0;
         if(checksum && cab_checksum(cab_comp,cbdata,cbuncomp)!=checksum) return 0;

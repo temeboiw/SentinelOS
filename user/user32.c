@@ -1261,9 +1261,32 @@ __attribute__((dllexport))
 BOOL DestroyWindow(void *hwnd) {
     (void)hwnd;
 
+    /* Remember the client area before hiding the window. Its text is drawn
+     * directly into the shared framebuffer, so hiding the frame alone can
+     * leave old glyphs behind if another process' clip state is active. */
+    int old_x=g_wnd.x, old_y=g_wnd.y, old_w=g_wnd.w, old_h=g_wnd.h;
+    cursor_restore();
     sy3(SYS_WmUnreg, 0, 0, 0);
     g_wnd.visible = 0;
     compose();
+
+    /*
+     * Explicitly scrub the former client area from the wallpaper cache after
+     * composition. This is a final guard against stale row labels such as
+     * "[DIR]" surviving a close on the shared framebuffer.
+     */
+    if (g_front && u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh &&
+        g_fw<=U32_AERO_CACHE_W && g_fh<=U32_AERO_CACHE_H) {
+        int x0=old_x+7, y0=old_y+41;
+        int x1=old_x+old_w-7, y1=old_y+old_h-8;
+        if(x0<0)x0=0;if(y0<0)y0=0;
+        if(x1>(int)g_fw)x1=(int)g_fw;
+        if(y1>(int)g_fh)y1=(int)g_fh;
+        for(int y=y0;y<y1;y++)
+            for(int x=x0;x<x1;x++)
+                g_front[y*g_pitch+x]=u32_aero_bg_cache[y*g_fw+x];
+        cursor_save_draw(g_mx,g_my);
+    }
 
     return 1;
 }

@@ -1206,9 +1206,50 @@ __attribute__((dllexport)) BOOL TrackPopupMenu(void *menu, unsigned int flags, i
     if(!(flags&0x0100u))SendMessageA(hwnd,0x0111u,(unsigned long long)it->id,0);
     (void)x;(void)y;return 1;
 }
-__attribute__((dllexport)) void *LoadCursorA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }
-__attribute__((dllexport)) void *LoadIconA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }
-__attribute__((dllexport)) void *LoadImageA(void *instance,LPCSTR name,unsigned int type,int cx,int cy,unsigned int flags){(void)cx;(void)cy;(void)flags;if(type==1u)return LoadIconA(instance,name);if(type==2u)return LoadCursorA(instance,name);return 0;}
+static unsigned int u32_stock_resource_id(LPCSTR name,int icon) {
+    unsigned long long raw=(unsigned long long)name;
+    if(raw && raw<=0xFFFFULL)return (unsigned int)raw;
+    if(!name)return 0;
+    static const struct { const char *name; unsigned int id; } cursors[]={
+        {"IDC_ARROW",32512},{"IDC_IBEAM",32513},{"IDC_WAIT",32514},{"IDC_CROSS",32515},
+        {"IDC_UPARROW",32516},{"IDC_SIZENWSE",32642},{"IDC_SIZENESW",32643},
+        {"IDC_SIZEWE",32644},{"IDC_SIZENS",32645},{"IDC_SIZEALL",32646},
+        {"IDC_NO",32648},{"IDC_HAND",32649},{"IDC_APPSTARTING",32650},{"IDC_HELP",32651}
+    };
+    static const struct { const char *name; unsigned int id; } icons[]={
+        {"IDI_APPLICATION",32512},{"IDI_HAND",32513},{"IDI_QUESTION",32514},
+        {"IDI_EXCLAMATION",32515},{"IDI_ASTERISK",32516},{"IDI_WINLOGO",32517},{"IDI_SHIELD",32518}
+    };
+    const char *p=icon?0:0;(void)p;
+    const char *key=name;
+    for(unsigned int i=0;i< (icon?sizeof(icons)/sizeof(icons[0]):sizeof(cursors)/sizeof(cursors[0]));i++) {
+        const char *candidate=icon?icons[i].name:cursors[i].name;
+        unsigned int j=0;
+        while(key[j]&&candidate[j]) {
+            char a=key[j],b=candidate[j];
+            if(a>='a'&&a<='z')a-=32;if(b>='a'&&b<='z')b-=32;
+            if(a!=b)break;j++;
+        }
+        if(!key[j]&&!candidate[j])return icon?icons[i].id:cursors[i].id;
+    }
+    return 0;
+}
+__attribute__((dllexport)) void *LoadCursorA(void *instance, LPCSTR name) {
+    (void)instance;unsigned int id=u32_stock_resource_id(name,0);
+    if(!id)return 0;
+    return (void *)(unsigned long long)(0x330000u|id);
+}
+__attribute__((dllexport)) void *LoadIconA(void *instance, LPCSTR name) {
+    (void)instance;unsigned int id=u32_stock_resource_id(name,1);
+    if(!id)return 0;
+    return (void *)(unsigned long long)(0x340000u|id);
+}
+__attribute__((dllexport)) void *LoadImageA(void *instance,LPCSTR name,unsigned int type,int cx,int cy,unsigned int flags) {
+    (void)cx;(void)cy;(void)flags;
+    if(type==1u)return LoadIconA(instance,name);
+    if(type==2u)return LoadCursorA(instance,name);
+    return 0;
+}
 __attribute__((dllexport)) BOOL DrawMenuBar(void *hwnd) { (void)hwnd; compose(); return 1; }
 __attribute__((dllexport)) unsigned long GetMessagePos(void) { return ((unsigned long)(g_my & 0xFFFF)<<16) | (unsigned long)(g_mx & 0xFFFF); }
 __attribute__((dllexport)) long GetMessageTime(void) { return (long)u32_last_msg_time; }

@@ -15,5 +15,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld qemu-utils util-linux dosfstools e2fsprogs mtools gnu-efi
+      - name: Fetch EDK2 headers
+        run: |
+          git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
+          echo "EDK2=$RUNNER_TEMP/edk2" >> "$GITHUB_ENV"
       - name: Build SentinelOS disk image
         run: bash scripts/build.sh

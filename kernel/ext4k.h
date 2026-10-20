@@ -8,6 +8,8 @@
 typedef struct {
     uint64_t part_off;
     uint32_t blksz, ipg, isize, dsize, first_data;
+    uint32_t inode_count, blocks_count, blocks_per_group;
+    uint32_t feature_compat, feature_incompat, feature_ro_compat;
     int is64;
     uint8_t blk[4096];
     int ok;
@@ -32,11 +34,17 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     if (e4_read(fs, 1024, sb, 1024) < 0) return -1;
     if (E16(sb, 56) != 0xEF53) return -1;
     fs->blksz = 1024u << E32(sb, 24);
+    fs->inode_count = E32(sb, 0);
+    fs->blocks_count = E32(sb, 4);
     fs->first_data = E32(sb, 20);
+    fs->blocks_per_group = E32(sb, 32);
     fs->ipg = E32(sb, 40);
     fs->isize = E16(sb, 88);
     if (fs->isize < 128) fs->isize = 128;
-    fs->is64 = (E32(sb, 96) & 0x80) != 0;
+    fs->feature_compat = E32(sb, 92);
+    fs->feature_incompat = E32(sb, 96);
+    fs->feature_ro_compat = E32(sb, 100);
+    fs->is64 = (fs->feature_incompat & 0x80) != 0;
     fs->dsize = fs->is64 ? E16(sb, 254) : 32;
     if (!fs->dsize) fs->dsize = 32;
     if (fs->blksz > 4096 || !fs->ipg) return -1;
@@ -53,6 +61,90 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
     if (fs->is64) itab |= (uint64_t)E32(gd, 0x28) << 32;
     uint32_t n = fs->isize > 256 ? 256 : fs->isize;
     return e4_read(fs, itab * fs->blksz + (uint64_t)idx * fs->isize, out, n);
+}
+
+/* Mutation is intentionally restricted to a small ext4-compatible subset.
+ * We refuse layouts needing checksums, 64-bit descriptors, journaling recovery,
+ * flex/meta block groups, or other unimplemented metadata semantics. */
+static int e4_can_mutate(Ext4k *fs) {
+    if (!fs || !fs->ok || fs->is64 || fs->dsize != 32 ||
+        fs->isize < 128 || fs->isize > 256 ||
+        !fs->inode_count || !fs->blocks_count || !fs->blocks_per_group ||
+        !fs->ipg || (fs->blksz != 1024 && fs->blksz != 2048 &&
+                     fs->blksz != 4096)) return 0;
+    if (fs->feature_incompat & ~0x42u) return 0; /* filetype + extents only */
+    if (fs->feature_compat & 0x4u) return 0; /* journal requires transactions */
+    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u))
+        return 0; /* gdt_csum, bigalloc, metadata_csum */
+    return 1;
+}
+
+static int e4_write_inode(Ext4k *fs, uint32_t ino, const uint8_t *src) {
+    if (!e4_can_mutate(fs) || !ino || ino > fs->inode_count) return -1;
+    uint32_t group = (ino - 1) / fs->ipg;
+    uint32_t index = (ino - 1) % fs->ipg;
+    uint8_t gd[32];
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (e4_read(fs, gdt + (uint64_t)group * 32, gd, sizeof gd) < 0) return -1;
+    uint32_t table = E32(gd, 8);
+    if (!table) return -1;
+    return e4_write(fs, (uint64_t)table * fs->blksz +
+                    (uint64_t)index * fs->isize, src, fs->isize);
+}
+
+/* Allocate one inode from a group's inode bitmap. The caller owns rollback if
+ * a later directory update fails. Returns inode number or 0 on failure. */
+static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
+    if (!e4_can_mutate(fs)) return 0;
+    uint8_t sb[1024], gd[32], bitmap[4096];
+    if (e4_read(fs, 1024, sb, sizeof sb) < 0) return 0;
+    uint32_t groups = (fs->inode_count + fs->ipg - 1) / fs->ipg;
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint32_t first_ino = E32(sb, 84);
+    if (first_ino < 11) first_ino = 11;
+    for (uint32_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
+        if (E16(gd, 14) == 0) continue;
+        uint32_t bitmap_block = E32(gd, 4);
+        if (!bitmap_block || e4_read(fs, (uint64_t)bitmap_block * fs->blksz,
+                                     bitmap, fs->blksz) < 0) return 0;
+        uint32_t valid = fs->ipg;
+        uint32_t remain = fs->inode_count - g * fs->ipg;
+        if (valid > remain) valid = remain;
+        for (uint32_t b = 0; b < valid; ++b) {
+            uint32_t ino = g * fs->ipg + b + 1;
+            if (ino < first_ino || (bitmap[b >> 3] & (1u << (b & 7)))) continue;
+            bitmap[b >> 3] |= (uint8_t)(1u << (b & 7));
+            if (e4_write(fs, (uint64_t)bitmap_block * fs->blksz,
+                         bitmap, fs->blksz) < 0) return 0;
+            E16(gd, 14) = (uint16_t)(E16(gd, 14) - 1);
+            if (is_dir) E16(gd, 16) = (uint16_t)(E16(gd, 16) + 1);
+            if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
+            uint32_t free_i = E32(sb, 16);
+            if (!free_i) return 0;
+            E32(sb, 16) = free_i - 1;
+            if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
+            return ino;
+        }
+    }
+    return 0;
+}
+
+static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
+    if (!e4_can_mutate(fs) || !ino || ino > fs->inode_count) return -1;
+    uint32_t g = (ino - 1) / fs->ipg, b = (ino - 1) % fs->ipg;
+    uint8_t sb[1024], gd[32], bitmap[4096];
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0 ||
+        e4_read(fs, 1024, sb, sizeof sb) < 0) return -1;
+    uint32_t bb = E32(gd, 4);
+    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    bitmap[b >> 3] &= (uint8_t)~(1u << (b & 7));
+    if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);
+    if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return -1;
+    E32(sb, 16) = E32(sb, 16) + 1;
+    return e4_write(fs, 1024, sb, sizeof sb);
 }
 
 static uint64_t e4_size(uint8_t *inode) {

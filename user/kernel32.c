@@ -157,14 +157,10 @@ __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
 __attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { if(!name||!*name){k32_last_error=87;return 0;}for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)){k32_modules[i].refs++;return (HANDLE)&k32_modules[i];}for(int i=0;i<16;i++)if(!k32_modules[i].used){int j=0;while(name[j]&&j<63){k32_modules[i].name[j]=name[j];j++;}k32_modules[i].name[j]=0;k32_modules[i].refs=1;k32_modules[i].used=1;return (HANDLE)&k32_modules[i];}k32_last_error=8;return 0; }
 __attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){if(k32_modules[i].refs>0)k32_modules[i].refs--;if(!k32_modules[i].refs)k32_modules[i].used=0;k32_last_error=0;return 1;}k32_last_error=126;return 0; }
 __attribute__((dllexport)) BOOL VirtualFree(LPVOID address,u64 size,DWORD type) { (void)address;(void)size;(void)type;k32_last_error=50;return 0; }
-    (void)address; (void)size; (void)type; return 0;
-}
 __attribute__((dllexport)) BOOL VirtualProtect(LPVOID address, u64 size, DWORD protect, DWORD *old) {
     (void)address; (void)size; (void)protect; if (old) *old=0; return 0;
 }
 __attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address,void *info,K32_SIZE_T len) { (void)address;(void)info;(void)len;k32_last_error=50;return 0; }
-    (void)address; (void)info; (void)len; return 0;
-}
 __attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
     const char *s="C:\\"; DWORD i=0; if (!out || !cap) return 0;
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
@@ -248,23 +244,36 @@ __attribute__((dllexport)) BOOL TerminateProcess(HANDLE process, DWORD code) {
     if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=50;return 0;}
     sy3(SYS_Exit,code,0,0);for(;;)__asm__ volatile("hlt");
 }
+typedef struct { void *ptr; K32_SIZE_T size; int freed; } K32_MEMENTRY;
+static K32_MEMENTRY k32_mem_table[128];
+static void k32_mem_register(void *p,K32_SIZE_T size){if(!p)return;int free_slot=-1;for(int i=0;i<128;i++){if(k32_mem_table[i].ptr==p){k32_mem_table[i].size=size;k32_mem_table[i].freed=0;return;}if((!k32_mem_table[i].ptr||k32_mem_table[i].freed)&&free_slot<0)free_slot=i;}if(free_slot>=0){k32_mem_table[free_slot].ptr=p;k32_mem_table[free_slot].size=size;k32_mem_table[free_slot].freed=0;}}
+static K32_MEMENTRY *k32_mem_entry(const void *p){for(int i=0;i<128;i++)if(k32_mem_table[i].ptr==p&&!k32_mem_table[i].freed)return &k32_mem_table[i];return 0;}
+static K32_SIZE_T k32_mem_size(void *p){K32_MEMENTRY *e=k32_mem_entry(p);return e?e->size:0;}
 __attribute__((dllexport)) HANDLE GetProcessHeap(void) { return (HANDLE)&k32_heap_tag; }
 __attribute__((dllexport)) LPVOID HeapAlloc(HANDLE heap, DWORD flags, K32_SIZE_T size) {
-    (void)heap; (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
+    if(heap!=GetProcessHeap()||size==0){k32_last_error=87;return 0;}
+    void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}
+    k32_mem_register(p,size);if(flags&0x8u){unsigned char *b=p;for(K32_SIZE_T i=0;i<size;i++)b[i]=0;}k32_last_error=0;return p;
 }
-__attribute__((dllexport)) BOOL HeapFree(HANDLE heap,DWORD flags,LPVOID mem) { (void)flags;if(heap!=GetProcessHeap()||!mem){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
-    (void)heap; (void)flags; (void)mem; return 0;
+__attribute__((dllexport)) BOOL HeapFree(HANDLE heap,DWORD flags,LPVOID mem) {
+    (void)flags;if(heap!=GetProcessHeap()||!mem){k32_last_error=87;return 0;}
+    K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return 0;}
+    /* SentinelOS currently has no page-release syscall; invalidate the heap
+       allocation so HeapSize/HeapValidate reject it and future allocations can reuse its metadata slot. */
+    e->freed=1;k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) LPVOID HeapReAlloc(HANDLE heap, DWORD flags, LPVOID mem, K32_SIZE_T size) {
-    (void)heap; (void)flags; (void)mem; (void)size; return (LPVOID)0;
+    if(heap!=GetProcessHeap()||!mem||!size){k32_last_error=87;return 0;}
+    K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return 0;}
+    K32_SIZE_T old=e->size;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}
+    K32_SIZE_T n=old<size?old:size;unsigned char *d=p,*s=mem;for(K32_SIZE_T i=0;i<n;i++)d[i]=s[i];
+    if((flags&0x8u)&&size>old)for(K32_SIZE_T i=old;i<size;i++)d[i]=0;
+    e->freed=1;k32_mem_register(p,size);k32_last_error=0;return p;
 }
 __attribute__((dllexport)) K32_SIZE_T HeapSize(HANDLE heap, DWORD flags, LPCVOID mem) {
-    (void)heap; (void)flags; (void)mem; return (K32_SIZE_T)-1;
+    (void)flags;if(heap!=GetProcessHeap()||!mem){k32_last_error=87;return (K32_SIZE_T)-1;}
+    K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return (K32_SIZE_T)-1;}k32_last_error=0;return e->size;
 }
-typedef struct { void *ptr; K32_SIZE_T size; } K32_MEMENTRY;
-static K32_MEMENTRY k32_mem_table[64];
-static void k32_mem_register(void *p,K32_SIZE_T size){if(!p)return;int free_slot=-1;for(int i=0;i<64;i++){if(k32_mem_table[i].ptr==p){k32_mem_table[i].size=size;return;}if(!k32_mem_table[i].ptr&&free_slot<0)free_slot=i;}if(free_slot>=0){k32_mem_table[free_slot].ptr=p;k32_mem_table[free_slot].size=size;}}
-static K32_SIZE_T k32_mem_size(void *p){for(int i=0;i<64;i++)if(k32_mem_table[i].ptr==p)return k32_mem_table[i].size;return 0;}
 __attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}
 __attribute__((dllexport)) LPVOID LocalFree(LPVOID mem){(void)mem;return mem;}
 __attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}

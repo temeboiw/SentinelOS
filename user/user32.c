@@ -10,9 +10,11 @@ typedef char *LPSTR;
 typedef const char *LPCSTR;
 typedef long long i64;
 
-i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
-int GetWindowTextLengthA(void *hwnd);
-BOOL IsWindow(void *hwnd);
+__attribute__((dllexport)) i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
+__attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd);
+__attribute__((dllexport)) BOOL IsWindow(void *hwnd);
+static void u32_wide_to_ansi(char *out, unsigned int cap, const unsigned short *in);
+static const char *u32_clip_lookup(unsigned int format);
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
@@ -497,8 +499,7 @@ static void compose(void) {
 
             u64 pid = sy3(
                 SYS_WmQuery, (u64)i, (u64)name, (u64)&minv
-            );
-            if (!pid) break;
+            );            if (!pid) break;
 
             int same = 1;
 
@@ -997,8 +998,7 @@ BOOL DestroyWindow(void *hwnd) {
 }
 
 __attribute__((dllexport))
-BOOL PostQuitMessage(int code) {    MSG m = {0};
-    m.message = 0x0012; /* WM_QUIT */
+BOOL PostQuitMessage(int code) {    MSG m = {0};    m.message = 0x0012; /* WM_QUIT */
     m.wParam = (u64)(unsigned int)code;
     m.pt_x = g_mx;
     m.pt_y = g_my;
@@ -1497,8 +1497,7 @@ __attribute__((dllexport)) int GetClassNameW(void *hwnd, U32_LPWSTR out, int cap
     int n=GetClassNameA(hwnd,name,sizeof(name));
     if (!out || cap<=0) return 0;
     return u32_ansi_to_wide(out,cap,name) < n ? cap-1 : n;}
-__attribute__((dllexport)) void *LoadCursorW(void *instance, const U32_WCHAR *name) {
-    char narrow[128];
+__attribute__((dllexport)) void *LoadCursorW(void *instance, const U32_WCHAR *name) {    char narrow[128];
     const char *arg;
     if ((unsigned long long)name <= 0xFFFFULL) arg=(const char *)name;
     else { if (!name) return 0; u32_wide_to_ansi(narrow,sizeof(narrow),name); arg=narrow; }
@@ -1998,7 +1997,6 @@ __attribute__((dllexport)) unsigned int SetTextAlign(void *dc,unsigned int align
 __attribute__((dllexport)) unsigned int GetTextAlign(void *dc){(void)dc;return u32_text_align;}
 
 __attribute__((dllexport)) int GetDeviceCaps(void *dc,int index){(void)dc;switch(index){case 8:case 10:return (int)g_fw;case 9:case 11:return (int)g_fh;case 88:return 32;case 12:return 96;case 14:return 96;case 2:return 1;default:return 0;}}
-
 __attribute__((dllexport)) BOOL GetWindowOrgEx(void *dc,U32_POINT *pt){(void)dc;if(!pt)return 0;pt->x=0;pt->y=0;return 1;}
 
 __attribute__((dllexport)) BOOL SetWindowOrgEx(void *dc,int x,int y,U32_POINT *old){(void)dc;if(old){old->x=0;old->y=0;}return x==0&&y==0;}
@@ -2247,6 +2245,29 @@ __attribute__((dllexport)) void *GetClipboardOwner(void){return u32_clipboard_ow
 __attribute__((dllexport)) void *GetOpenClipboardWindow(void){return u32_clipboard_open?u32_clipboard_owner:0;}
 
 __attribute__((dllexport)) DWORD GetClipboardSequenceNumber(void){return u32_clipboard_seq;}
+
+static const char *u32_clip_lookup(unsigned int format) {
+    switch (format) {
+        case 1: return "CF_TEXT";
+        case 2: return "CF_BITMAP";
+        case 3: return "CF_METAFILEPICT";
+        case 4: return "CF_SYLK";
+        case 5: return "CF_DIF";
+        case 6: return "CF_TIFF";
+        case 7: return "CF_OEMTEXT";
+        case 8: return "CF_DIB";
+        case 9: return "CF_PALETTE";
+        case 10: return "CF_PENDATA";
+        case 11: return "CF_RIFF";
+        case 12: return "CF_WAVE";
+        case 13: return "CF_UNICODETEXT";
+        case 14: return "CF_ENHMETAFILE";
+        case 15: return "CF_HDROP";
+        case 16: return "CF_LOCALE";
+        case 17: return "CF_DIBV5";
+        default: return 0;
+    }
+}
 
 __attribute__((dllexport)) int GetClipboardFormatNameA(unsigned int format,char *name,int cap){const char *s=u32_clip_lookup(format);if(!name||cap<=0||!s)return 0;int i=0;while(s[i]&&i+1<cap){name[i]=s[i];i++;}name[i]=0;return i;}
 
@@ -2497,8 +2518,7 @@ __attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,
 __attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data) {
     (void)flags;if(!IsWindow(hwnd)||!size)return 0;
     U32_FEEDBACK_SETTING *p=0;for(int i=0;i<16;i++)if(u32_feedback_settings[i].used&&u32_feedback_settings[i].hwnd==hwnd&&u32_feedback_settings[i].setting==setting){p=&u32_feedback_settings[i];break;}
-    if(!p){*size=0;return 1;}
-    DWORD cap=*size;*size=p->size;if(p->size&&(!data||cap<p->size))return 0;
+    if(!p){*size=0;return 1;}    DWORD cap=*size;*size=p->size;if(p->size&&(!data||cap<p->size))return 0;
     unsigned char *out=(unsigned char*)data;for(DWORD i=0;i<p->size;i++)out[i]=p->data[i];return 1;
 }
 

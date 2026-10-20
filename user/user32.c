@@ -66,6 +66,9 @@ typedef struct {
 
 static FBInfo g_fb;
 static u32 *g_front, g_pitch, g_fw, g_fh;
+/* Optional compositor clip used while moving a window. */
+static int u32_render_clip;
+static int u32_clip_x0, u32_clip_y0, u32_clip_x1, u32_clip_y1;
 /* Cached static Aero wallpaper. Dynamic window/taskbar content is composed over it. */
 #define U32_AERO_CACHE_W 1920u
 #define U32_AERO_CACHE_H 1080u
@@ -189,14 +192,30 @@ static void putpx(int x, int y, u32 col) {
     if (!g_front || x < 0 || y < 0 ||
         (u32)x >= g_fw || (u32)y >= g_fh)
         return;
-
+    if (u32_render_clip &&
+        (x < u32_clip_x0 || x >= u32_clip_x1 ||
+         y < u32_clip_y0 || y >= u32_clip_y1))
+        return;
     g_front[y * g_pitch + x] = col;
 }
 
 static void fill(int x, int y, int w, int h, u32 col) {
-    for (int yy = y; yy < y + h; yy++)
-        for (int xx = x; xx < x + w; xx++)
-            putpx(xx, yy, col);
+    if (w <= 0 || h <= 0) return;
+    int x1=x+w, y1=y+h;
+    if (u32_render_clip) {
+        if (x < u32_clip_x0) x=u32_clip_x0;
+        if (y < u32_clip_y0) y=u32_clip_y0;
+        if (x1 > u32_clip_x1) x1=u32_clip_x1;
+        if (y1 > u32_clip_y1) y1=u32_clip_y1;
+    }
+    if (x < 0) x=0;
+    if (y < 0) y=0;
+    if (x1 > (int)g_fw) x1=(int)g_fw;
+    if (y1 > (int)g_fh) y1=(int)g_fh;
+    if (x1 <= x || y1 <= y) return;
+    for (int yy=y; yy<y1; ++yy)
+        for (int xx=x; xx<x1; ++xx)
+            g_front[yy*g_pitch+xx]=col;
 }
 
 static void panel(int x, int y, int w, int h, u32 f, u32 b) {
@@ -548,8 +567,15 @@ static void compose(void) {
             u32_aero_bg_w = g_fw;
             u32_aero_bg_h = g_fh;
         } else {
-            for (u32 y = 0; y < g_fh; ++y)
-                for (u32 x = 0; x < g_fw; ++x)
+            u32 x0=0,y0=0,x1=g_fw,y1=g_fh;
+            if (u32_render_clip) {
+                x0=(u32)u32_clip_x0; y0=(u32)u32_clip_y0;
+                x1=(u32)u32_clip_x1; y1=(u32)u32_clip_y1;
+                if (x0>g_fw)x0=g_fw;if(y0>g_fh)y0=g_fh;
+                if (x1>g_fw)x1=g_fw;if(y1>g_fh)y1=g_fh;
+            }
+            for (u32 y=y0; y<y1; ++y)
+                for (u32 x=x0; x<x1; ++x)
                     g_front[y * g_pitch + x] = u32_aero_bg_cache[y * g_fw + x];
         }
     } else {
@@ -942,6 +968,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 msg->pt_x=ev.x;msg->pt_y=ev.y;
 
                 if (g_drag && (ev.btn & 1)) {
+                    int old_x=g_wnd.x, old_y=g_wnd.y;
                     g_wnd.x = ev.x - g_drag_ox;
                     g_wnd.y = ev.y - g_drag_oy;
 
@@ -951,9 +978,24 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     int rect[4] = {
                         g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h
                     };
-
                     sy3(SYS_WmRect, (u64)rect, 0, 0);
+
+                    /* Redraw only the union of old/new window bounds and
+                     * both cursor positions. This restores exposed wallpaper,
+                     * redraws intersecting desktop elements, and preserves
+                     * the pixels outside the affected area. */
+                    int x0=old_x, y0=old_y, x1=old_x+g_wnd.w+8, y1=old_y+g_wnd.h+12;
+                    int nx0=g_wnd.x, ny0=g_wnd.y, nx1=g_wnd.x+g_wnd.w+8, ny1=g_wnd.y+g_wnd.h+12;
+                    if(nx0<x0)x0=nx0;if(ny0<y0)y0=ny0;
+                    if(nx1>x1)x1=nx1;if(ny1>y1)y1=ny1;
+                    int cx0=cur_ox<g_mx?cur_ox:g_mx, cy0=cur_oy<g_my?cur_oy:g_my;
+                    int cx1=(cur_ox>g_mx?cur_ox:g_mx)+16, cy1=(cur_oy>g_my?cur_oy:g_my)+16;
+                    if(cx0<x0)x0=cx0;if(cy0<y0)y0=cy0;
+                    if(cx1>x1)x1=cx1;if(cy1>y1)y1=cy1;
+                    u32_render_clip=1;
+                    u32_clip_x0=x0;u32_clip_y0=y0;u32_clip_x1=x1;u32_clip_y1=y1;
                     compose();
+                    u32_render_clip=0;
                 }
 
                 if (ev.type == 3) {

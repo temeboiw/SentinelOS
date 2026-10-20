@@ -111,8 +111,12 @@ __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWOR
     if(n==(u64)-1){k32_last_error=5;return 0;}
     k32_last_error=0;return 1;
 }
-__attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD p) {
-    (void)t;(void)p; return (LPVOID)sy3(SYS_Alloc, (u64)a, sz, 0);
+__attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a,u64 sz,DWORD t,DWORD p) {
+    if(!sz||(t&0x3000u)!=0x3000u){k32_last_error=87;return 0;}
+    if(p!=0x02u&&p!=0x04u&&p!=0x20u&&p!=0x40u){k32_last_error=50;return 0;}
+    LPVOID result=(LPVOID)sy3(SYS_Alloc,(u64)a,sz,p);
+    if(!result){k32_last_error=8;return 0;}
+    k32_last_error=0;return result;
 }
 __attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, void *sec, DWORD d, DWORD f, HANDLE t) {
     (void)a;(void)s;(void)sec;(void)d;(void)f;(void)t;
@@ -274,7 +278,12 @@ __attribute__((dllexport)) BOOL VirtualProtect(LPVOID address,u64 size,DWORD pro
     if(!prior){k32_last_error=87;return 0;}
     *old=(DWORD)prior;k32_last_error=0;return 1;
 }
-__attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address,void *info,K32_SIZE_T len) { (void)address;(void)info;(void)len;k32_last_error=50;return 0; }
+__attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address,void *info,K32_SIZE_T len) {
+    if(!info||len<48){k32_last_error=87;return 0;}
+    u64 n=sy3(29,(u64)address,(u64)info,len);
+    if(!n){k32_last_error=87;return 0;}
+    k32_last_error=0;return n;
+}
 __attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
     DWORD n=0;while(k32_current_dir[n])n++;
     if(!out||!cap)return n+1;

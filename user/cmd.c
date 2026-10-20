@@ -129,8 +129,8 @@ static void redraw_prompt(void) {
     /* Typing changes only the prompt row. Do not invalidate the entire client
        area: USER32 composes the desktop behind every invalidated pixel. */
     if (g_invalidate) {
-        CMD_RECT dirty = { 0, 40 + g_line_count * 16,
-                           640, 40 + (g_line_count + 1) * 16 };
+        CMD_RECT dirty = { 0, 44 + g_line_count * 16,
+                           680, 44 + (g_line_count + 1) * 16 };
         g_invalidate(g_window, &dirty, 0);
     }
 }

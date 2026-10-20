@@ -490,8 +490,10 @@ static int k32_sync_ready(K32_SYNC_OBJECT *o){
     if(o->type==2)return o->owner==0||o->owner==(int)GetCurrentThreadId();
     if(o->type==4&&o->timer_active&&GetTickCount64()>=o->due_tick) {
         o->signaled=1;
-        if(o->period) { unsigned long long now=GetTickCount64();do{o->due_tick+=o->period;}while(o->due_tick<=now&&o->due_tick<=~0ULL-o->period); }
-        else o->timer_active=0;
+        if(o->period) {
+            unsigned long long now=GetTickCount64();
+            do { if(o->due_tick>~0ULL-o->period){o->timer_active=0;break;}o->due_tick+=o->period; } while(o->due_tick<=now);
+        } else o->timer_active=0;
     }
     return o->signaled;
 }
@@ -1322,13 +1324,13 @@ __attribute__((dllexport)) BOOL SetWaitableTimer(HANDLE timer,const K32_LARGE_IN
         K32_FILETIME nowft;GetSystemTimeAsFileTime(&nowft);
         unsigned long long now=((unsigned long long)nowft.dwHighDateTime<<32)|nowft.dwLowDateTime;
         unsigned long long target=(unsigned long long)signed_due;
-        delay=target>now?(target-now+9999ULL)/10000ULL:0;
+        if(target>now){unsigned long long delta=target-now;delay=delta/10000ULL+(delta%10000ULL!=0);}else delay=0;
     }
     unsigned long long now=GetTickCount64();o->due_tick=now>~0ULL-delay?~0ULL:now+delay;
     o->period=(DWORD)period;o->timer_active=1;o->signaled=0;k32_last_error=0;return 1;
 }
 
-__attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){K32_SYNC_OBJECT *o=k32_sync_get(timer);if(!o||o->type!=4){k32_last_error=6;return 0;}o->timer_active=0;k32_last_error=0;return 1;}
+__attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){K32_SYNC_OBJECT *o=k32_sync_get(timer);if(!o||o->type!=4){k32_last_error=6;return 0;}o->timer_active=0;o->signaled=0;k32_last_error=0;return 1;}
 
 __attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){
     char narrow[260]; DWORD i=0;

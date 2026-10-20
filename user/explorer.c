@@ -25,6 +25,8 @@ typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef void (*DrawTaskbar_t)(void);
 typedef int (*InvalidateRect_t)(void *, void *, int);
 typedef int (*UpdateWindow_t)(void *);
+typedef void (*BeginRedrawBatch_t)(void);
+typedef void (*EndRedrawBatch_t)(void);
 
 static CreateWindowExA_t pCreate;
 static ShowWindow_t pShow;
@@ -35,6 +37,8 @@ static TextOutA_t pText;
 static DrawTaskbar_t pBar;
 static InvalidateRect_t pInv;
 static UpdateWindow_t pUpd;
+static BeginRedrawBatch_t pBeginBatch;
+static EndRedrawBatch_t pEndBatch;
 
 static char g_search[32];
 static int g_search_len;
@@ -59,6 +63,7 @@ static int equals_ci(const char *a, const char *b) {
 }
 
 static void redraw_desktop(void **hwnd) {
+    if (pBeginBatch) pBeginBatch();
     *hwnd = pCreate
         ? pCreate(0, "Desktop", "Desktop", 0,
                   0, 0, 1, 1, 0, 0, 0, 0)
@@ -77,6 +82,7 @@ static void redraw_desktop(void **hwnd) {
     if (pBar) pBar();
     if (pInv) pInv(0, 0, 1);
     if (pUpd) pUpd(*hwnd);
+    if (pEndBatch) pEndBatch();
 }
 
 static void draw_search(void *hwnd) {
@@ -172,6 +178,8 @@ void explorer_main(void) {
     pBar    = (DrawTaskbar_t)NtGetProcAddress(u32n, "DrawTaskbar");
     pInv    = (InvalidateRect_t)NtGetProcAddress(u32n, "InvalidateRect");
     pUpd    = (UpdateWindow_t)NtGetProcAddress(u32n, "UpdateWindow");
+    pBeginBatch = (BeginRedrawBatch_t)NtGetProcAddress(u32n, "BeginRedrawBatch");
+    pEndBatch = (EndRedrawBatch_t)NtGetProcAddress(u32n, "EndRedrawBatch");
 
     if (!pGet) {
         NtWriteConsole("explorer: no user32 keyboard API\n");

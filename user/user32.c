@@ -537,6 +537,13 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
+    /* Remember whether the caller supplied a dirty-region clip. Cursor
+     * save/restore must not write outside that region: doing so restores
+     * stale framebuffer pixels over freshly rendered text during rapid
+     * mouse movement and leaves glyph fragments after a window closes. */
+    int explicit_clip = u32_render_clip;
+    if (!explicit_clip) cursor_restore();
+
     /* Ordinary app redraws are clipped to their own window. The desktop
      * process owns full-screen composition; explicit dirty clips are kept. */
     int auto_clip = 0;
@@ -583,8 +590,6 @@ static void compose(void) {
             }
         }
     }
-
-    cursor_restore();
 
     /* Stage 1: generate the expensive gradient/water wallpaper only when
      * the framebuffer dimensions change. Later compositions restore its
@@ -733,12 +738,15 @@ static void compose(void) {
     }
 
     draw_taskbar();
-    cursor_save_draw(g_mx, g_my);
     if (auto_clip) {
         u32_render_clip=0;
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
+    /* Only full compositions may move the software cursor. Dirty repaints
+     * leave its saved-under pixels untouched instead of restoring a stale
+     * cursor background across the clipped rectangle. */
+    if (!explicit_clip) cursor_save_draw(g_mx, g_my);
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is

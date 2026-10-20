@@ -18,7 +18,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -73,6 +73,9 @@ static WINDOW g_wnd;
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;
 static int u32_msg_time;\nstatic int u32_last_msg_time;
+typedef struct { void *hwnd; unsigned long long id; unsigned int interval; unsigned long long next_due; void *callback; int used; } U32_TIMER;
+static U32_TIMER u32_timers[16];
+static unsigned long long u32_tick_now(void) { u64 t=sy3(SYS_GetTickCount,0,0,0); return t==(u64)-1?0:t; }
 static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
@@ -118,6 +121,20 @@ static BOOL u32_msg_peek(MSG *msg, int remove) {
         u32_msg_count--;
     }
     return 1;
+}
+static void u32_pump_timers(void) {
+    unsigned long long now=u32_tick_now();
+    if(!now)return;
+    for(int i=0;i<16;i++) {
+        U32_TIMER *t=&u32_timers[i];
+        if(!t->used||now<t->next_due)continue;
+        MSG m={0};m.hwnd=(u32)(u64)t->hwnd;m.message=0x0113u;m.wParam=t->id;m.lParam=(i64)t->callback;
+        m.time=(u32)now;m.pt_x=g_mx;m.pt_y=g_my;
+        if(u32_msg_push(&m)) {
+            unsigned long long missed=(now-t->next_due)/t->interval;
+            t->next_due+=(missed+1ULL)*t->interval;
+        } else t->next_due=now+t->interval;
+    }
 }
 
 #define COL_BG       0xFF0D1117
@@ -743,7 +760,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     if (!g_front) ensure_fb();
 
     for (;;) {
-        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
+        u32_pump_timers();\n        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
@@ -840,6 +857,11 @@ BOOL TranslateMessage(const MSG *m) {
 __attribute__((dllexport))
 i64 DispatchMessageA(const MSG *m) {
     if (!m || m->message == 0x0012) return 0;
+    if(m->message==0x0113u && m->lParam) {
+        typedef void (*U32_TIMERPROC)(void *,unsigned int,unsigned long long,unsigned long);
+        ((U32_TIMERPROC)(u64)m->lParam)((void *)(u64)m->hwnd,m->message,m->wParam,m->time);
+        return 0;
+    }
     if (!u32_wnd_proc)
         return (i64)DefWindowProcA((void *)(u64)m->hwnd, m->message, m->wParam, m->lParam);
     typedef i64 (*U32_WNDPROC)(void *, unsigned int, u64, i64);
@@ -1066,7 +1088,7 @@ __attribute__((dllexport)) BOOL PostMessageA(void *hwnd, U32_UINT msg, U32_WPARA
 }
 __attribute__((dllexport)) BOOL PeekMessageA(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max, U32_UINT remove) {
     if (!msg) return 0;
-    if (!u32_msg_peek(msg, 0)) return 0;
+    u32_pump_timers();\n    if (!u32_msg_peek(msg, 0)) return 0;
     if (hwnd && msg->hwnd != (u32)(u64)hwnd) return 0;
     if ((min || max) && (msg->message < min || msg->message > max)) return 0;
     if (remove & 1u) u32_msg_peek(msg, 1);
@@ -1128,9 +1150,27 @@ __attribute__((dllexport)) int GetSystemMetrics(int index) {
     return 0;
 }
 __attribute__((dllexport)) unsigned long long SetTimer(void *hwnd, unsigned long long id, unsigned int ms, void *callback) {
-    (void)hwnd; (void)ms; (void)callback; return id ? id : 1;
+    if(hwnd&&!IsWindow(hwnd))return 0;
+    if(ms==0)ms=1;
+    int slot=-1;
+    if(id)for(int i=0;i<16;i++)if(u32_timers[i].used&&u32_timers[i].hwnd==hwnd&&u32_timers[i].id==id){slot=i;break;}
+    if(!id) {
+        for(unsigned long long candidate=1;candidate<0xFFFFFFFFULL;candidate++) {
+            int taken=0;for(int i=0;i<16;i++)if(u32_timers[i].used&&u32_timers[i].hwnd==hwnd&&u32_timers[i].id==candidate){taken=1;break;}
+            if(!taken){id=candidate;break;}
+        }
+    }
+    if(slot<0)for(int i=0;i<16;i++)if(!u32_timers[i].used){slot=i;break;}
+    if(slot<0||!id)return 0;
+    unsigned long long now=u32_tick_now();
+    u32_timers[slot].hwnd=hwnd;u32_timers[slot].id=id;u32_timers[slot].interval=ms;
+    u32_timers[slot].next_due=now+ms;u32_timers[slot].callback=callback;u32_timers[slot].used=1;
+    return id;
 }
-__attribute__((dllexport)) BOOL KillTimer(void *hwnd, unsigned long long id) { (void)hwnd; (void)id; return 1; }
+__attribute__((dllexport)) BOOL KillTimer(void *hwnd, unsigned long long id) {
+    for(int i=0;i<16;i++)if(u32_timers[i].used&&u32_timers[i].hwnd==hwnd&&u32_timers[i].id==id){u32_timers[i].used=0;u32_timers[i].callback=0;return 1;}
+    return 0;
+}
 __attribute__((dllexport)) void *GetDlgItem(void *dlg,int id){if(!IsWindow(dlg)||id<0)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);return c?(void *)(unsigned long long)(0x20000u+(unsigned)id):0;}
 __attribute__((dllexport)) BOOL SetDlgItemTextA(void *dlg,int id,LPCSTR text){if(!IsWindow(dlg)||id<0||!text)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;int i=0;while(text[i]&&i<127){c->text[i]=text[i];i++;}c->text[i]=0;return 1;}
 __attribute__((dllexport)) unsigned int GetDlgItemTextA(void *dlg,int id,LPSTR out,int cap){if(!out||cap<=0||!IsWindow(dlg)||id<0)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);if(!c){out[0]=0;return 0;}int i=0;while(c->text[i]&&i+1<cap){out[i]=c->text[i];i++;}out[i]=0;return i;}

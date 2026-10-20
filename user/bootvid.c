@@ -14,7 +14,7 @@ void bootvid_main(void){
   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-60,(int)f.h/2-22,"Starting system",0xFFB7D7E7,1);
   static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13},dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
   int cx=f.w/2,cy=f.h/2+22;u64 start=sy3(24,0,0,0);if(start==(u64)-1)start=0;
-  for(u32 frame=0;frame<100;frame++){rect(fb,f.pitch,f.w,f.h,cx-34,cy-34,68,68,0xFF0B2B3D);for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}(void)sy3(SYS_Yield,0,0,0);u64 now=sy3(24,0,0,0);if(now!=(u64)-1&&now-start>=1500)break;}
+  for(u32 frame=0;frame<100;frame++){for(int yy=cy-34;yy<cy+34;yy++){u32 bg=mix(0xFF071725,0xFF147AA4,(u32)((u64)(yy<0?0:yy)*255/(f.h>1?f.h-1:1)));rect(fb,f.pitch,f.w,f.h,cx-34,yy,68,1,bg);}for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}(void)sy3(SYS_Yield,0,0,0);u64 now=sy3(24,0,0,0);if(now!=(u64)-1&&now-start>=1500)break;}
   u64 n=(u64)f.pitch*f.h;
   if(f.w<=1920&&f.h<=1080&&n<=1920ULL*1080ULL){for(u64 i=0;i<n;i++)saved[i]=fb[i];for(u32 step=16;step>0;step--){u32 a=(step-1)*255/16;for(u32 y=0;y<f.h;y++)for(u32 x=0;x<f.w;x++){u64 i=(u64)y*f.pitch+x;u32 c=saved[i];fb[i]=0xFF000000|((((c>>16)&255)*a/255)<<16)|((((c>>8)&255)*a/255)<<8)|((c&255)*a/255);}u64 t=sy3(24,0,0,0);if(t!=(u64)-1)while(sy3(24,0,0,0)-t<12)(void)sy3(SYS_Yield,0,0,0);}}
   else rect(fb,f.pitch,f.w,f.h,0,0,f.w,f.h,0xFF000000);

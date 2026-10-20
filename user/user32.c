@@ -66,6 +66,11 @@ typedef struct {
 
 static FBInfo g_fb;
 static u32 *g_front, g_pitch, g_fw, g_fh;
+/* Cached static Aero wallpaper. Dynamic window/taskbar content is composed over it. */
+#define U32_AERO_CACHE_W 1920u
+#define U32_AERO_CACHE_H 1080u
+static u32 u32_aero_bg_cache[U32_AERO_CACHE_W * U32_AERO_CACHE_H];
+static u32 u32_aero_bg_w, u32_aero_bg_h;
 static int g_mx = 640, g_my = 400;
 typedef struct { int x,y; unsigned int time; unsigned long long extra; } U32_MOUSEMOVEPOINT;
 static U32_MOUSEMOVEPOINT u32_mouse_history[32];
@@ -528,7 +533,28 @@ static void compose(void) {
     }
 
     cursor_restore();
-    aero_desktop();
+
+    /* Stage 1: generate the expensive gradient/water wallpaper only when
+     * the framebuffer dimensions change. Later compositions restore its
+     * cached pixels before drawing dynamic UI on top. Oversized modes retain
+     * the original rendering path rather than writing past the cache. */
+    if (g_fw > 0 && g_fh > 0 &&
+        g_fw <= U32_AERO_CACHE_W && g_fh <= U32_AERO_CACHE_H) {
+        if (u32_aero_bg_w != g_fw || u32_aero_bg_h != g_fh) {
+            aero_desktop();
+            for (u32 y = 0; y < g_fh; ++y)
+                for (u32 x = 0; x < g_fw; ++x)
+                    u32_aero_bg_cache[y * g_fw + x] = g_front[y * g_pitch + x];
+            u32_aero_bg_w = g_fw;
+            u32_aero_bg_h = g_fh;
+        } else {
+            for (u32 y = 0; y < g_fh; ++y)
+                for (u32 x = 0; x < g_fw; ++x)
+                    g_front[y * g_pitch + x] = u32_aero_bg_cache[y * g_fw + x];
+        }
+    } else {
+        aero_desktop();
+    }
 
     /* Floating glass identity plaque. */
     round_fill(12,10,182,45,9,0xAFFFFFFF);

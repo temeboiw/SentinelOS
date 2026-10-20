@@ -1,6 +1,12 @@
 #pragma once
+#ifdef EXT4K_TEST
+#include <stdint.h>
+int ext4k_test_read(uint64_t off, void *dst, uint64_t len);
+int ext4k_test_write(uint64_t off, const void *src, uint64_t len);
+#else
 #include "ata.h"
 #include "virtio_blk.h"
+#endif
 
 #define E16(p,o) (*(uint16_t *)((uint8_t *)(p) + (o)))
 #define E32(p,o) (*(uint32_t *)((uint8_t *)(p) + (o)))
@@ -17,15 +23,22 @@ typedef struct {
 } Ext4k;
 
 static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
+#ifdef EXT4K_TEST
+    return ext4k_test_read(fs->part_off + off, dst, len);
+#else
     if (vb_ok) return blk_read(fs->part_off + off, dst, len);
     return ata_read(fs->part_off + off, dst, len);
+#endif
 }
 
-/* Low-level write primitive for future ext4 mutation routines.
- * This deliberately does not allocate ext4 blocks or modify directory entries. */
+/* Low-level write primitive; mutation helpers update allocation metadata too. */
 static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
+#ifdef EXT4K_TEST
+    return ext4k_test_write(fs->part_off + off, src, len);
+#else
     if (vb_ok) return blk_write(fs->part_off + off, src, len);
     return ata_write(fs->part_off + off, src, len);
+#endif
 }
 
 static int e4_mount(Ext4k *fs, uint64_t part_lba) {

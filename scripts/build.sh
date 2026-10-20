@@ -1505,7 +1505,12 @@ dd if="$B/esp.fat" \
 
 rm -f "$B/esp.fat"
 
-FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode,^dir_index,^orphan_file"
+FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode,^dir_index"
+# Newer e2fsprogs may enable orphan_file by default. Disable it only when
+# this mke2fs understands the feature name, keeping older build hosts working.
+if mke2fs -O '^orphan_file' -n -t ext4 -b 4096 /dev/null 1024 >/dev/null 2>&1; then
+  FEATS+=",^orphan_file"
+fi
 
 if ! mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
   -d "$B/rootfs" \

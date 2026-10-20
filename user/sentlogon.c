@@ -124,16 +124,16 @@ static void login_fade_in(u32 *fb,LogonFB *f) {
     u64 count=(u64)f->pitch*f->h;
     if(f->w>1920||f->h>1080||count>1920ULL*1080ULL)return;
     for(u64 i=0;i<count;i++)original[i]=fb[i];
-    for(u32 step=0;step<=16;step++) {
-        u32 a=step*255/16;
+    /* Five-frame fade keeps the login transition responsive on low-end systems. */
+    for(u32 step=0;step<=4;step++) {
+        u32 a=step*255/4;
         for(u32 y=0;y<f->h;y++)for(u32 x=0;x<f->w;x++) {
             u64 i=(u64)y*f->pitch+x;u32 c=original[i];
             u32 r=((c>>16)&255)*a/255,g=((c>>8)&255)*a/255,b=(c&255)*a/255;
             fb[i]=0xFF000000|(r<<16)|(g<<8)|b;
         }
         u64 begin=sy3(24,0,0,0);
-        if(begin!=(u64)-1)while(sy3(24,0,0,0)-begin<18)(void)sy3(SYS_Yield,0,0,0);
-        else for(volatile u32 spin=0;spin<250000;spin++){}
+        if(begin!=(u64)-1)while(sy3(24,0,0,0)-begin<8)(void)sy3(SYS_Yield,0,0,0);
     }
 }
 /* Graphical session-start screen. This runs in framebuffer mode (not UEFI text).

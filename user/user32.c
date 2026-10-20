@@ -170,6 +170,25 @@ static void cursor_restore(void) {
 }
 
 static void cursor_save_draw(int x, int y) {
+    /* Classic 16x16 arrow: black outline, white body, blue inner highlight. */
+    static const char shape[16][17] = {
+        "#...............",
+        "##..............",
+        "#w#.............",
+        "#ww#............",
+        "#www#...........",
+        "#wwww#..........",
+        "#wwwww#.........",
+        "#wwwwww#........",
+        "#wwwwwww#.......",
+        "#wwwwwwww#......",
+        "#wwww#####......",
+        "#ww#ww#.........",
+        "#w#.#ww#........",
+        "##...#ww#.......",
+        "#.....#ww#......",
+        "......##........"
+    };
     if (!g_front || !g_pitch) return;
 
     cursor_restore();
@@ -179,19 +198,16 @@ static void cursor_save_draw(int x, int y) {
     for (int j = 0; j < 16; j++) {
         for (int i = 0; i < 16; i++) {
             int yy = y + j, xx = x + i;
-
+            char p = shape[j][i];
             if (yy < 0 || (u32)yy >= g_fh ||
                 xx < 0 || (u32)xx >= g_fw) {
                 cur_under[j][i] = COL_BG;
                 continue;
             }
-
             cur_under[j][i] = g_front[yy * g_pitch + xx];
-
-            if (i == 0 || j == 0 || i == 15 || j == 15)
-                g_front[yy * g_pitch + xx] = COL_WHITE;
-            else if (i < 3 || j < 3)
-                g_front[yy * g_pitch + xx] = COL_ACCENT;
+            if (p == '#') g_front[yy * g_pitch + xx] = 0xFF000000;
+            else if (p == 'w') g_front[yy * g_pitch + xx] = COL_WHITE;
+            else if (p == '+') g_front[yy * g_pitch + xx] = COL_ACCENT;
         }
     }
 

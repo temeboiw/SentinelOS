@@ -48,7 +48,7 @@ struct virtq_used_elem {
 };
 struct virtq_used {
     uint16_t flags;
-    uint16_t idx;
+    volatile uint16_t idx; /* device-updated completion index; poll with volatile loads */
     struct virtq_used_elem ring[16];
 };
 struct virtio_blk_req {

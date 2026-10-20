@@ -25,6 +25,24 @@ static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
 static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0;
 typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
+typedef struct {
+    unsigned char data[4096];
+    unsigned int read_pos, write_pos, used;
+    int read_open, write_open;
+} K32_PIPE;
+static K32_PIPE k32_pipes[16];
+#define K32_PIPE_BASE 0x50500000ULL
+static int k32_pipe_decode(HANDLE h, unsigned int *slot, unsigned int *side) {
+    unsigned long long v=(unsigned long long)h;
+    if(v<K32_PIPE_BASE+1 || v>K32_PIPE_BASE+32) return 0;
+    unsigned long long d=v-K32_PIPE_BASE-1;
+    if(slot)*slot=(unsigned int)(d/2);
+    if(side)*side=(unsigned int)(d&1);
+    return 1;
+}
+static HANDLE k32_pipe_handle(unsigned int slot,unsigned int side) {
+    return (HANDLE)(K32_PIPE_BASE+1ULL+(unsigned long long)slot*2ULL+side);
+}
 static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static DWORD k32_cursor_size=25; static unsigned short k32_console_attr=7;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
@@ -49,10 +67,25 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
 }
 __attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) { (void)n; return (HANDLE)1; }
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
-    (void)h;(void)ov;
+    (void)ov;
+    unsigned int slot,side;
+    if(k32_pipe_decode(h,&slot,&side)) {
+        K32_PIPE *p=&k32_pipes[slot];
+        if(side!=1 || !p->write_open || (!buf&&len)) { if(w)*w=0; k32_last_error=109; return 0; }
+        if(!p->read_open) { if(w)*w=0; k32_last_error=109; return 0; }
+        const unsigned char *src=(const unsigned char*)buf; DWORD n=0;
+        while(n<len && p->used<sizeof(p->data)) {
+            p->data[p->write_pos]=src[n++]; p->write_pos=(p->write_pos+1u)%sizeof(p->data); p->used++;
+        }
+        if(w)*w=n;
+        k32_last_error=(n==len)?0: 232;
+        return n!=0 || len==0;
+    }
+    if((h!=(HANDLE)1 && h!=(HANDLE)2) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
     u64 n = sy3(SYS_Write, 1, (u64)buf, len);
     if (w) *w = (DWORD)n;
-    return n != (u64)-1;
+    if(n==(u64)-1){k32_last_error=5;return 0;}
+    k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD p) {
     (void)t;(void)p; return (LPVOID)sy3(SYS_Alloc, (u64)a, sz, 0);
@@ -64,12 +97,35 @@ __attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, voi
 }
 __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD *rd, void *ov) {
     (void)ov;
+    unsigned int slot,side;
+    if(k32_pipe_decode(h,&slot,&side)) {
+        K32_PIPE *p=&k32_pipes[slot];
+        if(side!=0 || !p->read_open || (!buf&&len)) { if(rd)*rd=0; k32_last_error=6; return 0; }
+        if(!p->used) { if(rd)*rd=0; k32_last_error=p->write_open?232:109; return 0; }
+        unsigned char *dst=(unsigned char*)buf; DWORD n=0;
+        while(n<len && p->used) {
+            dst[n++]=p->data[p->read_pos]; p->read_pos=(p->read_pos+1u)%sizeof(p->data); p->used--;
+        }
+        if(rd)*rd=n;k32_last_error=0;return 1;
+    }
     i64 n = (i64)sy3(SYS_ReadFile, (u64)h, (u64)buf, len);
-    if (n < 0) return 0;
+    if (n < 0) { if(rd)*rd=0; k32_last_error=6; return 0; }
     if (rd) *rd = (DWORD)n;
-    return 1;
+    k32_last_error=0;return 1;
 }
-__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { return sy3(SYS_CloseFile, (u64)h, 0, 0) != 0; }
+__attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
+    unsigned int slot,side;
+    if(k32_pipe_decode(h,&slot,&side)) {
+        K32_PIPE *p=&k32_pipes[slot];
+        if(side==0) { if(!p->read_open){k32_last_error=6;return 0;} p->read_open=0; }
+        else { if(!p->write_open){k32_last_error=6;return 0;} p->write_open=0; }
+        if(!p->read_open&&!p->write_open){p->used=0;p->read_pos=p->write_pos=0;}
+        k32_last_error=0;return 1;
+    }
+    if(h==(HANDLE)1||h==(HANDLE)2){k32_last_error=6;return 0;}
+    if(sy3(SYS_CloseFile, (u64)h, 0, 0) == 0){k32_last_error=6;return 0;}
+    k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
     return (DWORD)sy3(SYS_QueryDir, index, (u64)name, (u64)max);
 }
@@ -459,12 +515,38 @@ __attribute__((dllexport)) BOOL GetFileAttributesExA(LPCSTR path,int level,void 
     }
     k32_last_error=0;return 1;
 }
-__attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *info) { if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+typedef struct { DWORD dwFileAttributes; K32_FILETIME ftCreationTime,ftLastAccessTime,ftLastWriteTime; DWORD dwVolumeSerialNumber,nFileSizeHigh,nFileSizeLow,nNumberOfLinks,nFileIndexHigh,nFileIndexLow; } K32_BY_HANDLE_FILE_INFORMATION;
+__attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *info) {
+    if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}
+    unsigned int slot,side;if(k32_pipe_decode(file,&slot,&side)){k32_last_error=50;return 0;}
+    K32_BY_HANDLE_FILE_INFORMATION *p=(K32_BY_HANDLE_FILE_INFORMATION*)info;
+    for(unsigned int i=0;i<sizeof(*p)/sizeof(DWORD);i++)((DWORD*)p)[i]=0;
+    DWORD high=0,low=GetFileSize(file,&high);
+    if(low==0xFFFFFFFFu && GetLastError()!=0)return 0;
+    p->dwFileAttributes=0x80u;p->nFileSizeHigh=high;p->nFileSizeLow=low;p->nNumberOfLinks=1;
+    unsigned long long id=(unsigned long long)file;p->nFileIndexHigh=(DWORD)(id>>32);p->nFileIndexLow=(DWORD)id;
+    k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) BOOL SetEndOfFile(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL GetOverlappedResult(HANDLE file, void *overlapped, DWORD *transferred, BOOL wait) { (void)file; (void)overlapped; (void)wait; if (transferred) *transferred=0; k32_last_error=997; return 0; }
 __attribute__((dllexport)) BOOL CancelIo(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) BOOL CreatePipe(HANDLE *readPipe,HANDLE *writePipe,void *security,DWORD size) { (void)security;(void)size;if(!readPipe||!writePipe){k32_last_error=87;return 0;}*readPipe=0;*writePipe=0;k32_last_error=50;return 0; }
-__attribute__((dllexport)) BOOL PeekNamedPipe(HANDLE pipe,void *buffer,DWORD cap,DWORD *read,DWORD *available,DWORD *left) { (void)buffer;(void)cap;if(read)*read=0;if(available)*available=0;if(left)*left=0;if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL CreatePipe(HANDLE *readPipe,HANDLE *writePipe,void *security,DWORD size) {
+    (void)security;
+    if(!readPipe||!writePipe){k32_last_error=87;return 0;}
+    for(unsigned int i=0;i<16;i++) if(!k32_pipes[i].read_open&&!k32_pipes[i].write_open) {
+        K32_PIPE *p=&k32_pipes[i];p->read_pos=p->write_pos=p->used=0;p->read_open=1;p->write_open=1;
+        *readPipe=k32_pipe_handle(i,0);*writePipe=k32_pipe_handle(i,1);
+        (void)size;k32_last_error=0;return 1;
+    }
+    *readPipe=0;*writePipe=0;k32_last_error=8;return 0;
+}
+__attribute__((dllexport)) BOOL PeekNamedPipe(HANDLE pipe,void *buffer,DWORD cap,DWORD *read,DWORD *available,DWORD *left) {
+    unsigned int slot,side;
+    if(!k32_pipe_decode(pipe,&slot,&side)||side!=0||!k32_pipes[slot].read_open){if(read)*read=0;if(available)*available=0;if(left)*left=0;k32_last_error=6;return 0;}
+    K32_PIPE *p=&k32_pipes[slot];DWORD n=cap<p->used?cap:p->used;
+    if(buffer&&n) { unsigned char *dst=(unsigned char*)buffer;for(DWORD i=0;i<n;i++)dst[i]=p->data[(p->read_pos+i)%sizeof(p->data)]; }
+    if(read)*read=n;if(available)*available=p->used;if(left)*left=0;k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) BOOL SetHandleInformation(HANDLE h,DWORD mask,DWORD flags){if(!h||h==INVALID_HANDLE_VALUE)return 0;for(int i=0;i<32;i++){if(k32_handle_flags[i].handle==h){k32_handle_flags[i].flags=(k32_handle_flags[i].flags&~mask)|(flags&mask);return 1;}}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=flags&mask;return 1;}return 0;}
 __attribute__((dllexport)) BOOL GetHandleInformation(HANDLE h,DWORD *flags){if(!h||h==INVALID_HANDLE_VALUE||!flags)return 0;for(int i=0;i<32;i++)if(k32_handle_flags[i].handle==h){*flags=k32_handle_flags[i].flags;return 1;}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=0;*flags=0;return 1;}return 0;}
 __attribute__((dllexport)) BOOL DuplicateHandle(HANDLE source_process,HANDLE source,HANDLE target_process,HANDLE *target,DWORD access,BOOL inherit,DWORD options){(void)access;(void)inherit;(void)options;if((source_process==GetCurrentProcess()||source_process==(HANDLE)1)&&(target_process==GetCurrentProcess()||target_process==(HANDLE)1)&&source&&target){*target=source;return 1;}k32_last_error=50;return 0;}

@@ -30,7 +30,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -196,10 +196,17 @@ __attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) {
 }
 __attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (void)attrs; if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
-    (void)file; if (high) *high=0; return 0xFFFFFFFFu;
+    if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0xFFFFFFFFu;}
+    u64 size=sy3(SYS_QueryFileSize,(u64)file,0,0);if((i64)size<0){k32_last_error=6;return 0xFFFFFFFFu;}
+    if(high)*high=(DWORD)(size>>32);k32_last_error=0;return (DWORD)size;
 }
 __attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG *high, DWORD method) {
-    (void)file; (void)distance; (void)method; if (high) *high=0; return 0xFFFFFFFFu;
+    if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0xFFFFFFFFu;}
+    long long offset;
+    if(high)offset=((long long)(int)*high<<32)|(unsigned int)distance;else offset=(int)distance;
+    u64 pos=sy3(SYS_SetFilePosition,(u64)file,(u64)offset,method);
+    if((i64)pos<0){k32_last_error=87;return 0xFFFFFFFFu;}
+    if(high)*high=(LONG)(pos>>32);k32_last_error=0;return (DWORD)pos;
 }
 __attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {

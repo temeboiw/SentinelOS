@@ -1990,6 +1990,7 @@ __attribute__((dllexport)) void *LoadBitmapA(void *instance,const char *name) {
     unsigned int colors=u32_bitmap_read32(data+32);if(!colors&&bpp<=8)colors=1u<<bpp;
     unsigned long long need=(unsigned long long)header+(bpp<=8?(unsigned long long)colors*4ULL:0ULL)+stride*rows;
     if(need>bytes)return 0;
+    for(int i=0;i<16;i++)if(u32_bitmap_resources[i].used&&u32_bitmap_resources[i].data==data)return &u32_bitmap_resources[i];
     for(int i=0;i<16;i++)if(!u32_bitmap_resources[i].used) {
         U32_BITMAP_RESOURCE *b=&u32_bitmap_resources[i];b->data=data;b->bytes=bytes;b->width=width;b->height=height<0?-height:height;b->bpp=(int)bpp;b->used=1;return b;
     }

@@ -715,10 +715,11 @@ void mainCRTStartup(void) {
      * Grow the total MSI buffer as needed. 16 MiB is only the maximum size
      * of each individual kernel allocation, not a limit on the whole package.
      * Keep allocating adjacent chunks until EOF or the allocator runs out of
-     * virtual/physical memory. The parser currently uses 32-bit file offsets.
+     * virtual/physical memory. File-read syscalls are capped at 1 MiB each.
+     * The parser currently uses 32-bit file offsets.
      */
     const u32 chunk_size=16u*1024u*1024u;
-    const u32 read_size=8u*1024u*1024u;
+    const u32 read_size=1024u*1024u;
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;
     u32 capacity=0, total=0;

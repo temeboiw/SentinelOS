@@ -74,8 +74,11 @@ static int e4_can_mutate(Ext4k *fs) {
         !fs->inode_count || !fs->blocks_count || !fs->blocks_per_group ||
         !fs->ipg || fs->ipg > fs->blksz*8u || (fs->blksz != 1024 && fs->blksz != 2048 &&
                      fs->blksz != 4096)) return 0;
-    if (fs->feature_incompat & ~0x10242u) return 0; /* filetype, extents, flex_bg, orphan_file */
-    if (fs->feature_compat & 0x4u) return 0; /* journal requires transactions */
+    /* Mutations require extent-backed files and plain 32-byte group
+       descriptors. Unknown incompat features are not safe to write around. */
+    if ((fs->feature_incompat & 0x42u) != 0x42u) return 0; /* FILETYPE + EXTENTS */
+    if (fs->feature_incompat & ~0x42u) return 0;
+    if (fs->feature_compat & 0x4u) return 0; /* journal needs transactions */
     if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u))
         return 0; /* gdt_csum, bigalloc, metadata_csum */
     return 1;

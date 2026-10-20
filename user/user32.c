@@ -689,6 +689,27 @@ static void compose(void) {
     cursor_save_draw(g_mx, g_my);
 }
 
+/* Recompose only a damaged screen rectangle. The static Aero wallpaper is
+ * restored from cache in this region, not regenerated across the framebuffer. */
+static void compose_region(int x0, int y0, int x1, int y1) {
+    int was_clipped = u32_render_clip;
+    int ox0 = u32_clip_x0, oy0 = u32_clip_y0;
+    int ox1 = u32_clip_x1, oy1 = u32_clip_y1;
+    if (was_clipped) {
+        if (ox0 < x0) x0 = ox0;
+        if (oy0 < y0) y0 = oy0;
+        if (ox1 > x1) x1 = ox1;
+        if (oy1 > y1) y1 = oy1;
+    }
+    u32_render_clip = 1;
+    u32_clip_x0 = x0; u32_clip_y0 = y0;
+    u32_clip_x1 = x1; u32_clip_y1 = y1;
+    compose();
+    u32_render_clip = was_clipped;
+    u32_clip_x0 = ox0; u32_clip_y0 = oy0;
+    u32_clip_x1 = ox1; u32_clip_y1 = oy1;
+}
+
 static void on_click(int x, int y) {
     int h = (int)g_fh;
     int ty = h - 44;
@@ -976,7 +997,8 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_search_text[g_search_len] = 0;
                         }
 
-                        compose();
+                        int h = (int)g_fh;
+                        compose_region(18, h - 178, 188, h - 152);
                         continue;
                     }
 
@@ -990,7 +1012,8 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_search_len < 22) {
                         g_search_text[g_search_len++] = key;
                         g_search_text[g_search_len] = 0;
-                        compose();
+                        int h = (int)g_fh;
+                        compose_region(18, h - 178, 188, h - 152);
                     }
 
                     continue;

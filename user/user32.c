@@ -12,6 +12,7 @@ typedef long long i64;
 
 i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
 int GetWindowTextLengthA(void *hwnd);
+BOOL IsWindow(void *hwnd);
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,

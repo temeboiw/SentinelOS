@@ -845,7 +845,9 @@ static void u32_menu_text(char *out, unsigned int cap, LPCSTR text) {
 static int u32_menu_insert(void *handle, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) {
     U32_MENUDATA *m=u32_menu_data(handle); if (!m || m->count>=16) return 0;
     int bypos=(flags&0x0400u)!=0;
-    int at=bypos ? (position<= (unsigned int)m->count ? (int)position : -1) : (position==0xFFFFFFFFu ? m->count : u32_menu_index(m,position,0));
+    int at=position==0xFFFFFFFFu ? m->count :
+           (bypos ? (position<= (unsigned int)m->count ? (int)position : -1)
+                  : u32_menu_index(m,position,0));
     if (at<0 || at>m->count) return 0;
     for (int i=m->count;i>at;i--) m->items[i]=m->items[i-1];
     U32_MENUITEM *it=&m->items[at]; it->flags=flags; it->id=id; it->submenu=(flags&0x0010u)?(void *)id:0;
@@ -868,7 +870,6 @@ static int u32_show_cursor_count;
 static void *u32_capture;
 static void *u32_focus;
 static void *u32_active;
-static unsigned int u32_next_menu = 10;
 
 __attribute__((dllexport)) BOOL GetClientRect(void *hwnd, U32_RECT *r) {
     (void)hwnd; if (!r || !g_wnd.visible) return 0;

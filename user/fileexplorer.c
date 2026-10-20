@@ -43,7 +43,8 @@ typedef struct {
     int x, y;
 } MSG;
 
-#define MAX_ENT 48
+#define MAX_ENT 256
+#define VISIBLE_ROWS 28
 static char g_names[MAX_ENT][64];
 static int g_isdir[MAX_ENT];
 static int g_count;
@@ -51,6 +52,7 @@ static char g_path[128];
 static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
+static int g_scroll = 0;
 
 static int ends_with(const char *n, const char *ext);
 
@@ -59,7 +61,12 @@ static int ends_with(const char *n, const char *ext);
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     pText(0, 0, 0, g_path, -1);
     pText(0, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
-    for (int i = 0; i < g_count; i++) {
+    for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
+        int i = g_scroll + visible;
+        if (i >= g_count) {
+            pText(0, 0, 2 + visible, " ", -1);
+            continue;
+        }
         char line[80];
         int p = 0;
         line[p++] = (i == g_hover_row) ? '>' : ' ';
@@ -76,10 +83,8 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         }
         for (int j = 0; g_names[i][j] && p < 78; j++) line[p++] = g_names[i][j];
         line[p] = 0;
-        pText(0, 0, 2 + i, line, -1);
+        pText(0, 0, 2 + visible, line, -1);
     }
-    for (int i = g_count; i < 28; i++)
-        pText(0, 0, 2 + i, " ", -1);
     if (pInv) pInv(0, 0, 1);
 }
 
@@ -104,6 +109,7 @@ static int ends_with(const char *n, const char *ext) {
 static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
     g_count = 0;
     g_hover_row = -1;
+    g_scroll = 0;
 
     /* Always provide a parent-directory entry, even if the VFS omits it. */
     g_names[g_count][0] = '.';
@@ -176,11 +182,36 @@ void mainCRTStartup(void) {
         if (msg.message == 0x0200) {
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
-            if (row < 0 || row >= g_count) row = -1;
+            if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= g_count) row = -1;
+            else row += g_scroll;
             if (row != g_hover_row) {
                 g_hover_row = row;
                 draw_rows(pText, pInv);
             }
+        }
+
+        /* Mouse wheel and arrow/Page keys scroll the visible directory rows. */
+        if (msg.message == 0x020A) {
+            int delta = (int)((msg.wParam >> 16) & 0xFFFF);
+            if (delta & 0x8000) delta -= 0x10000;
+            if (delta > 0) g_scroll -= 3;
+            else if (delta < 0) g_scroll += 3;
+            if (g_scroll < 0) g_scroll = 0;
+            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            g_hover_row = -1;
+            draw_rows(pText, pInv);
+        }
+        if (msg.message == 0x0100) {
+            if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
+            if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;
+            if (msg.wParam == 0x21) g_scroll -= VISIBLE_ROWS;
+            if (msg.wParam == 0x22) g_scroll += VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            g_hover_row = -1;
+            draw_rows(pText, pInv);
         }
 
         if (msg.message == 0x0201) {
@@ -191,7 +222,8 @@ void mainCRTStartup(void) {
              */
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
-            if (row >= 0 && row < g_count) {
+            if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
+                row += g_scroll;
                 print("fileexplorer: click ");
                 print(g_names[row]);
                 print("\n");

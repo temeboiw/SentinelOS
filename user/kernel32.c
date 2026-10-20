@@ -1023,7 +1023,32 @@ __attribute__((dllexport)) BOOL GetVersionExA(K32_OSVERSIONINFOA *v){if(!v||v->d
 typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; K32_WCHAR szCSDVersion[128]; } K32_OSVERSIONINFOW;
 __attribute__((dllexport)) BOOL GetVersionExW(K32_OSVERSIONINFOW *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
 
-__attribute__((dllexport)) BOOL VerifyVersionInfoA(const void *v,DWORD type,unsigned long long mask){(void)v;(void)type;(void)mask;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL VerifyVersionInfoA(const void *v,DWORD type,unsigned long long mask){
+    typedef struct { DWORD size,major,minor,build,platform; } K32_VERSION_PREFIX;
+    const K32_VERSION_PREFIX *want=(const K32_VERSION_PREFIX*)v;
+    if(!want||want->size<sizeof(K32_VERSION_PREFIX)){k32_last_error=87;return 0;}
+    const DWORD actual[4]={1,0,1,2};
+    const DWORD requested[4]={want->major,want->minor,want->build,want->platform};
+    const DWORD flags[4]={0x2u,0x1u,0x4u,0x8u};
+    const unsigned int shifts[4]={0,3,21,24};
+    for(unsigned int i=0;i<4;i++){
+        if(!(type&flags[i]))continue;
+        unsigned int op=(unsigned int)((mask>>shifts[i])&7u);
+        int ok=0;
+        switch(op){
+            case 1: ok=actual[i]==requested[i];break;
+            case 2: ok=actual[i]>requested[i];break;
+            case 3: ok=actual[i]>=requested[i];break;
+            case 4: ok=actual[i]<requested[i];break;
+            case 5: ok=actual[i]<=requested[i];break;
+            case 6: ok=(actual[i]&requested[i])==requested[i];break;
+            case 7: ok=(actual[i]&requested[i])!=0;break;
+            default: k32_last_error=87;return 0;
+        }
+        if(!ok){k32_last_error=1150;return 0;}
+    }
+    k32_last_error=0;return 1;
+}
 
 __attribute__((dllexport)) BOOL VerifyVersionInfoW(const void *v,DWORD type,unsigned long long mask){return VerifyVersionInfoA(v,type,mask);}
 

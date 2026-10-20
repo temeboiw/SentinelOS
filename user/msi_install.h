@@ -181,6 +181,11 @@ static int msi_set_dir_override(const char *id,const char *path) {
     if(!id || !id[0] || !path || path[0]!='C' || path[1]!=':' || path[2]!='\\') return 0;
     u32 n=0;while(path[n] && n+1<512)n++;if(path[n])return 0;
     for(u32 i=0;i<n;i++) if(path[i]=='['||path[i]==']')return 0;
+    for(u32 i=3;i<n;) {
+        while(i<n && (path[i]=='\\'||path[i]=='/'))i++;
+        u32 start=i; while(i<n && path[i]!='\\' && path[i]!='/')i++;
+        if(i-start==2 && path[start]=='.' && path[start+1]=='.')return 0;
+    }
     int slot=msi_find_dir_override(id);
     if(slot<0){if(msi_dir_override_count>=128)return 0;slot=(int)msi_dir_override_count++;}
     u32 j=0;while(id[j] && j+1<sizeof msi_dir_overrides[0].id){msi_dir_overrides[slot].id[j]=id[j];j++;}
@@ -314,6 +319,7 @@ static int msi_resolve_dir(u32 idx,u32 depth) {
     if(*s) return 0; leaf[n]=0;
     char *pipe=0; for(u32 i=0;leaf[i];i++) if(leaf[i]=='|') pipe=leaf+i;
     if(pipe) { u32 i=0; while(pipe[1+i] && i+1<sizeof leaf){leaf[i]=pipe[1+i];i++;} leaf[i]=0; }
+    if(same_name(leaf,"..")) return 0;
     if(!leaf[0] || same_name(leaf,".")) {
         u32 i=0; while(parent_path[i] && i+1<sizeof d->path){d->path[i]=parent_path[i];i++;}
         if(parent_path[i]) return 0; d->path[i]=0;

@@ -77,6 +77,10 @@ int main(void) {
     ok &= check(block == 18, "first free data block allocated");
     ok &= check((test_disk[3u * 1024u + 2] & 0x02u) != 0, "block bitmap bit set");
     ok &= check(E16(gdt, 12) == 110 && E32(sb, 12) == 237, "free block counters updated");
+    uint64_t block2 = e4_alloc_block(&fs);
+    ok &= check(block2 == 19, "next adjacent data block allocated");
+    ok &= check(E16(gdt, 12) == 109 && E32(sb, 12) == 236,
+                "second allocation updates counters");
 
     uint8_t inode[128];
     memset(inode, 0, sizeof inode);
@@ -86,10 +90,10 @@ int main(void) {
     E16(inode, 44) = 4;
     E16(inode, 46) = 0;
     ok &= check(e4_add_inline_extent(&fs, inode, 0, block) == 0, "first inline extent added");
-    ok &= check(e4_add_inline_extent(&fs, inode, 1, block + 1) == 0, "adjacent extent coalesced");
+    ok &= check(e4_add_inline_extent(&fs, inode, 1, block2) == 0, "adjacent extent coalesced");
     ok &= check(E16(inode + 40, 2) == 1 && (E16(inode + 52, 4) & 0x7FFFu) == 2,
                 "adjacent extent length recorded");
-    ok &= check(e4_map(&fs, inode, 0) == block && e4_map(&fs, inode, 1) == block + 1,
+    ok &= check(e4_map(&fs, inode, 0) == block && e4_map(&fs, inode, 1) == block2,
                 "logical blocks map to allocated physical blocks");
 
     if (!ok) return 1;

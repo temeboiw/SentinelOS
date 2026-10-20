@@ -196,7 +196,7 @@ E LSTATUS RegDeleteKeyA(HKEY h,LPCSTR sub) {
 E LSTATUS RegEnumKeyExA(HKEY h,DWORD index,LPSTR name,DWORD *name_len,DWORD *reserved,LPSTR class_name,DWORD *class_len,void *last_write) {
     (void)reserved;(void)class_name;(void)class_len;(void)last_write;
     int k=reg_key_index(h);if(k<0)return ERROR_INVALID_HANDLE;
-    if(!name_len)return ERROR_INVALID_PARAMETER;
+    if(!name_len||!name)return ERROR_INVALID_PARAMETER;
     char found[REG_NAME_MAX];DWORD count=0;
     for(int i=5;i<REG_KEY_MAX;i++)if(reg_keys[i].used&&reg_child_name(reg_keys[k].path,reg_keys[i].path,found,sizeof found)) {
         if(count++==index){DWORD need=reg_len(found);if(*name_len<=need){*name_len=need;return ERROR_MORE_DATA;}reg_copy(name,found,*name_len);*name_len=need;return ERROR_SUCCESS;}
@@ -204,7 +204,8 @@ E LSTATUS RegEnumKeyExA(HKEY h,DWORD index,LPSTR name,DWORD *name_len,DWORD *res
     return ERROR_NO_MORE_ITEMS;
 }
 E LSTATUS RegEnumValueA(HKEY h,DWORD index,LPSTR name,DWORD *name_len,DWORD *reserved,DWORD *type,BYTE *data,DWORD *data_len) {
-    (void)reserved;int k=reg_key_index(h);if(k<0)return ERROR_INVALID_HANDLE;
+    (void)reserved;if(!name_len&&!data_len)return ERROR_INVALID_PARAMETER;
+    int k=reg_key_index(h);if(k<0)return ERROR_INVALID_HANDLE;
     DWORD count=0;
     for(int i=0;i<REG_VALUE_MAX;i++)if(reg_values[i].used&&reg_values[i].key==k) {
         if(count++!=index)continue;

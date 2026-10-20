@@ -730,10 +730,10 @@ static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
     u8 reserve_header=0, reserve_folder=0, reserve_data=0;
     u64 pos=36;
     if (flags&0x0004) {
-        u8 r[4];
-        if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,r,4)) return 0;
+        u8 r[3];
+        if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,r,3)) return 0;
         reserve_header=r[0]; reserve_folder=r[1]; reserve_data=r[2];
-        pos+=4u+reserve_header;
+        pos+=3u+reserve_header;
     }
     if (flags&0x0001) {
         if (!cab_skip_string(sectors,stream_size,cab_size,&pos) ||

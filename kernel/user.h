@@ -862,7 +862,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
     uint16_t sections=*(uint16_t *)(fh+2);
     uint16_t opt_size=*(uint16_t *)(fh+16);
     uint64_t opt_off=(uint64_t)lfanew+24;
-    if(machine!=0x8664 || opt_size<112 || opt_off+opt_size>raw_size ||
+    if(machine!=0x8664 || opt_size<160 || opt_off+opt_size>raw_size ||
        *(uint16_t *)(raw+opt_off)!=0x20B || !sections || sections>96)goto bad_raw;
     uint8_t *opt=raw+opt_off;
     uint32_t entry_rva=*(uint32_t *)(opt+16);
@@ -870,7 +870,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
     uint32_t image_size=*(uint32_t *)(opt+56);
     uint32_t headers_size=*(uint32_t *)(opt+60);
     uint64_t sect_off=opt_off+opt_size;
-    if(!image_size || image_size>16u*1024*1024 ||
+    if(image_size<0x1000 || image_size>16u*1024*1024 ||
        !headers_size || headers_size>raw_size || headers_size>image_size ||
        entry_rva>=image_size ||
        sect_off+(uint64_t)sections*40>raw_size)goto bad_raw;

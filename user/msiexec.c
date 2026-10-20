@@ -1,10 +1,10 @@
 /*
- * SentinelOS msiexec: first-stage MSI compound-file reader.
+ * SentinelOS MSI engine foundation.
  *
- * This deliberately does not execute MSI custom actions or modify the
- * filesystem. It validates the OLE Compound File container and reports its
- * streams; interpreting MSI relational tables and installing components are
- * separate engine work.
+ * Reads OLE Compound Files including both regular FAT streams and CFB mini
+ * streams. This is groundwork for MSI relational-table decoding. It does not
+ * claim to install packages until the table/action and writable-filesystem
+ * layers are implemented.
  */
 typedef unsigned long long u64;
 typedef unsigned int u32;
@@ -16,6 +16,9 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 #define MAX_BUFFER 0x70000000u /* 1.75 GiB from 0x50000000 to 0xC0000000 */
 #define MAX_FAT 524288
 #define MAX_DIR (256u * 1024u)
+#define MAX_MINIFAT 262144u
+#define MAX_MINI_STREAM (8u * 1024u * 1024u)
+#define MINI_SECTOR_SIZE 64u
 #define FREE_SECTOR 0xFFFFFFFFu
 #define END_OF_CHAIN 0xFFFFFFFEu
 #define FAT_SECTOR 0xFFFFFFFDu
@@ -27,7 +30,11 @@ static u32 fat[MAX_FAT];
 /* Keep the FAT-sector index off the small user-mode stack. */
 static u32 fat_sids[MAX_FAT/128];
 static u8 dir_buffer[MAX_DIR];
-static u32 fat_count, sector_size, sector_count;
+/* CFB mini-stream storage is separate from the main FAT stream space. */
+static u32 mini_fat[MAX_MINIFAT];
+static u8 mini_stream[MAX_MINI_STREAM];
+static u32 mini_fat_count, mini_stream_size, mini_sector_count;
+static u32 fat_count, sector_size, sector_count, mini_cutoff;
 static const u8 *file_bytes;
 static u32 file_size;
 
@@ -116,6 +123,63 @@ static u32 read_chain(u32 first, u8 *dst, u32 cap) {
     }
     return done;
 }
+static int load_mini_stream(const u8 *dir, u32 dir_bytes) {
+    const u8 *root=0;
+    for (u32 off=0; off+128<=dir_bytes; off+=128) {
+        const u8 *e=dir+off;
+        if (e[66]==5) { root=e; break; }
+    }
+    if (!root) return 0;
+
+    u64 root_size=rd64(root+120);
+    if (root_size>MAX_MINI_STREAM) return 0;
+    mini_stream_size=(u32)root_size;
+    mini_sector_count=(mini_stream_size+MINI_SECTOR_SIZE-1)/MINI_SECTOR_SIZE;
+    if (mini_stream_size) {
+        u32 got=read_chain(rd32(root+116),mini_stream,mini_stream_size);
+        if (got<mini_stream_size) return 0;
+    }
+
+    u32 first=rd32(file_bytes+60);
+    u32 sectors=rd32(file_bytes+64);
+    if (!sectors) { mini_fat_count=0; return 1; }
+    if (sectors>MAX_MINIFAT/(sector_size/4)) return 0;
+    u32 bytes_cap=sectors*sector_size;
+    u32 got=read_chain(first,(u8 *)mini_fat,bytes_cap);
+    mini_fat_count=got/4;
+    return mini_fat_count>0;
+}
+
+static u32 read_mini_chain(u32 first, u8 *dst, u32 size) {
+    u32 sid=first, done=0, guard=0;
+    while (sid!=END_OF_CHAIN && sid!=FREE_SECTOR &&
+           sid<mini_fat_count && done<size && guard++<=mini_fat_count) {
+        u64 off=(u64)sid*MINI_SECTOR_SIZE;
+        if (off>=mini_stream_size) break;
+        u32 n=MINI_SECTOR_SIZE;
+        if (n>size-done) n=size-done;
+        if (n>mini_stream_size-(u32)off) n=mini_stream_size-(u32)off;
+        for (u32 i=0;i<n;i++) dst[done+i]=mini_stream[(u32)off+i];
+        done+=n;
+        u32 next=rd32((const u8 *)mini_fat+sid*4);
+        if (next==sid || next==FAT_SECTOR || next==DIFAT_SECTOR) break;
+        sid=next;
+    }
+    return done;
+}
+
+static u32 read_entry_stream(const u8 *e, u8 *dst, u32 cap) {
+    u64 raw_size=rd64(e+120);
+    if (raw_size>cap || raw_size>0xFFFFFFFFu) return 0;
+    u32 size=(u32)raw_size;
+    if (!size) return 0;
+    if (size<mini_cutoff) {
+        if (!mini_fat_count || !mini_stream_size) return 0;
+        return read_mini_chain(rd32(e+116),dst,size);
+    }
+    return read_chain(rd32(e+116),dst,size);
+}
+
 static void print_stream_name(const u8 *e) {
     u16 chars=rd16(e+64)/2;
     if (chars>32) chars=32;
@@ -142,10 +206,16 @@ static void inspect_msi(void) {
     if (!sector_size || sector_count==0 || !load_fat()) {
         out("msiexec: malformed or unsupported FAT/DIFAT layout\n"); return;
     }
+    mini_cutoff=rd32(file_bytes+56);
+    if (!mini_cutoff) mini_cutoff=4096;
     u32 dir_sid=rd32(file_bytes+48);
     u8 *dir=dir_buffer;
     u32 dir_bytes=read_chain(dir_sid,dir,MAX_DIR);
     if (dir_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
+    if (!load_mini_stream(dir,dir_bytes)) {
+        out("msiexec: mini-stream metadata is unsupported or exceeds limits\n");
+        return;
+    }
     msi_ok=1;
     msi_major=major;
     out("MSI compound database: structurally readable\n");
@@ -166,7 +236,8 @@ static void inspect_msi(void) {
     }
     msi_entry_count=count;
     out("Entries: "); out_u32(count); out("\n");
-    out("Installer engine: not yet enabled; no files were changed.\n");
+    out("CFB mini-streams: readable\n");
+    out("MSI table decoding and installation actions are still pending; no files were changed.\n");
     out("Custom actions were not executed.\n");
 }
 typedef struct {
@@ -267,12 +338,12 @@ void mainCRTStartup(void) {
         for (;;) __asm__ volatile("pause");
     }
     /*
-     * Grow the contiguous user buffer in 16 MiB chunks and read until EOF.
-     * There is no fixed MSI file-size cap; growth is bounded by the available
-     * user virtual-address window and the parser's CFB/FAT data structures.
+     * Grow the contiguous user buffer in 32 MiB chunks and read in 8 MiB
+     * requests. Larger reads reduce syscall overhead for large MSI payloads.
+     * Growth is bounded by the available user virtual-address window.
      */
-    const u32 chunk_size=16u*1024u*1024u;
-    const u32 read_size=1024u*1024u;
+    const u32 chunk_size=32u*1024u*1024u;
+    const u32 read_size=8u*1024u*1024u;
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;
     u32 capacity=0, total=0;
@@ -286,9 +357,6 @@ void mainCRTStartup(void) {
             }
             u32 grow=chunk_size;
             if (grow>MAX_BUFFER-capacity) grow=MAX_BUFFER-capacity;
-            out("msiexec: allocating buffer chunk at offset ");
-            out_u32(capacity);
-            out("\n");
             u64 p=sy3(SYS_Alloc,buffer_base+capacity,grow,0);
             if (p!=(buffer_base+capacity)) {
                 out("msiexec: cannot grow MSI buffer; package size or memory limit reached\n");
@@ -296,7 +364,6 @@ void mainCRTStartup(void) {
                 break;
             }
             capacity+=grow;
-            out("msiexec: buffer chunk ready\n");
         }
         u64 want=capacity-total;
         if (want>read_size) want=read_size;

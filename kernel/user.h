@@ -21,6 +21,7 @@
 #define SYS_NtOpenFile              5
 #define SYS_NtWriteExistingFile     23
 #define SYS_NtSeekFile               24
+#define SYS_NtCreateDirectory        25
 #define SYS_NtReadFile              6
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
@@ -783,7 +784,7 @@ static uint32_t vfs_resolve_user_path(const char *path) {
     return dir;
 }
 
-static int e4_insert_regular_dirent(uint32_t dir_ino, const char *name, uint32_t ino) {
+static int e4_insert_dirent(uint32_t dir_ino, const char *name, uint32_t ino, uint8_t file_type) {
     if (!e4_can_mutate(&g_ext4) || !name || !name[0]) return -1;
     uint32_t nl = 0;
     while (name[nl] && nl < 256) nl++;
@@ -820,7 +821,7 @@ static int e4_insert_regular_dirent(uint32_t dir_ino, const char *name, uint32_t
                 E32(block, at) = ino;
                 E16(block, at + 4) = (uint16_t)slot;
                 block[at + 6] = (uint8_t)nl;
-                block[at + 7] = 1; /* EXT4_FT_REG_FILE */
+                block[at + 7] = file_type;
                 for (uint32_t j = 0; j < nl; ++j) block[at + 8 + j] = (uint8_t)name[j];
                 if (e4_write(&g_ext4, pb * g_ext4.blksz, block, g_ext4.blksz) < 0)
                     return -1;
@@ -906,11 +907,75 @@ static uint32_t vfs_create_empty_regular(const char *path) {
     E16(fresh, 46) = 0;
     if (g_ext4.isize >= 160) E16(fresh, 128) = 32;
     if (e4_write_inode(&g_ext4, ino, fresh) < 0) return 0;
-    if (e4_insert_regular_dirent(parent_ino, base, ino) < 0) {
+    if (e4_insert_dirent(parent_ino, base, ino, 1) < 0) {
         /* Do not clear the inode bit after a possibly partial directory write:
            leaking an unreachable inode is safer than freeing a referenced one. */
         return 0;
     }
+    return ino;
+}
+
+static uint32_t vfs_create_directory(const char *path) {
+    if (!g_ext4_ok || !e4_can_mutate(&g_ext4) || !path || !path[0]) return 0;
+    char full[256], base[256], parent[256];
+    uint32_t len = 0;
+    while (path[len] && len + 1 < sizeof full) { full[len] = path[len]; len++; }
+    if (path[len]) return 0;
+    while (len > 1 && (full[len-1] == '/' || full[len-1] == '\\')) len--;
+    full[len] = 0;
+    int sep = -1;
+    for (uint32_t i = 0; i < len; ++i)
+        if (full[i] == '/' || full[i] == '\\') sep = (int)i;
+    uint32_t start = (uint32_t)(sep + 1);
+    if (start >= len || len - start > 255) return 0;
+    uint32_t bn = len - start;
+    for (uint32_t i = 0; i < bn; ++i) base[i] = full[start+i];
+    base[bn] = 0;
+    if ((bn == 1 && base[0] == '.') ||
+        (bn == 2 && base[0] == '.' && base[1] == '.') ||
+        (bn == 0)) return 0;
+    uint32_t parent_ino = vfs_cwd_ino ? vfs_cwd_ino : 2;
+    if (sep >= 0) {
+        if (sep == 0) { parent[0]='/'; parent[1]=0; }
+        else {
+            for (uint32_t i=0;i<(uint32_t)sep;i++) parent[i]=full[i];
+            parent[sep]=0;
+        }
+        parent_ino = vfs_resolve_user_path(parent);
+        if (!parent_ino) return 0;
+    }
+    uint8_t pino[256];
+    if (e4_inode(&g_ext4, parent_ino, pino) < 0 ||
+        (E16(pino,0) & 0xF000) != 0x4000 ||
+        (E32(pino,32) & 0x1000u) ||
+        e4_lookup_ci(&g_ext4,parent_ino,base)) return 0;
+
+    uint32_t ino = e4_alloc_inode(&g_ext4, 1);
+    if (!ino) return 0;
+    uint64_t pb = e4_alloc_block(&g_ext4);
+    if (!pb) return 0;
+    static uint8_t block[4096];
+    for (uint32_t i=0;i<g_ext4.blksz;i++) block[i]=0;
+    E32(block,0)=ino; E16(block,4)=12; block[6]=1; block[7]=2; block[8]='.';
+    E32(block,12)=parent_ino; E16(block,16)=(uint16_t)(g_ext4.blksz-12);
+    block[18]=2; block[19]=2; block[20]='.'; block[21]='.';
+    if (e4_write(&g_ext4,pb*g_ext4.blksz,block,g_ext4.blksz)<0) return 0;
+
+    uint8_t fresh[256];
+    for (uint32_t i=0;i<g_ext4.isize;i++) fresh[i]=0;
+    E16(fresh,0)=0x41ED; /* directory, mode 0755 */
+    E32(fresh,4)=g_ext4.blksz;
+    E16(fresh,26)=2;
+    E32(fresh,28)=g_ext4.blksz/512;
+    E32(fresh,32)=0x00080000;
+    E16(fresh,40)=0xF30A; E16(fresh,42)=1; E16(fresh,44)=4; E16(fresh,46)=0;
+    E32(fresh,52)=0; E16(fresh,56)=1;
+    E16(fresh,58)=(uint16_t)(pb>>32); E32(fresh,60)=(uint32_t)pb;
+    if (g_ext4.isize >= 160) E16(fresh,128)=32;
+    if (e4_write_inode(&g_ext4,ino,fresh)<0) return 0;
+    if (e4_insert_dirent(parent_ino,base,ino,2)<0) return 0;
+    E16(pino,26)=(uint16_t)(E16(pino,26)+1);
+    if (e4_write_inode(&g_ext4,parent_ino,pino)<0) return 0;
     return ino;
 }
 
@@ -1658,6 +1723,15 @@ static Frame *syscall_handler(Frame *f) {
 
         MmSwitchToProcess(caller);
         f->rax = proc->Pid;
+        return f;
+    }
+
+    case SYS_NtCreateDirectory: {
+        char name[256];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0)
+            f->rax = 0;
+        else
+            f->rax = vfs_create_directory(name) ? 1 : 0;
         return f;
     }
 

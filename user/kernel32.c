@@ -201,9 +201,11 @@ static void k32_shutdown_screen(void) {
     K32_FBINFO fb = {0};
     if (!sy3(8, (u64)&fb, 0, 0) || !fb.va || fb.w < 320 || fb.h < 200) return;
     volatile DWORD *pixels = (volatile DWORD *)(u64)fb.va;
+    DWORD pitch_px = fb.pitch / sizeof(DWORD);
+    if (pitch_px < fb.w) return;
     for (DWORD y = 0; y < fb.h; ++y)
         for (DWORD x = 0; x < fb.w; ++x)
-            pixels[(u64)y * fb.pitch + x] = 0xFF003399;
+            pixels[(u64)y * pitch_px + x] = 0xFF003399;
     K32_TextOutA draw = (K32_TextOutA)sy3(9, (u64)"user32.dll", (u64)"TextOutA", 0);
     if (draw) {
         draw(0, (int)(fb.w / 2) - 90, (int)(fb.h / 2) - 20, "SENTINELOS", -1);

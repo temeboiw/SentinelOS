@@ -2038,7 +2038,7 @@ static int u32_pe_string_resource(void *instance,unsigned int id,const unsigned 
     unsigned short magic=u32_pe_u16(opt);unsigned int dd=(magic==0x20Bu)?112u:(magic==0x10Bu)?96u:0xFFFFFFFFu;
     if(dd==0xFFFFFFFFu||optsize<dd+24u)return 0;
     unsigned int image_size=u32_pe_u32(opt+56),rrva=u32_pe_u32(opt+dd+16),rsize=u32_pe_u32(opt+dd+20);
-    if(!image_size||!rrva||!rsize||!u32_pe_range(image_size,rrva,rsize))return 0;
+    if(!image_size||!rrva||rsize<16||!u32_pe_range(image_size,rrva,rsize))return 0;
     const unsigned char *root=base+rrva;
     unsigned int type_off=0,block_off=0,lang_off=0;
     unsigned int count=(unsigned int)u32_pe_u16(root+12)+u32_pe_u16(root+14);

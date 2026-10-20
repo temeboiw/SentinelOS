@@ -561,8 +561,10 @@ static u32 cab_checksum(const u8 *p, u32 n, u16 unpacked) {
     if(i<n){u32 tail=0,shift=0;while(i<n){tail|=(u32)p[i++]<<shift;shift+=8;}sum^=tail;}
     return sum;
 }
+typedef int (*CabBlockSink)(u32 folder, u32 offset, const u8 *data, u32 len, void *context);
 static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression,
                                    u8 reserve_data, u32 sectors, u64 cab_size,
+                                   u32 folder_index, CabBlockSink sink, void *context,
                                    u32 *total_out) {
     u64 pos=folder_start; *total_out=0;
     cab_wpos=cab_wcount=0;
@@ -586,6 +588,7 @@ static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression
             if(cbdata<2 || cab_comp[0]!='C' || cab_comp[1]!='K') return 0;
             if(!cab_inflate_raw(cab_comp+2,cbdata-2,cbuncomp)) return 0;
         }
+        if (sink && !sink(folder_index,*total_out,cab_out,cab_outlen,context)) return 0;
         if (*total_out > 0xFFFFFFFFu - cab_outlen) return 0;
         *total_out += cab_outlen;
         pos += cbdata;
@@ -690,7 +693,7 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
         u32 total=0;
         if (!cab_read_folder_payload(folders[i].data_off,folders[i].blocks,
                                      folders[i].compression,reserve_data,
-                                     sectors,stream_size,&total)) {
+                                     sectors,stream_size,i,0,0,&total)) {
             out("  CAB folder "); out_u32(i); out(": unsupported or corrupt compression/data\n");
             return 0;
         }

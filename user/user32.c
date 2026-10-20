@@ -115,15 +115,24 @@ static BOOL u32_msg_push(const MSG *msg) {
     u32_msg_count++;
     return 1;
 }
-static BOOL u32_msg_peek(MSG *msg, int remove) {
-    if (!u32_msg_count) return 0;
-    if (msg) *msg = u32_msg_queue[u32_msg_head];
-    u32_last_msg_time = (int)u32_msg_queue[u32_msg_head].time;
-    if (remove) {
-        u32_msg_head = (u32_msg_head + 1) % 32;
-        u32_msg_count--;
-    }
+static BOOL u32_msg_matches(const MSG *m,void *hwnd,u32 min,u32 max) {
+    if(hwnd&&m->hwnd!=(u32)(u64)hwnd)return 0;
+    if(min&&m->message<min)return 0;
+    if(max&&m->message>max)return 0;
     return 1;
+}
+static BOOL u32_msg_take_filtered(MSG *msg,void *hwnd,u32 min,u32 max,int remove) {
+    for(unsigned int off=0;off<u32_msg_count;off++) {
+        unsigned int at=(u32_msg_head+off)%32;MSG *candidate=&u32_msg_queue[at];
+        if(!u32_msg_matches(candidate,hwnd,min,max))continue;
+        if(msg)*msg=*candidate;u32_last_msg_time=(int)candidate->time;
+        if(remove) {
+            for(unsigned int j=off;j+1<u32_msg_count;j++)u32_msg_queue[(u32_msg_head+j)%32]=u32_msg_queue[(u32_msg_head+j+1)%32];
+            u32_msg_count--;
+        }
+        return 1;
+    }
+    return 0;
 }
 static void u32_pump_timers(void) {
     unsigned long long now=u32_tick_now();
@@ -756,16 +765,12 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
 
 __attribute__((dllexport))
 BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
-    (void)hwnd;
-    (void)min;
-    (void)max;
-
     if (!msg) return 0;
     if (!g_front) ensure_fb();
 
     for (;;) {
         u32_pump_timers();
-        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
+        if (u32_msg_take_filtered(msg,hwnd,min,max,1)) return msg->message == 0x0012 ? 0 : 1;
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
@@ -804,11 +809,10 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     continue;
                 }
 
-                msg->message = 0x0100;
-                msg->wParam = (u64)(unsigned char)ev.key;
-                msg->pt_x = g_mx;
-                msg->pt_y = g_my;
-                return 1;
+                msg->hwnd=g_wnd.visible?1u:0u;msg->message=0x0100u;
+                msg->wParam=(u64)(unsigned char)ev.key;msg->lParam=0;msg->time=(u32)u32_tick_now();
+                msg->pt_x=g_mx;msg->pt_y=g_my;
+                (void)u32_msg_push(msg);continue;
             }
 
             if (ev.type == 2 || ev.type == 3) {
@@ -816,9 +820,9 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_my = ev.y;
                 u32_mouse_record();
 
-                msg->message = (ev.type == 3) ? 0x0201 : 0x0200;
-                msg->pt_x = ev.x;
-                msg->pt_y = ev.y;
+                msg->hwnd=g_wnd.visible?1u:0u;msg->message=(ev.type==3)?0x0201u:0x0200u;
+                msg->wParam=(u64)(unsigned int)ev.btn;msg->lParam=0;msg->time=(u32)u32_tick_now();
+                msg->pt_x=ev.x;msg->pt_y=ev.y;
 
                 if (g_drag && (ev.btn & 1)) {
                     g_wnd.x = ev.x - g_drag_ox;
@@ -833,7 +837,6 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
 
                     sy3(SYS_WmRect, (u64)rect, 0, 0);
                     compose();
-                    return 1;
                 }
 
                 if (ev.type == 3) {
@@ -843,7 +846,8 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     present_cursor_only();
                 }
 
-                return 1;
+                (void)u32_msg_push(msg);
+                continue;
             }
         }
 
@@ -1095,11 +1099,7 @@ __attribute__((dllexport)) BOOL PostMessageA(void *hwnd, U32_UINT msg, U32_WPARA
 __attribute__((dllexport)) BOOL PeekMessageA(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max, U32_UINT remove) {
     if (!msg) return 0;
     u32_pump_timers();
-    if (!u32_msg_peek(msg, 0)) return 0;
-    if (hwnd && msg->hwnd != (u32)(u64)hwnd) return 0;
-    if ((min || max) && (msg->message < min || msg->message > max)) return 0;
-    if (remove & 1u) u32_msg_peek(msg, 1);
-    return 1;
+    return u32_msg_take_filtered(msg,hwnd,min,max,(remove&1u)!=0);
 }
 __attribute__((dllexport)) short GetKeyState(int key){if(key<0||key>255)return 0;return (short)u32_key_state[key];}
 __attribute__((dllexport)) short GetAsyncKeyState(int key){if(key<0||key>255)return 0;return (short)u32_key_state[key];}

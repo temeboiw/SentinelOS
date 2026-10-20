@@ -521,10 +521,31 @@ static void draw_taskbar(void) {
     }
 }
 
+static int u32_is_desktop_window(void) {
+    static const char desktop[] = "Desktop";
+    int i=0;
+    while (desktop[i] && g_wnd.title[i] == desktop[i]) i++;
+    return desktop[i] == 0 && g_wnd.title[i] == 0;
+}
+
 static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
     if (!g_front) return;
+
+    /* Ordinary app redraws are clipped to their own window. The desktop
+     * process owns full-screen composition; explicit dirty clips are kept. */
+    int auto_clip = 0;
+    int saved_x0=u32_clip_x0, saved_y0=u32_clip_y0;
+    int saved_x1=u32_clip_x1, saved_y1=u32_clip_y1;
+    if (!u32_render_clip && g_wnd.visible && !g_wnd.minimized &&
+        g_wnd.w > 2 && !u32_is_desktop_window()) {
+        u32_render_clip=1;
+        u32_clip_x0=g_wnd.x-6; u32_clip_y0=g_wnd.y-6;
+        u32_clip_x1=g_wnd.x+g_wnd.w+10;
+        u32_clip_y1=g_wnd.y+g_wnd.h+14;
+        auto_clip=1;
+    }
 
     if (g_wnd.visible) {
         for (int i = 0; i < 8; i++) {
@@ -562,12 +583,17 @@ static void compose(void) {
         if (u32_aero_bg_w != g_fw || u32_aero_bg_h != g_fh) {
             /* Cache creation must always render the entire wallpaper, even
              * when the caller requested a small dirty-region repaint. */
+            /* Build this process' wallpaper cache off-screen: starting an app
+             * must not repaint the live desktop with its private cache. */
+            u32 *saved_front = g_front;
+            u32 saved_pitch = g_pitch;
             int was_clipped = u32_render_clip;
+            g_front = u32_aero_bg_cache;
+            g_pitch = g_fw;
             u32_render_clip = 0;
             aero_desktop();
-            for (u32 y = 0; y < g_fh; ++y)
-                for (u32 x = 0; x < g_fw; ++x)
-                    u32_aero_bg_cache[y * g_fw + x] = g_front[y * g_pitch + x];
+            g_front = saved_front;
+            g_pitch = saved_pitch;
             u32_aero_bg_w = g_fw;
             u32_aero_bg_h = g_fh;
             u32_render_clip = was_clipped;
@@ -687,6 +713,11 @@ static void compose(void) {
 
     draw_taskbar();
     cursor_save_draw(g_mx, g_my);
+    if (auto_clip) {
+        u32_render_clip=0;
+        u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
+        u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
+    }
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is
@@ -708,6 +739,30 @@ static void compose_region(int x0, int y0, int x1, int y1) {
     u32_render_clip = was_clipped;
     u32_clip_x0 = ox0; u32_clip_y0 = oy0;
     u32_clip_x1 = ox1; u32_clip_y1 = oy1;
+}
+
+static void show_shutdown_screen(int reboot) {
+    ensure_fb();
+    if (!g_front || !g_fw || !g_fh) return;
+    cursor_restore();
+    gradient_v(0,0,(int)g_fw,(int)g_fh,0xFF071725,0xFF123F5C);
+    int cx=(int)g_fw/2, cy=(int)g_fh/2;
+    round_fill(cx-190,cy-72,380,144,14,0xE8193448);
+    round_fill(cx-188,cy-70,376,140,12,0xFF102D42);
+    fill(cx-174,cy-52,348,1,0xFF4BA6C7);
+    draw_text(cx-142,cy-22,reboot?"Restarting SentinelOS":"Shutting down SentinelOS",0xFFFFFFFF);
+    draw_text(cx-142,cy+12,reboot?"Your system is restarting...":"Your system is shutting down...",0xFF9CD9EB);
+    /* Keep the shutdown screen visible before handing control to firmware. */
+    u64 start=sy3(SYS_GetTickCount,0,0,0);
+    if (start!=(u64)-1) {
+        for (;;) {
+            u64 now=sy3(SYS_GetTickCount,0,0,0);
+            if (now!=(u64)-1 && now>=start && now-start>=5000) break;
+            __asm__ volatile("pause");
+        }
+    } else {
+        for (volatile u64 i=0;i<100000000ULL;i++) __asm__ volatile("pause");
+    }
 }
 
 static void on_click(int x, int y) {
@@ -772,7 +827,7 @@ static void on_click(int x, int y) {
                 g_search_text[0] = 0;
             }
 
-            compose();
+            compose_region(0, ty-150, (int)g_fw, (int)g_fh);
             return;
         }
     }
@@ -786,16 +841,18 @@ static void on_click(int x, int y) {
                 mx + 10, my + 12,
                 mx + mw - 10, my + 38)) {
             g_search_focus = 1;
-            compose();
+            compose_region(0, my, (int)g_fw, (int)g_fh);
             return;
         }
 
         if (hit(x, y, mx, my + 42, mx + mw, my + 68)) {
+            show_shutdown_screen(0);
             sy3(SYS_Shutdown, 0, 0, 0);
             return;
         }
 
         if (hit(x, y, mx, my + 66, mx + mw, my + 92)) {
+            show_shutdown_screen(1);
             sy3(SYS_Shutdown, 1, 0, 0);
             return;
         }
@@ -803,14 +860,14 @@ static void on_click(int x, int y) {
         if (hit(x, y, mx, my + 92, mx + mw, my + 118)) {
             g_menu = 0;
             g_search_focus = 0;
-            compose();
+            compose_region(0, my, (int)g_fw, (int)g_fh);
             return;
         }
 
         /* Click elsewhere closes the menu. */
         g_menu = 0;
         g_search_focus = 0;
-        compose();
+        compose_region(0, my, (int)g_fw, (int)g_fh);
         return;
     }
 

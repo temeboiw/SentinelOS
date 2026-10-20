@@ -22,6 +22,7 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 #define DIFAT_SECTOR 0xFFFFFFFCu
 
 static int msi_ok;
+static u32 msi_entry_count, msi_major;
 static u32 fat[MAX_FAT];
 /* Keep the FAT-sector index off the small user-mode stack. */
 static u32 fat_sids[MAX_FAT/128];
@@ -146,6 +147,7 @@ static void inspect_msi(void) {
     u32 dir_bytes=read_chain(dir_sid,dir,MAX_DIR);
     if (dir_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
     msi_ok=1;
+    msi_major=major;
     out("MSI compound database: structurally readable\n");
     out("Container version: "); out_u32(major); out("\n");
     out("Streams/storage entries:\n");
@@ -162,10 +164,96 @@ static void inspect_msi(void) {
         out("\n");
         count++;
     }
+    msi_entry_count=count;
     out("Entries: "); out_u32(count); out("\n");
     out("Installer engine: not yet enabled; no files were changed.\n");
     out("Custom actions were not executed.\n");
 }
+typedef struct {
+    u32 hwnd, message;
+    u64 wParam;
+    long long lParam;
+    u32 time;
+    int pt_x, pt_y;
+} MSI_MSG;
+typedef void *(*MSI_CreateWindowExA)(u32, const char *, const char *, u32,
+    int, int, int, int, void *, void *, void *, void *);
+typedef int (*MSI_ShowWindow)(void *, int);
+typedef int (*MSI_TextOutA)(void *, int, int, const char *, int);
+typedef int (*MSI_InvalidateRect)(void *, void *, int);
+typedef int (*MSI_GetMessageA)(MSI_MSG *, void *, u32, u32);
+
+static u32 msi_strlen(const char *s) {
+    u32 n=0;
+    while (s && s[n]) n++;
+    return n;
+}
+static void msi_ui_line(MSI_TextOutA text, void *hwnd, int row, const char *s) {
+    if (text && s) (void)text(hwnd, 0, row, s, (int)msi_strlen(s));
+}
+static void show_installer_window(const char *name) {
+    MSI_CreateWindowExA create=(MSI_CreateWindowExA)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"CreateWindowExA",0);
+    MSI_ShowWindow show=(MSI_ShowWindow)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"ShowWindow",0);
+    MSI_TextOutA text=(MSI_TextOutA)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"TextOutA",0);
+    MSI_InvalidateRect invalidate=(MSI_InvalidateRect)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"InvalidateRect",0);
+    MSI_GetMessageA getmsg=(MSI_GetMessageA)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"GetMessageA",0);
+    if (!create || !show || !text || !invalidate || !getmsg) {
+        show_and_exit("MSI Reader",
+            "The installer window APIs are unavailable. No files were changed.",1);
+        return;
+    }
+    void *hwnd=create(0,"STATIC","SentinelOS MSI Installer",0x10CF0000u,
+        120,70,720,440,0,0,0,0);
+    if (!hwnd) {
+        show_and_exit("MSI Reader","Could not create installer window.",1);
+        return;
+    }
+    (void)show(hwnd,5);
+    msi_ui_line(text,hwnd,0,"SentinelOS Installer");
+    msi_ui_line(text,hwnd,1,"Windows Installer package recognized");
+    msi_ui_line(text,hwnd,2,"");
+    msi_ui_line(text,hwnd,3,"Package:");
+    msi_ui_line(text,hwnd,4,name);
+    msi_ui_line(text,hwnd,5,"");
+    msi_ui_line(text,hwnd,6,"Container validation: PASSED");
+    msi_ui_line(text,hwnd,7,"Compound-file version:");
+    msi_ui_line(text,hwnd,8,msi_major==4?"4":"3");
+    msi_ui_line(text,hwnd,9,"Directory entries:");
+    char entries[16];
+    u32 ev=msi_entry_count, en=0;
+    if (!ev) entries[en++]=48;
+    else {
+        char rev[16]; u32 rn=0;
+        while (ev && rn<15) { rev[rn++]=(char)(48+ev%10); ev/=10; }
+        while (rn) entries[en++]=rev[--rn];
+    }
+    entries[en]=0;
+    msi_ui_line(text,hwnd,10,entries);
+    msi_ui_line(text,hwnd,11,"Installation: NOT STARTED");
+    msi_ui_line(text,hwnd,12,"");
+    msi_ui_line(text,hwnd,13,"This build reads the MSI container, but is not yet a");
+    msi_ui_line(text,hwnd,14,"Windows Installer engine. MSI tables, authored UI,");
+    msi_ui_line(text,hwnd,15,"file/component actions, rollback, and custom actions");
+    msi_ui_line(text,hwnd,16,"are not implemented. Install is intentionally disabled");
+    msi_ui_line(text,hwnd,17,"to avoid leaving a partial installation.");
+    msi_ui_line(text,hwnd,18,"");
+    msi_ui_line(text,hwnd,19,"Press Esc or click X to close.");
+    (void)invalidate(hwnd,0,1);
+    MSI_MSG msg;
+    for (;;) {
+        if (!getmsg(&msg,0,0,0)) continue;
+        if (msg.message==0x0100u && msg.wParam==27u) {
+            (void)sy3(SYS_Exit,0,0,0);
+            for (;;) __asm__ volatile("pause");
+        }
+    }
+}
+
 void mainCRTStartup(void) {
     const char *name=ARG_VA;
     if (!name[0]) {
@@ -224,9 +312,11 @@ void mainCRTStartup(void) {
     }
     file_bytes=buf; file_size=total;
     inspect_msi();
-    if (msi_ok)
-        show_and_exit("MSI Reader",
-            "MSI container is readable. Table decoding and installation are not implemented; no files were changed.",0);
+    if (msi_ok) {
+        show_installer_window(name);
+        (void)sy3(SYS_Exit,0,0,0);
+        for (;;) __asm__ volatile("pause");
+    }
     show_and_exit("MSI Reader",
         "This file is not a supported MSI compound database. No files were changed.",1);
 }

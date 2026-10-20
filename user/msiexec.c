@@ -13,7 +13,7 @@ typedef unsigned char u8;
 
 enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
-#define MAX_FILE (256u * 1024u * 1024u)
+#define MAX_BUFFER 0x70000000u /* 1.75 GiB from 0x50000000 to 0xC0000000 */
 #define MAX_FAT 524288
 #define MAX_DIR (256u * 1024u)
 #define FREE_SECTOR 0xFFFFFFFFu
@@ -179,40 +179,50 @@ void mainCRTStartup(void) {
         for (;;) __asm__ volatile("pause");
     }
     /*
-     * NtAllocateVirtualMemory currently caps each request at 16 MiB.
-     * Reserve the file buffer as adjacent 16 MiB chunks so the reader's
-     * virtual address range remains contiguous without one oversized request.
+     * Grow the contiguous user buffer in 16 MiB chunks and read until EOF.
+     * There is no fixed MSI file-size cap; growth is bounded by the available
+     * user virtual-address window and the parser's CFB/FAT data structures.
      */
     const u32 chunk_size=16u*1024u*1024u;
+    const u32 read_size=1024u*1024u;
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;
-    for (u32 off=0;off<MAX_FILE;off+=chunk_size) {
-        out("msiexec: allocating buffer chunk at offset ");
-        out_u32(off);
-        out("\n");
-        u64 p=sy3(SYS_Alloc,buffer_base+off,chunk_size,0);
-        if (p!=(buffer_base+off)) {
-            out("msiexec: could not allocate MSI buffer chunk at offset ");
-            out_u32(off);
+    u32 capacity=0, total=0;
+    int read_error=0;
+    for (;;) {
+        if (total==capacity) {
+            if (capacity>=MAX_BUFFER) {
+                out("msiexec: package exceeds the available contiguous user buffer\n");
+                read_error=1;
+                break;
+            }
+            u32 grow=chunk_size;
+            if (grow>MAX_BUFFER-capacity) grow=MAX_BUFFER-capacity;
+            out("msiexec: allocating buffer chunk at offset ");
+            out_u32(capacity);
             out("\n");
-            (void)sy3(SYS_CloseFile,h,0,0);
-            show_and_exit("MSI Reader",
-                "Not enough user memory to inspect this MSI. No files were changed.",1);
+            u64 p=sy3(SYS_Alloc,buffer_base+capacity,grow,0);
+            if (p!=(buffer_base+capacity)) {
+                out("msiexec: cannot grow MSI buffer; package size or memory limit reached\n");
+                read_error=1;
+                break;
+            }
+            capacity+=grow;
+            out("msiexec: buffer chunk ready\n");
         }
-        out("msiexec: buffer chunk ready\n");
-    }
-    u32 total=0;
-    while(total<MAX_FILE) {
-        u64 want=MAX_FILE-total;
-        if (want>1024u*1024u) want=1024u*1024u;
+        u64 want=capacity-total;
+        if (want>read_size) want=read_size;
         u64 n=sy3(SYS_ReadFile,h,(u64)(buf+total),want);
-        if ((long long)n<0) break;
+        if ((long long)n<0) { read_error=1; break; }
         if (!n) break;
         total+=(u32)n;
     }
     (void)sy3(SYS_CloseFile,h,0,0);
+    if (read_error) {
+        show_and_exit("MSI Reader",
+            "Could not read the complete MSI within available memory. No files were changed.",1);
+    }
     file_bytes=buf; file_size=total;
-    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 256 MiB\n");
     inspect_msi();
     if (msi_ok)
         show_and_exit("MSI Reader",

@@ -30,7 +30,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -77,8 +77,8 @@ __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
 }
 __attribute__((dllexport)) DWORD GetLastError(void) { return k32_last_error; }
 __attribute__((dllexport)) void SetLastError(DWORD e) { k32_last_error=e; }
-__attribute__((dllexport)) u64 GetTickCount64(void) { return 0; }
-__attribute__((dllexport)) void Sleep(DWORD ms) { (void)ms; }
+__attribute__((dllexport)) u64 GetTickCount64(void) { u64 t=sy3(SYS_GetTickCount,0,0,0);return t==(u64)-1?0:t; }
+__attribute__((dllexport)) void Sleep(DWORD ms) { if(!ms){sy3(21,0,0,0);return;}u64 start=GetTickCount64();while(GetTickCount64()-start<ms)sy3(21,0,0,0); }
 __attribute__((dllexport)) BOOL PeekInput(void *out) {
     return (BOOL)sy3(SYS_GetInput, (u64)out, 0, 0);
 }
@@ -235,12 +235,12 @@ __attribute__((dllexport)) void GetSystemInfo(K32_SYSTEM_INFO *s) {
 }
 __attribute__((dllexport)) DWORD GetVersion(void) { return 0x00000001u; }
 __attribute__((dllexport)) BOOL QueryPerformanceCounter(K32_LARGE_INTEGER *out) {
-    if (!out) return 0; out->QuadPart=0; return 1;
+    if (!out) return 0; out->QuadPart=(long long)(GetTickCount64()*10000ULL); return 1;
 }
 __attribute__((dllexport)) BOOL QueryPerformanceFrequency(K32_LARGE_INTEGER *out) {
-    if (!out) return 0; out->QuadPart=1000; return 1;
+    if (!out) return 0; out->QuadPart=10000000LL; return 1;
 }
-__attribute__((dllexport)) DWORD GetTickCount(void) { return 0; }
+__attribute__((dllexport)) DWORD GetTickCount(void) { return (DWORD)GetTickCount64(); }
 __attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE process, DWORD *code) {
     (void)process; if (!code) return 0; *code=259; return 1;
 }

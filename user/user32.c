@@ -560,12 +560,17 @@ static void compose(void) {
     if (g_fw > 0 && g_fh > 0 &&
         g_fw <= U32_AERO_CACHE_W && g_fh <= U32_AERO_CACHE_H) {
         if (u32_aero_bg_w != g_fw || u32_aero_bg_h != g_fh) {
+            /* Cache creation must always render the entire wallpaper, even
+             * when the caller requested a small dirty-region repaint. */
+            int was_clipped = u32_render_clip;
+            u32_render_clip = 0;
             aero_desktop();
             for (u32 y = 0; y < g_fh; ++y)
                 for (u32 x = 0; x < g_fw; ++x)
                     u32_aero_bg_cache[y * g_fw + x] = g_front[y * g_pitch + x];
             u32_aero_bg_w = g_fw;
             u32_aero_bg_h = g_fh;
+            u32_render_clip = was_clipped;
         } else {
             u32 x0=0,y0=0,x1=g_fw,y1=g_fh;
             if (u32_render_clip) {

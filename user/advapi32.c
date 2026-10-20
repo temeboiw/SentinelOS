@@ -137,7 +137,20 @@ E LSTATUS RegCreateKeyExA(HKEY h,LPCSTR sub,DWORD reserved,LPSTR class_name,DWOR
     char path[REG_PATH_MAX];
     if(reg_join(parent,sub?sub:"",path,sizeof path)<0)return ERROR_INVALID_PARAMETER;
     int k=reg_find_key(path);DWORD disp=1;
-    if(k<0){k=reg_make_key(path);disp=2;}
+    if(k<0) {
+        /* RegCreateKeyEx creates missing intermediate components as well. */
+        char prefix[REG_PATH_MAX];reg_copy(prefix,path,sizeof prefix);
+        unsigned len=reg_len(prefix);
+        for(unsigned i=0;i<len;i++) {
+            if(prefix[i]!='\\\\')continue;
+            char saved=prefix[i];prefix[i]=0;
+            if(reg_find_key(prefix)<0 && reg_make_key(prefix)<0) {
+                prefix[i]=saved;return ERROR_NOT_ENOUGH_MEMORY;
+            }
+            prefix[i]=saved;
+        }
+        k=reg_make_key(path);disp=2;
+    }
     if(k<0)return ERROR_NOT_ENOUGH_MEMORY;
     *out=(HKEY)(u64)(REG_HANDLE_BASE+(u64)k);if(disposition)*disposition=disp;
     return ERROR_SUCCESS;

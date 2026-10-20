@@ -30,16 +30,18 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 
 static int msi_ok;
 static u32 msi_entry_count, msi_major;
-static u32 fat[MAX_FAT];
+/* Large workspaces are allocated at runtime so the PE image stays small
+ * enough not to overlap user32.dll's fixed image base. */
+static u32 *fat;
 /* Keep the FAT-sector index off the small user-mode stack. */
-static u32 fat_sids[MAX_FAT/128];
-static u32 cab_sector_ids[MAX_FAT];
-static u8 dir_buffer[MAX_DIR];
+static u32 *fat_sids;
+static u32 *cab_sector_ids;
+static u8 *dir_buffer;
 /* CFB mini-stream storage is separate from the main FAT stream space. */
-static u32 mini_fat[MAX_MINIFAT];
-static u8 mini_stream[MAX_MINI_STREAM];
-static u8 table_buffer[MAX_TABLE_STREAM];
-static u8 string_data[MAX_TABLE_STREAM];
+static u32 *mini_fat;
+static u8 *mini_stream;
+static u8 *table_buffer;
+static u8 *string_data;
 static u32 string_offset[MSI_MAX_STRINGS], string_length[MSI_MAX_STRINGS];
 static u32 string_count, string_data_size;
 static u32 mini_fat_count, mini_stream_size, mini_sector_count;
@@ -62,6 +64,28 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
         : [r]"=r"(r) : [n]"r"(n),[a]"r"(a),[b]"r"(b),[c]"r"(c)
         : "rax","rdi","rsi","rdx","memory","cc");
     return r;
+}
+
+/* NtAllocateVirtualMemory currently caps each request at 16 MiB. Keep every
+ * request below that limit and outside the fixed DLL/image range. */
+static int init_msi_workspace(void) {
+    u64 va=0x43000000ULL, p, n;
+#define MSI_WS(ptr, type, bytes) do { \
+        n=((u64)(bytes)+0xFFFULL)&~0xFFFULL; \
+        p=sy3(SYS_Alloc,va,n,0); \
+        if (p!=va) return 0; \
+        (ptr)=(type *)p; va+=n; \
+    } while (0)
+    MSI_WS(fat,u32,MAX_FAT*sizeof(u32));
+    MSI_WS(fat_sids,u32,(MAX_FAT/128)*sizeof(u32));
+    MSI_WS(cab_sector_ids,u32,MAX_FAT*sizeof(u32));
+    MSI_WS(dir_buffer,u8,MAX_DIR);
+    MSI_WS(mini_fat,u32,MAX_MINIFAT*sizeof(u32));
+    MSI_WS(mini_stream,u8,MAX_MINI_STREAM);
+    MSI_WS(table_buffer,u8,MAX_TABLE_STREAM);
+    MSI_WS(string_data,u8,MAX_TABLE_STREAM);
+#undef MSI_WS
+    return 1;
 }
 static void out(const char *s) {
     u64 n=0; while(s[n]) n++;
@@ -678,17 +702,21 @@ void mainCRTStartup(void) {
         for (;;) __asm__ volatile("pause");
     }
     out("msiexec: inspecting "); out(name); out("\n");
+    if (!init_msi_workspace()) {
+        show_and_exit("MSI Reader",
+            "Not enough memory for MSI parser workspaces. No files were changed.",1);
+    }
     u64 h=sy3(SYS_OpenFile,(u64)name,0,0);
     if ((long long)h<0) {
         out("msiexec: cannot open package in the current directory\n");
         for (;;) __asm__ volatile("pause");
     }
     /*
-     * Grow the contiguous user buffer in 32 MiB chunks and read in 8 MiB
-     * requests. Larger reads reduce syscall overhead for large MSI payloads.
-     * Growth is bounded by the available user virtual-address window.
+     * Grow the contiguous user buffer in 16 MiB chunks: the kernel allocator
+     * rejects any single allocation larger than 16 MiB. Read in 8 MiB requests
+     * to reduce syscall overhead while respecting that allocator limit.
      */
-    const u32 chunk_size=32u*1024u*1024u;
+    const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=8u*1024u*1024u;
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;

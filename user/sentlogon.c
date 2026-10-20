@@ -105,6 +105,43 @@ static void cursor_draw(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y) {
         }
     }
 }
+/* Graphical session-start screen. This runs in framebuffer mode (not UEFI text).
+ * Paint the background once, then animate only the twelve-dot spinner. */
+static void session_loading_screen(void) {
+    FBInfo f={0};
+    if(!NtMapFramebuffer(&f)||!f.va||f.w<320||f.h<200)return;
+    f.pitch/=4;
+    u32 *fb=(u32 *)(u64)f.va;
+    rect(fb,f.pitch,f.w,f.h,0,0,(int)f.w,(int)f.h,0xFF061522);
+    /* Gentle blue light field and centered title. */
+    for(u32 y=0;y<f.h/2;y++) {
+        u32 c=mix(0xFF123D59,0xFF061522,(u32)((u64)y*255/(f.h/2?f.h/2:1)));
+        rect(fb,f.pitch,f.w,f.h,0,(int)y,(int)f.w,1,c);
+    }
+    const char *brand="SENTINELOS";
+    int tx=(int)f.w/2-40, ty=(int)f.h/2-72;
+    text(fb,f.pitch,f.w,f.h,tx,ty,brand,0xFFF1FBFF,2);
+    text(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2-34,
+         "Starting your session",0xFFB7D7E7,1);
+    static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13};
+    static const int dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
+    int cx=(int)f.w/2, cy=(int)f.h/2+18;
+    u64 start=sy3(24,0,0,0);
+    if(start==(u64)-1)start=0;
+    for(unsigned frame=0;frame<100;frame++) {
+        /* Clear only the spinner's small bounding box. */
+        rect(fb,f.pitch,f.w,f.h,cx-34,cy-34,68,68,0xFF0B2638);
+        for(int i=0;i<12;i++) {
+            int age=(i-(int)(frame%12)+12)%12;
+            u32 col=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;
+            rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,col);
+        }
+        (void)sy3(SYS_Yield,0,0,0);
+        u64 now=sy3(24,0,0,0);
+        if(now!=(u64)-1 && now-start>=1800)break;
+    }
+}
+
 void sentlogon_main(void) {
     LogonFB fbinfo={0};
     if(!NtMapFramebuffer((FBInfo *)&fbinfo)||!fbinfo.va||fbinfo.w<320||fbinfo.h<200) {

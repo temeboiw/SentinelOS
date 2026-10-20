@@ -10,6 +10,8 @@ typedef char *LPSTR;
 typedef const char *LPCSTR;
 typedef long long i64;
 
+i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
+
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,

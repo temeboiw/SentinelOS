@@ -67,7 +67,13 @@ typedef struct {
 } WINDOW;
 
 static FBInfo g_fb;
-static u32 *g_front, g_pitch, g_fw, g_fh;
+static u32 *g_front, *g_scanout, g_pitch, g_fw, g_fh, g_scan_pitch;
+/* Z-ordered surfaces: cached background, desktop, window, taskbar, cursor. */
+enum { U32_LAYER_BACKGROUND=0, U32_LAYER_DESKTOP=10, U32_LAYER_WINDOW=20, U32_LAYER_TASKBAR=30, U32_LAYER_CURSOR=100 };
+#define U32_LAYER_MAX_PIXELS (1920u * 1080u)
+static u32 u32_desktop_layer[U32_LAYER_MAX_PIXELS];
+static u32 u32_window_layer[U32_LAYER_MAX_PIXELS];
+static u32 u32_taskbar_layer[U32_LAYER_MAX_PIXELS];
 /* Optional compositor clip used while moving a window. */
 static int u32_render_clip;
 static int u32_clip_x0, u32_clip_y0, u32_clip_x1, u32_clip_y1;
@@ -92,8 +98,10 @@ static int u32_suppress_desktop_card;
 static int g_search_focus;
 static char g_search_text[32];
 static int g_search_len;
-static u32 cur_under[16][16];
 static int cur_on, cur_ox, cur_oy;
+static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
+static void u32_composite_layers(int x0, int y0, int x1, int y1);
+static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;
@@ -314,20 +322,9 @@ static void draw_text(int x, int y, const char *s, u32 col) {
 }
 
 static void cursor_restore(void) {
-    if (!cur_on || !g_front) return;
-
-    for (int j = 0; j < 16; j++) {
-        int yy = cur_oy + j;
-        if (yy < 0 || (u32)yy >= g_fh) continue;
-
-        for (int i = 0; i < 16; i++) {
-            int xx = cur_ox + i;
-            if (xx < 0 || (u32)xx >= g_fw) continue;
-
-            g_front[yy * g_pitch + xx] = cur_under[j][i];
-        }
-    }
-
+    if (!cur_on || !g_scanout) return;
+    /* Rebuild the scene below the cursor; never restore stale saved pixels. */
+    u32_repaint_scene_rect(cur_ox, cur_oy, cur_ox + 16, cur_oy + 16);
     cur_on = 0;
 }
 
@@ -351,28 +348,20 @@ static void cursor_save_draw(int x, int y) {
         "#.....#ww#......",
         "......##........"
     };
-    if (!g_front || !g_pitch) return;
-
-    cursor_restore();
+    if (!g_scanout || !g_scan_pitch) return;
+    /* Independent topmost layer: cursor pixels never enter scene surfaces. */
     cur_ox = x;
     cur_oy = y;
-
     for (int j = 0; j < 16; j++) {
         for (int i = 0; i < 16; i++) {
             int yy = y + j, xx = x + i;
             char p = shape[j][i];
-            if (yy < 0 || (u32)yy >= g_fh ||
-                xx < 0 || (u32)xx >= g_fw) {
-                cur_under[j][i] = COL_BG;
-                continue;
-            }
-            cur_under[j][i] = g_front[yy * g_pitch + xx];
-            if (p == '#') g_front[yy * g_pitch + xx] = 0xFF000000;
-            else if (p == 'w') g_front[yy * g_pitch + xx] = COL_WHITE;
-            else if (p == '+') g_front[yy * g_pitch + xx] = COL_ACCENT;
+            if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
+            if (p == '#') g_scanout[yy * g_scan_pitch + xx] = 0xFF000000;
+            else if (p == 'w') g_scanout[yy * g_scan_pitch + xx] = COL_WHITE;
+            else if (p == '+') g_scanout[yy * g_scan_pitch + xx] = COL_ACCENT;
         }
     }
-
     cur_on = 1;
 }
 
@@ -381,14 +370,60 @@ static void present_cursor_only(void) {
 }
 
 static void ensure_fb(void) {
-    if (!sy3(SYS_MapFb, (u64)&g_fb, 0, 0) || !g_fb.va)
-        return;
-
-    g_front = (u32 *)g_fb.va;
-    g_fw = g_fb.w;
-    g_fh = g_fb.h;
-    g_pitch = g_fb.pitch / 4;
+    if (!sy3(SYS_MapFb, (u64)&g_fb, 0, 0) || !g_fb.va) return;
+    g_scanout = (u32 *)g_fb.va;
+    g_fw = g_fb.w; g_fh = g_fb.h;
+    g_scan_pitch = g_fb.pitch / 4;
+    g_front = g_scanout; g_pitch = g_scan_pitch;
     u32_ttf_load();
+}
+
+static void u32_clear_layer(u32 *layer) {
+    if (!layer || g_fw>1920u || g_fh>1080u) return;
+    u32 x0=0,y0=0,x1=g_fw,y1=g_fh;
+    if (u32_render_clip) {
+        if (u32_clip_x0>0)x0=(u32)u32_clip_x0;
+        if (u32_clip_y0>0)y0=(u32)u32_clip_y0;
+        if (u32_clip_x1>=0 && (u32)u32_clip_x1<x1)x1=(u32)u32_clip_x1;
+        if (u32_clip_y1>=0 && (u32)u32_clip_y1<y1)y1=(u32)u32_clip_y1;
+    }
+    if(x0>x1)x0=x1; if(y0>y1)y0=y1;
+    for(u32 y=y0;y<y1;y++)for(u32 x=x0;x<x1;x++)layer[y*g_fw+x]=0;
+}
+
+static u32 u32_alpha_over(u32 dst,u32 src) {
+    u32 a=src>>24;
+    if(!a)return dst; if(a==255u)return src;
+    u32 ia=255u-a;
+    u32 r=(((src>>16)&255u)*a+((dst>>16)&255u)*ia)/255u;
+    u32 g=(((src>>8)&255u)*a+((dst>>8)&255u)*ia)/255u;
+    u32 b=((src&255u)*a+(dst&255u)*ia)/255u;
+    return 0xFF000000u|(r<<16)|(g<<8)|b;
+}
+
+/* BACKGROUND < DESKTOP < WINDOW < TASKBAR < CURSOR. */
+static void u32_composite_layers(int x0,int y0,int x1,int y1) {
+    if(!g_scanout||g_fw>1920u||g_fh>1080u)return;
+    if(x0<0)x0=0;if(y0<0)y0=0;
+    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
+        u32 at=(u32)y*g_fw+(u32)x;
+        u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
+        u32 c=*dst;
+        c=u32_alpha_over(c,u32_desktop_layer[at]);
+        c=u32_alpha_over(c,u32_window_layer[at]);
+        c=u32_alpha_over(c,u32_taskbar_layer[at]);
+        *dst=c;
+    }
+}
+
+static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
+    if(!g_scanout||u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
+    if(x0<0)x0=0;if(y0<0)y0=0;
+    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++)
+        g_scanout[(u32)y*g_scan_pitch+(u32)x]=u32_aero_bg_cache[(u32)y*g_fw+(u32)x];
+    u32_composite_layers(x0,y0,x1,y1);
 }
 
 static int hit(int x, int y, int x0, int y0, int x1, int y1) {    return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -537,34 +572,10 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
-    /* Remember whether the caller supplied a dirty-region clip. Cursor
-     * save/restore must not write outside that region: doing so restores
-     * stale framebuffer pixels over freshly rendered text during rapid
-     * mouse movement and leaves glyph fragments after a window closes. */
     int explicit_clip = u32_render_clip;
-    int clip_x0_before=u32_clip_x0, clip_y0_before=u32_clip_y0;
-    int clip_x1_before=u32_clip_x1, clip_y1_before=u32_clip_y1;
-    int redraw_cursor_after_clip=0;
-
-    if (!explicit_clip) {
-        cursor_restore();
-    } else {
-        /* Keep dirty paints local. Never expand one dirty rectangle to
-         * cover the entire path between the old and new cursor positions:
-         * that makes a fast mouse movement repaint a huge rectangle and
-         * produces speed-dependent blocks/streaks. The input path repaints
-         * the old and new 16x16 footprints independently. */
-        int old_hit = cur_on &&
-            cur_ox < u32_clip_x1 && cur_ox+16 > u32_clip_x0 &&
-            cur_oy < u32_clip_y1 && cur_oy+16 > u32_clip_y0;
-        int new_hit =
-            g_mx < u32_clip_x1 && g_mx+16 > u32_clip_x0 &&
-            g_my < u32_clip_y1 && g_my+16 > u32_clip_y0;
-        if (old_hit || new_hit) {
-            cur_on=0;
-            redraw_cursor_after_clip=1;
-        }
-    }
+    cursor_restore();
+    int layered = g_fw<=1920u && g_fh<=1080u;
+    int layer_x0=0,layer_y0=0,layer_x1=(int)g_fw,layer_y1=(int)g_fh;
 
     /* Ordinary app redraws are clipped to their own window. The desktop
      * process owns full-screen composition; explicit dirty clips are kept. */
@@ -661,6 +672,7 @@ static void compose(void) {
         aero_desktop();
     }
 
+    if(layered){g_front=u32_desktop_layer;g_pitch=g_fw;u32_clear_layer(u32_desktop_layer);}
     /* Floating glass identity plaque. */
     round_fill(12,10,182,45,9,0xAFFFFFFF);
     round_fill(14,12,178,41,8,0xEAFBFFFF);
@@ -698,6 +710,7 @@ static void compose(void) {
         draw_text(cx+27,cy+111,g_lines[8][0]?g_lines[8]:"Search: ",0xFF276A84);
     }
 
+    if(layered){g_front=u32_window_layer;g_pitch=g_fw;u32_clear_layer(u32_window_layer);}
     if (g_wnd.visible && !g_wnd.minimized) {
         int x = g_wnd.x, y = g_wnd.y;
         int w = g_wnd.w, h = g_wnd.h;
@@ -759,25 +772,19 @@ static void compose(void) {
         }
     }
 
+    if(layered){g_front=u32_taskbar_layer;g_pitch=g_fw;u32_clear_layer(u32_taskbar_layer);}
     draw_taskbar();
+    if(u32_render_clip){layer_x0=u32_clip_x0;layer_y0=u32_clip_y0;layer_x1=u32_clip_x1;layer_y1=u32_clip_y1;}
+    if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
     if (auto_clip) {
         u32_render_clip=0;
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
-    /* The clip has now repainted the complete area beneath any cursor
-     * it touched. Restore the caller's clip and save fresh underlay pixels
-     * before drawing the cursor, so it remains visible without pixel trails. */
-    if (explicit_clip) {
-        u32_clip_x0=clip_x0_before; u32_clip_y0=clip_y0_before;
-        u32_clip_x1=clip_x1_before; u32_clip_y1=clip_y1_before;
-    }
-    if (!explicit_clip || redraw_cursor_after_clip) {
-        int saved_clip=u32_render_clip;
-        u32_render_clip=0;
-        cursor_save_draw(g_mx,g_my);
-        u32_render_clip=saved_clip;
-    }
+    /* Cursor is always presented last, above every scene layer. */
+    g_front=g_scanout; g_pitch=g_scan_pitch;
+    u32_render_clip=0;
+    cursor_save_draw(g_mx,g_my);
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is

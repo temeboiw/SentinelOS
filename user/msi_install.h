@@ -26,6 +26,8 @@ static u8 msi_copy_buffer[65536];
 static MsiRuntimeProperty msi_runtime_props[128];
 static MsiDirOverride msi_dir_overrides[128];
 static u32 msi_runtime_prop_count, msi_dir_override_count;
+static u8 msi_custom_preexecuted[512];
+static int msi_resolve_dir(u32 idx,u32 depth);
 
 static int msi_cell_text(const char *table,u32 row,u32 col,char *out_text,u32 cap) {
     int is_text=0;
@@ -240,7 +242,8 @@ static int msi_load_sequence(MsiSequenceRow *rows,u8 *enabled,u32 cap,u32 *count
         int cond=msi_condition_eval(rows[i].condition);
         if(cond<0) { out("Install blocked: unsupported condition: ");out(rows[i].condition);out("\n");return 0; }
         if(!cond) continue;
-        if(!msi_action_supported(rows[i].action)) {
+        if(!msi_action_supported(rows[i].action) &&
+           !msi_custom_action_kind(rows[i].action)) {
             out("Install blocked: unsupported MSI action/custom action: ");out(rows[i].action);out("\n");
             return 0;
         }
@@ -281,6 +284,12 @@ static int msi_resolve_dir(u32 idx,u32 depth) {
     MsiDirPath *d=&msi_dir_paths[idx];
     if(d->state==2) return 1;
     if(d->state==1) return 0;
+    int oi=msi_find_dir_override(d->id);
+    if(oi>=0) {
+        u32 j=0; while(msi_dir_overrides[oi].path[j] && j+1<sizeof d->path){d->path[j]=msi_dir_overrides[oi].path[j];j++;}
+        if(msi_dir_overrides[oi].path[j]) return 0;
+        d->path[j]=0; d->state=2; return 1;
+    }
     if(msi_builtin_dir(d->id,d->path,sizeof d->path)){d->state=2;return 1;}
     d->state=1;
     char parent_path[512];
@@ -383,7 +392,7 @@ static int msi_build_file_plan(void) {
     MsiTable *files=msi_find_table("File"), *components=msi_find_table("Component");
     MsiTable *fc=msi_find_table("FeatureComponents");
     if(!files || !files->rows || files->rows>MSI_MAX_FILE_PLANS ||
-       !components || !components->rows || !msi_load_directories() ||
+       !components || !components->rows || !msi_dir_count ||
        (fc && fc->rows)) {
         out("Install blocked: unsupported file/component/feature table layout.\n"); return 0;
     }
@@ -477,9 +486,39 @@ static int msi_copy_staged_files(void) {
     }
     return 1;
 }
+static int msi_preflight_custom_actions(MsiSequenceRow *rows,u32 count) {
+    int init=-1;
+    for(u32 i=0;i<count;i++) if(rows[i].sequence!=0 &&
+       same_name(rows[i].action,"InstallInitialize")) {init=(int)i;break;}
+    if(init<0) return 0;
+    for(u32 i=0;i<count;i++) {
+        msi_custom_preexecuted[i]=0;
+        if(rows[i].sequence==0 || msi_action_supported(rows[i].action)) continue;
+        int kind=msi_custom_action_kind(rows[i].action);
+        if(!kind) return 0;
+        if((kind==35 || kind==51) && (int)i>init) {
+            out("Install blocked: SetDirectory/SetProperty custom actions must precede InstallInitialize.\n");
+            return 0;
+        }
+        int cond=msi_condition_eval(rows[i].condition);
+        if(cond<0) return 0;
+        if(!cond) continue;
+        if(kind==35 || kind==51) {
+            if(!msi_execute_custom_action(rows[i].action)) return 0;
+            msi_custom_preexecuted[i]=1;
+        } else if(kind==19 && (int)i<init) {
+            (void)msi_execute_custom_action(rows[i].action);
+            return 0;
+        }
+    }
+    return 1;
+}
 static int msi_install_package(void) {
     MsiSequenceRow *rows=msi_install_rows; u8 *enabled=msi_install_enabled; u32 count=0;
+    msi_runtime_prop_count=0; msi_dir_override_count=0;
     if(!msi_db_ok || !msi_load_sequence(rows,enabled,512,&count) ||
+       !msi_load_directories() ||
+       !msi_preflight_custom_actions(rows,count) ||
        !msi_build_file_plan()) {
         out("Install preflight failed; no destination files changed.\n"); return 0;
     }
@@ -487,7 +526,16 @@ static int msi_install_package(void) {
     int initialized=0, installed_files=0, finalized=0;
     for(u32 i=0;i<count;i++) {
         if(!enabled[i]) continue;
+        int cond=msi_condition_eval(rows[i].condition);
+        if(cond<0) goto fail;
+        if(!cond) continue;
         const char *a=rows[i].action;
+        if(!msi_action_supported(a)) {
+            int kind=msi_custom_action_kind(a);
+            if((kind==35 || kind==51) && msi_custom_preexecuted[i]) continue;
+            if(kind==19) { (void)msi_execute_custom_action(a); goto fail; }
+            goto fail;
+        }
         if(same_name(a,"InstallInitialize")) { initialized=1; continue; }
         if(same_name(a,"InstallFiles")) {
             if(!initialized || installed_files || !msi_extract_embedded_cabinets() ||

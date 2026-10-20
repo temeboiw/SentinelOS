@@ -106,13 +106,16 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
     return 0;
 }
 
-#define VFS_MAX_ENT 64
-typedef struct { char name[32]; uint8_t is_dir; uint32_t ino; } VfsEnt;
+#define VFS_MAX_ENT 256
+typedef struct { char name[256]; uint8_t is_dir; uint32_t ino; } VfsEnt;
 static VfsEnt vfs_ents[VFS_MAX_ENT];
 static int vfs_nent;
 static Ext4k g_ext4;
 static int g_ext4_ok;
 static uint32_t vfs_parent_ino;
+#define VFS_MAX_DEPTH 64
+static uint32_t vfs_dir_stack[VFS_MAX_DEPTH];
+static int vfs_depth;
 static char vfs_cwd[128];
 static uint32_t vfs_cwd_ino = 2;
 
@@ -131,7 +134,7 @@ static int vfs_listdir(uint32_t dir_ino) {
             uint32_t ino = E32(buf, o);
             uint8_t nl = buf[o + 6];
             uint8_t ft = buf[o + 7];
-            if (ino && nl > 0 && nl < 32) {
+            if (ino && nl > 0) {
                 if (!(nl == 1 && buf[o + 8] == '.') &&
                     !(nl == 2 && buf[o + 8] == '.' && buf[o + 9] == '.')) {
                     VfsEnt *e = &vfs_ents[vfs_nent++];
@@ -173,9 +176,9 @@ static int vfs_chdir(const char *name) {
     if (!name || !name[0]) return -1;
     /* parent */
     if (name[0]=='.' && name[1]=='.' && name[2]==0) {
-        if (vfs_cwd_ino == 2) return 0;
-        vfs_cwd_ino = vfs_parent_ino;
-        vfs_parent_ino = 2;
+        if (vfs_depth <= 0) return 0;
+        vfs_cwd_ino = vfs_dir_stack[--vfs_depth];
+        vfs_parent_ino = vfs_depth > 0 ? vfs_dir_stack[vfs_depth - 1] : 2;
         return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
     }
     for (int i = 0; i < vfs_nent; i++) {
@@ -184,6 +187,8 @@ static int vfs_chdir(const char *name) {
         while (*a || *b) { if (*a++ != *b++) { ok = 0; break; } }
         if (!ok) continue;
         if (!vfs_ents[i].is_dir) return -2;
+        if (vfs_depth >= VFS_MAX_DEPTH) return -1;
+        vfs_dir_stack[vfs_depth++] = vfs_cwd_ino;
         vfs_parent_ino = vfs_cwd_ino;
         vfs_cwd_ino = vfs_ents[i].ino;
         return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
@@ -199,6 +204,7 @@ static int vfs_mount_c(void) {
     }
     vfs_cwd_ino = 2;
     vfs_parent_ino = 2;
+    vfs_depth = 0;
     vfs_cwd[0] = 67;
     vfs_cwd[1] = 58;
     vfs_cwd[2] = 92;

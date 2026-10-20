@@ -13,8 +13,8 @@ typedef unsigned char u8;
 
 enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
-#define MAX_FILE (4u * 1024u * 1024u)
-#define MAX_FAT 16384
+#define MAX_FILE (16u * 1024u * 1024u)
+#define MAX_FAT 65536
 #define MAX_DIR (256u * 1024u)
 #define FREE_SECTOR 0xFFFFFFFFu
 #define END_OF_CHAIN 0xFFFFFFFEu
@@ -193,7 +193,7 @@ void mainCRTStartup(void) {
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     file_bytes=buf; file_size=total;
-    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 4 MiB\n");
+    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 16 MiB\n");
     inspect_msi();
     if (msi_ok)
         show_and_exit("MSI Reader",

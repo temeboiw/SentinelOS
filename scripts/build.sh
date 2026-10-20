@@ -213,6 +213,7 @@ USER_CFLAGS=(
   -fno-stack-protector
   -fno-pic
   -mno-red-zone
+  -mno-stack-arg-probe
   -mgeneral-regs-only
   -O2
   -Wall

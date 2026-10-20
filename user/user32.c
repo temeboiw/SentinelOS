@@ -545,6 +545,14 @@ static void compose(void) {
         u32_clip_x1=g_wnd.x+g_wnd.w+10;
         u32_clip_y1=g_wnd.y+g_wnd.h+14;
         auto_clip=1;
+    } else if (!u32_render_clip && u32_is_desktop_window() &&
+               u32_aero_bg_w == g_fw && u32_aero_bg_h == g_fh) {
+        /* After initial desktop paint, ordinary desktop updates cover the
+         * card and taskbar only, not the static wallpaper or icon area. */
+        u32_render_clip=1;
+        u32_clip_x0=0; u32_clip_y0=60;
+        u32_clip_x1=(int)g_fw; u32_clip_y1=(int)g_fh;
+        auto_clip=1;
     }
 
     if (g_wnd.visible) {
@@ -976,12 +984,14 @@ static int u32_update_pending;
 static BOOL u32_update_erase;
 __attribute__((dllexport))
 BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
-    if(hwnd&&!IsWindow(hwnd))return 0;
+    int desktop_window=u32_is_desktop_window();
+    if(hwnd&&!IsWindow(hwnd)&&!desktop_window)return 0;
     U32_RECT r;
     if(rc)r=*(const U32_RECT*)rc;
-    else {r.left=0;r.top=0;r.right=g_wnd.visible?g_wnd.w:(int)g_fw;r.bottom=g_wnd.visible?g_wnd.h-32:(int)g_fh;}
+    else {r.left=0;r.top=0;r.right=(g_wnd.visible&&!desktop_window)?g_wnd.w:(int)g_fw;r.bottom=(g_wnd.visible&&!desktop_window)?g_wnd.h:(int)g_fh;}
     if(r.left<0)r.left=0;if(r.top<0)r.top=0;
-    int maxw=g_wnd.visible?g_wnd.w:(int)g_fw,maxh=g_wnd.visible?g_wnd.h-32:(int)g_fh;
+    int maxw=(g_wnd.visible&&!desktop_window)?g_wnd.w:(int)g_fw;
+    int maxh=(g_wnd.visible&&!desktop_window)?g_wnd.h:(int)g_fh;
     if(r.right>maxw)r.right=maxw;if(r.bottom>maxh)r.bottom=maxh;
     if(r.right<=r.left||r.bottom<=r.top)return 1;
     if(!u32_update_pending)u32_invalid_rect=r;

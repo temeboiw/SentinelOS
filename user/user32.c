@@ -55,6 +55,10 @@ static WINDOW g_wnd;
 static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
+static long u32_class_style; static void *u32_class_proc;
+static long u32_class_extra[2];
+static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
+static unsigned int u32_double_click_time=500;
 static char g_lines[40][80];
 static int g_nlines, g_tb_n, g_tb_pids[8];
 
@@ -819,6 +823,7 @@ typedef long long U32_LRESULT;
 typedef unsigned int U32_UINT;
 typedef unsigned short U32_WCHAR;
 typedef struct { int left, top, right, bottom; } U32_RECT;
+typedef struct { unsigned int cbSize,fMask; int nMin,nMax; unsigned int nPage; int nPos,nTrackPos; } U32_SCROLLINFO;
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
 typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle, dwWindowStatus, cxWindowBorders, cyWindowBorders; unsigned short atomWindowType, wCreatorVersion; } U32_WINDOWINFO;
@@ -1310,12 +1315,12 @@ __attribute__((dllexport)) unsigned long long GetScrollInfo(void) { return 0; }
 
 /* Additional Win32 entry points. These ABI placeholders are intentionally conservative;
    replace with OS-backed implementations as the corresponding subsystems mature. */
-__attribute__((dllexport)) unsigned long long SetScrollInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long ShowScrollBar(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetScrollRange(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetScrollRange(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetScrollPos(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetScrollPos(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int SetScrollInfo(void *hwnd,int bar,const U32_SCROLLINFO *info,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||!info||(bar!=0&&bar!=1)||info->cbSize<sizeof(U32_SCROLLINFO))return 0;int i=bar==0?0:1,old=u32_scroll_pos[i];if(info->fMask&1u)u32_scroll_min[i]=info->nMin;if(info->fMask&2u)u32_scroll_max[i]=info->nMax;if(info->fMask&4u)u32_scroll_page[i]=(int)info->nPage;if(info->fMask&8u)u32_scroll_pos[i]=info->nPos;if(u32_scroll_pos[i]<u32_scroll_min[i])u32_scroll_pos[i]=u32_scroll_min[i];if(u32_scroll_pos[i]>u32_scroll_max[i])u32_scroll_pos[i]=u32_scroll_max[i];return old;}
+__attribute__((dllexport)) BOOL ShowScrollBar(void *hwnd,int bar,BOOL show){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;u32_scroll_visible[bar]=show!=0;return 1;}
+__attribute__((dllexport)) BOOL SetScrollRange(void *hwnd,int bar,int min,int max,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1||max<min)return 0;u32_scroll_min[bar]=min;u32_scroll_max[bar]=max;if(u32_scroll_pos[bar]<min)u32_scroll_pos[bar]=min;if(u32_scroll_pos[bar]>max)u32_scroll_pos[bar]=max;return 1;}
+__attribute__((dllexport)) BOOL GetScrollRange(void *hwnd,int bar,int *min,int *max){if(!IsWindow(hwnd)||bar<0||bar>1||!min||!max)return 0;*min=u32_scroll_min[bar];*max=u32_scroll_max[bar];return 1;}
+__attribute__((dllexport)) int GetScrollPos(void *hwnd,int bar){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;return u32_scroll_pos[bar];}
+__attribute__((dllexport)) int SetScrollPos(void *hwnd,int bar,int pos,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1)return 0;int old=u32_scroll_pos[bar];if(pos<u32_scroll_min[bar])pos=u32_scroll_min[bar];if(pos>u32_scroll_max[bar])pos=u32_scroll_max[bar];u32_scroll_pos[bar]=pos;return old;}
 __attribute__((dllexport)) unsigned long long SetWindowRgn(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetWindowRgn(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long MapWindowPoints(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -1323,7 +1328,7 @@ __attribute__((dllexport)) BOOL ClientToScreen(void *hwnd,U32_POINT *pt){if(!IsW
 __attribute__((dllexport)) BOOL ScreenToClient(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x-=g_wnd.x;pt->y-=g_wnd.y+24;return 1;}
 __attribute__((dllexport)) void *WindowFromPoint(U32_POINT pt){return IsWindow((void *)1)&&hit(pt.x,pt.y,g_wnd.x,g_wnd.y,g_wnd.x+g_wnd.w,g_wnd.y+g_wnd.h)?(void *)1:0;}
 __attribute__((dllexport)) unsigned long long ChildWindowFromPoint(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetDoubleClickTime(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL SetDoubleClickTime(unsigned int ms){if(ms==0)ms=500;if(ms<1||ms>5000)return 0;u32_double_click_time=ms;return 1;}
 __attribute__((dllexport)) void *GetLastActivePopup(void *hwnd){return IsWindow(hwnd)?hwnd:0;}
 __attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd) { if (!IsWindow(hwnd)) return 0; int n=0; while (g_wnd.title[n]) n++; return n; }
 __attribute__((dllexport)) int GetWindowTextLengthW(void *hwnd) { return GetWindowTextLengthA(hwnd); }
@@ -1331,14 +1336,14 @@ __attribute__((dllexport)) long long GetWindowLongPtrA(void *hwnd, int index) { 
 __attribute__((dllexport)) long long SetWindowLongPtrA(void *hwnd, int index, long long value) { if (!IsWindow(hwnd)) return 0; long long old=GetWindowLongPtrA(hwnd,index); if (index==-4) u32_wnd_proc=(void *)(unsigned long long)value; else if (index==-21) u32_wnd_userdata=(void *)(unsigned long long)value; else return (long long)SetWindowLongA(hwnd,index,(long)value); compose(); return old; }
 __attribute__((dllexport)) long long GetWindowLongPtrW(void *hwnd, int index) { return GetWindowLongPtrA(hwnd,index); }
 __attribute__((dllexport)) long long SetWindowLongPtrW(void *hwnd, int index, long long value) { return SetWindowLongPtrA(hwnd,index,value); }
-__attribute__((dllexport)) unsigned long long GetClassLongA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetClassLongA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetClassLongPtrA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetClassLongPtrA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetClassLongW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetClassLongW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetClassLongPtrW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetClassLongPtrW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) unsigned long GetClassLongA(void *hwnd,int index){if(!IsWindow(hwnd))return 0;if(index==-26)return (unsigned long)u32_class_style;if(index==-24)return (unsigned long)(unsigned long long)u32_class_proc;if(index==-20)return (unsigned long)u32_class_extra[0];if(index==-18)return (unsigned long)u32_class_extra[1];return 0;}
+__attribute__((dllexport)) long SetClassLongA(void *hwnd,int index,long value){if(!IsWindow(hwnd))return 0;long old=(long)GetClassLongA(hwnd,index);if(index==-26)u32_class_style=value;else if(index==-24)u32_class_proc=(void *)(unsigned long long)(unsigned long)value;else if(index==-20)u32_class_extra[0]=value;else if(index==-18)u32_class_extra[1]=value;else return 0;return old;}
+__attribute__((dllexport)) unsigned long long GetClassLongPtrA(void *hwnd,int index){return (unsigned long long)GetClassLongA(hwnd,index);}
+__attribute__((dllexport)) unsigned long long SetClassLongPtrA(void *hwnd,int index,unsigned long long value){return (unsigned long long)SetClassLongA(hwnd,index,(long)value);}
+__attribute__((dllexport)) unsigned long GetClassLongW(void *hwnd,int index){return GetClassLongA(hwnd,index);}
+__attribute__((dllexport)) long SetClassLongW(void *hwnd,int index,long value){return SetClassLongA(hwnd,index,value);}
+__attribute__((dllexport)) unsigned long long GetClassLongPtrW(void *hwnd,int index){return GetClassLongPtrA(hwnd,index);}
+__attribute__((dllexport)) unsigned long long SetClassLongPtrW(void *hwnd,int index,unsigned long long value){return SetClassLongPtrA(hwnd,index,value);}
 __attribute__((dllexport)) u32 GetWindowModuleFileNameW(void *hwnd, U32_LPWSTR out, u32 cap) {
     char narrow[260]; u32 n=GetWindowModuleFileNameA(hwnd,narrow,sizeof(narrow));
     if (!n || !out || !cap) return 0;
@@ -1352,8 +1357,8 @@ __attribute__((dllexport)) BOOL IsChild(void *parent,void *child){return IsWindo
 __attribute__((dllexport)) BOOL IsWindowUnicode(void *hwnd){return IsWindow(hwnd)&&u32_wnd_proc!=0;}
 __attribute__((dllexport)) BOOL IsWindowEnabled(void *hwnd){return IsWindow(hwnd)&&!(u32_wnd_style&0x08000000u);}
 __attribute__((dllexport)) void *GetWindowOwner(void *hwnd){return IsWindow(hwnd)?u32_wnd_parent:0;}
-__attribute__((dllexport)) unsigned long long GetWindowWord(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetWindowWord(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) unsigned short GetWindowWord(void *hwnd,int index){return (unsigned short)GetWindowLongA(hwnd,index);}
+__attribute__((dllexport)) unsigned short SetWindowWord(void *hwnd,int index,unsigned short value){return (unsigned short)SetWindowLongA(hwnd,index,value);}
 __attribute__((dllexport)) long GetWindowLongW(void *hwnd, int index) { return GetWindowLongA(hwnd,index); }
 __attribute__((dllexport)) long SetWindowLongW(void *hwnd, int index, long value) { return SetWindowLongA(hwnd,index,value); }
 __attribute__((dllexport)) int GetDlgCtrlID(void *hwnd) { return IsWindow(hwnd) ? (int)u32_wnd_id : 0; }

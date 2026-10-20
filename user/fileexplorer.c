@@ -33,6 +33,9 @@ typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
 typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
+typedef void (*BeginRedrawBatch_t)(void);
+typedef void (*EndRedrawBatch_t)(void);
+typedef struct { int left, top, right, bottom; } FE_RECT;
 
 
 typedef struct {
@@ -53,22 +56,19 @@ static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
+static void *g_window;
 
 static int ends_with(const char *n, const char *ext);
 
-/* Reserve one character at the start of every row for the hover marker.
-   Changing it never shifts the filename or any neighboring controls. */
-static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
-    pText(0, 0, 0, g_path, -1);
-    pText(0, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
-    for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
-        int i = g_scroll + visible;
-        if (i >= g_count) {
-            pText(0, 0, 2 + visible, " ", -1);
-            continue;
-        }
-        char line[80];
-        int p = 0;
+/* Draw one visible row and invalidate only that row. */
+static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visible) {
+    if (visible < 0 || visible >= VISIBLE_ROWS) return;
+    int i = g_scroll + visible;
+    char line[80];
+    int p = 0;
+    if (i >= g_count) {
+        line[0]=' '; line[1]=0;
+    } else {
         line[p++] = (i == g_hover_row) ? '>' : ' ';
         if (g_isdir[i]) {
             line[p++]='['; line[p++]='D'; line[p++]='I'; line[p++]='R'; line[p++]=']'; line[p++]=' ';
@@ -83,11 +83,25 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         }
         for (int j = 0; g_names[i][j] && p < 78; j++) line[p++] = g_names[i][j];
         line[p] = 0;
-        pText(0, 0, 2 + visible, line, -1);
     }
-    if (pInv) pInv(0, 0, 1);
+    pText(g_window, 0, 2 + visible, line, -1);
+    if (pInv) {
+        FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
+                          760, 44 + (3 + visible) * 16 };
+        pInv(g_window, &dirty, 0);
+    }
 }
 
+static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
+    pText(g_window, 0, 0, g_path, -1);
+    pText(g_window, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
+    for (int visible = 0; visible < VISIBLE_ROWS; visible++)
+        draw_visible_row(pText, 0, visible);
+    if (pInv) {
+        FE_RECT dirty = { 0, 0, 760, 520 };
+        pInv(g_window, &dirty, 1);
+    }
+}
 
 static void path_init(void) {
     g_path[0]='C'; g_path[1]=':'; g_path[2]='\\'; g_path[3]=0;
@@ -154,6 +168,8 @@ void mainCRTStartup(void) {
     DispatchMessageA_t pDisp = (DispatchMessageA_t)gpa(u32, "DispatchMessageA");
     MessageBoxA_t pMsgBox = (MessageBoxA_t)gpa(u32, "MessageBoxA");
     InvalidateRect_t pInv = (InvalidateRect_t)gpa(u32, "InvalidateRect");
+    BeginRedrawBatch_t pBeginBatch = (BeginRedrawBatch_t)gpa(u32, "BeginRedrawBatch");
+    EndRedrawBatch_t pEndBatch = (EndRedrawBatch_t)gpa(u32, "EndRedrawBatch");
 
     if (!pQuery || !pCreate || !pShow || !pText || !pGetMsg) {
         print("fileexplorer: missing API\n");
@@ -163,10 +179,12 @@ void mainCRTStartup(void) {
     path_init();
     print("fileexplorer: create window\n");
     g_win_y = 40;
-    void *hwnd = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
-    if (pShow) pShow(hwnd, 1);
+    if (pBeginBatch) pBeginBatch();
+    g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
+    if (pShow) pShow(g_window, 1);
     reload(pQuery, pText, pInv);
-    if (pUpdate) pUpdate(hwnd);
+    if (pUpdate) pUpdate(g_window);
+    if (pEndBatch) pEndBatch();
     print("fileexplorer: ready\n");
 
     MSG msg;
@@ -185,8 +203,12 @@ void mainCRTStartup(void) {
             if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= g_count) row = -1;
             else row += g_scroll;
             if (row != g_hover_row) {
+                int old_row = g_hover_row;
                 g_hover_row = row;
-                draw_rows(pText, pInv);
+                if (old_row >= g_scroll && old_row < g_scroll + VISIBLE_ROWS)
+                    draw_visible_row(pText, pInv, old_row - g_scroll);
+                if (row >= g_scroll && row < g_scroll + VISIBLE_ROWS)
+                    draw_visible_row(pText, pInv, row - g_scroll);
             }
         }
 

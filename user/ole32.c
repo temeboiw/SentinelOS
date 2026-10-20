@@ -34,7 +34,7 @@ static void task_init(void) {
     task_first->free=1;task_first->magic=GUID_HEAP_MAGIC;
 }
 static u64 align16(u64 n){return (n+15u)&~15ull;}
-E HRESULT CoInitialize(LPVOID p) {return CoInitializeEx(p,2u);}
+E HRESULT CoInitializeEx(LPVOID p,DWORD flags);\nE HRESULT CoInitialize(LPVOID p) {return CoInitializeEx(p,2u);}
 E HRESULT CoInitializeEx(LPVOID p,DWORD flags) {
     (void)p;int model=(flags&0x2)?1:0;
     if(!com_init_count){com_init_count=1;com_model=model;return S_OK;}

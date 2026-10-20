@@ -2131,7 +2131,7 @@ __attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){ret
 static int u32_station_inherit,u32_desktop_inherit;
 #define U32_WINSTA_HANDLE ((void *)0x1100)
 #define U32_DESKTOP_HANDLE ((void *)0x1101)
-static void *u32_process_station=U32_WINSTA_HANDLE,*u32_thread_desktop=U32_DESKTOP_HANDLE,*u32_active_desktop=U32_DESKTOP_HANDLE;
+static void *u32_process_station=U32_WINSTA_HANDLE,*u32_thread_desktop=U32_DESKTOP_HANDLE;
 __attribute__((dllexport)) void *GetProcessWindowStation(void){return u32_process_station;}
 
 __attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?u32_thread_desktop:0;}
@@ -2326,7 +2326,7 @@ __attribute__((dllexport)) void *OpenDesktopW(const unsigned short *name,DWORD f
 
 __attribute__((dllexport)) BOOL CloseDesktop(void *desktop){return desktop==U32_DESKTOP_HANDLE;}
 
-__attribute__((dllexport)) BOOL SwitchDesktop(void *desktop){if(desktop!=U32_DESKTOP_HANDLE)return 0;u32_active_desktop=desktop;compose();return 1;}
+__attribute__((dllexport)) BOOL SwitchDesktop(void *desktop){if(desktop!=U32_DESKTOP_HANDLE)return 0;compose();return 1;}
 
 __attribute__((dllexport)) BOOL GetUserObjectInformation(void *object,int index,void *info,DWORD len,DWORD *needed){return GetUserObjectInformationA(object,index,info,len,needed);}
 

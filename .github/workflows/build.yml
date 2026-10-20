@@ -24,6 +24,10 @@ jobs:
         run: |
           clang -std=c11 -Wall -Wextra tests/ext4_alloc_test.c -o build/ext4_alloc_test
           ./build/ext4_alloc_test
+      - name: Test MSI action safety
+        run: |
+          clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-unused-variable tests/msi_engine_test.c -o build/msi_engine_test
+          ./build/msi_engine_test
       - name: Fetch EDK2 headers
         run: |
           git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"

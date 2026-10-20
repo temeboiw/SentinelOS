@@ -1002,11 +1002,21 @@ __attribute__((dllexport)) int GetClassNameA(void *hwnd, LPSTR out, int cap) {
     if (!out || cap<=0) return 0;
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
 }
+typedef struct { int used; unsigned short atom; U32_WNDCLASSA wc; char name[96], menu[96]; } U32_CLASSREG;
+static U32_CLASSREG u32_classes[16];
+static int u32_class_name_equal(const char *a,const char *b){if(!a||!b)return 0;while(*a&&*b){char x=*a,y=*b;if(x>='A'&&x<='Z')x+=32;if(y>='A'&&y<='Z')y+=32;if(x!=y)return 0;a++;b++;}return *a==0&&*b==0;}
+static U32_CLASSREG *u32_class_find(const char *name){if(!name)return 0;for(int i=0;i<16;i++)if(u32_classes[i].used&&u32_class_name_equal(u32_classes[i].name,name))return &u32_classes[i];return 0;}
 __attribute__((dllexport)) unsigned short RegisterClassA(const U32_WNDCLASSA *wc) {
-    (void)wc; return 1;
+    if(!wc||!wc->class_name||!wc->class_name[0])return 0;
+    if(u32_class_find(wc->class_name))return 0;
+    int slot=-1;for(int i=0;i<16;i++)if(!u32_classes[i].used){slot=i;break;}if(slot<0)return 0;
+    U32_CLASSREG *c=&u32_classes[slot];c->used=1;c->atom=(unsigned short)(0xC000+slot);c->wc=*wc;
+    unsigned int n=0;while(wc->class_name[n]&&n+1<sizeof(c->name)){c->name[n]=wc->class_name[n];n++;}c->name[n]=0;c->wc.class_name=c->name;
+    if(wc->menu_name){n=0;while(wc->menu_name[n]&&n+1<sizeof(c->menu)){c->menu[n]=wc->menu_name[n];n++;}c->menu[n]=0;c->wc.menu_name=c->menu;}else c->wc.menu_name=0;
+    return c->atom;
 }
 __attribute__((dllexport)) BOOL UnregisterClassA(LPCSTR name, void *instance) {
-    (void)name; (void)instance; return 1;
+    (void)instance;U32_CLASSREG *c=u32_class_find(name);if(!c)return 0;c->used=0;c->name[0]=0;c->menu[0]=0;return 1;
 }
 __attribute__((dllexport)) U32_LRESULT DefWindowProcA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
     switch(msg){
@@ -1823,9 +1833,9 @@ __attribute__((dllexport)) int TranslateAcceleratorA(void *hwnd,void *table,MSG 
 
 __attribute__((dllexport)) int TranslateAcceleratorW(void *hwnd,void *table,MSG *msg){return TranslateAcceleratorA(hwnd,table,msg);}
 
-__attribute__((dllexport)) BOOL GetClassInfoA(void *instance,const char *name,void *info){(void)instance;(void)name;if(!info)return 0;return 0;}
+__attribute__((dllexport)) BOOL GetClassInfoA(void *instance,const char *name,void *info){(void)instance;if(!name||!info)return 0;U32_CLASSREG *c=u32_class_find(name);if(!c)return 0;*(U32_WNDCLASSA*)info=c->wc;return 1;}
 
-__attribute__((dllexport)) BOOL GetClassInfoW(void *instance,const unsigned short *name,void *info){(void)instance;(void)name;if(!info)return 0;return 0;}
+__attribute__((dllexport)) BOOL GetClassInfoW(void *instance,const unsigned short *name,void *info){(void)instance;if(!name||!info)return 0;char narrow[96];u32_wide_to_ansi(narrow,sizeof(narrow),name);U32_CLASSREG *c=u32_class_find(narrow);if(!c)return 0;U32_WNDCLASSW *w=(U32_WNDCLASSW*)info;w->style=c->wc.style;w->proc=c->wc.proc;w->cls_extra=c->wc.cls_extra;w->wnd_extra=c->wc.wnd_extra;w->instance=c->wc.instance;w->icon=c->wc.icon;w->cursor=c->wc.cursor;w->background=c->wc.background;w->menu_name=0;w->class_name=0;return 1;}
 
 __attribute__((dllexport)) BOOL GetClassInfoExA(void *instance,const char *name,void *info){return GetClassInfoA(instance,name,info);}
 

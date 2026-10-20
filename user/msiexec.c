@@ -591,6 +591,15 @@ static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression
     return 1;
 }
 
+static int cab_skip_string(u32 sectors, u64 stream_size, u64 cab_size, u64 *pos) {
+    for (u32 i=0;i<4096;i++) {
+        u8 ch;
+        if (*pos>=cab_size || !cfb_stream_read_list(cab_sector_ids,sectors,stream_size,*pos,&ch,1)) return 0;
+        (*pos)++;
+        if (!ch) return 1;
+    }
+    return 0;
+}
 static int msi_list_embedded_cabinet(const char *stream_name) {
     const u8 *entry=find_stream_entry(stream_name,0);
     if (!entry) {
@@ -608,35 +617,83 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
         return 0;
     }
     u32 cab_size=rd32(h+8), files_off=rd32(h+16);
-    u16 files=rd16(h+28);
-    if (cab_size>stream_size || files_off>=cab_size) return 0;
+    u16 folder_count=rd16(h+26), files=rd16(h+28), flags=rd16(h+30);
+    if (cab_size>stream_size || cab_size<36 || files_off>=cab_size ||
+        !folder_count || folder_count>128) return 0;
+
+    u8 reserve_header=0, reserve_folder=0, reserve_data=0;
+    u64 pos=36;
+    if (flags&0x0004) {
+        u8 r[4];
+        if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,r,4)) return 0;
+        reserve_header=r[0]; reserve_folder=r[1]; reserve_data=r[2];
+        pos+=4u+reserve_header;
+    }
+    if (flags&0x0001) {
+        if (!cab_skip_string(sectors,stream_size,cab_size,&pos) ||
+            !cab_skip_string(sectors,stream_size,cab_size,&pos)) return 0;
+    }
+    if (flags&0x0002) {
+        if (!cab_skip_string(sectors,stream_size,cab_size,&pos) ||
+            !cab_skip_string(sectors,stream_size,cab_size,&pos)) return 0;
+    }
+    typedef struct { u32 data_off; u16 blocks, compression; } CabFolder;
+    static CabFolder folders[128];
+    if (pos+(u64)folder_count*(8u+reserve_folder)>cab_size ||
+        pos+(u64)folder_count*(8u+reserve_folder)>files_off) return 0;
+    for (u32 i=0;i<folder_count;i++) {
+        u8 rec[8];
+        if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,rec,8)) return 0;
+        folders[i].data_off=rd32(rec);
+        folders[i].blocks=rd16(rec+4);
+        folders[i].compression=rd16(rec+6);
+        if (folders[i].data_off>=cab_size ||
+            folders[i].data_off+(u64)folders[i].blocks*(8u+reserve_data)>cab_size) return 0;
+        pos+=8u+reserve_folder;
+    }
+
     out("Embedded cabinet "); out(stream_name); out(": ");
-    out_u32(files); out(" files\n");
-    u64 pos=files_off;
-    u32 shown=0;
+    out_u32(files); out(" files, "); out_u32(folder_count); out(" folders\n");
+    pos=files_off;
     for (u32 i=0;i<files;i++) {
         u8 rec[16];
-        if (pos+16>cab_size || !cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,rec,16))
-            return 0;
-        u32 file_size=rd32(rec);
+        if (pos+16>cab_size ||
+            !cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,rec,16)) return 0;
+        u32 file_len=rd32(rec);
+        u16 folder_id=rd16(rec+8);
         pos+=16;
         char name[260]; u32 n=0; int ended=0;
         while (pos<cab_size && n+1<sizeof(name)) {
-            u8 c;
-            if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,&c,1)) return 0;
+            u8 ch;
+            if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,&ch,1)) return 0;
             pos++;
-            if (!c) { ended=1; break; }
-            name[n++]=(c>=32 && c<127)?(char)c:'?';
+            if (!ch) { ended=1; break; }
+            name[n++]=(ch>=32 && ch<127)?(char)ch:'?';
         }
         name[n]=0;
         if (!ended) return 0;
-        if (shown<16) {
-            out("    "); out(name); out(" ("); out_u32(file_size); out(" bytes)\n");
-            shown++;
+        if (folder_id>=folder_count) {
+            out("  Unsupported split-cabinet file record: "); out(name); out("\n");
+            return 0;
+        }
+        if (i<16) {
+            out("    "); out(name); out(" ("); out_u32(file_len); out(" bytes)\n");
         }
     }
-    if (files>shown) {
-        out("    ... "); out_u32(files-shown); out(" additional files\n");
+    if (files>16) { out("    ... "); out_u32(files-16); out(" additional files\n"); }
+
+    /* Decompress and validate each folder now. The installer stage will route
+       these decoded blocks to destination files after MSI sequence planning. */
+    for (u32 i=0;i<folder_count;i++) {
+        u32 total=0;
+        if (!cab_read_folder_payload(folders[i].data_off,folders[i].blocks,
+                                     folders[i].compression,reserve_data,
+                                     sectors,stream_size,&total)) {
+            out("  CAB folder "); out_u32(i); out(": unsupported or corrupt compression/data\n");
+            return 0;
+        }
+        out("  CAB folder "); out_u32(i); out(": decompressed ");
+        out_u32(total); out(" bytes (validated; not installed)\n");
     }
     return 1;
 }

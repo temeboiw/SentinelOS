@@ -103,7 +103,7 @@ typedef struct { K32_LONG dwOemId; K32_LONG dwPageSize; void *lpMinimumApplicati
 typedef struct { K32_SIZE_T QuadPart; } K32_LARGE_INTEGER;
 static DWORD k32_heap_tag;
 static char k32_cmdline[] = "sentinel.exe";
-static const K32_WCHAR k32_cmdline_w[] = {'s','e','n','t','i','n','e','l','.','e','x','e',0};
+static K32_WCHAR k32_cmdline_w[] = {'s','e','n','t','i','n','e','l','.','e','x','e',0};
 static void k32_wide_to_ansi(char *out, DWORD cap, K32_LPCWSTR in) {
     DWORD i=0; if (!out || !cap) return;
     if (in) while (in[i] && i+1<cap) { out[i]=in[i]<128?(char)in[i]:'?'; i++; }

@@ -7,6 +7,10 @@ typedef void *LPVOID;
 typedef const char *LPCSTR;
 typedef const void *LPCVOID;
 typedef char *LPSTR;
+typedef long LONG;
+typedef unsigned short K32_WCHAR;
+typedef const K32_WCHAR *K32_LPCWSTR;
+typedef K32_WCHAR *K32_LPWSTR;
 static DWORD k32_last_error;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
@@ -99,6 +103,23 @@ typedef struct { K32_LONG dwOemId; K32_LONG dwPageSize; void *lpMinimumApplicati
 typedef struct { K32_SIZE_T QuadPart; } K32_LARGE_INTEGER;
 static DWORD k32_heap_tag;
 static char k32_cmdline[] = "sentinel.exe";
+static const K32_WCHAR k32_cmdline_w[] = {'s','e','n','t','i','n','e','l','.','e','x','e',0};
+static void k32_wide_to_ansi(char *out, DWORD cap, K32_LPCWSTR in) {
+    DWORD i=0; if (!out || !cap) return;
+    if (in) while (in[i] && i+1<cap) { out[i]=in[i]<128?(char)in[i]:'?'; i++; }
+    out[i]=0;
+}
+static DWORD k32_ansi_to_wide(K32_LPWSTR out, DWORD cap, const char *in) {
+    DWORD i=0; if (!out || !cap) return 0;
+    if (in) while (in[i] && i+1<cap) { out[i]=(unsigned char)in[i]; i++; }
+    out[i]=0; return i;
+}
+static DWORD k32_copy_wide_path(const char *src, K32_LPWSTR out, DWORD cap) {
+    DWORD n=0; while (src && src[n]) n++;
+    if (!out || !cap) return n+1;
+    k32_ansi_to_wide(out,cap,src);
+    return n+1>cap ? n+1 : n;
+}
 
 __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }
 __attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
@@ -246,19 +267,53 @@ __attribute__((dllexport)) DWORD GetFileType(HANDLE file) { (void)file; return 0
 
 
 /* Compatibility export placeholders: signatures and semantics still need implementation. */
-__attribute__((dllexport)) unsigned long long GetCommandLineW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetModuleHandleW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetModuleFileNameW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long CreateFileW(void) { return 0; }
+__attribute__((dllexport)) K32_LPWSTR GetCommandLineW(void) { return (K32_LPWSTR)k32_cmdline_w; }
+__attribute__((dllexport)) HANDLE GetModuleHandleW(K32_LPCWSTR name) {
+    char narrow[260]; if (!name) return GetModuleHandleA(0);
+    k32_wide_to_ansi(narrow,sizeof(narrow),name); return GetModuleHandleA(narrow);
+}
+__attribute__((dllexport)) DWORD GetModuleFileNameW(HANDLE module, K32_LPWSTR out, DWORD cap) {
+    char narrow[512]; DWORD n=GetModuleFileNameA(module,narrow,sizeof(narrow));
+    if (!out || !cap) return 0;
+    DWORD copied=k32_ansi_to_wide(out,cap,narrow);
+    return copied+1<n ? cap : copied;
+}
+__attribute__((dllexport)) HANDLE CreateFileW(K32_LPCWSTR name, DWORD access, DWORD share, void *security, DWORD creation, DWORD flags, HANDLE template_file) {
+    char narrow[512]; if (!name) return INVALID_HANDLE_VALUE;
+    k32_wide_to_ansi(narrow,sizeof(narrow),name);
+    return CreateFileA(narrow,access,share,security,creation,flags,template_file);
+}
 __attribute__((dllexport)) unsigned long long DeleteFileW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long MoveFileW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long CopyFileW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long CreateDirectoryW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long RemoveDirectoryW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetCurrentDirectoryW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetCurrentDirectoryW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetFullPathNameW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetTempPathW(void) { return 0; }
+__attribute__((dllexport)) DWORD GetCurrentDirectoryW(DWORD cap, K32_LPWSTR out) {
+    char narrow[512]; DWORD n=GetCurrentDirectoryA(sizeof(narrow),narrow);
+    if (!out || !cap) return n+1;
+    if (n+1>cap) { k32_ansi_to_wide(out,cap,narrow); return n+1; }
+    return k32_ansi_to_wide(out,cap,narrow);
+}
+__attribute__((dllexport)) BOOL SetCurrentDirectoryW(K32_LPCWSTR path) {
+    char narrow[512]; if (!path) return 0;
+    k32_wide_to_ansi(narrow,sizeof(narrow),path); return SetCurrentDirectoryA(narrow);
+}
+__attribute__((dllexport)) DWORD GetFullPathNameW(K32_LPCWSTR path, DWORD cap, K32_LPWSTR out, K32_LPWSTR *part) {
+    char in[512], resolved[512]; if (!path) return 0;
+    k32_wide_to_ansi(in,sizeof(in),path);
+    DWORD n=GetFullPathNameA(in,sizeof(resolved),resolved,0);
+    if (!out || !cap) return n+1;
+    if (n+1>cap) { k32_ansi_to_wide(out,cap,resolved); if (part) *part=0; return n+1; }
+    k32_ansi_to_wide(out,cap,resolved);
+    if (part) { DWORD i=0,last=0; while (resolved[i]) { if (resolved[i]=='\\' || resolved[i]=='/') last=i+1; i++; } *part=out+last; }
+    return n;
+}
+__attribute__((dllexport)) DWORD GetTempPathW(DWORD cap, K32_LPWSTR out) {
+    char narrow[260]; DWORD n=GetTempPathA(sizeof(narrow),narrow);
+    if (!out || !cap) return n;
+    if (n>cap) { k32_ansi_to_wide(out,cap,narrow); return n; }
+    k32_ansi_to_wide(out,cap,narrow); return n;
+}
 __attribute__((dllexport)) unsigned long long GetEnvironmentVariableW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long SetEnvironmentVariableW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetFileAttributesW(void) { return 0; }
@@ -269,9 +324,16 @@ __attribute__((dllexport)) unsigned long long GetShortPathNameA(void) { return 0
 __attribute__((dllexport)) unsigned long long GetLongPathNameA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceExA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetDriveTypeA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetLogicalDrives(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetLogicalDriveStringsA(void) { return 0; }
+__attribute__((dllexport)) DWORD GetDriveTypeA(LPCSTR root) {
+    if (!root || ((root[0]=='C' || root[0]=='c') && root[1]==':' && (root[2]=='\\' || root[2]=='/' || root[2]==0))) return 3;
+    return 1;
+}
+__attribute__((dllexport)) DWORD GetLogicalDrives(void) { return 1u<<2; }
+__attribute__((dllexport)) DWORD GetLogicalDriveStringsA(DWORD cap, LPSTR out) {
+    if (!out || !cap) return 4;
+    if (cap<5) { out[0]=0; return 4; }
+    out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
+}
 __attribute__((dllexport)) unsigned long long GetVolumeInformationA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetFileTime(void) { return 0; }
 __attribute__((dllexport)) unsigned long long SetFileTime(void) { return 0; }
@@ -302,8 +364,14 @@ __attribute__((dllexport)) unsigned long long SetThreadPriority(void) { return 0
 __attribute__((dllexport)) unsigned long long GetCurrentProcessorNumber(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetNativeSystemInfo(void) { return 0; }
 __attribute__((dllexport)) unsigned long long IsProcessorFeaturePresent(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemDirectoryA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowsDirectoryA(void) { return 0; }
+__attribute__((dllexport)) DWORD GetSystemDirectoryA(LPSTR out, DWORD cap) {
+    const char *p="C:\\System32"; DWORD i=0; if (!out || !cap) return 11;
+    while (p[i] && i+1<cap) { out[i]=p[i]; i++; } out[i]=0; return p[i] ? 12 : i;
+}
+__attribute__((dllexport)) DWORD GetWindowsDirectoryA(LPSTR out, DWORD cap) {
+    const char *p="C:\\Windows"; DWORD i=0; if (!out || !cap) return 10;
+    while (p[i] && i+1<cap) { out[i]=p[i]; i++; } out[i]=0; return p[i] ? 11 : i;
+}
 __attribute__((dllexport)) unsigned long long GetUserDefaultLCID(void) { return 0; }
 __attribute__((dllexport)) DWORD GetACP(void) { return 1252u; }
 
@@ -323,8 +391,15 @@ __attribute__((dllexport)) unsigned long long GetVolumePathNameA(unsigned long l
 __attribute__((dllexport)) unsigned long long GetVolumePathNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetVolumePathNamesForVolumeNameA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetVolumePathNamesForVolumeNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetDriveTypeW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetLogicalDriveStringsW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) DWORD GetDriveTypeW(K32_LPCWSTR root) {
+    if (!root || ((root[0]=='C' || root[0]=='c') && root[1]==':' && (root[2]=='\\' || root[2]=='/' || root[2]==0))) return 3;
+    return 1;
+}
+__attribute__((dllexport)) DWORD GetLogicalDriveStringsW(DWORD cap, K32_LPWSTR out) {
+    if (!out || !cap) return 4;
+    if (cap<5) { out[0]=0; return 4; }
+    out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
+}
 __attribute__((dllexport)) unsigned long long GetVolumeInformationW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceExW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -333,8 +408,8 @@ __attribute__((dllexport)) unsigned long long GetTempPath2A(unsigned long long a
 __attribute__((dllexport)) unsigned long long GetTempPath2W(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetShortPathNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetLongPathNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemDirectoryW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowsDirectoryW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) DWORD GetSystemDirectoryW(K32_LPWSTR out, DWORD cap) { return k32_copy_wide_path("C:\\System32",out,cap); }
+__attribute__((dllexport)) DWORD GetWindowsDirectoryW(K32_LPWSTR out, DWORD cap) { return k32_copy_wide_path("C:\\Windows",out,cap); }
 __attribute__((dllexport)) unsigned long long GetComputerNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetUserNameA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetUserNameW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }

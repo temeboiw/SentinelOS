@@ -57,8 +57,8 @@ __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD 
 __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
     return sy3(12, (u64)path, 0, 0) == 0;
 }
-__attribute__((dllexport)) DWORD GetLastError(void) { return 0; }
-__attribute__((dllexport)) void SetLastError(DWORD e) { (void)e; }
+__attribute__((dllexport)) DWORD GetLastError(void) { return k32_last_error; }
+__attribute__((dllexport)) void SetLastError(DWORD e) { k32_last_error=e; }
 __attribute__((dllexport)) u64 GetTickCount64(void) { return 0; }
 __attribute__((dllexport)) void Sleep(DWORD ms) { (void)ms; }
 __attribute__((dllexport)) BOOL PeekInput(void *out) {
@@ -97,6 +97,7 @@ typedef struct { K32_WORD wYear,wMonth,wDayOfWeek,wDay,wHour,wMinute,wSecond,wMi
 typedef struct { K32_LONG dwOemId; K32_LONG dwPageSize; void *lpMinimumApplicationAddress; void *lpMaximumApplicationAddress; K32_SIZE_T dwActiveProcessorMask; K32_LONG dwNumberOfProcessors; K32_LONG dwProcessorType; K32_LONG dwAllocationGranularity; K32_WORD wProcessorLevel; K32_WORD wProcessorRevision; } K32_SYSTEM_INFO;
 typedef struct { K32_SIZE_T QuadPart; } K32_LARGE_INTEGER;
 static DWORD k32_heap_tag;
+static DWORD k32_last_error;
 static char k32_cmdline[] = "sentinel.exe";
 
 __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }
@@ -304,12 +305,12 @@ __attribute__((dllexport)) unsigned long long IsProcessorFeaturePresent(void) { 
 __attribute__((dllexport)) unsigned long long GetSystemDirectoryA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetWindowsDirectoryA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetUserDefaultLCID(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetACP(void) { return 0; }
+__attribute__((dllexport)) DWORD GetACP(void) { return 1252u; }
 
 
 /* Additional Win32 entry points. These ABI placeholders are intentionally conservative;
    replace with OS-backed implementations as the corresponding subsystems mature. */
-__attribute__((dllexport)) unsigned long long GetOEMCP(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) DWORD GetOEMCP(void) { return 437u; }
 __attribute__((dllexport)) unsigned long long GetConsoleCP(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetConsoleOutputCP(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long SetConsoleCP(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -346,9 +347,9 @@ __attribute__((dllexport)) unsigned long long ExpandEnvironmentStringsW(unsigned
 __attribute__((dllexport)) unsigned long long GetModuleHandleExA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetModuleHandleExW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetStartupInfoW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetProcessId(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetThreadId(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetProcessIdOfThread(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) DWORD GetProcessId(HANDLE process) { return process==GetCurrentProcess() ? GetCurrentProcessId() : 0; }
+__attribute__((dllexport)) DWORD GetThreadId(HANDLE thread) { if (thread==GetCurrentThread()) return GetCurrentThreadId(); return (u64)thread>0 && (u64)thread<0xFFFFFFFFULL ? (DWORD)(u64)thread : 0; }
+__attribute__((dllexport)) DWORD GetProcessIdOfThread(HANDLE thread) { return GetThreadId(thread) ? GetCurrentProcessId() : 0; }
 __attribute__((dllexport)) unsigned long long OpenProcess(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long OpenThread(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetCurrentProcessToken(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }

@@ -343,12 +343,22 @@ __attribute__((dllexport)) DWORD GetEnvironmentVariableW(K32_LPCWSTR name,K32_LP
 __attribute__((dllexport)) BOOL SetEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR value){char n[128],v[256];if(!name)return 0;k32_wide_to_ansi(n,sizeof(n),name);if(!value)return SetEnvironmentVariableA(n,0);k32_wide_to_ansi(v,sizeof(v),value);return SetEnvironmentVariableA(n,v);}
 __attribute__((dllexport)) DWORD GetFileAttributesW(K32_LPCWSTR path){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return GetFileAttributesA(p);}
 __attribute__((dllexport)) BOOL SetFileAttributesW(K32_LPCWSTR path,DWORD attrs){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return SetFileAttributesA(p,attrs);}
-__attribute__((dllexport)) unsigned long long GetTempFileNameA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetTempFileNameW(void) { return 0; }
+__attribute__((dllexport)) DWORD GetTempFileNameA(LPCSTR path,LPCSTR prefix,UINT unique,LPSTR out) {
+    if(!out){k32_last_error=87;return 0;}
+    if(!unique){k32_last_error=50;out[0]=0;return 0;}
+    char dir[260];if(!path||!*path){DWORD n=GetTempPathA(sizeof(dir),dir);if(!n||n>=sizeof(dir)){k32_last_error=3;return 0;}}else{DWORD i=0;while(path[i]&&i+2<sizeof(dir)){dir[i]=path[i];i++;}dir[i]=0;if(path[i]){k32_last_error=206;return 0;}if(i&&dir[i-1]!='\\'&&dir[i-1]!='/'){dir[i++]='\\';dir[i]=0;}}
+    DWORD p=0;while(dir[p]&&p+1<sizeof(dir))p++;if(p+1>=sizeof(dir)){k32_last_error=206;return 0;}
+    const char *pre=prefix&&*prefix?prefix:"TMP";for(int j=0;j<3&&pre[j]&&p+1<sizeof(dir);j++)dir[p++]=pre[j];
+    static const char hex[]="0123456789ABCDEF";for(int j=0;j<4;j++)dir[p++]=hex[(unique>>(j*4))&15u];dir[p]=0;
+    DWORD i=0;while(dir[i]&&i+1<260){out[i]=dir[i];i++;}out[i]=0;if(dir[i]){k32_last_error=206;return 0;}k32_last_error=0;return unique;
+}
+__attribute__((dllexport)) DWORD GetTempFileNameW(K32_LPCWSTR path,K32_LPCWSTR prefix,UINT unique,K32_LPWSTR out) {
+    char p[260],pre[64],name[260];if(!out){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),path);k32_wide_to_ansi(pre,sizeof(pre),prefix);DWORD id=GetTempFileNameA(path?p:0,prefix?pre:0,unique,name);if(!id){out[0]=0;return 0;}k32_ansi_to_wide(out,260,name);return id;
+}
 __attribute__((dllexport)) DWORD GetShortPathNameA(LPCSTR path,LPSTR out,DWORD cap){return GetFullPathNameA(path,cap,out,0);}
 __attribute__((dllexport)) DWORD GetLongPathNameA(LPCSTR path,LPSTR out,DWORD cap){return GetFullPathNameA(path,cap,out,0);}
-__attribute__((dllexport)) unsigned long long GetDiskFreeSpaceA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetDiskFreeSpaceExA(void) { return 0; }
+__attribute__((dllexport)) BOOL GetDiskFreeSpaceA(LPCSTR root,DWORD *sectorsPerCluster,DWORD *bytesPerSector,DWORD *freeClusters,DWORD *totalClusters) { (void)sectorsPerCluster;(void)bytesPerSector;(void)freeClusters;(void)totalClusters;if(!root){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL GetDiskFreeSpaceExA(LPCSTR path,unsigned long long *available,unsigned long long *total,unsigned long long *freeBytes) { (void)available;(void)total;(void)freeBytes;if(!path){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) DWORD GetDriveTypeA(LPCSTR root) {
     if (!root || ((root[0]=='C' || root[0]=='c') && root[1]==':' && (root[2]=='\\' || root[2]=='/' || root[2]==0))) return 3;
     return 1;
@@ -359,21 +369,21 @@ __attribute__((dllexport)) DWORD GetLogicalDriveStringsA(DWORD cap, LPSTR out) {
     if (cap<5) { out[0]=0; return 4; }
     out[0]='C'; out[1]=':'; out[2]='\\'; out[3]=0; out[4]=0; return 4;
 }
-__attribute__((dllexport)) unsigned long long GetVolumeInformationA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetFileTime(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetFileTime(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemTimeAsFileTime(void) { return 0; }
+__attribute__((dllexport)) BOOL GetVolumeInformationA(LPCSTR root,LPSTR label,DWORD labelCap,DWORD *serial,DWORD *maxComponent,DWORD *flags,LPSTR fsName,DWORD fsCap) { (void)label;(void)labelCap;(void)serial;(void)maxComponent;(void)flags;(void)fsName;(void)fsCap;if(!root){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL GetFileTime(HANDLE file,K32_FILETIME *created,K32_FILETIME *accessed,K32_FILETIME *written) { (void)created;(void)accessed;(void)written;if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL SetFileTime(HANDLE file,const K32_FILETIME *created,const K32_FILETIME *accessed,const K32_FILETIME *written) { (void)created;(void)accessed;(void)written;if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) void GetSystemTimeAsFileTime(K32_FILETIME *ft) { if(!ft)return;K32_SYSTEMTIME st;GetSystemTime(&st);SystemTimeToFileTime(&st,ft); }
 static int k32_leap(int y){return (y%4==0&&y%100!=0)||y%400==0;}
 __attribute__((dllexport)) BOOL SystemTimeToFileTime(const K32_SYSTEMTIME *st,K32_FILETIME *ft){static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};if(!st||!ft||st->wYear<1601||st->wMonth<1||st->wMonth>12||st->wHour>23||st->wMinute>59||st->wSecond>59||st->wMilliseconds>999)return 0;int max=mdays[st->wMonth-1]+(st->wMonth==2&&k32_leap(st->wYear));if(st->wDay<1||st->wDay>max)return 0;unsigned long long days=0;for(int y=1601;y<st->wYear;y++)days+=k32_leap(y)?366:365;for(int m=1;m<st->wMonth;m++)days+=mdays[m-1]+(m==2&&k32_leap(st->wYear));days+=st->wDay-1;unsigned long long ticks=days*864000000000ULL+((unsigned long long)st->wHour*3600+st->wMinute*60+st->wSecond)*10000000ULL+(unsigned long long)st->wMilliseconds*10000ULL;ft->dwLowDateTime=(DWORD)ticks;ft->dwHighDateTime=(DWORD)(ticks>>32);return 1;}
 __attribute__((dllexport)) BOOL FileTimeToSystemTime(const K32_FILETIME *ft,K32_SYSTEMTIME *st){if(!ft||!st)return 0;unsigned long long ticks=((unsigned long long)ft->dwHighDateTime<<32)|ft->dwLowDateTime;unsigned long long days=ticks/864000000000ULL,rem=ticks%864000000000ULL;int year=1601;while(days>=(unsigned long long)(k32_leap(year)?366:365)){days-=k32_leap(year)?366:365;if(++year>9999)return 0;}static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};int month=1;while(month<=12){int d=mdays[month-1]+(month==2&&k32_leap(year));if(days<(unsigned long long)d)break;days-=d;month++;}st->wYear=year;st->wMonth=month;st->wDay=(unsigned short)days+1;st->wDayOfWeek=(unsigned short)((((ticks/864000000000ULL)+1)%7));st->wHour=rem/36000000000ULL;rem%=36000000000ULL;st->wMinute=rem/600000000ULL;rem%=600000000ULL;st->wSecond=rem/10000000ULL;st->wMilliseconds=(rem%10000000ULL)/10000ULL;return 1;}
 __attribute__((dllexport)) LONG CompareFileTime(const K32_FILETIME *a,const K32_FILETIME *b){if(!a||!b)return 0;if(a->dwHighDateTime<b->dwHighDateTime)return -1;if(a->dwHighDateTime>b->dwHighDateTime)return 1;if(a->dwLowDateTime<b->dwLowDateTime)return -1;if(a->dwLowDateTime>b->dwLowDateTime)return 1;return 0;}
-__attribute__((dllexport)) unsigned long long GetFileAttributesExA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetFileInformationByHandle(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetEndOfFile(void) { return 0; }
+__attribute__((dllexport)) BOOL GetFileAttributesExA(LPCSTR path,int level,void *data) { (void)data;if(!path||!*path||level!=0){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *info) { if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL SetEndOfFile(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL GetOverlappedResult(HANDLE file, void *overlapped, DWORD *transferred, BOOL wait) { (void)file; (void)overlapped; (void)wait; if (transferred) *transferred=0; k32_last_error=997; return 0; }
-__attribute__((dllexport)) unsigned long long CancelIo(void) { return 0; }
-__attribute__((dllexport)) unsigned long long CreatePipe(void) { return 0; }
-__attribute__((dllexport)) unsigned long long PeekNamedPipe(void) { return 0; }
+__attribute__((dllexport)) BOOL CancelIo(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL CreatePipe(HANDLE *readPipe,HANDLE *writePipe,void *security,DWORD size) { (void)security;(void)size;if(!readPipe||!writePipe){k32_last_error=87;return 0;}*readPipe=0;*writePipe=0;k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL PeekNamedPipe(HANDLE pipe,void *buffer,DWORD cap,DWORD *read,DWORD *available,DWORD *left) { (void)buffer;(void)cap;if(read)*read=0;if(available)*available=0;if(left)*left=0;if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL SetHandleInformation(HANDLE h,DWORD mask,DWORD flags){if(!h||h==INVALID_HANDLE_VALUE)return 0;for(int i=0;i<32;i++){if(k32_handle_flags[i].handle==h){k32_handle_flags[i].flags=(k32_handle_flags[i].flags&~mask)|(flags&mask);return 1;}}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=flags&mask;return 1;}return 0;}
 __attribute__((dllexport)) BOOL GetHandleInformation(HANDLE h,DWORD *flags){if(!h||h==INVALID_HANDLE_VALUE||!flags)return 0;for(int i=0;i<32;i++)if(k32_handle_flags[i].handle==h){*flags=k32_handle_flags[i].flags;return 1;}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=0;*flags=0;return 1;}return 0;}
 __attribute__((dllexport)) BOOL DuplicateHandle(HANDLE source_process,HANDLE source,HANDLE target_process,HANDLE *target,DWORD access,BOOL inherit,DWORD options){(void)access;(void)inherit;(void)options;if((source_process==GetCurrentProcess()||source_process==(HANDLE)1)&&(target_process==GetCurrentProcess()||target_process==(HANDLE)1)&&source&&target){*target=source;return 1;}k32_last_error=50;return 0;}
@@ -390,8 +400,8 @@ static char k32_env_block_a[16*162]; static K32_WCHAR k32_env_block_w[16*162];
 static void k32_build_env_block(void){k32_env_boot();unsigned int p=0;for(int i=0;i<16;i++)if(k32_env[i].used){for(unsigned int j=0;k32_env[i].name[j]&&p+1<sizeof(k32_env_block_a);j++)k32_env_block_a[p++]=k32_env[i].name[j];if(p+1<sizeof(k32_env_block_a))k32_env_block_a[p++]='=';for(unsigned int j=0;k32_env[i].value[j]&&p+1<sizeof(k32_env_block_a);j++)k32_env_block_a[p++]=k32_env[i].value[j];if(p+1<sizeof(k32_env_block_a))k32_env_block_a[p++]=0;}k32_env_block_a[p]=0;for(unsigned int i=0;i<=p;i++)k32_env_block_w[i]=(unsigned char)k32_env_block_a[i];}
 __attribute__((dllexport)) LPSTR GetEnvironmentStringsA(void){k32_build_env_block();return k32_env_block_a;}
 __attribute__((dllexport)) BOOL FreeEnvironmentStringsA(LPCSTR p){if(p!=k32_env_block_a){k32_last_error=87;return 0;}return 1;}
-__attribute__((dllexport)) unsigned long long GetProcessTimes(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetThreadTimes(void) { return 0; }
+__attribute__((dllexport)) BOOL GetProcessTimes(HANDLE process,K32_FILETIME *created,K32_FILETIME *exitTime,K32_FILETIME *kernel,K32_FILETIME *user) { (void)created;(void)exitTime;(void)kernel;(void)user;if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL GetThreadTimes(HANDLE thread,K32_FILETIME *created,K32_FILETIME *exitTime,K32_FILETIME *kernel,K32_FILETIME *user) { (void)created;(void)exitTime;(void)kernel;(void)user;if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) DWORD GetPriorityClass(HANDLE process){if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}return k32_priority_class;}
 __attribute__((dllexport)) BOOL SetPriorityClass(HANDLE process,DWORD priority){if((process!=GetCurrentProcess()&&process!=(HANDLE)1)||(priority!=0x40u&&priority!=0x4000u&&priority!=0x8000u&&priority!=0x80u&&priority!=0x20u&&priority!=0x100u)){k32_last_error=87;return 0;}k32_priority_class=priority;return 1;}
 __attribute__((dllexport)) int GetThreadPriority(HANDLE thread){if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0x7FFFFFFF;}return k32_thread_priority;}
@@ -470,8 +480,8 @@ __attribute__((dllexport)) BOOL GetProcessShutdownParameters(DWORD *level,DWORD 
 __attribute__((dllexport)) BOOL SetProcessShutdownParameters(DWORD level,DWORD flags){if(level>0x3FFu){k32_last_error=87;return 0;}k32_shutdown_level=level;k32_shutdown_flags=flags;return 1;}
 __attribute__((dllexport)) DWORD SetErrorMode(DWORD mode){DWORD old=k32_error_mode;k32_error_mode=mode;return old;}
 __attribute__((dllexport)) DWORD GetErrorMode(void){return k32_error_mode;}
-__attribute__((dllexport)) unsigned long long GetSystemTimeAdjustment(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemTimePreciseAsFileTime(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL GetSystemTimeAdjustment(DWORD *adjustment,DWORD *increment,BOOL *disabled) { if(!adjustment||!increment||!disabled){k32_last_error=87;return 0;}*adjustment=0;*increment=10000;*disabled=1;return 1; }
+__attribute__((dllexport)) void GetSystemTimePreciseAsFileTime(K32_FILETIME *ft) { GetSystemTimeAsFileTime(ft); }
 __attribute__((dllexport)) DWORD GetThreadLocale(void){return 0x0409;}
 __attribute__((dllexport)) BOOL SetThreadLocale(DWORD locale){return locale==0x0409;}
 __attribute__((dllexport)) unsigned short GetUserDefaultLangID(void){return 0x0409;}

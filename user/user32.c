@@ -818,6 +818,8 @@ typedef struct { void *hdc; int erase; U32_RECT paint; int restore, inc_update; 
 typedef struct { unsigned int style; void *proc; int cls_extra, wnd_extra; void *instance, icon, cursor, background; LPCSTR menu_name, class_name; } U32_WNDCLASSA;
 static int u32_show_cursor_count;
 static void *u32_capture;
+static void *u32_focus;
+static void *u32_active;
 static unsigned int u32_next_menu = 10;
 
 __attribute__((dllexport)) BOOL GetClientRect(void *hwnd, U32_RECT *r) {
@@ -844,9 +846,9 @@ __attribute__((dllexport)) BOOL IsWindowVisible(void *hwnd) { return IsWindow(hw
 __attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) { (void)hwnd; (void)enable; return 1; }
 __attribute__((dllexport)) BOOL IsIconic(void *hwnd) { (void)hwnd; return g_wnd.visible && g_wnd.minimized; }
 __attribute__((dllexport)) void *GetForegroundWindow(void) { return g_wnd.visible && !g_wnd.minimized ? (void *)1 : (void *)0; }
-__attribute__((dllexport)) BOOL SetForegroundWindow(void *hwnd) { (void)hwnd; return IsWindow(hwnd); }
-__attribute__((dllexport)) void *GetActiveWindow(void) { return GetForegroundWindow(); }
-__attribute__((dllexport)) void *SetActiveWindow(void *hwnd) { void *old=GetActiveWindow(); (void)hwnd; return old; }
+__attribute__((dllexport)) BOOL SetForegroundWindow(void *hwnd) { if (!IsWindow(hwnd)) return 0; u32_active=hwnd; return 1; }
+__attribute__((dllexport)) void *GetActiveWindow(void) { return u32_active ? u32_active : GetForegroundWindow(); }
+__attribute__((dllexport)) void *SetActiveWindow(void *hwnd) { void *old=GetActiveWindow(); u32_active=hwnd; return old; }
 __attribute__((dllexport)) int GetWindowTextA(void *hwnd, LPSTR out, int cap) {
     int i=0; (void)hwnd; if (!out || cap<=0 || !g_wnd.visible) return 0;
     while (g_wnd.title[i] && i+1<cap) { out[i]=g_wnd.title[i]; i++; } out[i]=0; return i;
@@ -955,5 +957,5 @@ __attribute__((dllexport)) BOOL ScrollWindow(void *hwnd, int dx, int dy, const U
 __attribute__((dllexport)) BOOL GetUpdateRect(void *hwnd, U32_RECT *r, BOOL erase) {
     (void)hwnd; (void)erase; if (r) { r->left=0; r->top=0; r->right=0; r->bottom=0; } return 0;
 }
-__attribute__((dllexport)) void *SetFocus(void *hwnd) { static void *focus; void *old=focus; focus=hwnd; return old; }
-__attribute__((dllexport)) void *GetFocus(void) { return GetForegroundWindow(); }
+__attribute__((dllexport)) void *SetFocus(void *hwnd) { void *old=u32_focus; u32_focus=hwnd; return old; }
+__attribute__((dllexport)) void *GetFocus(void) { return u32_focus; }

@@ -1115,9 +1115,11 @@ static void inspect_msi(void) {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }
     out("Inspection mode: this pass changed no files.\n");
-    out("CAB folders: bounded uncompressed/MSZIP decoding and validation; payloads are not extracted yet.\n");
-    out("Kernel storage: guarded ext4 file/directory creation and bounded block allocation; not yet tested.\n");
-    out("MSI standard-action execution, transaction rollback, and Windows custom-action compatibility remain pending.\n");
+    out("CAB: bounded uncompressed/MSZIP decoding; install mode can stage supported embedded cabinets.\n");
+    out("Storage: guarded ext4 create/growth/delete on a limited non-journaled feature subset.\n");
+    out("MSI: limited file-install sequence, feature levels, and best-effort runtime rollback.\n");
+    out("Custom actions: SetProperty, SetDirectory, and Error only; native DLL/EXE/script actions are rejected.\n");
+    out("This implementation has not been built or tested; power-loss rollback is unavailable.\n");
     out("Custom actions were not executed.\n");
 }
 typedef struct {

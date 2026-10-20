@@ -92,7 +92,7 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
     }
     /* TextOut lines: 0=path 1=hint 2..=entries  => click must subtract 2 */
     pText(0, 0, 0, g_path, -1);
-    pText(0, 0, 1, "Click folder to open  |  .. goes up", -1);
+    pText(0, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
     for (int i = 0; i < g_count; i++) {
         char line[80];
         int p = 0;

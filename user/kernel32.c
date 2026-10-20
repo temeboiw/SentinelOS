@@ -798,7 +798,7 @@ __attribute__((dllexport)) BOOL GetNumaProximityNode(DWORD proximity,BYTE *node)
 
 __attribute__((dllexport)) BOOL GetNumaProximityNodeEx(DWORD proximity,WORD *node){if(!node||proximity)return 0;*node=0;return 1;}
 
-__attribute__((dllexport)) HANDLE CreateFile2(K32_LPCWSTR name,DWORD access,DWORD share,DWORD disposition,void *params){(void)access;(void)share;(void)disposition;(void)params;char p[512];k32_wide_to_ansi(p,sizeof(p),name);return CreateFileA(p,0,0,0,0,0,0);}
+__attribute__((dllexport)) HANDLE CreateFile2(K32_LPCWSTR name,DWORD access,DWORD share,DWORD disposition,void *params){(void)share;(void)params;char p[512];k32_wide_to_ansi(p,sizeof(p),name);return CreateFileA(p,access,share,0,disposition,0,0);}
 
 __attribute__((dllexport)) BOOL MoveFileExA(LPCSTR from,LPCSTR to,DWORD flags){(void)flags;return MoveFileA(from,to);}
 

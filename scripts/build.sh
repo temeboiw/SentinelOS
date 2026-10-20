@@ -247,6 +247,66 @@ lld -flavor link \
   /export:ExitWindowsEx \
   /export:CreateThread \
   /export:WaitForSingleObject \
+  /export:GetCurrentProcessId \
+  /export:GetCurrentThreadId \
+  /export:GetCurrentProcess \
+  /export:GetCurrentThread \
+  /export:GetModuleHandleA \
+  /export:GetCommandLineA \
+  /export:GetModuleFileNameA \
+  /export:GetProcAddress \
+  /export:LoadLibraryA \
+  /export:FreeLibrary \
+  /export:VirtualFree \
+  /export:VirtualProtect \
+  /export:VirtualQuery \
+  /export:GetCurrentDirectoryA \
+  /export:CreateDirectoryA \
+  /export:RemoveDirectoryA \
+  /export:DeleteFileA \
+  /export:MoveFileA \
+  /export:CopyFileA \
+  /export:GetFileAttributesA \
+  /export:SetFileAttributesA \
+  /export:GetFileSize \
+  /export:SetFilePointer \
+  /export:FlushFileBuffers \
+  /export:GetTempPathA \
+  /export:GetFullPathNameA \
+  /export:GetEnvironmentVariableA \
+  /export:SetEnvironmentVariableA \
+  /export:GetComputerNameA \
+  /export:GetSystemInfo \
+  /export:GetVersion \
+  /export:QueryPerformanceCounter \
+  /export:QueryPerformanceFrequency \
+  /export:GetTickCount \
+  /export:GetExitCodeProcess \
+  /export:TerminateProcess \
+  /export:GetProcessHeap \
+  /export:HeapAlloc \
+  /export:HeapFree \
+  /export:HeapReAlloc \
+  /export:HeapSize \
+  /export:LocalAlloc \
+  /export:LocalFree \
+  /export:GlobalAlloc \
+  /export:GlobalFree \
+  /export:GetConsoleMode \
+  /export:SetConsoleMode \
+  /export:ReadConsoleA \
+  /export:WriteConsoleA \
+  /export:GetSystemTime \
+  /export:GetLocalTime \
+  /export:CreateEventA \
+  /export:SetEvent \
+  /export:ResetEvent \
+  /export:CreateMutexA \
+  /export:ReleaseMutex \
+  /export:CreateSemaphoreA \
+  /export:ReleaseSemaphore \
+  /export:WaitForMultipleObjects \
+  /export:GetFileType \
   "/implib:$B/obj/kernel32.lib" \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
@@ -273,6 +333,66 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:GetClientRect \
+  /export:MoveWindow \
+  /export:SetWindowPos \
+  /export:GetWindowRect \
+  /export:IsWindow \
+  /export:IsWindowVisible \
+  /export:EnableWindow \
+  /export:IsIconic \
+  /export:GetForegroundWindow \
+  /export:SetForegroundWindow \
+  /export:GetActiveWindow \
+  /export:SetActiveWindow \
+  /export:GetWindowTextA \
+  /export:SetWindowTextA \
+  /export:GetClassNameA \
+  /export:RegisterClassA \
+  /export:UnregisterClassA \
+  /export:DefWindowProcA \
+  /export:SendMessageA \
+  /export:PostMessageA \
+  /export:PeekMessageA \
+  /export:GetKeyState \
+  /export:GetAsyncKeyState \
+  /export:GetCursorPos \
+  /export:SetCursorPos \
+  /export:ShowCursor \
+  /export:SetCapture \
+  /export:ReleaseCapture \
+  /export:GetCapture \
+  /export:GetDesktopWindow \
+  /export:GetDC \
+  /export:ReleaseDC \
+  /export:BeginPaint \
+  /export:EndPaint \
+  /export:GetWindowLongA \
+  /export:SetWindowLongA \
+  /export:GetSystemMetrics \
+  /export:SetTimer \
+  /export:KillTimer \
+  /export:GetDlgItem \
+  /export:SetDlgItemTextA \
+  /export:GetDlgItemTextA \
+  /export:CreateMenu \
+  /export:CreatePopupMenu \
+  /export:AppendMenuA \
+  /export:DestroyMenu \
+  /export:TrackPopupMenu \
+  /export:LoadCursorA \
+  /export:LoadIconA \
+  /export:LoadImageA \
+  /export:DrawMenuBar \
+  /export:GetMessagePos \
+  /export:GetMessageTime \
+  /export:GetDoubleClickTime \
+  /export:MessageBeep \
+  /export:RedrawWindow \
+  /export:ScrollWindow \
+  /export:GetUpdateRect \
+  /export:SetFocus \
+  /export:GetFocus \
   "/implib:$B/obj/user32.lib" \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"

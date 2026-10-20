@@ -633,14 +633,14 @@ __attribute__((dllexport)) int MulDiv(int a,int b,int d){if(!d)return -1;long lo
 
 __attribute__((dllexport)) DWORD GetCurrentTime(void){return GetTickCount();}
 
-__attribute__((dllexport)) typedef struct { DWORD MaxCharSize; unsigned char DefaultChar[2],LeadByte[12]; } K32_CPINFO;
-BOOL GetCPInfo(DWORD cp,K32_CPINFO *info){if(!info||(cp!=0&&cp!=65001&&cp!=1252&&cp!=437&&cp!=1200)){k32_last_error=87;return 0;}info->MaxCharSize=cp==65001?4:(cp==1200?2:1);info->DefaultChar[0]='?';info->DefaultChar[1]=0;for(int i=0;i<12;i++)info->LeadByte[i]=0;return 1;}
+typedef struct { DWORD MaxCharSize; unsigned char DefaultChar[2],LeadByte[12]; } K32_CPINFO;
+__attribute__((dllexport)) BOOL GetCPInfo(DWORD cp,K32_CPINFO *info){if(!info||(cp!=0&&cp!=65001&&cp!=1252&&cp!=437&&cp!=1200)){k32_last_error=87;return 0;}info->MaxCharSize=cp==65001?4:(cp==1200?2:1);info->DefaultChar[0]='?';info->DefaultChar[1]=0;for(int i=0;i<12;i++)info->LeadByte[i]=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { DWORD MaxCharSize,DefaultChar[1],LeadByte[6]; char CodePageName[260]; } K32_CPINFOEXA;
-BOOL GetCPInfoExA(DWORD cp,DWORD flags,K32_CPINFOEXA *info){(void)flags;if(!info)return 0;K32_CPINFO base;if(!GetCPInfo(cp,&base))return 0;info->MaxCharSize=base.MaxCharSize;info->DefaultChar[0]='?';for(int i=0;i<6;i++)info->LeadByte[i]=0;const char *n=cp==65001?"Unicode (UTF-8)":cp==1252?"Western European (Windows)":cp==437?"OEM United States":"Unicode";int i=0;while(n[i]&&i<259){info->CodePageName[i]=n[i];i++;}info->CodePageName[i]=0;return 1;}
+typedef struct { DWORD MaxCharSize,DefaultChar[1],LeadByte[6]; char CodePageName[260]; } K32_CPINFOEXA;
+__attribute__((dllexport)) BOOL GetCPInfoExA(DWORD cp,DWORD flags,K32_CPINFOEXA *info){(void)flags;if(!info)return 0;K32_CPINFO base;if(!GetCPInfo(cp,&base))return 0;info->MaxCharSize=base.MaxCharSize;info->DefaultChar[0]='?';for(int i=0;i<6;i++)info->LeadByte[i]=0;const char *n=cp==65001?"Unicode (UTF-8)":cp==1252?"Western European (Windows)":cp==437?"OEM United States":"Unicode";int i=0;while(n[i]&&i<259){info->CodePageName[i]=n[i];i++;}info->CodePageName[i]=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { DWORD MaxCharSize,DefaultChar[1],LeadByte[6]; K32_WCHAR CodePageName[260]; } K32_CPINFOEXW;
-BOOL GetCPInfoExW(DWORD cp,DWORD flags,K32_CPINFOEXW *info){if(!info)return 0;K32_CPINFOEXA a;if(!GetCPInfoExA(cp,flags,&a))return 0;info->MaxCharSize=a.MaxCharSize;info->DefaultChar[0]='?';for(int i=0;i<6;i++)info->LeadByte[i]=0;int i=0;while(a.CodePageName[i]&&i<259){info->CodePageName[i]=(unsigned char)a.CodePageName[i];i++;}info->CodePageName[i]=0;return 1;}
+typedef struct { DWORD MaxCharSize,DefaultChar[1],LeadByte[6]; K32_WCHAR CodePageName[260]; } K32_CPINFOEXW;
+__attribute__((dllexport)) BOOL GetCPInfoExW(DWORD cp,DWORD flags,K32_CPINFOEXW *info){if(!info)return 0;K32_CPINFOEXA a;if(!GetCPInfoExA(cp,flags,&a))return 0;info->MaxCharSize=a.MaxCharSize;info->DefaultChar[0]='?';for(int i=0;i<6;i++)info->LeadByte[i]=0;int i=0;while(a.CodePageName[i]&&i<259){info->CodePageName[i]=(unsigned char)a.CodePageName[i];i++;}info->CodePageName[i]=0;return 1;}
 
 __attribute__((dllexport)) BOOL GetProcessAffinityMask(HANDLE process,K32_SIZE_T *process_mask,K32_SIZE_T *system_mask){if(!process_mask||!system_mask||(process!=GetCurrentProcess()&&process!=(HANDLE)1)){k32_last_error=87;return 0;}*process_mask=1;*system_mask=1;return 1;}
 
@@ -658,8 +658,8 @@ __attribute__((dllexport)) BOOL GetThreadPriorityBoost(HANDLE thread,BOOL *disab
 
 __attribute__((dllexport)) BOOL SetThreadPriorityBoost(HANDLE thread,BOOL disable){(void)disable;return thread==GetCurrentThread()||thread==(HANDLE)1;}
 
-__attribute__((dllexport)) typedef struct { unsigned short Group,Number,Reserved; } K32_PROCESSOR_NUMBER;
-void GetCurrentProcessorNumberEx(K32_PROCESSOR_NUMBER *number){if(number){number->Group=0;number->Number=0;number->Reserved=0;}}
+typedef struct { unsigned short Group,Number,Reserved; } K32_PROCESSOR_NUMBER;
+__attribute__((dllexport)) void GetCurrentProcessorNumberEx(K32_PROCESSOR_NUMBER *number){if(number){number->Group=0;number->Number=0;number->Reserved=0;}}
 
 __attribute__((dllexport)) DWORD SetThreadIdealProcessor(HANDLE thread,DWORD processor){if(thread!=GetCurrentThread()&&thread!=(HANDLE)1)return 0xFFFFFFFFu;return processor==0?0:0xFFFFFFFFu;}
 
@@ -675,8 +675,8 @@ __attribute__((dllexport)) BOOL GetProcessHandleCount(HANDLE process,DWORD *coun
 
 __attribute__((dllexport)) BOOL GetThreadIOPendingFlag(HANDLE thread,BOOL *pending){if(!pending||(thread!=GetCurrentThread()&&thread!=(HANDLE)1))return 0;*pending=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { unsigned long long ReadOperationCount,WriteOperationCount,OtherOperationCount,ReadTransferCount,WriteTransferCount,OtherTransferCount; } K32_IO_COUNTERS;
-BOOL GetProcessIoCounters(HANDLE process,K32_IO_COUNTERS *c){if(!c||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;for(int i=0;i<6;i++)((unsigned long long*)c)[i]=0;return 1;}
+typedef struct { unsigned long long ReadOperationCount,WriteOperationCount,OtherOperationCount,ReadTransferCount,WriteTransferCount,OtherTransferCount; } K32_IO_COUNTERS;
+__attribute__((dllexport)) BOOL GetProcessIoCounters(HANDLE process,K32_IO_COUNTERS *c){if(!c||(process!=GetCurrentProcess()&&process!=(HANDLE)1))return 0;for(int i=0;i<6;i++)((unsigned long long*)c)[i]=0;return 1;}
 
 __attribute__((dllexport)) BOOL GetThreadDescription(HANDLE thread,K32_LPWSTR *description){if(!description||(thread!=GetCurrentThread()&&thread!=(HANDLE)1))return 0;static K32_WCHAR name[]={'S','e','n','t','i','n','e','l','O','S',' ','t','h','r','e','a','d',0};*description=name;return 1;}
 
@@ -864,11 +864,11 @@ __attribute__((dllexport)) BOOL CreateProcessW(K32_LPCWSTR app,K32_LPWSTR cmd,vo
 
 __attribute__((dllexport)) unsigned int WinExec(LPCSTR command,unsigned int show){(void)command;(void)show;k32_last_error=50;return 31;}
 
-__attribute__((dllexport)) typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; char szCSDVersion[128]; } K32_OSVERSIONINFOA;
-BOOL GetVersionExA(K32_OSVERSIONINFOA *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
+typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; char szCSDVersion[128]; } K32_OSVERSIONINFOA;
+__attribute__((dllexport)) BOOL GetVersionExA(K32_OSVERSIONINFOA *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; K32_WCHAR szCSDVersion[128]; } K32_OSVERSIONINFOW;
-BOOL GetVersionExW(K32_OSVERSIONINFOW *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
+typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; K32_WCHAR szCSDVersion[128]; } K32_OSVERSIONINFOW;
+__attribute__((dllexport)) BOOL GetVersionExW(K32_OSVERSIONINFOW *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
 
 __attribute__((dllexport)) BOOL VerifyVersionInfoA(const void *v,DWORD type,unsigned long long mask){(void)v;(void)type;(void)mask;k32_last_error=50;return 0;}
 
@@ -892,16 +892,16 @@ __attribute__((dllexport)) BOOL HeapSetInformation(HANDLE heap,int info,void *da
 
 __attribute__((dllexport)) BOOL HeapQueryInformation(HANDLE heap,int info,void *data,K32_SIZE_T size,K32_SIZE_T *needed){(void)info;if(heap!=(HANDLE)&k32_heap_tag||!data||!size){if(needed)*needed=0;return 0;}if(needed)*needed=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { DWORD dwLength; DWORD dwMemoryLoad; K32_SIZE_T ullTotalPhys,ullAvailPhys,ullTotalPageFile,ullAvailPageFile,ullTotalVirtual,ullAvailVirtual,ullAvailExtendedVirtual; } K32_MEMORYSTATUSEX;
-BOOL GlobalMemoryStatusEx(K32_MEMORYSTATUSEX *m){if(!m||m->dwLength<sizeof(*m))return 0;m->dwMemoryLoad=0;m->ullTotalPhys=256ull*1024*1024;m->ullAvailPhys=128ull*1024*1024;m->ullTotalPageFile=m->ullTotalPhys;m->ullAvailPageFile=m->ullAvailPhys;m->ullTotalVirtual=m->ullTotalPhys;m->ullAvailVirtual=m->ullAvailPhys;m->ullAvailExtendedVirtual=0;return 1;}
+typedef struct { DWORD dwLength; DWORD dwMemoryLoad; K32_SIZE_T ullTotalPhys,ullAvailPhys,ullTotalPageFile,ullAvailPageFile,ullTotalVirtual,ullAvailVirtual,ullAvailExtendedVirtual; } K32_MEMORYSTATUSEX;
+__attribute__((dllexport)) BOOL GlobalMemoryStatusEx(K32_MEMORYSTATUSEX *m){if(!m||m->dwLength<sizeof(*m))return 0;m->dwMemoryLoad=0;m->ullTotalPhys=256ull*1024*1024;m->ullAvailPhys=128ull*1024*1024;m->ullTotalPageFile=m->ullTotalPhys;m->ullAvailPageFile=m->ullAvailPhys;m->ullTotalVirtual=m->ullTotalPhys;m->ullAvailVirtual=m->ullAvailPhys;m->ullAvailExtendedVirtual=0;return 1;}
 
-__attribute__((dllexport)) typedef struct { DWORD dwLength,dwMemoryLoad; K32_SIZE_T dwTotalPhys,dwAvailPhys,dwTotalPageFile,dwAvailPageFile,dwTotalVirtual,dwAvailVirtual; } K32_MEMORYSTATUS;
-void GlobalMemoryStatus(K32_MEMORYSTATUS *m){if(!m)return;m->dwLength=sizeof(*m);m->dwMemoryLoad=50;m->dwTotalPhys=256ull*1024*1024;m->dwAvailPhys=128ull*1024*1024;m->dwTotalPageFile=m->dwTotalPhys;m->dwAvailPageFile=m->dwAvailPhys;m->dwTotalVirtual=m->dwTotalPhys;m->dwAvailVirtual=m->dwAvailPhys;}
+typedef struct { DWORD dwLength,dwMemoryLoad; K32_SIZE_T dwTotalPhys,dwAvailPhys,dwTotalPageFile,dwAvailPageFile,dwTotalVirtual,dwAvailVirtual; } K32_MEMORYSTATUS;
+__attribute__((dllexport)) void GlobalMemoryStatus(K32_MEMORYSTATUS *m){if(!m)return;m->dwLength=sizeof(*m);m->dwMemoryLoad=50;m->dwTotalPhys=256ull*1024*1024;m->dwAvailPhys=128ull*1024*1024;m->dwTotalPageFile=m->dwTotalPhys;m->dwAvailPageFile=m->dwAvailPhys;m->dwTotalVirtual=m->dwTotalPhys;m->dwAvailVirtual=m->dwAvailPhys;}
 
 __attribute__((dllexport)) BOOL GetPhysicallyInstalledSystemMemory(unsigned long long *kb){if(!kb)return 0;*kb=262144;return 1;}
 
-__attribute__((dllexport)) typedef struct { unsigned long long ProcessorMask; DWORD Relationship; unsigned char Reserved[32]; } K32_LOGICAL_PROCESSOR_INFO;
-BOOL GetLogicalProcessorInformation(K32_LOGICAL_PROCESSOR_INFO *buffer,DWORD *length){if(!length)return 0;if(!buffer||*length<sizeof(K32_LOGICAL_PROCESSOR_INFO)){*length=sizeof(K32_LOGICAL_PROCESSOR_INFO);k32_last_error=122;return 0;}buffer->ProcessorMask=1;buffer->Relationship=0;for(int i=0;i<32;i++)buffer->Reserved[i]=0;*length=sizeof(*buffer);return 1;}
+typedef struct { unsigned long long ProcessorMask; DWORD Relationship; unsigned char Reserved[32]; } K32_LOGICAL_PROCESSOR_INFO;
+__attribute__((dllexport)) BOOL GetLogicalProcessorInformation(K32_LOGICAL_PROCESSOR_INFO *buffer,DWORD *length){if(!length)return 0;if(!buffer||*length<sizeof(K32_LOGICAL_PROCESSOR_INFO)){*length=sizeof(K32_LOGICAL_PROCESSOR_INFO);k32_last_error=122;return 0;}buffer->ProcessorMask=1;buffer->Relationship=0;for(int i=0;i<32;i++)buffer->Reserved[i]=0;*length=sizeof(*buffer);return 1;}
 
 __attribute__((dllexport)) BOOL GetLogicalProcessorInformationEx(DWORD relationship,void *buffer,DWORD *length){(void)relationship;(void)buffer;if(length)*length=0;k32_last_error=50;return 0;}
 
@@ -1079,8 +1079,8 @@ __attribute__((dllexport)) BOOL GetProcessDefaultLayout(DWORD *layout){if(!layou
 
 __attribute__((dllexport)) BOOL SetProcessDefaultLayout(DWORD layout){return layout==0;}
 
-__attribute__((dllexport)) typedef struct { BYTE ACLineStatus,BatteryFlag,BatteryLifePercent,Reserved1; DWORD BatteryLifeTime,BatteryFullLifeTime; } K32_SYSTEM_POWER_STATUS;
-BOOL GetSystemPowerStatus(K32_SYSTEM_POWER_STATUS *s){if(!s)return 0;s->ACLineStatus=1;s->BatteryFlag=128;s->BatteryLifePercent=255;s->Reserved1=0;s->BatteryLifeTime=0xFFFFFFFFu;s->BatteryFullLifeTime=0xFFFFFFFFu;return 1;}
+typedef struct { BYTE ACLineStatus,BatteryFlag,BatteryLifePercent,Reserved1; DWORD BatteryLifeTime,BatteryFullLifeTime; } K32_SYSTEM_POWER_STATUS;
+__attribute__((dllexport)) BOOL GetSystemPowerStatus(K32_SYSTEM_POWER_STATUS *s){if(!s)return 0;s->ACLineStatus=1;s->BatteryFlag=128;s->BatteryLifePercent=255;s->Reserved1=0;s->BatteryLifeTime=0xFFFFFFFFu;s->BatteryFullLifeTime=0xFFFFFFFFu;return 1;}
 
 __attribute__((dllexport)) BOOL SetSystemPowerState(BOOL suspend,BOOL force){(void)suspend;(void)force;k32_last_error=50;return 0;}
 

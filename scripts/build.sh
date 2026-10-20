@@ -720,6 +720,67 @@ lld -flavor link \
   /export:RemoveMenuItem \
   /export:CheckMenuItemState \
   /export:EnableMenuItemState \
+  /export:IsDebuggerPresent \
+  /export:CheckRemoteDebuggerPresent \
+  /export:OutputDebugStringA \
+  /export:OutputDebugStringW \
+  /export:DebugBreak \
+  /export:GetThreadErrorMode \
+  /export:SetThreadErrorMode \
+  /export:SetThreadStackGuarantee \
+  /export:GetThreadStackGuarantee \
+  /export:GetProcessDefaultLayout \
+  /export:SetProcessDefaultLayout \
+  /export:GetSystemPowerStatus \
+  /export:SetSystemPowerState \
+  /export:GetSystemDefaultLocaleName \
+  /export:GetUserDefaultLocaleName \
+  /export:GetLocaleInfoByName \
+  /export:GetCalendarInfoEx \
+  /export:GetDateFormatEx \
+  /export:GetTimeFormatEx \
+  /export:GetNumberFormatEx \
+  /export:GetCurrencyFormatEx \
+  /export:GetDurationFormat \
+  /export:GetDurationFormatEx \
+  /export:FindNLSString \
+  /export:FindNLSStringEx \
+  /export:CompareStringEx \
+  /export:SetFileInformationByHandle \
+  /export:GetFileAttributesTransactedA \
+  /export:GetFileAttributesTransactedW \
+  /export:SetFileAttributesTransactedA \
+  /export:SetFileAttributesTransactedW \
+  /export:RegisterClassExA \
+  /export:RegisterClassExW \
+  /export:CreateWindowA \
+  /export:CreateWindowW \
+  /export:DispatchMessageW \
+  /export:CreateDialogIndirectParamA \
+  /export:CreateDialogIndirectParamW \
+  /export:DialogBoxIndirectParamA \
+  /export:DialogBoxIndirectParamW \
+  /export:GetRawInputData \
+  /export:GetRawInputBuffer \
+  /export:GetRawInputDeviceInfoA \
+  /export:GetRawInputDeviceInfoW \
+  /export:GetRawInputDeviceList \
+  /export:RegisterRawInputDevices \
+  /export:DefRawInputProc \
+  /export:GetPointerType \
+  /export:GetPointerInfo \
+  /export:GetPointerInfoHistory \
+  /export:GetPointerPenInfo \
+  /export:GetPointerTouchInfo \
+  /export:GetPointerFrameInfo \
+  /export:GetPointerDevice \
+  /export:GetPointerDeviceRects \
+  /export:GetPointerDevices \
+  /export:GetGestureInfo \
+  /export:CloseGestureInfoHandle \
+  /export:GetGestureExtraArgs \
+  /export:SetGestureConfig \
+  /export:GetTouchInputInfo \
   "/out:$SYS32/hal.dll" \
   "$B/obj/hal.o"
 

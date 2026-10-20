@@ -21,6 +21,8 @@ void *memcpy(void *destination, const void *source, unsigned long long count) {
 }
 
 __attribute__((dllexport)) i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
+__attribute__((dllexport)) i64 SendMessageA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
+__attribute__((dllexport)) BOOL DestroyWindow(void *hwnd);
 __attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd);
 __attribute__((dllexport)) BOOL IsWindow(void *hwnd);
 static void u32_wide_to_ansi(char *out, unsigned int cap, const unsigned short *in);
@@ -792,8 +794,16 @@ static void on_click(int x, int y) {
         int bx = wx + ww - 28;
 
         if (hit(x, y, bx, by, bx + 24, by + 24)) {
-            sy3(SYS_WmUnreg, 0, 0, 0);
-            sy3(SYS_Exit, 0, 0, 0);
+            /*
+             * Closing a window is not the same as terminating its process.
+             * Give the application its normal WM_CLOSE notification first,
+             * then enforce the close if the app does not destroy the window.
+             * This makes the title-bar X work for every USER32 window and
+             * avoids killing the scheduler's current process from input code.
+             */
+            SendMessageA((void *)1, 0x0010u, 0, 0); /* WM_CLOSE */
+            if (g_wnd.visible)
+                DestroyWindow((void *)1);
             return;
         }
 

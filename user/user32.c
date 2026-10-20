@@ -821,6 +821,47 @@ typedef unsigned short U32_WCHAR;
 typedef struct { int left, top, right, bottom; } U32_RECT;
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
+typedef struct { unsigned int flags; unsigned long long id; void *submenu; char text[80]; } U32_MENUITEM;
+typedef struct { int used, count, default_pos; U32_MENUITEM items[16]; } U32_MENUDATA;
+static U32_MENUDATA u32_menus[16];
+static void *u32_system_menu;
+static U32_MENUDATA *u32_menu_data(void *handle) {
+    unsigned long long v=(unsigned long long)handle;
+    if (v<0x100 || v>=0x110) return 0;
+    U32_MENUDATA *m=&u32_menus[v-0x100];
+    return m->used ? m : 0;
+}
+static int u32_menu_index(U32_MENUDATA *m, unsigned long long item, int bypos) {
+    if (!m) return -1;
+    if (bypos) return item<(unsigned long long)m->count ? (int)item : -1;
+    for (int i=0;i<m->count;i++) if (m->items[i].id==item) return i;
+    return -1;
+}
+static void u32_menu_text(char *out, unsigned int cap, LPCSTR text) {
+    unsigned int i=0; if (!out || !cap) return;
+    if (text) while (text[i] && i+1<cap) { out[i]=text[i]; i++; }
+    out[i]=0;
+}
+static int u32_menu_insert(void *handle, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) {
+    U32_MENUDATA *m=u32_menu_data(handle); if (!m || m->count>=16) return 0;
+    int bypos=(flags&0x0400u)!=0;
+    int at=bypos ? (position<= (unsigned int)m->count ? (int)position : -1) : (position==0xFFFFFFFFu ? m->count : u32_menu_index(m,position,0));
+    if (at<0 || at>m->count) return 0;
+    for (int i=m->count;i>at;i--) m->items[i]=m->items[i-1];
+    U32_MENUITEM *it=&m->items[at]; it->flags=flags; it->id=id; it->submenu=(flags&0x0010u)?(void *)id:0;
+    u32_menu_text(it->text,sizeof(it->text),text); m->count++;
+    if (m->default_pos>=at) m->default_pos++;
+    return 1;
+}
+static int u32_menu_remove(void *handle, unsigned int item, unsigned int flags, int destroy_submenu) {
+    U32_MENUDATA *m=u32_menu_data(handle); int idx=u32_menu_index(m,item,(flags&0x0400u)!=0);
+    if (idx<0) return 0;
+    void *sub=m->items[idx].submenu;
+    for (int i=idx;i+1<m->count;i++) m->items[i]=m->items[i+1];
+    m->count--; if (m->default_pos==idx) m->default_pos=-1; else if (m->default_pos>idx) m->default_pos--;
+    if (destroy_submenu && sub) { U32_MENUDATA *sm=u32_menu_data(sub); if (sm) sm->used=0; }
+    return 1;
+}
 typedef struct { void *hdc; int erase; U32_RECT paint; int restore, inc_update; unsigned char reserved[32]; } U32_PAINTSTRUCT;
 typedef struct { unsigned int style; void *proc; int cls_extra, wnd_extra; void *instance, icon, cursor, background; LPCSTR menu_name, class_name; } U32_WNDCLASSA;
 static int u32_show_cursor_count;
@@ -954,12 +995,22 @@ __attribute__((dllexport)) BOOL SetDlgItemTextA(void *dlg, int id, LPCSTR text) 
 __attribute__((dllexport)) unsigned int GetDlgItemTextA(void *dlg, int id, LPSTR out, int cap) {
     (void)dlg; (void)id; if (out && cap>0) out[0]=0; return 0;
 }
-__attribute__((dllexport)) void *CreateMenu(void) { return (void *)(unsigned long long)(u32_next_menu++); }
+__attribute__((dllexport)) void *CreateMenu(void) {
+    for (int i=0;i<16;i++) if (!u32_menus[i].used) {
+        u32_menus[i].used=1; u32_menus[i].count=0; u32_menus[i].default_pos=-1;
+        return (void *)(unsigned long long)(0x100+i);
+    }
+    return 0;
+}
 __attribute__((dllexport)) void *CreatePopupMenu(void) { return CreateMenu(); }
 __attribute__((dllexport)) BOOL AppendMenuA(void *menu, unsigned int flags, unsigned long long id, LPCSTR text) {
-    (void)menu; (void)flags; (void)id; (void)text; return 1;
+    return u32_menu_insert(menu,0xFFFFFFFFu,flags|0x0400u,id,text);
 }
-__attribute__((dllexport)) BOOL DestroyMenu(void *menu) { (void)menu; return 1; }
+__attribute__((dllexport)) BOOL DestroyMenu(void *menu) {
+    U32_MENUDATA *m=u32_menu_data(menu); if (!m) return 0;
+    for (int i=0;i<m->count;i++) if (m->items[i].submenu) { U32_MENUDATA *sub=u32_menu_data(m->items[i].submenu); if (sub) sub->used=0; }
+    m->used=0; m->count=0; return 1;
+}
 __attribute__((dllexport)) BOOL TrackPopupMenu(void *menu, unsigned int flags, int x, int y, int reserved, void *hwnd, const U32_RECT *rect) {
     (void)menu; (void)flags; (void)x; (void)y; (void)reserved; (void)hwnd; (void)rect; return 0;
 }
@@ -1212,22 +1263,22 @@ __attribute__((dllexport)) void *GetMenu(void *hwnd) { return IsWindow(hwnd) ? u
 __attribute__((dllexport)) BOOL SetMenu(void *hwnd, void *menu) {
     if (!IsWindow(hwnd)) return 0; u32_wnd_menu=menu; compose(); return 1;
 }
-__attribute__((dllexport)) unsigned long long GetSubMenu(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuItemCount(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuItemID(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuState(void) { return 0; }
-__attribute__((dllexport)) unsigned long long CheckMenuItem(void) { return 0; }
-__attribute__((dllexport)) unsigned long long EnableMenuItem(void) { return 0; }
-__attribute__((dllexport)) unsigned long long DeleteMenu(void) { return 0; }
-__attribute__((dllexport)) unsigned long long RemoveMenu(void) { return 0; }
-__attribute__((dllexport)) unsigned long long InsertMenuA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long ModifyMenuA(void) { return 0; }
+__attribute__((dllexport)) void *GetSubMenu(void *menu, int position) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,(unsigned long long)position,1); return i<0 ? 0 : m->items[i].submenu; }
+__attribute__((dllexport)) int GetMenuItemCount(void *menu) { U32_MENUDATA *m=u32_menu_data(menu); return m ? m->count : -1; }
+__attribute__((dllexport)) unsigned int GetMenuItemID(void *menu, int position) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,(unsigned long long)position,1); return i<0 ? 0xFFFFFFFFu : (unsigned int)m->items[i].id; }
+__attribute__((dllexport)) unsigned int GetMenuState(void *menu, unsigned int item, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); return i<0 ? 0xFFFFFFFFu : m->items[i].flags; }
+__attribute__((dllexport)) unsigned int CheckMenuItem(void *menu, unsigned int item, unsigned int check) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(check&0x0400u)!=0); if (i<0) return 0xFFFFFFFFu; unsigned int old=m->items[i].flags&0x8u; m->items[i].flags=(m->items[i].flags&~0x8u)|((check&0x8u)?0x8u:0); return old; }
+__attribute__((dllexport)) unsigned int EnableMenuItem(void *menu, unsigned int item, unsigned int enable) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(enable&0x0400u)!=0); if (i<0) return 0xFFFFFFFFu; unsigned int old=m->items[i].flags&0x3u; m->items[i].flags=(m->items[i].flags&~0x3u)|(enable&0x3u); return old; }
+__attribute__((dllexport)) BOOL DeleteMenu(void *menu, unsigned int item, unsigned int flags) { return u32_menu_remove(menu,item,flags,1); }
+__attribute__((dllexport)) BOOL RemoveMenu(void *menu, unsigned int item, unsigned int flags) { return u32_menu_remove(menu,item,flags,0); }
+__attribute__((dllexport)) BOOL InsertMenuA(void *menu, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) { return u32_menu_insert(menu,position,flags,id,text); }
+__attribute__((dllexport)) BOOL ModifyMenuA(void *menu, unsigned int item, unsigned int flags, unsigned long long id, LPCSTR text) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0) return 0; m->items[i].flags=flags; m->items[i].id=id; m->items[i].submenu=(flags&0x0010u)?(void *)id:0; u32_menu_text(m->items[i].text,sizeof(m->items[i].text),text); return 1; }
 __attribute__((dllexport)) unsigned long long SetMenuItemInfoA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetMenuItemInfoA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuStringA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetMenuDefaultItem(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuDefaultItem(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetSystemMenu(void) { return 0; }
+__attribute__((dllexport)) int GetMenuStringA(void *menu, unsigned int item, char *out, int cap, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0 || !out || cap<=0) return 0; int n=0; while (m->items[i].text[n] && n+1<cap) { out[n]=m->items[i].text[n]; n++; } out[n]=0; return n; }
+__attribute__((dllexport)) BOOL SetMenuDefaultItem(void *menu, unsigned int item, unsigned int by_position) { U32_MENUDATA *m=u32_menu_data(menu); if (!m) return 0; int i=u32_menu_index(m,item,by_position!=0); if (i<0) return 0; m->default_pos=i; return 1; }
+__attribute__((dllexport)) unsigned int GetMenuDefaultItem(void *menu, unsigned int by_position, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); (void)flags; if (!m || m->default_pos<0 || m->default_pos>=m->count) return 0xFFFFFFFFu; return by_position ? (unsigned int)m->default_pos : (unsigned int)m->items[m->default_pos].id; }
+__attribute__((dllexport)) void *GetSystemMenu(void *hwnd, BOOL revert) { if (!IsWindow(hwnd)) return 0; if (revert) { if (u32_system_menu) DestroyMenu(u32_system_menu); u32_system_menu=0; } if (!u32_system_menu) u32_system_menu=CreateMenu(); return u32_system_menu; }
 __attribute__((dllexport)) unsigned long long GetScrollInfo(void) { return 0; }
 
 

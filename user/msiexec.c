@@ -1043,6 +1043,8 @@ static int parse_msi_catalog(void) {
     msi_db_ok=1;
     return 1;
 }
+#include "msi_install.h"
+
 static void inspect_msi(void) {
     static const u8 signature[8]={0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1};
     if (file_size<512) { out("msiexec: file is too small for an MSI compound database\n"); return; }

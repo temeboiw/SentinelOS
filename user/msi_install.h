@@ -391,12 +391,47 @@ static int msi_file_name_matches(const char *raw,const char *name) {
     }
     return 0;
 }
+static int msi_parse_decimal(const char *s,u32 *value) {
+    if(!s || !s[0]) return 0;
+    u32 v=0;
+    for(u32 i=0;s[i];i++) {
+        if(s[i]<'0'||s[i]>'9') return 0;
+        if(v>(0xFFFFFFFFu-(u32)(s[i]-'0'))/10u)return 0;
+        v=v*10u+(u32)(s[i]-'0');
+    }
+    *value=v;return 1;
+}
+static int msi_component_selected(const char *component) {
+    MsiTable *fc=msi_find_table("FeatureComponents");
+    if(!fc || !fc->rows) return 1;
+    MsiTable *features=msi_find_table("Feature");
+    if(!features || !features->rows) return 0;
+    MsiTable *conditions=msi_find_table("Condition");
+    if(conditions && conditions->rows) return -1;
+    char level_text[64]; u32 install_level=1;
+    if(msi_property_value("INSTALLLEVEL",level_text,sizeof level_text) &&
+       level_text[0] && !msi_parse_decimal(level_text,&install_level)) return -1;
+    for(u32 i=0;i<fc->rows;i++) {
+        char feature_id[64],comp_id[64];
+        if(!msi_cell_text("FeatureComponents",i,0,feature_id,sizeof feature_id) ||
+           !msi_cell_text("FeatureComponents",i,1,comp_id,sizeof comp_id)) return -1;
+        if(!same_name(comp_id,component)) continue;
+        for(u32 j=0;j<features->rows;j++) {
+            char key[64]; long long feature_level=0;
+            if(!msi_cell_text("Feature",j,0,key,sizeof key) ||
+               !msi_table_cell("Feature",j,5,0,0,&feature_level,0)) return -1;
+            if(same_name(key,feature_id) && feature_level>0 &&
+               (u64)feature_level<=install_level) return 1;
+        }
+    }
+    return 0;
+}
 static int msi_build_file_plan(void) {
     MsiTable *files=msi_find_table("File"), *components=msi_find_table("Component");
     MsiTable *fc=msi_find_table("FeatureComponents");
     if(!files || !files->rows || files->rows>MSI_MAX_FILE_PLANS ||
        !components || !components->rows || !msi_dir_count ||
-       (fc && fc->rows)) {
+       (fc && fc->rows && !msi_find_table("Feature"))) {
         out("Install blocked: unsupported file/component/feature table layout.\n"); return 0;
     }
     msi_file_plan_count=0;
@@ -409,6 +444,9 @@ static int msi_build_file_plan(void) {
            !msi_table_cell("File",i,3,0,0,&size,0) ||
            !msi_table_cell("File",i,6,0,0,&seq,0) || size<0 ||
            size>0x7FFFFFFFLL || seq<0) return 0;
+        int selected=msi_component_selected(comp);
+        if(selected<0) { out("Install blocked: unsupported feature condition table.\n"); return 0; }
+        if(!selected) continue;
         int component_row=-1;
         for(u32 j=0;j<components->rows;j++) {
             char key[64];

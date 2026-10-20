@@ -12,6 +12,8 @@ typedef struct {
     u32 size;
     long long sequence;
 } MsiFilePlan;
+typedef struct { char name[64], value[256]; } MsiRuntimeProperty;
+typedef struct { char id[64], path[512]; } MsiDirOverride;
 
 #define MSI_MAX_DIRS 512u
 #define MSI_MAX_FILE_PLANS 4096u
@@ -21,6 +23,9 @@ static u32 msi_dir_count, msi_file_plan_count;
 static MsiSequenceRow msi_install_rows[512];
 static u8 msi_install_enabled[512];
 static u8 msi_copy_buffer[65536];
+static MsiRuntimeProperty msi_runtime_props[128];
+static MsiDirOverride msi_dir_overrides[128];
+static u32 msi_runtime_prop_count, msi_dir_override_count;
 
 static int msi_cell_text(const char *table,u32 row,u32 col,char *out_text,u32 cap) {
     int is_text=0;
@@ -33,6 +38,10 @@ static int msi_cell_text(const char *table,u32 row,u32 col,char *out_text,u32 ca
 static int msi_property_value(const char *key,char *out_value,u32 cap) {
     MsiTable *t=msi_find_table("Property");
     if (cap) out_value[0]=0;
+    for(u32 i=0;i<msi_runtime_prop_count;i++) if(same_name(msi_runtime_props[i].name,key)) {
+        u32 j=0; while(msi_runtime_props[i].value[j] && j+1<cap){out_value[j]=msi_runtime_props[i].value[j];j++;}
+        if(cap) out_value[j]=0; return 1;
+    }
     if (!t) return 0;
     for(u32 i=0;i<t->rows;i++) {
         char k[128],v[256];
@@ -111,6 +120,97 @@ static int msi_action_supported(const char *a) {
     };
     for(u32 i=0;i<sizeof supported/sizeof supported[0];i++)
         if(same_name(a,supported[i])) return 1;
+    return 0;
+}
+static int msi_custom_action_kind(const char *action) {
+    MsiTable *t=msi_find_table("CustomAction");
+    if(!t) return 0;
+    for(u32 i=0;i<t->rows;i++) {
+        char name[96]; long long type=0;
+        if(!msi_cell_text("CustomAction",i,0,name,sizeof name) ||
+           !msi_table_cell("CustomAction",i,1,0,0,&type,0)) return 0;
+        if(!same_name(name,action)) continue;
+        if(type==19) return 19; /* Error */
+        if(type==35) return 35; /* SetDirectory */
+        if(type==51) return 51; /* SetProperty */
+        return 0; /* never run native DLL, EXE, script or deferred actions */
+    }
+    return 0;
+}
+static int msi_set_runtime_property(const char *name,const char *value) {
+    if(!name || !name[0] || !value) return 0;
+    u32 i=0; while(name[i] && i+1<sizeof msi_runtime_props[0].name)i++;
+    if(name[i]) return 0;
+    u32 j=0; while(value[j] && j+1<sizeof msi_runtime_props[0].value)j++;
+    if(value[j]) return 0;
+    int slot=-1;
+    for(u32 k=0;k<msi_runtime_prop_count;k++) if(same_name(msi_runtime_props[k].name,name)){slot=(int)k;break;}
+    if(slot<0) { if(msi_runtime_prop_count>=128)return 0; slot=(int)msi_runtime_prop_count++; }
+    for(u32 k=0;k<=i;k++)msi_runtime_props[slot].name[k]=name[k];
+    for(u32 k=0;k<=j;k++)msi_runtime_props[slot].value[k]=value[k];
+    return 1;
+}
+static int msi_format_value(const char *src,char *dst,u32 cap) {
+    u32 outn=0;
+    for(u32 i=0;src[i];) {
+        if(src[i]=='[') {
+            u32 end=i+1; while(src[end] && src[end]!=']')end++;
+            if(!src[end] || end==i+1) return 0;
+            char key[64]; u32 n=end-i-1;
+            if(n>=sizeof key)return 0;
+            for(u32 j=0;j<n;j++)key[j]=src[i+1+j];key[n]=0;
+            char val[256]; (void)msi_property_value(key,val,sizeof val);
+            for(u32 j=0;val[j];j++){if(outn+1>=cap)return 0;dst[outn++]=val[j];}
+            i=end+1;
+        } else { if(outn+1>=cap)return 0; dst[outn++]=src[i++]; }
+    }
+    if(!cap)return 0;dst[outn]=0;return 1;
+}
+static int msi_find_dir_override(const char *id) {
+    for(u32 i=0;i<msi_dir_override_count;i++) if(same_name(msi_dir_overrides[i].id,id))return (int)i;
+    return -1;
+}
+static int msi_set_dir_override(const char *id,const char *path) {
+    if(!id || !id[0] || !path || path[0]!='C' || path[1]!=':' || path[2]!='\\') return 0;
+    u32 n=0;while(path[n] && n+1<512)n++;if(path[n])return 0;
+    for(u32 i=0;i<n;i++) if(path[i]=='['||path[i]==']')return 0;
+    int slot=msi_find_dir_override(id);
+    if(slot<0){if(msi_dir_override_count>=128)return 0;slot=(int)msi_dir_override_count++;}
+    u32 j=0;while(id[j] && j+1<sizeof msi_dir_overrides[0].id){msi_dir_overrides[slot].id[j]=id[j];j++;}
+    if(id[j])return 0;msi_dir_overrides[slot].id[j]=0;
+    for(u32 k=0;k<=n;k++)msi_dir_overrides[slot].path[k]=path[k];
+    for(u32 k=0;k<msi_dir_count;k++)msi_dir_paths[k].state=0;
+    for(u32 k=0;k<msi_dir_count;k++)if(!msi_resolve_dir(k,0))return 0;
+    return 1;
+}
+static int msi_execute_custom_action(const char *action) {
+    MsiTable *t=msi_find_table("CustomAction");
+    if(!t)return 0;
+    for(u32 i=0;i<t->rows;i++) {
+        char name[96],source[128],target[256]; long long type=0;
+        if(!msi_cell_text("CustomAction",i,0,name,sizeof name) ||
+           !msi_table_cell("CustomAction",i,1,0,0,&type,0)) return 0;
+        if(!same_name(name,action))continue;
+        source[0]=target[0]=0;
+        if(!msi_cell_text("CustomAction",i,2,source,sizeof source) ||
+           !msi_cell_text("CustomAction",i,3,target,sizeof target))return 0;
+        if(type==19) {
+            char message[256];
+            if(!msi_format_value(target,message,sizeof message))return 0;
+            out("MSI Error custom action: ");out(message);out("\n");return 0;
+        }
+        if(type==51) {
+            char value[256];
+            if(!msi_format_value(target,value,sizeof value))return 0;
+            return msi_set_runtime_property(source,value);
+        }
+        if(type==35) {
+            char path[512];
+            if(!msi_format_value(target,path,sizeof path))return 0;
+            return msi_set_dir_override(source,path);
+        }
+        return 0;
+    }
     return 0;
 }
 static int msi_load_sequence(MsiSequenceRow *rows,u8 *enabled,u32 cap,u32 *count_out) {

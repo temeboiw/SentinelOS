@@ -790,7 +790,8 @@ static int e4_insert_regular_dirent(uint32_t dir_ino, const char *name, uint32_t
     if (!nl || nl > 255 || e4_lookup_ci(&g_ext4, dir_ino, name)) return -1;
     uint8_t dinode[256];
     if (e4_inode(&g_ext4, dir_ino, dinode) < 0 ||
-        (E16(dinode, 0) & 0xF000) != 0x4000) return -1;
+        (E16(dinode, 0) & 0xF000) != 0x4000 ||
+        (E32(dinode, 32) & 0x00001000u)) return -1; /* indexed dirs need htree updates */
     uint64_t dsize = e4_size(dinode);
     static uint8_t block[4096];
     for (uint64_t pos = 0; pos < dsize; pos += g_ext4.blksz) {
@@ -993,13 +994,15 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     if (E16(inode + 40, 6) != 0 || em > 4 || en > em) return -1;
     static uint8_t zero[4096];
     /* Preflight extent capacity conservatively before allocating anything. */
+    uint32_t first_needed = (uint32_t)((h->pos < old_size ? h->pos : old_size) /
+                                       g_ext4.blksz);
     uint32_t missing = 0;
-    for (uint32_t lb = 0; lb <= last_lb; ++lb)
+    for (uint32_t lb = first_needed; lb <= last_lb; ++lb)
         if (!e4_map(&g_ext4, inode, lb)) missing++;
     /* Blocks may coalesce into a single extent; only refuse up front when the
        inline root is already full. Fragmentation can still exhaust it safely. */
     if (missing && en >= em) return -1;
-    for (uint32_t lb = 0; lb <= last_lb; ++lb) {
+    for (uint32_t lb = first_needed; lb <= last_lb; ++lb) {
         if (e4_map(&g_ext4, inode, lb)) continue;
         uint64_t pb = e4_alloc_block(&g_ext4);
         if (!pb || e4_write(&g_ext4, pb * g_ext4.blksz, zero, g_ext4.blksz) < 0 ||

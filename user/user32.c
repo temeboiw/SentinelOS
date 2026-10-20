@@ -1128,6 +1128,68 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     }
 }
 
+
+typedef struct { long left,top,right,bottom; } USER_RECT_LOCAL;
+typedef struct {
+    void *hdc;
+    int fErase;
+    USER_RECT_LOCAL rcPaint;
+    int fRestore,fIncUpdate;
+    unsigned char rgbReserved[32];
+} USER_PAINTSTRUCT_LOCAL;
+
+__attribute__((dllexport)) void *GetDC(void *hwnd) {
+    (void)hwnd;return (void *)1;
+}
+__attribute__((dllexport)) void *GetWindowDC(void *hwnd) {
+    (void)hwnd;return (void *)1;
+}
+__attribute__((dllexport)) int ReleaseDC(void *hwnd,void *hdc) {
+    (void)hwnd;return hdc?1:0;
+}
+__attribute__((dllexport)) BOOL GetClientRect(void *hwnd,USER_RECT_LOCAL *r) {
+    (void)hwnd;if(!r)return 0;
+    r->left=0;r->top=0;
+    r->right=g_wnd.w>8?g_wnd.w-8:0;
+    r->bottom=g_wnd.h>42?g_wnd.h-42:0;
+    return 1;
+}
+__attribute__((dllexport)) void *BeginPaint(void *hwnd,USER_PAINTSTRUCT_LOCAL *ps) {
+    (void)hwnd;if(!ps)return 0;
+    ps->hdc=(void *)1;ps->fErase=0;
+    ps->rcPaint.left=0;ps->rcPaint.top=0;
+    ps->rcPaint.right=g_wnd.w>8?g_wnd.w-8:0;
+    ps->rcPaint.bottom=g_wnd.h>42?g_wnd.h-42:0;
+    ps->fRestore=0;ps->fIncUpdate=0;
+    for(int i=0;i<32;i++)ps->rgbReserved[i]=0;
+    return ps->hdc;
+}
+__attribute__((dllexport)) BOOL EndPaint(void *hwnd,const USER_PAINTSTRUCT_LOCAL *ps) {
+    (void)hwnd;(void)ps;return 1;
+}
+__attribute__((dllexport)) int GetSystemMetrics(int index) {
+    if(index==0)return (int)g_fw;
+    if(index==1)return (int)g_fh;
+    if(index==2)return 16;
+    if(index==3)return 16;
+    return 0;
+}
+__attribute__((dllexport)) BOOL SetWindowTextA(void *hwnd,LPCSTR title) {
+    (void)hwnd;if(!title)return 0;
+    int i=0;while(title[i]&&i<63){g_wnd.title[i]=title[i];i++;}g_wnd.title[i]=0;
+    if(g_wnd.visible) {
+        sy3(SYS_WmReg,0,(u64)g_wnd.title,0);
+        int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
+        sy3(SYS_WmRect,(u64)rect,0,0);
+    }
+    compose();return 1;
+}
+__attribute__((dllexport)) int GetWindowTextA(void *hwnd,LPSTR out,int cap) {
+    (void)hwnd;if(!out||cap<=0)return 0;
+    int i=0;while(g_wnd.title[i]&&i<cap-1){out[i]=g_wnd.title[i];i++;}
+    out[i]=0;return i;
+}
+
 /* Query the current process's window geometry and visible text scroll offset. */
 __attribute__((dllexport))
 BOOL GetWindowRect(void *hwnd, int *rect) {

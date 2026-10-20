@@ -13,8 +13,8 @@ typedef unsigned char u8;
 
 enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
-#define MAX_FILE (16u * 1024u * 1024u)
-#define MAX_FAT 65536
+#define MAX_FILE (128u * 1024u * 1024u)
+#define MAX_FAT 524288
 #define MAX_DIR (256u * 1024u)
 #define FREE_SECTOR 0xFFFFFFFFu
 #define END_OF_CHAIN 0xFFFFFFFEu
@@ -144,6 +144,7 @@ static void inspect_msi(void) {
     u8 *dir=dir_buffer;
     u32 dir_bytes=read_chain(dir_sid,dir,MAX_DIR);
     if (dir_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
+    msi_ok=1;
     out("MSI compound database: structurally readable\n");
     out("Container version: "); out_u32(major); out("\n");
     out("Streams/storage entries:\n");

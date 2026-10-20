@@ -123,7 +123,9 @@ static void launch_app(const char *name, void **hwnd) {
     } else {
         g_search_len = 0;
         g_search[0] = 0;
-        redraw_desktop(hwnd);
+        /* The desktop already exists. Repaint only the search field; recreating
+         * the desktop here repainted the wallpaper after every app launch. */
+        draw_search(*hwnd);
     }
 
     g_launched = 0;

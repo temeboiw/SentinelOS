@@ -927,6 +927,52 @@ static void redraw_window_contents(void) {
     cursor_save_draw(g_mx, g_my);
 }
 
+
+/* Minimal GDI bridge used by gdi32.dll. Coordinates are client-relative.
+ * Draw into this process' user32 surface and present only the affected area. */
+static void gdi_present(int x,int y,int w,int h) {
+    if(!g_front||w<=0||h<=0)return;
+    int x0=g_wnd.x+4+x,y0=g_wnd.y+36+y,x1=x0+w,y1=y0+h;
+    if(x0<0)x0=0;if(y0<0)y0=0;
+    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    if(g_back)for(int yy=y0;yy<y1;yy++) {
+        u32 *dst=g_front+(u64)yy*g_pitch+x0;
+        u32 *src=g_back+(u64)yy*g_fw+x0;
+        for(int xx=x0;xx<x1;xx++)dst[xx-x0]=src[xx-x0];
+    }
+    g_draw=g_front;g_draw_pitch=g_pitch;
+    cursor_save_draw(g_mx,g_my);
+}
+static void gdi_begin(void) {
+    ensure_fb();cursor_restore();
+    g_draw=g_back?g_back:g_front;
+    g_draw_pitch=g_back?g_fw:g_pitch;
+}
+__attribute__((dllexport)) BOOL GdiFillRect(int x,int y,int w,int h,u32 color) {
+    if(w<=0||h<=0)return 0;
+    gdi_begin();fill(g_wnd.x+4+x,g_wnd.y+36+y,w,h,color);gdi_present(x,y,w,h);return 1;
+}
+__attribute__((dllexport)) BOOL GdiLine(int x1,int y1,int x2,int y2,u32 color) {
+    gdi_begin();
+    int dx=x2>=x1?x2-x1:x1-x2, sx=x1<x2?1:-1;
+    int dy=y2>=y1?y1-y2:y2-y1, sy=y1<y2?1:-1, err=dx+dy;
+    int minx=x1<x2?x1:x2,maxx=x1>x2?x1:x2,miny=y1<y2?y1:y2,maxy=y1>y2?y1:y2;
+    for(;;) {
+        putpx(g_wnd.x+4+x1,g_wnd.y+36+y1,color);
+        if(x1==x2&&y1==y2)break;
+        int e2=2*err;
+        if(e2>=dy){err+=dy;x1+=sx;}
+        if(e2<=dx){err+=dx;y1+=sy;}
+    }
+    gdi_present(minx,miny,maxx-minx+1,maxy-miny+1);return 1;
+}
+__attribute__((dllexport)) BOOL GdiTextOut(int x,int y,LPCSTR str,int len,u32 color) {
+    if(!str)return 0;if(len<0){len=0;while(str[len])len++;}
+    gdi_begin();
+    for(int i=0;i<len;i++)draw_char(g_wnd.x+4+x+i*8,g_wnd.y+36+y,str[i],color);
+    gdi_present(x,y,len*8,8);return 1;
+}
+
 __attribute__((dllexport))
 BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
     (void)hwnd;

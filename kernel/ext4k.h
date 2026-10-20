@@ -18,6 +18,13 @@ static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
     return ata_read(fs->part_off + off, dst, len);
 }
 
+/* Low-level write primitive for future ext4 mutation routines.
+ * This deliberately does not allocate ext4 blocks or modify directory entries. */
+static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
+    if (vb_ok) return blk_write(fs->part_off + off, src, len);
+    return ata_write(fs->part_off + off, src, len);
+}
+
 static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     uint8_t sb[1024];
     fs->part_off = part_lba * 512;

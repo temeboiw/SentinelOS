@@ -44,6 +44,10 @@ static int msi_property_value(const char *key,char *out_value,u32 cap) {
         u32 j=0; while(msi_runtime_props[i].value[j] && j+1<cap){out_value[j]=msi_runtime_props[i].value[j];j++;}
         if(cap) out_value[j]=0; return 1;
     }
+    for(u32 i=0;i<msi_dir_count;i++) if(same_name(msi_dir_paths[i].id,key)) {
+        u32 j=0; while(msi_dir_paths[i].path[j] && j+1<cap){out_value[j]=msi_dir_paths[i].path[j];j++;}
+        if(cap) out_value[j]=0; return 1;
+    }
     if (!t) return 0;
     for(u32 i=0;i<t->rows;i++) {
         char k[128],v[256];

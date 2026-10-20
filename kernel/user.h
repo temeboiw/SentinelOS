@@ -1238,6 +1238,7 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
+        int automatic_address=(prefer==0);
         if (!prefer) prefer = 0x50000000ULL;
         if ((prefer & 0xFFFULL) || prefer < 0x10000ULL ||
             prefer >= 0x0000800000000000ULL ||
@@ -1249,6 +1250,16 @@ static Frame *syscall_handler(Frame *f) {
         /* Validate and allocate while the system CR3 provides the physical
            identity map used by the PMM. Never replace an existing mapping. */
         MmSwitchToProcess(PspSystemProcess);
+        if(automatic_address) {
+            uint64_t candidate=0x50000000ULL;
+            uint64_t limit=0x60000000ULL-size;
+            for(;candidate<=limit;candidate+=USER_IMAGE_PAGE)
+                if(MmUserRangeUnmapped(caller,candidate,size))break;
+            if(candidate>limit) {
+                MmSwitchToProcess(caller);f->rax=0;return f;
+            }
+            prefer=candidate;
+        }
         if (!MmUserRangeUnmapped(caller, prefer, size)) {
             MmSwitchToProcess(caller);
             f->rax = 0;

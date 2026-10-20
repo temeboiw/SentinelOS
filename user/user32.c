@@ -60,6 +60,7 @@ static long u32_class_extra[2];
 static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
 static unsigned int u32_double_click_time=500;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
+static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
 static unsigned int u32_caret_blink=530;
 static int u32_clip_left,u32_clip_top,u32_clip_right,u32_clip_bottom,u32_clip_active;
 static char g_lines[40][80];
@@ -830,8 +831,8 @@ typedef struct { unsigned int cbSize,fMask; int nMin,nMax; unsigned int nPage; i
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
 typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle, dwWindowStatus, cxWindowBorders, cyWindowBorders; unsigned short atomWindowType, wCreatorVersion; } U32_WINDOWINFO;
-typedef struct { unsigned int flags; unsigned long long id; void *submenu; char text[80]; } U32_MENUITEM;
-typedef struct { int used, count, default_pos; U32_MENUITEM items[16]; } U32_MENUDATA;
+typedef struct { unsigned int flags; unsigned long long id; void *submenu; void *bmp_checked,*bmp_unchecked; char text[80]; } U32_MENUITEM;
+typedef struct { int used, count, default_pos; unsigned int style,max_height,help_id; void *background; unsigned long long menu_data; U32_MENUITEM items[16]; } U32_MENUDATA;
 static U32_MENUDATA u32_menus[16];
 static void *u32_system_menu;
 static U32_MENUDATA *u32_menu_data(void *handle) {
@@ -1354,8 +1355,8 @@ __attribute__((dllexport)) u32 GetWindowModuleFileNameW(void *hwnd, U32_LPWSTR o
     return (u32)copied+1<n ? cap : (u32)copied;
 }
 __attribute__((dllexport)) unsigned long long GetWindowRgnBox(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowDisplayAffinity(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetWindowDisplayAffinity(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL GetWindowDisplayAffinity(void *hwnd,unsigned int *affinity){if(!IsWindow(hwnd)||!affinity)return 0;*affinity=u32_window_affinity;return 1;}
+__attribute__((dllexport)) BOOL SetWindowDisplayAffinity(void *hwnd,unsigned int affinity){if(!IsWindow(hwnd)||(affinity!=0&&affinity!=1&&affinity!=0x11u))return 0;u32_window_affinity=affinity;return 1;}
 __attribute__((dllexport)) BOOL IsChild(void *parent,void *child){return IsWindow(parent)&&IsWindow(child)&&u32_wnd_parent==parent&&child!=parent;}
 __attribute__((dllexport)) BOOL IsWindowUnicode(void *hwnd){return IsWindow(hwnd)&&u32_wnd_proc!=0;}
 __attribute__((dllexport)) BOOL IsWindowEnabled(void *hwnd){return IsWindow(hwnd)&&!(u32_wnd_style&0x08000000u);}
@@ -1418,8 +1419,8 @@ typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos
 __attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=(void *)1;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
 __attribute__((dllexport)) void *SetCursor(void *cursor){static void *current=(void *)1;void *old=current;current=cursor;return old;}
 __attribute__((dllexport)) unsigned long long GetMouseMovePointsEx(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetKeyboardState(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetKeyboardState(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL GetKeyboardState(unsigned char *state){if(!state)return 0;for(int i=0;i<256;i++)state[i]=u32_key_state[i];return 1;}
+__attribute__((dllexport)) BOOL SetKeyboardState(const unsigned char *state){if(!state)return 0;for(int i=0;i<256;i++)u32_key_state[i]=state[i];return 1;}
 __attribute__((dllexport)) void *GetKeyboardLayout(unsigned int thread){(void)thread;return (void *)0x04090409;}
 __attribute__((dllexport)) int GetKeyboardLayoutList(int count,void **list){if(count>0&&list)list[0]=(void *)0x04090409;return 1;}
 __attribute__((dllexport)) BOOL GetKeyboardLayoutNameA(char *name){if(!name)return 0;const char *s="00000409";for(int i=0;i<9;i++)name[i]=s[i];return 1;}
@@ -1434,8 +1435,8 @@ __attribute__((dllexport)) unsigned int MapVirtualKeyA(unsigned int code,unsigne
 __attribute__((dllexport)) unsigned int MapVirtualKeyW(unsigned int code,unsigned int type){return MapVirtualKeyA(code,type);}
 __attribute__((dllexport)) unsigned int MapVirtualKeyExA(unsigned int code,unsigned int type,void *layout){(void)layout;return MapVirtualKeyA(code,type);}
 __attribute__((dllexport)) unsigned int MapVirtualKeyExW(unsigned int code,unsigned int type,void *layout){(void)layout;return MapVirtualKeyW(code,type);}
-__attribute__((dllexport)) unsigned long long ToUnicode(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long ToUnicodeEx(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int ToUnicode(unsigned int vk,unsigned int scan,const unsigned char *state,U32_WCHAR *out,int cap,unsigned int flags){(void)scan;(void)flags;if(!out||cap<=0)return 0;unsigned int c=vk;if(c>='A'&&c<='Z'&&state&&!(state[0x10]&0x80u))c+=32;if(c>=32&&c<127){out[0]=(U32_WCHAR)c;return 1;}return 0;}
+__attribute__((dllexport)) int ToUnicodeEx(unsigned int vk,unsigned int scan,const unsigned char *state,U32_WCHAR *out,int cap,unsigned int flags,void *layout){(void)layout;return ToUnicode(vk,scan,state,out,cap,flags);}
 __attribute__((dllexport)) short VkKeyScanA(char ch){unsigned char c=(unsigned char)ch;if(c>='a'&&c<='z')return (short)(c-32);if(c>='A'&&c<='Z')return (short)(c|0x0100);if(c>=32&&c<127)return (short)c;return -1;}
 __attribute__((dllexport)) short VkKeyScanW(U32_WCHAR ch){if(ch>127)return -1;return VkKeyScanA((char)ch);}
 __attribute__((dllexport)) short VkKeyScanExA(char ch,void *layout){(void)layout;return VkKeyScanA(ch);}
@@ -1450,7 +1451,7 @@ __attribute__((dllexport)) BOOL DestroyCaret(void){u32_caret_created=0;u32_caret
 __attribute__((dllexport)) BOOL HideCaret(void *hwnd){if(!IsWindow(hwnd)||!u32_caret_created)return 0;u32_caret_visible=0;return 1;}
 __attribute__((dllexport)) BOOL ShowCaret(void *hwnd){if(!IsWindow(hwnd)||!u32_caret_created)return 0;u32_caret_visible=1;return 1;}
 __attribute__((dllexport)) int GetMenuStringW(void *menu,unsigned int item,U32_WCHAR *out,int cap,unsigned int flags){char b[128];int n=GetMenuStringA(menu,item,b,sizeof(b),flags);if(!out||cap<=0)return n;int i=0;while(b[i]&&i+1<cap){out[i]=(unsigned char)b[i];i++;}out[i]=0;return n;}
-__attribute__((dllexport)) unsigned long long SetMenuItemBitmaps(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL SetMenuItemBitmaps(void *menu,unsigned int item,unsigned int flags,void *checked,void *unchecked){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,(flags&0x0400u)!=0);if(i<0)return 0;m->items[i].bmp_checked=checked;m->items[i].bmp_unchecked=unchecked;return 1;}
 __attribute__((dllexport)) int GetMenuCheckMarkDimensions(void){return (13<<16)|13;}
 __attribute__((dllexport)) BOOL HiliteMenuItem(void *hwnd,void *menu,unsigned int item,unsigned int flags){(void)hwnd;U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,(flags&0x0400u)!=0);if(i<0)return 0;if(flags&0x0080u)m->items[i].flags|=0x0080u;else m->items[i].flags&=~0x0080u;return 1;}
 __attribute__((dllexport)) BOOL InsertMenuW(void *menu,unsigned int pos,unsigned int flags,unsigned long long id,const U32_WCHAR *text){char b[80];u32_wide_to_ansi(b,sizeof(b),text);return InsertMenuA(menu,pos,flags,id,b);}
@@ -1462,11 +1463,12 @@ __attribute__((dllexport)) unsigned long long TrackPopupMenuEx(unsigned long lon
 __attribute__((dllexport)) BOOL EndMenu(void){g_menu=0;return 1;}
 __attribute__((dllexport)) unsigned long long GetMenuContextHelpId(void *menu){return u32_menu_data(menu)?u32_context_help_id:0;}
 __attribute__((dllexport)) BOOL SetMenuContextHelpId(void *menu,unsigned long long id){if(!u32_menu_data(menu))return 0;u32_context_help_id=id;return 1;}
-__attribute__((dllexport)) unsigned long long GetMenuInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long SetMenuInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuItemRect(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+typedef struct { unsigned int cbSize,fMask,dwStyle,dwMaxHeight; void *hbrBack; unsigned int dwContextHelpID; unsigned long long dwMenuData; } U32_MENUINFO;
+__attribute__((dllexport)) BOOL GetMenuInfo(void *menu,U32_MENUINFO *info){U32_MENUDATA *m=u32_menu_data(menu);if(!m||!info||info->cbSize<sizeof(U32_MENUINFO))return 0;if(info->fMask&1u)info->dwStyle=m->style;if(info->fMask&2u)info->dwMaxHeight=m->max_height;if(info->fMask&4u)info->hbrBack=m->background;if(info->fMask&8u)info->dwContextHelpID=m->help_id;if(info->fMask&0x10u)info->dwMenuData=m->menu_data;return 1;}
+__attribute__((dllexport)) BOOL SetMenuInfo(void *menu,const U32_MENUINFO *info){U32_MENUDATA *m=u32_menu_data(menu);if(!m||!info||info->cbSize<sizeof(U32_MENUINFO))return 0;if(info->fMask&1u)m->style=info->dwStyle;if(info->fMask&2u)m->max_height=info->dwMaxHeight;if(info->fMask&4u)m->background=info->hbrBack;if(info->fMask&8u)m->help_id=info->dwContextHelpID;if(info->fMask&0x10u)m->menu_data=info->dwMenuData;return 1;}
+__attribute__((dllexport)) BOOL GetMenuItemRect(void *hwnd,void *menu,unsigned int item,U32_RECT *rect){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,0);if(!IsWindow(hwnd)||i<0||!rect)return 0;rect->left=g_wnd.x+i*80;rect->top=g_wnd.y+24;rect->right=rect->left+80;rect->bottom=rect->top+24;return 1;}
 __attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){U32_MENUDATA *m=u32_menu_data(menu);if(!m||count>16)return 0;while(m->count<(int)count){U32_MENUITEM *it=&m->items[m->count++];it->flags=0;it->id=0;it->submenu=0;it->text[0]=0;}m->count=(int)count;if(m->default_pos>=m->count)m->default_pos=-1;return 1;}
 __attribute__((dllexport)) BOOL IsZoomed(void *hwnd){(void)hwnd;return 0;}
-__attribute__((dllexport)) unsigned long long GetWindowPos(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
 __attribute__((dllexport)) unsigned long long UnregisterClassW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}

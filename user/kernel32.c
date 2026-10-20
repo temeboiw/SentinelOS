@@ -68,7 +68,7 @@ static void k32_untrack_path(HANDLE h) {
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -259,7 +259,13 @@ __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
 }
 __attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { if(!name||!*name){k32_last_error=87;return 0;}for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)){k32_modules[i].refs++;return (HANDLE)&k32_modules[i];}for(int i=0;i<16;i++)if(!k32_modules[i].used){int j=0;while(name[j]&&j<63){k32_modules[i].name[j]=name[j];j++;}k32_modules[i].name[j]=0;k32_modules[i].refs=1;k32_modules[i].used=1;return (HANDLE)&k32_modules[i];}k32_last_error=8;return 0; }
 __attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){if(k32_modules[i].refs>0)k32_modules[i].refs--;if(!k32_modules[i].refs)k32_modules[i].used=0;k32_last_error=0;return 1;}k32_last_error=126;return 0; }
-__attribute__((dllexport)) BOOL VirtualFree(LPVOID address,u64 size,DWORD type) { (void)address;(void)size;(void)type;k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL VirtualFree(LPVOID address,u64 size,DWORD type) {
+    if(!address||((unsigned long long)address&0xFFFULL)){k32_last_error=87;return 0;}
+    if(type!=0x8000u){k32_last_error=50;return 0;}
+    if(size!=0){k32_last_error=87;return 0;}
+    if(!sy3(SYS_FreeVirtualMemory,(u64)address,0,type)){k32_last_error=87;return 0;}
+    k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) BOOL VirtualProtect(LPVOID address, u64 size, DWORD protect, DWORD *old) {
     (void)address; (void)size; (void)protect; if (old) *old=0; return 0;
 }

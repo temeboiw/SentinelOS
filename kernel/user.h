@@ -38,6 +38,7 @@
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
+#define SYS_NtProtectVirtualMemory     28
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -50,6 +51,20 @@ static void user_vm_forget_process(KPROCESS *proc) {
     for(int i=0;i<USER_VM_ALLOCATION_MAX;i++)if(user_vm_allocations[i].used&&user_vm_allocations[i].process==proc) {
         user_vm_allocations[i].used=0;user_vm_allocations[i].process=0;user_vm_allocations[i].base=0;user_vm_allocations[i].size=0;
     }
+}
+static int user_vm_set_page_writable(KPROCESS *proc,uint64_t va,int writable) {
+    if(!proc||va<0x10000ULL||va>=0x0000800000000000ULL||(va&0xFFFULL))return 0;
+    uint64_t *root=PHYS_TO_VIRT(proc->DirectoryTableBase&PTE_ADDR);
+    uint64_t e4=root[(va>>39)&511];if(!(e4&PTE_P)||!(e4&PTE_U))return 0;
+    uint64_t *pdpt=PHYS_TO_VIRT(e4&PTE_ADDR);uint64_t e3=pdpt[(va>>30)&511];
+    if(!(e3&PTE_P)||!(e3&PTE_U)||(e3&PTE_PS))return 0;
+    uint64_t *pd=PHYS_TO_VIRT(e3&PTE_ADDR);uint64_t e2=pd[(va>>21)&511];
+    if(!(e2&PTE_P)||!(e2&PTE_U)||(e2&PTE_PS))return 0;
+    uint64_t *pt=PHYS_TO_VIRT(e2&PTE_ADDR);unsigned int idx=(unsigned int)((va>>12)&511);uint64_t e=pt[idx];
+    if(!(e&PTE_P)||!(e&PTE_U)||!(e&PTE_OWNED))return 0;
+    pt[idx]=writable?(e|PTE_RW):(e&~PTE_RW);
+    if(MmCurrentProcess==proc)__asm__ volatile("invlpg (%0)"::"r"(va):"memory");
+    return 1;
 }
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
@@ -1514,6 +1529,37 @@ static Frame *syscall_handler(Frame *f) {
         if(ok){a->used=0;a->process=0;a->base=0;a->size=0;}
         MmSwitchToProcess(caller);
         f->rax=ok?1:0;return f;
+    }
+
+    case SYS_NtProtectVirtualMemory: {
+        KPROCESS *caller=MmCurrentProcess;
+        uint64_t address=f->rdi,length=f->rsi,protect=f->rdx;
+        if(!caller||caller==PspSystemProcess||!length||address>UINT64_MAX-length||
+           (protect!=0x02ULL&&protect!=0x04ULL&&protect!=0x20ULL&&protect!=0x40ULL)) {f->rax=0;return f;}
+        uint64_t start=address&~0xFFFULL,end=address+length;
+        if(end>UINT64_MAX-0xFFFULL){f->rax=0;return f;}
+        end=(end+0xFFFULL)&~0xFFFULL;
+        if(end<=start){f->rax=0;return f;}
+        UserVmAllocation *allocation=0;
+        for(int i=0;i<USER_VM_ALLOCATION_MAX;i++) {
+            UserVmAllocation *a=&user_vm_allocations[i];
+            if(a->used&&a->process==caller&&start>=a->base&&end<=a->base+a->size){allocation=a;break;}
+        }
+        if(!allocation){f->rax=0;return f;}
+        uint64_t first=MmLookupUserPte(caller,start,0);
+        if(!(first&PTE_P)||!(first&PTE_U)||!(first&PTE_OWNED)){f->rax=0;return f;}
+        uint64_t old_protect=(first&PTE_RW)?0x04ULL:0x02ULL;
+        for(uint64_t page=start;page<end;page+=USER_IMAGE_PAGE) {
+            uint64_t pte=MmLookupUserPte(caller,page,0);
+            if(!(pte&PTE_P)||!(pte&PTE_U)||!(pte&PTE_OWNED)){f->rax=0;return f;}
+        }
+        int writable=(protect==0x04ULL||protect==0x40ULL);
+        MmSwitchToProcess(PspSystemProcess);
+        int ok=1;
+        for(uint64_t page=start;page<end;page+=USER_IMAGE_PAGE)
+            if(!user_vm_set_page_writable(caller,page,writable)){ok=0;break;}
+        MmSwitchToProcess(caller);
+        f->rax=ok?old_protect:0;return f;
     }
 
     case SYS_NtQueryDirectoryFile: {

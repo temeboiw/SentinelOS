@@ -1013,6 +1013,7 @@ __attribute__((dllexport)) unsigned short RegisterClassA(const U32_WNDCLASSA *wc
     U32_CLASSREG *c=&u32_classes[slot];c->used=1;c->atom=(unsigned short)(0xC000+slot);c->wc=*wc;
     unsigned int n=0;while(wc->class_name[n]&&n+1<sizeof(c->name)){c->name[n]=wc->class_name[n];n++;}c->name[n]=0;c->wc.class_name=c->name;
     if(wc->menu_name){n=0;while(wc->menu_name[n]&&n+1<sizeof(c->menu)){c->menu[n]=wc->menu_name[n];n++;}c->menu[n]=0;c->wc.menu_name=c->menu;}else c->wc.menu_name=0;
+    u32_class_style=(long)wc->style;u32_class_proc=wc->proc;u32_class_extra[0]=wc->cls_extra;u32_class_extra[1]=wc->wnd_extra;
     return c->atom;
 }
 __attribute__((dllexport)) BOOL UnregisterClassA(LPCSTR name, void *instance) {
@@ -1843,7 +1844,9 @@ __attribute__((dllexport)) int TranslateAcceleratorW(void *hwnd,void *table,MSG 
 
 __attribute__((dllexport)) BOOL GetClassInfoA(void *instance,const char *name,void *info){(void)instance;if(!name||!info)return 0;U32_CLASSREG *c=u32_class_find(name);if(!c)return 0;*(U32_WNDCLASSA*)info=c->wc;return 1;}
 
-__attribute__((dllexport)) BOOL GetClassInfoW(void *instance,const unsigned short *name,void *info){(void)instance;if(!name||!info)return 0;char narrow[96];u32_wide_to_ansi(narrow,sizeof(narrow),name);U32_CLASSREG *c=u32_class_find(narrow);if(!c)return 0;U32_WNDCLASSW *w=(U32_WNDCLASSW*)info;w->style=c->wc.style;w->proc=c->wc.proc;w->cls_extra=c->wc.cls_extra;w->wnd_extra=c->wc.wnd_extra;w->instance=c->wc.instance;w->icon=c->wc.icon;w->cursor=c->wc.cursor;w->background=c->wc.background;w->menu_name=0;w->class_name=0;return 1;}
+static U32_WCHAR u32_class_name_w[96],u32_class_menu_w[96];
+static void u32_class_copy_wide(U32_WCHAR *out,unsigned int cap,const char *in){unsigned int i=0;if(!out||!cap)return;while(in&&in[i]&&i+1<cap){out[i]=(unsigned char)in[i];i++;}out[i]=0;}
+__attribute__((dllexport)) BOOL GetClassInfoW(void *instance,const unsigned short *name,void *info){(void)instance;if(!name||!info)return 0;char narrow[96];u32_wide_to_ansi(narrow,sizeof(narrow),name);U32_CLASSREG *c=u32_class_find(narrow);if(!c)return 0;U32_WNDCLASSW *w=(U32_WNDCLASSW*)info;w->style=c->wc.style;w->proc=c->wc.proc;w->cls_extra=c->wc.cls_extra;w->wnd_extra=c->wc.wnd_extra;w->instance=c->wc.instance;w->icon=c->wc.icon;w->cursor=c->wc.cursor;w->background=c->wc.background;u32_class_copy_wide(u32_class_name_w,96,c->name);u32_class_copy_wide(u32_class_menu_w,96,c->menu);w->menu_name=c->wc.menu_name?u32_class_menu_w:0;w->class_name=u32_class_name_w;return 1;}
 
 __attribute__((dllexport)) BOOL GetClassInfoExA(void *instance,const char *name,void *info){return GetClassInfoA(instance,name,info);}
 

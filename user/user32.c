@@ -208,12 +208,12 @@ static void cursor_save_draw(int x, int y) {
                 "BWWWWWWWB.......",
                 "BWWWWWWWWB......",
                 "BWWWWBBBBBB.....",
-                "BWWB..B.........",
-                "BWB.BWB.........",
-                "BB...BWB........",
-                "B.....BWB.......",
-                "......BWB.......",
-                ".......BB......."
+                "BWWB..BSS.......",
+                "BWB.BWBSS.......",
+                "BB...BWBSS......",
+                "B.....BWBSS.....",
+                "......BWBSS.....",
+                ".......BBSS....."
             };
             char pix = arrow[j][i];
             if (pix == 'B') g_front[yy * g_pitch + xx] = 0xFF101820;

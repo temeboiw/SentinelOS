@@ -78,7 +78,7 @@ __attribute__((dllexport)) BOOL SetCurrentDirectoryA(LPCSTR path) {
 __attribute__((dllexport)) DWORD GetLastError(void) { return k32_last_error; }
 __attribute__((dllexport)) void SetLastError(DWORD e) { k32_last_error=e; }
 __attribute__((dllexport)) u64 GetTickCount64(void) { u64 t=sy3(SYS_GetTickCount,0,0,0);return t==(u64)-1?0:t; }
-__attribute__((dllexport)) void Sleep(DWORD ms) { if(!ms){sy3(21,0,0,0);return;}u64 start=GetTickCount64();while(GetTickCount64()-start<ms)sy3(21,0,0,0); }
+__attribute__((dllexport)) void Sleep(DWORD ms) { if(!ms){sy3(21,0,0,0);return;}u64 start=sy3(SYS_GetTickCount,0,0,0);if(start==(u64)-1){sy3(21,0,0,0);return;}for(;;){u64 now=sy3(SYS_GetTickCount,0,0,0);if(now==(u64)-1||now-start>=ms)break;sy3(21,0,0,0);} }
 __attribute__((dllexport)) BOOL PeekInput(void *out) {
     return (BOOL)sy3(SYS_GetInput, (u64)out, 0, 0);
 }

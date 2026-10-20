@@ -163,23 +163,42 @@ __attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
 }
 __attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path, void *security) {
-    (void)path; (void)security; return 0;
+    (void)security;
+    if(!path||!*path){k32_last_error=87;return 0;}
+    k32_last_error=50; return 0;
 }
-__attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) { (void)path; return 0; }
-__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path; return 0; }
-__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { (void)from; (void)to; return 0; }
+__attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) { if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
+__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
+__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { if(!from||!*from||!to||!*to){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
-    (void)from; (void)to; (void)fail_if_exists; return 0;
+    (void)fail_if_exists;
+    if(!from||!*from||!to||!*to){k32_last_error=87;return 0;}
+    k32_last_error=50; return 0;
 }
-__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
-__attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (void)path; (void)attrs; return 0; }
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) {
+    if(!path||!*path){k32_last_error=87;return 0xFFFFFFFFu;}
+    const char *p=path;
+    if((p[0]=='C'||p[0]=='c')&&p[1]==':')p+=2;
+    while(*p=='\\'||*p=='/')p++;
+    if(!*p){k32_last_error=0;return 0x10u;}
+    for(const char *q=p;*q;q++)if(*q=='\\'||*q=='/'){k32_last_error=3;return 0xFFFFFFFFu;}
+    char entry[256];
+    for(DWORD i=0;i<256;i++){
+        DWORD type=QueryDirectoryA(i,entry,sizeof(entry));
+        if(!type)break;
+        if(k32_eqi(entry,p)){k32_last_error=0;return type==2?0x10u:0x80u;}
+    }
+    k32_last_error=2;
+    return 0xFFFFFFFFu;
+}
+__attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (void)attrs; if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
     (void)file; if (high) *high=0; return 0xFFFFFFFFu;
 }
 __attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG *high, DWORD method) {
     (void)file; (void)distance; (void)method; if (high) *high=0; return 0xFFFFFFFFu;
 }
-__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { (void)file; return 0; }
+__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {
     const char *s="C:\\TEMP\\"; DWORD i=0; if (!out || !cap) return 0;
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i+1;

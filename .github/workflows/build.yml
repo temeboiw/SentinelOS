@@ -20,6 +20,10 @@ jobs:
           mkdir -p build
           clang -std=c11 -Wall -Wextra tests/mszip_test.c -o build/mszip_test
           ./build/mszip_test
+      - name: Test ext4 allocation metadata
+        run: |
+          clang -std=c11 -Wall -Wextra tests/ext4_alloc_test.c -o build/ext4_alloc_test
+          ./build/ext4_alloc_test
       - name: Fetch EDK2 headers
         run: |
           git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"

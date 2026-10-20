@@ -77,7 +77,8 @@ for src in \
   user/user32.c \
   user/explorer.c \
   user/fileexplorer.c \
-  user/cmd.c
+  user/cmd.c \
+  user/msiexec.c
 do
   if [[ ! -f "$ROOT/$src" ]]; then
     echo "FATAL: required source file missing: $src"
@@ -1408,6 +1409,18 @@ lld -flavor link \
   "/out:$SYS32/cmd.exe" \
   "$B/obj/cmd.o"
 
+echo "  -> msiexec.exe"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/msiexec.c" \
+  -o "$B/obj/msiexec.o"
+
+lld -flavor link \
+  /subsystem:native /entry:mainCRTStartup /nodefaultlib \
+  /fixed:no /base:0x40400000 \
+  "/out:$SYS32/msiexec.exe" \
+  "$B/obj/msiexec.o"
+
 echo "==> Checking required images"
 
 for image in \
@@ -1436,7 +1449,8 @@ ls -lh \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
   "$SYS32/user32.dll" \
-  "$SYS32/cmd.exe"
+  "$SYS32/cmd.exe" \
+  "$SYS32/msiexec.exe"
 
 echo "==> GPT disk image (FAT32 ESP + ext4)"
 

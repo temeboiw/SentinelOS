@@ -13,7 +13,7 @@ typedef unsigned char u8;
 
 enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
-#define MAX_BUFFER 0x70000000u /* 1.75 GiB from 0x50000000 to 0xC0000000 */
+#define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
 #define MAX_DIR (256u * 1024u)
 #define MAX_MINIFAT 262144u
@@ -712,9 +712,10 @@ void mainCRTStartup(void) {
         for (;;) __asm__ volatile("pause");
     }
     /*
-     * Grow the contiguous user buffer in 16 MiB chunks: the kernel allocator
-     * rejects any single allocation larger than 16 MiB. Read in 8 MiB requests
-     * to reduce syscall overhead while respecting that allocator limit.
+     * Grow the total MSI buffer as needed. 16 MiB is only the maximum size
+     * of each individual kernel allocation, not a limit on the whole package.
+     * Keep allocating adjacent chunks until EOF or the allocator runs out of
+     * virtual/physical memory. The parser currently uses 32-bit file offsets.
      */
     const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=8u*1024u*1024u;
@@ -725,7 +726,7 @@ void mainCRTStartup(void) {
     for (;;) {
         if (total==capacity) {
             if (capacity>=MAX_BUFFER) {
-                out("msiexec: package exceeds the available contiguous user buffer\n");
+                out("msiexec: MSI exceeds the 32-bit parser size limit\n");
                 read_error=1;
                 break;
             }

@@ -458,7 +458,7 @@ static void inspect_msi(void) {
     out("Container version: "); out_u32(major); out("\n");
     out("Streams/storage entries:\n");
     u32 count=0;
-    for (u32 off=0;off+128<=dir_bytes;off+=128) {
+    for (u32 off=0;off+128<=directory_bytes;off+=128) {
         const u8 *e=dir+off;
         u8 type=e[66];
         if (type!=2 && type!=5) continue;

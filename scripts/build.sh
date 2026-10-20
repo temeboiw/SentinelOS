@@ -114,14 +114,17 @@ mkdir -p \
   "$B/rootfs/Users/Public" \
   "$B/rootfs/Windows/System32"
 
-# Lato is a friendly humanist sans that suits the Vista/Frutiger Aero era.
-# Prefer a vendored copy, otherwise use a standard Linux font package when
-# present. USER32 keeps its readable bitmap fallback if no TTF is available.
+# Lato is the preferred humanist sans for the Vista/Frutiger Aero era.
+# If it is not installed, use a neutral sans-serif TrueType substitute.
+# A vendored assets/fonts/Lato-Regular.ttf always takes priority.
 FONT_SRC="$ROOT/assets/fonts/Lato-Regular.ttf"
 if [[ ! -s "$FONT_SRC" ]]; then
   for candidate in \
     /usr/share/fonts/truetype/lato/Lato-Regular.ttf \
-    /usr/share/fonts/truetype/Lato-Regular.ttf
+    /usr/share/fonts/truetype/Lato-Regular.ttf \
+    /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+    /usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf \
+    /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
   do
     if [[ -s "$candidate" ]]; then FONT_SRC="$candidate"; break; fi
   done

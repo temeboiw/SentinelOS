@@ -2377,7 +2377,7 @@ __attribute__((dllexport)) BOOL SetWindowRedraw(void *hwnd,BOOL redraw){if(!IsWi
 
 __attribute__((dllexport)) BOOL GetWindowRedraw(void *hwnd){return IsWindow(hwnd);}
 
-__attribute__((dllexport)) DWORD GetWindowArrange(void){return 0;}
+__attribute__((dllexport)) DWORD GetWindowArrange(void){return g_wnd.minimized?2u:(g_wnd.visible?1u:0u);}
 
 __attribute__((dllexport)) unsigned int ArrangeIconicWindows(void *hwnd){return IsWindow(hwnd)?0:0;}
 

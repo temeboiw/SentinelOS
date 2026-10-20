@@ -783,10 +783,147 @@ static uint32_t vfs_resolve_user_path(const char *path) {
     return dir;
 }
 
+static int e4_insert_regular_dirent(uint32_t dir_ino, const char *name, uint32_t ino) {
+    if (!e4_can_mutate(&g_ext4) || !name || !name[0]) return -1;
+    uint32_t nl = 0;
+    while (name[nl] && nl < 256) nl++;
+    if (!nl || nl > 255 || e4_lookup_ci(&g_ext4, dir_ino, name)) return -1;
+    uint8_t dinode[256];
+    if (e4_inode(&g_ext4, dir_ino, dinode) < 0 ||
+        (E16(dinode, 0) & 0xF000) != 0x4000) return -1;
+    uint64_t dsize = e4_size(dinode);
+    static uint8_t block[4096];
+    for (uint64_t pos = 0; pos < dsize; pos += g_ext4.blksz) {
+        uint64_t pb = e4_map(&g_ext4, dinode, (uint32_t)(pos / g_ext4.blksz));
+        if (!pb || e4_read(&g_ext4, pb * g_ext4.blksz, block, g_ext4.blksz) < 0) continue;
+        for (uint32_t o = 0; o + 8 <= g_ext4.blksz; ) {
+            uint32_t entry_ino = E32(block, o);
+            uint16_t rec = E16(block, o + 4);
+            uint8_t oldnl = block[o + 6];
+            if (rec < 8 || (rec & 3) || o + rec > g_ext4.blksz ||
+                oldnl > rec - 8) break;
+            uint32_t need = (8u + nl + 3u) & ~3u;
+            uint32_t slot = 0, at = o;
+            if (!entry_ino && rec >= need) {
+                slot = rec;
+            } else {
+                uint32_t used = (8u + oldnl + 3u) & ~3u;
+                if (entry_ino && rec >= used && rec - used >= need) {
+                    E16(block, o + 4) = (uint16_t)used;
+                    at = o + used;
+                    slot = rec - used;
+                }
+            }
+            if (slot) {
+                for (uint32_t j = 0; j < slot; ++j) block[at + j] = 0;
+                E32(block, at) = ino;
+                E16(block, at + 4) = (uint16_t)slot;
+                block[at + 6] = (uint8_t)nl;
+                block[at + 7] = 1; /* EXT4_FT_REG_FILE */
+                for (uint32_t j = 0; j < nl; ++j) block[at + 8 + j] = (uint8_t)name[j];
+                if (e4_write(&g_ext4, pb * g_ext4.blksz, block, g_ext4.blksz) < 0)
+                    return -1;
+                return 0;
+            }
+            o += rec;
+        }
+    }
+    return -1; /* no slack in existing directory blocks; no directory growth yet */
+}
+
+static uint32_t vfs_create_empty_regular(const char *path) {
+    if (!g_ext4_ok || !e4_can_mutate(&g_ext4) || !path || !path[0]) return 0;
+    char full[256];
+    uint32_t len = 0;
+    while (path[len] && len + 1 < sizeof full) { full[len] = path[len]; len++; }
+    if (path[len]) return 0;
+    while (len > 1 && (full[len - 1] == '/' || full[len - 1] == '\\')) len--;
+    full[len] = 0;
+    int last_sep = -1;
+    for (uint32_t i = 0; i < len; ++i)
+        if (full[i] == '/' || full[i] == '\\') last_sep = (int)i;
+    char base[256], parent[256];
+    uint32_t bn = 0, pn = 0;
+    uint32_t start = (uint32_t)(last_sep + 1);
+    if (start >= len) return 0;
+    bn = len - start;
+    if (!bn || bn > 255) return 0;
+    for (uint32_t i = 0; i < bn; ++i) base[i] = full[start + i];
+    base[bn] = 0;
+    if ((bn == 1 && base[0] == '.') ||
+        (bn == 2 && base[0] == '.' && base[1] == '.')) return 0;
+    uint32_t parent_ino = vfs_cwd_ino ? vfs_cwd_ino : 2;
+    if (last_sep >= 0) {
+        /* Keep a drive prefix such as C: intact for the path resolver. */
+        pn = (uint32_t)last_sep;
+        if (pn == 0) { parent[0] = '/'; parent[1] = 0; }
+        else {
+            for (uint32_t i = 0; i < pn; ++i) parent[i] = full[i];
+            parent[pn] = 0;
+            if (pn == 2 && full[1] == ':') parent[pn] = 0;
+        }
+        parent_ino = vfs_resolve_user_path(parent);
+        if (!parent_ino) return 0;
+    }
+    uint8_t pino[256];
+    if (e4_inode(&g_ext4, parent_ino, pino) < 0 ||
+        (E16(pino, 0) & 0xF000) != 0x4000 ||
+        e4_lookup_ci(&g_ext4, parent_ino, base)) return 0;
+
+    /* Preflight directory slack before changing allocation metadata. */
+    int has_space = 0;
+    uint64_t dsize = e4_size(pino);
+    static uint8_t dbuf[4096];
+    uint32_t need = (8u + bn + 3u) & ~3u;
+    for (uint64_t pos = 0; pos < dsize && !has_space; pos += g_ext4.blksz) {
+        uint64_t pb = e4_map(&g_ext4, pino, (uint32_t)(pos / g_ext4.blksz));
+        if (!pb || e4_read(&g_ext4, pb * g_ext4.blksz, dbuf, g_ext4.blksz) < 0) continue;
+        for (uint32_t o = 0; o + 8 <= g_ext4.blksz; ) {
+            uint16_t rec = E16(dbuf, o + 4);
+            uint32_t eino = E32(dbuf, o);
+            uint8_t en = dbuf[o + 6];
+            if (rec < 8 || (rec & 3) || o + rec > g_ext4.blksz || en > rec - 8) break;
+            if ((!eino && rec >= need) ||
+                (eino && rec - ((8u + en + 3u) & ~3u) >= need)) {
+                has_space = 1; break;
+            }
+            o += rec;
+        }
+    }
+    if (!has_space) return 0;
+
+    uint32_t ino = e4_alloc_inode(&g_ext4, 0);
+    if (!ino) return 0;
+    uint8_t fresh[256];
+    for (uint32_t i = 0; i < g_ext4.isize; ++i) fresh[i] = 0;
+    E16(fresh, 0) = 0x81A4; /* regular file, mode 0644 */
+    E16(fresh, 26) = 1;     /* link count */
+    E32(fresh, 32) = 0x00080000; /* EXT4_EXTENTS_FL */
+    E16(fresh, 40) = 0xF30A; /* empty extent tree */
+    E16(fresh, 42) = 0;
+    E16(fresh, 44) = (uint16_t)((60 - 12) / 12);
+    E16(fresh, 46) = 0;
+    if (g_ext4.isize >= 132) E16(fresh, 128) = (uint16_t)(g_ext4.isize - 128);
+    if (e4_write_inode(&g_ext4, ino, fresh) < 0) return 0;
+    if (e4_insert_regular_dirent(parent_ino, base, ino) < 0) {
+        /* Do not clear the inode bit after a possibly partial directory write:
+           leaking an unreachable inode is safer than freeing a referenced one. */
+        return 0;
+    }
+    return ino;
+}
+
 static int vfs_open_user_file(const char *name, uint64_t access, uint64_t disposition) {
-    /* Only OPEN_EXISTING is supported until ext4 create/truncate exists. */
-    if (!g_ext4_ok || !name || !name[0] || disposition != 3) return -1;
+    if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = vfs_resolve_user_path(name);
+    if (!ino && (disposition == 1 || disposition == 4)) {
+        if (!(access & 0x40000000u)) return -1;
+        ino = vfs_create_empty_regular(name);
+    } else if (ino && disposition == 1) {
+        return -1; /* CREATE_NEW must not overwrite an existing path */
+    } else if (disposition != 3 && disposition != 4) {
+        return -1; /* no truncate/replace semantics until implemented */
+    }
     if (!ino) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, ino, inode) < 0 ||

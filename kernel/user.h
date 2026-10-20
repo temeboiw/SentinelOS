@@ -1871,6 +1871,19 @@ static Frame *syscall_handler(Frame *f) {
 /* ------------------------------------------------------------ user entry */
 
 static void user_enter(BootInfo *bi) {
+    /* Keep mouse coordinates in the same pixel space as the framebuffer.
+       Hard-coded 1280x800 input coordinates made every hit target drift on
+       other video modes (for example clicking Windows opened Users). */
+    if (bi && bi->width && bi->height) {
+        mouse_screen_w = (int)bi->width;
+        mouse_screen_h = (int)bi->height;
+        mouse_x = (int)bi->width / 2;
+        mouse_y = (int)bi->height / 2;
+        vi_screen_w = (int)bi->width;
+        vi_screen_h = (int)bi->height;
+        vi_x = (int)bi->width / 2;
+        vi_y = (int)bi->height / 2;
+    }
     ps2_init();
     ata_init();
     virtio_blk_init();

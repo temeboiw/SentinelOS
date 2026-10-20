@@ -962,14 +962,102 @@ __attribute__((dllexport)) void *GetFocus(void) { return u32_focus; }
 
 
 /* Compatibility export placeholders: signatures and semantics still need implementation. */
-__attribute__((dllexport)) unsigned long long MessageBoxW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long CreateWindowExW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long RegisterClassW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long DefWindowProcW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SendMessageW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long PostMessageW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long PeekMessageW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetMessageW(void) { return 0; }
+typedef const U32_WCHAR *U32_LPCWSTR;
+typedef U32_WCHAR *U32_LPWSTR;
+typedef unsigned long long U32_WPARAM64;
+typedef long long U32_LPARAM64;
+typedef BOOL (*U32_ENUMWINDOWSPROC)(void *, long long);
+typedef struct {
+    unsigned int style;
+    void *proc;
+    int cls_extra, wnd_extra;
+    void *instance, icon, cursor, background;
+    U32_LPCWSTR menu_name, class_name;
+} U32_WNDCLASSW;
+
+static void u32_wide_to_ansi(char *out, unsigned int cap, U32_LPCWSTR in) {
+    unsigned int i=0;
+    if (!out || !cap) return;
+    if (in) {
+        while (in[i] && i+1<cap) {
+            unsigned int c=in[i];
+            out[i]=(c < 128) ? (char)c : '?';
+            i++;
+        }
+    }
+    out[i]=0;
+}
+static int u32_ansi_to_wide(U32_LPWSTR out, int cap, const char *in) {
+    int i=0;
+    if (!out || cap<=0) return 0;
+    if (in) while (in[i] && i+1<cap) { out[i]=(unsigned char)in[i]; i++; }
+    out[i]=0;
+    return i;
+}
+static int u32_wide_equal_ansi(U32_LPCWSTR wide, const char *ansi) {
+    unsigned int i=0;
+    if (!wide || !ansi) return wide==0 && ansi==0;
+    while (wide[i] && ansi[i]) {
+        unsigned int c=wide[i];
+        if (c>=128 || (char)c!=ansi[i]) return 0;
+        i++;
+    }
+    return wide[i]==0 && ansi[i]==0;
+}
+
+__attribute__((dllexport)) int MessageBoxW(void *hwnd, U32_LPCWSTR text, U32_LPCWSTR caption, u32 type) {
+    char atext[512], acaption[128];
+    u32_wide_to_ansi(atext, sizeof(atext), text);
+    u32_wide_to_ansi(acaption, sizeof(acaption), caption);
+    return MessageBoxA(hwnd, atext, acaption, type);
+}
+__attribute__((dllexport)) void *CreateWindowExW(
+    u32 ex, U32_LPCWSTR cls, U32_LPCWSTR title, u32 style,
+    int x, int y, int w, int h,
+    void *parent, void *menu, void *inst, void *param)
+{
+    char class_a[128], title_a[64];
+    u32_wide_to_ansi(class_a, sizeof(class_a), cls);
+    u32_wide_to_ansi(title_a, sizeof(title_a), title);
+    return CreateWindowExA(ex, cls ? class_a : 0, title ? title_a : 0, style,
+                           x,y,w,h,parent,menu,inst,param);
+}
+__attribute__((dllexport)) unsigned short RegisterClassW(const U32_WNDCLASSW *wc) {
+    U32_WNDCLASSA a;
+    char class_a[128], menu_a[128];
+    if (!wc) return 0;
+    u32_wide_to_ansi(class_a, sizeof(class_a), wc->class_name);
+    u32_wide_to_ansi(menu_a, sizeof(menu_a), wc->menu_name);
+    a.style=wc->style; a.proc=wc->proc; a.cls_extra=wc->cls_extra;
+    a.wnd_extra=wc->wnd_extra; a.instance=wc->instance; a.icon=wc->icon;
+    a.cursor=wc->cursor; a.background=wc->background;
+    a.menu_name=wc->menu_name ? menu_a : 0;
+    a.class_name=wc->class_name ? class_a : 0;
+    return RegisterClassA(&a);
+}
+__attribute__((dllexport)) U32_LRESULT DefWindowProcW(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
+    return DefWindowProcA(hwnd,msg,wp,lp);
+}
+__attribute__((dllexport)) U32_LRESULT SendMessageW(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
+    if (msg==0x000Cu) {
+        char title[64]; u32_wide_to_ansi(title,sizeof(title),(U32_LPCWSTR)lp);
+        return SetWindowTextA(hwnd,title);
+    }
+    if (msg==0x000Du) {
+        char title[256]; int n=GetWindowTextA(hwnd,title,sizeof(title));
+        return u32_ansi_to_wide((U32_LPWSTR)lp,(int)wp,title) < n ? (U32_LRESULT)wp-1 : n;
+    }
+    return SendMessageA(hwnd,msg,wp,lp);
+}
+__attribute__((dllexport)) BOOL PostMessageW(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
+    return PostMessageA(hwnd,msg,wp,lp);
+}
+__attribute__((dllexport)) BOOL PeekMessageW(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max, U32_UINT remove) {
+    return PeekMessageA(msg,hwnd,min,max,remove);
+}
+__attribute__((dllexport)) BOOL GetMessageW(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max) {
+    return GetMessageA(msg,hwnd,min,max);
+}
 __attribute__((dllexport)) unsigned long long CreateDialogParamA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long CreateDialogParamW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long DialogBoxParamA(void) { return 0; }
@@ -977,24 +1065,88 @@ __attribute__((dllexport)) unsigned long long DialogBoxParamW(void) { return 0; 
 __attribute__((dllexport)) unsigned long long EndDialog(void) { return 0; }
 __attribute__((dllexport)) unsigned long long IsDialogMessageA(void) { return 0; }
 __attribute__((dllexport)) unsigned long long IsDialogMessageW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowTextW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long SetWindowTextW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetClassNameW(void) { return 0; }
+__attribute__((dllexport)) int GetWindowTextW(void *hwnd, U32_LPWSTR out, int cap) {
+    char text[256];
+    int n=GetWindowTextA(hwnd,text,sizeof(text));
+    if (!out || cap<=0) return 0;
+    return u32_ansi_to_wide(out,cap,text) < n ? cap-1 : n;
+}
+__attribute__((dllexport)) BOOL SetWindowTextW(void *hwnd, U32_LPCWSTR title) {
+    char text[64];
+    if (!title) return SetWindowTextA(hwnd,0);
+    u32_wide_to_ansi(text,sizeof(text),title);
+    return SetWindowTextA(hwnd,text);
+}
+__attribute__((dllexport)) int GetClassNameW(void *hwnd, U32_LPWSTR out, int cap) {
+    char name[128];
+    int n=GetClassNameA(hwnd,name,sizeof(name));
+    if (!out || cap<=0) return 0;
+    return u32_ansi_to_wide(out,cap,name) < n ? cap-1 : n;
+}
 __attribute__((dllexport)) unsigned long long LoadCursorW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long LoadIconW(void) { return 0; }
 __attribute__((dllexport)) unsigned long long LoadImageW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long FindWindowA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long FindWindowW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long FindWindowExA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long FindWindowExW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetParent(void) { return 0; }
+__attribute__((dllexport)) void *FindWindowA(LPCSTR class_name, LPCSTR title) {
+    if (!g_wnd.visible) return 0;
+    if (title) {
+        int i=0;
+        while (title[i] && g_wnd.title[i] && title[i]==g_wnd.title[i]) i++;
+        if (title[i] || g_wnd.title[i]) return 0;
+    }
+    if (class_name) {
+        const char *actual="SentinelWindow"; int i=0;
+        while (class_name[i] && actual[i] && class_name[i]==actual[i]) i++;
+        if (class_name[i] || actual[i]) return 0;
+    }
+    return (void *)1;
+}
+__attribute__((dllexport)) void *FindWindowW(U32_LPCWSTR class_name, U32_LPCWSTR title) {
+    if (!g_wnd.visible) return 0;
+    if (title && !u32_wide_equal_ansi(title,g_wnd.title)) return 0;
+    if (class_name && !u32_wide_equal_ansi(class_name,"SentinelWindow")) return 0;
+    return (void *)1;
+}
+__attribute__((dllexport)) void *FindWindowExA(void *parent, void *after, LPCSTR class_name, LPCSTR title) {
+    if (parent && parent!=(void *)2) return 0;
+    if (after) return 0;
+    return FindWindowA(class_name,title);
+}
+__attribute__((dllexport)) void *FindWindowExW(void *parent, void *after, U32_LPCWSTR class_name, U32_LPCWSTR title) {
+    if (parent && parent!=(void *)2) return 0;
+    if (after) return 0;
+    return FindWindowW(class_name,title);
+}
+__attribute__((dllexport)) void *GetParent(void *hwnd) {
+    if (hwnd==(void *)1 && g_wnd.visible) return (void *)2;
+    return 0;
+}
 __attribute__((dllexport)) unsigned long long SetParent(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetWindow(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowThreadProcessId(void) { return 0; }
-__attribute__((dllexport)) unsigned long long GetAncestor(void) { return 0; }
-__attribute__((dllexport)) unsigned long long EnumWindows(void) { return 0; }
-__attribute__((dllexport)) unsigned long long EnumChildWindows(void) { return 0; }
-__attribute__((dllexport)) unsigned long long EnumThreadWindows(void) { return 0; }
+__attribute__((dllexport)) DWORD GetWindowThreadProcessId(void *hwnd, DWORD *process_id) {
+    if (!IsWindow(hwnd)) { if (process_id) *process_id=0; return 0; }
+    if (process_id) *process_id=(DWORD)sy3(2,0,0,0);
+    return 1;
+}
+__attribute__((dllexport)) void *GetAncestor(void *hwnd, unsigned int flags) {
+    if (hwnd!=(void *)1 || !g_wnd.visible) return 0;
+    if (flags==1 || flags==2 || flags==3) return (void *)2;
+    return 0;
+}
+__attribute__((dllexport)) BOOL EnumWindows(U32_ENUMWINDOWSPROC callback, long long param) {
+    if (!callback) return 0;
+    if (IsWindowVisible((void *)1)) return callback((void *)1,param);
+    return 1;
+}
+__attribute__((dllexport)) BOOL EnumChildWindows(void *parent, U32_ENUMWINDOWSPROC callback, long long param) {
+    if (!callback) return 0;
+    (void)parent; (void)param;
+    return 1;
+}
+__attribute__((dllexport)) BOOL EnumThreadWindows(DWORD thread_id, U32_ENUMWINDOWSPROC callback, long long param) {
+    if (!callback) return 0;
+    if (thread_id==1 && IsWindowVisible((void *)1)) return callback((void *)1,param);
+    return 1;
+}
 __attribute__((dllexport)) unsigned long long GetTopWindow(void) { return 0; }
 __attribute__((dllexport)) unsigned long long BringWindowToTop(void) { return 0; }
 __attribute__((dllexport)) unsigned long long SetWindowPlacement(void) { return 0; }

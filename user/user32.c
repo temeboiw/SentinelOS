@@ -94,7 +94,9 @@ typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
 static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
-static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
+static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static DWORD u32_display_affinity,u32_layered_color,u32_layered_flags; static unsigned char u32_layered_alpha; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
+typedef struct { void *hwnd; int setting; DWORD flags,size; unsigned char data[64]; int used; } U32_FEEDBACK_SETTING;
+static U32_FEEDBACK_SETTING u32_feedback_settings[16];
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
 static U32_DLGCTRL u32_dlgctrl[32];
 static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;c->text[0]=0;return c;}return 0;}
@@ -1625,8 +1627,8 @@ __attribute__((dllexport)) int GetWindowRgnBox(void *hwnd,U32_RECT *rect){
     if(rect->right<=rect->left||rect->bottom<=rect->top)return 1;
     return 2;
 }
-__attribute__((dllexport)) BOOL GetWindowDisplayAffinity(void *hwnd,unsigned int *affinity){if(!IsWindow(hwnd)||!affinity)return 0;*affinity=u32_window_affinity;return 1;}
-__attribute__((dllexport)) BOOL SetWindowDisplayAffinity(void *hwnd,unsigned int affinity){if(!IsWindow(hwnd)||(affinity!=0&&affinity!=1&&affinity!=0x11u))return 0;u32_window_affinity=affinity;return 1;}
+__attribute__((dllexport)) BOOL GetWindowDisplayAffinity(void *hwnd,unsigned int *affinity){if(!IsWindow(hwnd)||!affinity)return 0;*affinity=u32_display_affinity;return 1;}
+__attribute__((dllexport)) BOOL SetWindowDisplayAffinity(void *hwnd,unsigned int affinity){if(!IsWindow(hwnd)||(affinity!=0&&affinity!=1&&affinity!=0x11u))return 0;u32_display_affinity=affinity;return 1;}
 __attribute__((dllexport)) BOOL IsChild(void *parent,void *child){return IsWindow(parent)&&IsWindow(child)&&u32_wnd_parent==parent&&child!=parent;}
 __attribute__((dllexport)) BOOL IsWindowUnicode(void *hwnd){return IsWindow(hwnd)&&u32_wnd_proc!=0;}
 __attribute__((dllexport)) BOOL IsWindowEnabled(void *hwnd){return IsWindow(hwnd)&&!(u32_wnd_style&0x08000000u);}
@@ -2059,9 +2061,9 @@ __attribute__((dllexport)) void *GetPropW(void *hwnd,const unsigned short *name)
 
 __attribute__((dllexport)) void *RemovePropW(void *hwnd,const unsigned short *name){if(!name)return 0;char a[48];int i=0;while(name[i]&&i<47){a[i]=(char)name[i];i++;}a[i]=0;return RemovePropA(hwnd,a);}
 
-__attribute__((dllexport)) BOOL SetLayeredWindowAttributes(void *hwnd,DWORD color,unsigned char alpha,DWORD flags){if(!IsWindow(hwnd))return 0;u32_window_affinity=(u32_window_affinity&0xFFFF0000u)|((DWORD)alpha<<8)|(flags&0xFFu);return 1;}
+__attribute__((dllexport)) BOOL SetLayeredWindowAttributes(void *hwnd,DWORD color,unsigned char alpha,DWORD flags){if(!IsWindow(hwnd)||(flags&~7u))return 0;u32_layered_color=color;u32_layered_alpha=alpha;u32_layered_flags=flags;return 1;}
 
-__attribute__((dllexport)) BOOL GetLayeredWindowAttributes(void *hwnd,DWORD *color,unsigned char *alpha,DWORD *flags){if(!IsWindow(hwnd))return 0;if(color)*color=0;if(alpha)*alpha=(unsigned char)((u32_window_affinity>>8)&0xFF);if(flags)*flags=u32_window_affinity&0xFF;return 1;}
+__attribute__((dllexport)) BOOL GetLayeredWindowAttributes(void *hwnd,DWORD *color,unsigned char *alpha,DWORD *flags){if(!IsWindow(hwnd))return 0;if(color)*color=u32_layered_color;if(alpha)*alpha=u32_layered_alpha;if(flags)*flags=u32_layered_flags;return 1;}
 
 __attribute__((dllexport)) BOOL UpdateLayeredWindow(void *hwnd,void *dc,const U32_POINT *dst,const U32_POINT *size,void *src,const U32_POINT *srcpt,DWORD key,const void *blend,DWORD flags){(void)dc;(void)src;(void)srcpt;(void)key;(void)blend;(void)flags;if(!IsWindow(hwnd))return 0;if(dst){g_wnd.x=dst->x;g_wnd.y=dst->y;}if(size){g_wnd.w=size->x;g_wnd.h=size->y;}return 1;}
 
@@ -2346,9 +2348,20 @@ __attribute__((dllexport)) BOOL SetPhysicalCursorPos(int x,int y){return SetCurs
 
 __attribute__((dllexport)) BOOL GetCursorInfoEx(void *info){return GetCursorInfo(info);}
 
-__attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD size,const void *data){(void)setting;(void)flags;(void)size;(void)data;return IsWindow(hwnd);}
+__attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD size,const void *data) {
+    if(!IsWindow(hwnd)||size>64||(!data&&size))return 0;
+    int slot=-1;for(int i=0;i<16;i++){if(u32_feedback_settings[i].used&&u32_feedback_settings[i].hwnd==hwnd&&u32_feedback_settings[i].setting==setting){slot=i;break;}if(!u32_feedback_settings[i].used&&slot<0)slot=i;}
+    if(slot<0)return 0;U32_FEEDBACK_SETTING *p=&u32_feedback_settings[slot];p->hwnd=hwnd;p->setting=setting;p->flags=flags;p->size=size;p->used=1;
+    const unsigned char *src=(const unsigned char*)data;for(DWORD i=0;i<size;i++)p->data[i]=src[i];return 1;
+}
 
-__attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data){(void)setting;(void)flags;if(!IsWindow(hwnd)||!size)return 0;if(data&&*size)((unsigned char*)data)[0]=0;*size=0;return 1;}
+__attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data) {
+    (void)flags;if(!IsWindow(hwnd)||!size)return 0;
+    U32_FEEDBACK_SETTING *p=0;for(int i=0;i<16;i++)if(u32_feedback_settings[i].used&&u32_feedback_settings[i].hwnd==hwnd&&u32_feedback_settings[i].setting==setting){p=&u32_feedback_settings[i];break;}
+    if(!p){*size=0;return 1;}
+    DWORD cap=*size;*size=p->size;if(p->size&&(!data||cap<p->size))return 0;
+    unsigned char *out=(unsigned char*)data;for(DWORD i=0;i<p->size;i++)out[i]=p->data[i];return 1;
+}
 
 typedef struct { DWORD attribute; void *data; unsigned long long size; } U32_COMPOSITION_DATA;
 __attribute__((dllexport)) BOOL GetWindowCompositionAttribute(void *hwnd,void *data){

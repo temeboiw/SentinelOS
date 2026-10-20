@@ -85,10 +85,10 @@ static int reg_join(int parent,const char *sub,char *out,unsigned cap) {
     const char *p=reg_keys[parent].path;unsigned n=reg_len(p),i=0;
     if(n>=cap)return -1;
     for(unsigned j=0;j<n;j++)out[j]=p[j];
-    while(sub&&(*sub=='\\\\'||*sub=='/'))sub++;
+    while(sub&&(*sub=='\\'||*sub=='/'))sub++;
     if(sub&&*sub) {
-        if(n+1>=cap)return -1;out[n++]='\\\\';
-        while(sub[i]&&n+1<cap){char c=sub[i++];out[n++]=(c=='/'? '\\\\':c);}
+        if(n+1>=cap)return -1;out[n++]='\\';
+        while(sub[i]&&n+1<cap){char c=sub[i++];out[n++]=(c=='/'? '\\':c);}
         if(sub[i])return -1;
     }
     out[n]=0;return 0;
@@ -106,10 +106,10 @@ static int reg_child_name(const char *parent,const char *candidate,char *out,uns
     unsigned p=reg_len(parent),c=reg_len(candidate);
     if(c<=p)return 0;
     for(unsigned i=0;i<p;i++)if(reg_lower(parent[i])!=reg_lower(candidate[i]))return 0;
-    if(candidate[p]!='\\\\')return 0;
+    if(candidate[p]!='\\')return 0;
     unsigned i=p+1,n=0;
     if(!candidate[i])return 0;
-    while(candidate[i]&&candidate[i]!='\\\\') {
+    while(candidate[i]&&candidate[i]!='\\') {
         if(n+1>=cap)return 0;out[n++]=candidate[i++];
     }
     out[n]=0;
@@ -142,7 +142,7 @@ E LSTATUS RegCreateKeyExA(HKEY h,LPCSTR sub,DWORD reserved,LPSTR class_name,DWOR
         char prefix[REG_PATH_MAX];reg_copy(prefix,path,sizeof prefix);
         unsigned len=reg_len(prefix);
         for(unsigned i=0;i<len;i++) {
-            if(prefix[i]!='\\\\')continue;
+            if(prefix[i]!='\\')continue;
             char saved=prefix[i];prefix[i]=0;
             if(reg_find_key(prefix)<0 && reg_make_key(prefix)<0) {
                 prefix[i]=saved;return ERROR_NOT_ENOUGH_MEMORY;

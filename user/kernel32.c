@@ -910,7 +910,7 @@ static DWORD k32_alias_list_a(LPSTR out,DWORD cap,LPCSTR exe){
  if(out&&cap){if(used<cap)out[used]=0;else out[cap-1]=0;if(used+1<cap)out[used+1]=0;}return used;
 }
 __attribute__((dllexport)) DWORD GetConsoleAliasesA(LPSTR buffer,DWORD cap,LPCSTR exe){return k32_alias_list_a(buffer,cap,exe);}
-__attribute__((dllexport)) DWORD GetConsoleAliasesW(K32_LPWSTR buffer,DWORD cap,K32_LPCWSTR exe){char e[64],a[4096];if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;DWORD n=k32_alias_list_a(a,sizeof(a),e);if(!buffer||!cap)return n;DWORD i=0;while(i<n&&i+1<cap){buffer[i]=(unsigned char)a[i];i++;}if(i<cap)buffer[i]=0;if(i+1<cap)buffer[i+1]=0;return n;}
+__attribute__((dllexport)) DWORD GetConsoleAliasesW(K32_LPWSTR buffer,DWORD cap,K32_LPCWSTR exe){char e[64];static char a[4096];if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;DWORD n=k32_alias_list_a(a,sizeof(a),e);if(!buffer||!cap)return n;DWORD i=0;while(i<n&&i+1<cap){buffer[i]=(unsigned char)a[i];i++;}if(i<cap)buffer[i]=0;if(i+1<cap)buffer[i+1]=0;return n;}
 __attribute__((dllexport)) DWORD GetConsoleAliasesLengthA(LPCSTR exe){return k32_alias_list_a(0,0,exe);}
 __attribute__((dllexport)) DWORD GetConsoleAliasesLengthW(K32_LPCWSTR exe){char e[64];if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;return k32_alias_list_a(0,0,e);}
 __attribute__((dllexport)) DWORD GetConsoleAliasA(LPCSTR source,LPSTR target,DWORD cap,LPCSTR exe){if(!source||!target||!cap){k32_last_error=87;return 0;}int i=k32_alias_find(source,exe);if(i<0){target[0]=0;k32_last_error=2;return 0;}DWORD n=0;while(k32_aliases[i].target[n])n++;if(n+1>cap){target[0]=0;k32_last_error=122;return 0;}for(DWORD j=0;j<=n;j++)target[j]=k32_aliases[i].target[j];k32_last_error=0;return n;}
@@ -1933,7 +1933,7 @@ __attribute__((dllexport)) K32_WCHAR *wcscpy(K32_WCHAR*d,const K32_WCHAR*s){if(!
 
 __attribute__((dllexport)) K32_WCHAR *wcsncpy(K32_WCHAR*d,const K32_WCHAR*s,u64 n){if(!d||!s)return d;u64 i=0;while(i<n&&s[i]){d[i]=s[i];i++;}while(i<n)d[i++]=0;return d;}
 
-__attribute__((dllexport)) K32_WCHAR *wcscat(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while(*d)d++;while((*d++=*s++));return r;}
+__attribute__((dllexport)) K32_WCHAR *wcscat(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while(*d)d++;while((*d++=*s++)!=0) { }return r;}
 
 __attribute__((dllexport)) K32_WCHAR *wcsncat(K32_WCHAR*d,const K32_WCHAR*s,u64 n){if(!d||!s)return d;K32_WCHAR*r=d;while(*d)d++;u64 i=0;while(i<n&&s[i])d[i]=s[i],i++;d[i]=0;return r;}
 

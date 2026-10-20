@@ -815,6 +815,10 @@ static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
     for (u32 i=0;i<cab_file_count;i++) {
         CabFile *cf=&cab_files[i];
         if ((u64)cf->offset+cf->size>folder_totals[cf->folder]) return 0;
+        for (u32 j=0;j<i;j++) if (cab_files[j].folder==cf->folder &&
+            cf->size && cab_files[j].size &&
+            (u64)cf->offset < (u64)cab_files[j].offset+cab_files[j].size &&
+            (u64)cab_files[j].offset < (u64)cf->offset+cf->size) return 0;
     }
     if (extract) {
         /* Pre-create all destinations before streaming blocks. */

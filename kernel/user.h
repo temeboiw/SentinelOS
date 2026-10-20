@@ -1397,36 +1397,38 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_NtQueryDirectoryFile: {
         uint32_t index = (uint32_t)f->rdi;
         char *name = (char *)f->rsi;
-
-        if (!name || !MmValidateUserRange(MmCurrentProcess, (uint64_t)name, 64, 1)) {
+        uint64_t capacity = f->rdx;
+        if (capacity < 2 || capacity > 256 ||
+            !name || !MmValidateUserRange(MmCurrentProcess, (uint64_t)name, capacity, 1)) {
             f->rax = 0;
             return f;
         }
 
-        if (g_ext4_ok && index < (uint32_t)vfs_nent) {
-            const char *n = vfs_ents[index].name;
-            int i = 0;
-
-            for (; n[i] && i < 63; i++)
-                name[i] = n[i];
-
-            name[i] = 0;
-            f->rax = vfs_ents[index].is_dir ? 2 : 1;
+        if (g_ext4_ok) {
+            /* A mounted filesystem is the sole source of directory entries.
+               Never append boot modules after the current directory ends. */
+            if (index < (uint32_t)vfs_nent) {
+                const char *n = vfs_ents[index].name;
+                uint64_t i = 0;
+                for (; n[i] && i + 1 < capacity; i++)
+                    name[i] = n[i];
+                name[i] = 0;
+                f->rax = vfs_ents[index].is_dir ? 2 : 1;
+            } else {
+                f->rax = 0;
+            }
         } else if (user_bootinfo &&
                    index < user_bootinfo->module_count &&
                    index < BOOT_MAX_MODULES) {
             const char *n = user_bootinfo->modules[index].name;
-            int i = 0;
-
-            for (; n[i] && i < 63; i++)
+            uint64_t i = 0;
+            for (; n[i] && i + 1 < capacity; i++)
                 name[i] = n[i];
-
             name[i] = 0;
             f->rax = 1;
         } else {
             f->rax = 0;
         }
-
         return f;
     }
 

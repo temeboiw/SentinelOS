@@ -784,6 +784,31 @@ static uint32_t vfs_resolve_user_path(const char *path) {
     return dir;
 }
 
+static int e4_dir_has_space(uint32_t dir_ino, uint32_t name_len) {
+    if (!name_len || name_len > 255) return 0;
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4,dir_ino,inode)<0 ||
+        (E16(inode,0)&0xF000)!=0x4000 ||
+        (E32(inode,32)&0x1000u)) return 0;
+    uint64_t size=e4_size(inode);
+    uint32_t need=(8u+name_len+3u)&~3u;
+    static uint8_t block[4096];
+    for(uint64_t pos=0;pos<size;pos+=g_ext4.blksz) {
+        uint64_t pb=e4_map(&g_ext4,inode,(uint32_t)(pos/g_ext4.blksz));
+        if(!pb || e4_read(&g_ext4,pb*g_ext4.blksz,block,g_ext4.blksz)<0) continue;
+        for(uint32_t o=0;o+8<=g_ext4.blksz;) {
+            uint16_t rec=E16(block,o+4);
+            uint32_t eino=E32(block,o);
+            uint8_t nl=block[o+6];
+            if(rec<8 || (rec&3) || o+rec>g_ext4.blksz || nl>rec-8) break;
+            if((!eino && rec>=need) ||
+               (eino && rec-((8u+nl+3u)&~3u)>=need)) return 1;
+            o+=rec;
+        }
+    }
+    return 0;
+}
+
 static int e4_insert_dirent(uint32_t dir_ino, const char *name, uint32_t ino, uint8_t file_type) {
     if (!e4_can_mutate(&g_ext4) || !name || !name[0]) return -1;
     uint32_t nl = 0;
@@ -949,7 +974,8 @@ static uint32_t vfs_create_directory(const char *path) {
         (E16(pino,0) & 0xF000) != 0x4000 ||
         (E32(pino,32) & 0x1000u) ||
         E16(pino,26) == 0xFFFFu ||
-        e4_lookup_ci(&g_ext4,parent_ino,base)) return 0;
+        e4_lookup_ci(&g_ext4,parent_ino,base) ||
+        !e4_dir_has_space(parent_ino,bn)) return 0;
 
     uint32_t ino = e4_alloc_inode(&g_ext4, 1);
     if (!ino) return 0;

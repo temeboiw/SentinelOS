@@ -1479,3 +1479,95 @@ __attribute__((dllexport)) BOOL IsZoomed(void *hwnd){(void)hwnd;return 0;}
 __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
 __attribute__((dllexport)) unsigned long long UnregisterClassW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) long long GetMessageExtraInfo(void){return 0;}
+
+__attribute__((dllexport)) long long SetMessageExtraInfo(long long value){static long long extra;long long old=extra;extra=value;return old;}
+
+__attribute__((dllexport)) DWORD GetQueueStatus(DWORD flags){(void)flags;return 0;}
+
+__attribute__((dllexport)) BOOL GetInputState(void){return 0;}
+
+__attribute__((dllexport)) BOOL WaitMessage(void){InputEvent e;return (BOOL)sy3(SYS_GetInput,(u64)&e,0,0);}
+
+__attribute__((dllexport)) BOOL ReplyMessage(long long result){(void)result;return 1;}
+
+__attribute__((dllexport)) BOOL InSendMessage(void){return 0;}
+
+__attribute__((dllexport)) DWORD InSendMessageEx(void *reserved){(void)reserved;return 0;}
+
+__attribute__((dllexport)) void *GetWindowDC(void *hwnd){return IsWindow(hwnd)?(void *)1:0;}
+
+__attribute__((dllexport)) void *GetDCEx(void *hwnd,void *region,DWORD flags){(void)region;(void)flags;return GetDC(hwnd);}
+
+__attribute__((dllexport)) DWORD GetSysColor(int index){static const DWORD c[]={0x00C0C0C0,0x00000000,0x00FFFFFF,0x00808080,0x00000000,0x00FFFFFF,0x00000000,0x00C0C0C0,0x00FFFFFF,0x00000000,0x00808080,0x00D4D0C8,0x00000000,0x00FFFFFF,0x00D4D0C8,0x00000000,0x00D4D0C8,0x00000000,0x00FFFFFF,0x00000000,0x00D4D0C8,0x00000000,0x00FFFFFF,0x00D4D0C8,0x00000000,0x00FFFFFF,0x00000000,0x00D4D0C8,0x00000000,0x00FFFFFF};return index>=0&&index<30?c[index]:0;}
+
+__attribute__((dllexport)) void *GetSysColorBrush(int index){return (void *)(unsigned long long)(0x1000u+(unsigned int)(index<0?0:index));}
+
+__attribute__((dllexport)) BOOL SetSysColors(int count,const int *indices,const DWORD *colors){if(count<0||(count>0&&(!indices||!colors)))return 0;return 1;}
+
+__attribute__((dllexport)) int FillRect(void *dc,const U32_RECT *r,void *brush){(void)dc;if(!r)return 0;u32 col=brush?(u32)(unsigned long long)brush:COL_PANEL;fill(r->left,r->top,r->right-r->left,r->bottom-r->top,col);return 1;}
+
+__attribute__((dllexport)) int FrameRect(void *dc,const U32_RECT *r,void *brush){(void)dc;if(!r)return 0;u32 col=brush?(u32)(unsigned long long)brush:COL_TEXT;fill(r->left,r->top,r->right-r->left,1,col);fill(r->left,r->bottom-1,r->right-r->left,1,col);fill(r->left,r->top,1,r->bottom-r->top,col);fill(r->right-1,r->top,1,r->bottom-r->top,col);return 1;}
+
+__attribute__((dllexport)) BOOL InvertRect(void *dc,const U32_RECT *r){(void)dc;if(!r||!g_front)return 0;for(int y=r->top;y<r->bottom;y++)for(int x=r->left;x<r->right;x++)if(x>=0&&y>=0&&(u32)x<g_fw&&(u32)y<g_fh)g_front[y*g_pitch+x]^=0x00FFFFFFu;return 1;}
+
+__attribute__((dllexport)) BOOL DrawFocusRect(void *dc,const U32_RECT *r){(void)dc;if(!r)return 0;for(int x=r->left;x<r->right;x+=2){putpx(x,r->top,COL_TEXT);putpx(x,r->bottom-1,COL_TEXT);}for(int y=r->top;y<r->bottom;y+=2){putpx(r->left,y,COL_TEXT);putpx(r->right-1,y,COL_TEXT);}return 1;}
+
+__attribute__((dllexport)) BOOL OpenIcon(void *hwnd){if(!IsWindow(hwnd))return 0;g_wnd.minimized=0;return 1;}
+
+__attribute__((dllexport)) BOOL CloseWindow(void *hwnd){if(!IsWindow(hwnd))return 0;g_wnd.minimized=1;return 1;}
+
+__attribute__((dllexport)) BOOL ShowOwnedPopups(void *hwnd,BOOL show){(void)show;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL FlashWindow(void *hwnd,BOOL invert){(void)invert;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL AnimateWindow(void *hwnd,DWORD time,DWORD flags){(void)time;(void)flags;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL GetDesktopWindowRect(U32_RECT *r){if(!r)return 0;ensure_fb();r->left=0;r->top=0;r->right=(int)g_fw;r->bottom=(int)g_fh;return 1;}
+
+__attribute__((dllexport)) void *GetWindowFromDC(void *dc){return dc?(void *)1:0;}
+
+__attribute__((dllexport)) int GetUpdateRgn(void *hwnd,void *region,BOOL erase){(void)region;(void)erase;return IsWindow(hwnd)?1:0;}
+
+__attribute__((dllexport)) int ExcludeUpdateRgn(void *dc,void *hwnd){(void)dc;return IsWindow(hwnd)?1:0;}
+
+__attribute__((dllexport)) int GetScrollPos32(void *hwnd,int bar){if(!IsWindow(hwnd))return 0;return bar==0?u32_scroll_pos[0]:u32_scroll_pos[1];}
+
+__attribute__((dllexport)) int SetScrollPos32(void *hwnd,int bar,int pos,BOOL redraw){(void)redraw;if(!IsWindow(hwnd))return 0;int i=bar==0?0:1;int old=u32_scroll_pos[i];u32_scroll_pos[i]=pos;return old;}
+
+__attribute__((dllexport)) DWORD GetWindowThreadProcessIdEx(void *hwnd,DWORD *pid){return GetWindowThreadProcessId(hwnd,pid);}
+
+__attribute__((dllexport)) BOOL IsHungAppWindow(void *hwnd){return !IsWindow(hwnd);}
+
+__attribute__((dllexport)) DWORD GetActiveWindowThread(void){return GetCurrentThreadId();}
+
+__attribute__((dllexport)) long GetWindowLongOffset(void *hwnd,int offset){return GetWindowLongA(hwnd,offset);}
+
+__attribute__((dllexport)) long SetWindowLongOffset(void *hwnd,int offset,long value){return SetWindowLongA(hwnd,offset,value);}
+
+__attribute__((dllexport)) BOOL GetCursorPosEx(U32_POINT *pt){return GetCursorPos(pt);}
+
+__attribute__((dllexport)) BOOL SetCursorPosEx(int x,int y){return SetCursorPos(x,y);}
+
+__attribute__((dllexport)) BOOL GetCaretState(int *x,int *y,int *visible){if(x)*x=u32_caret_x;if(y)*y=u32_caret_y;if(visible)*visible=u32_caret_visible;return u32_caret_created;}
+
+__attribute__((dllexport)) int GetDialogControlCount(void *dlg){int n=0;for(int i=0;i<32;i++)if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==dlg)n++;return n;}
+
+__attribute__((dllexport)) unsigned int GetMenuItemFlags(void *menu,unsigned int pos){U32_MENUDATA *m=u32_menu_data(menu);return m&&pos<(unsigned int)m->count?m->items[pos].flags:0;}
+
+__attribute__((dllexport)) int GetMenuItemTextA(void *menu,unsigned int pos,char *out,int cap){return GetMenuStringA(menu,pos,out,cap,0x0400u);}
+
+__attribute__((dllexport)) BOOL SetMenuItemTextA(void *menu,unsigned int pos,const char *text){return ModifyMenuA(menu,pos,0x0400u,0,text);}
+
+__attribute__((dllexport)) unsigned long GetWindowStyle(void *hwnd){return IsWindow(hwnd)?u32_wnd_style:0;}
+
+__attribute__((dllexport)) unsigned long SetWindowStyle(void *hwnd,unsigned long style){if(!IsWindow(hwnd))return 0;unsigned long old=u32_wnd_style;u32_wnd_style=style;return old;}
+
+__attribute__((dllexport)) unsigned long GetWindowExStyle(void *hwnd){return IsWindow(hwnd)?u32_wnd_exstyle:0;}
+
+__attribute__((dllexport)) unsigned long SetWindowExStyle(void *hwnd,unsigned long style){if(!IsWindow(hwnd))return 0;unsigned long old=u32_wnd_exstyle;u32_wnd_exstyle=style;return old;}
+
+__attribute__((dllexport)) BOOL GetWindowClientOrigin(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x=g_wnd.x;pt->y=g_wnd.y+24;return 1;}
+
+__attribute__((dllexport)) BOOL SetWindowClientOrigin(void *hwnd,const U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;g_wnd.x=pt->x;g_wnd.y=pt->y-24;return 1;}

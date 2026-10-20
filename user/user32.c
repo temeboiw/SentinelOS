@@ -94,7 +94,7 @@ typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
 static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
-static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static void *u32_current_cursor=(void *)0x337F00u;
+static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
 static U32_DLGCTRL u32_dlgctrl[32];
 static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;c->text[0]=0;return c;}return 0;}
@@ -766,6 +766,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
+            u32_last_input_time=(DWORD)u32_tick_now();
             if (ev.type == 1) {
                 char key = ev.key;
 
@@ -1690,7 +1691,7 @@ __attribute__((dllexport)) BOOL GetMenuBarInfo(void *hwnd,long object,unsigned l
 typedef struct { unsigned int cbSize,flags; void *hwndActive,*hwndFocus,*hwndCapture,*hwndMenuOwner,*hwndMoveSize,*hwndCaret; U32_RECT rcCaret; } U32_GUITHREADINFO;
 __attribute__((dllexport)) BOOL GetGUIThreadInfo(unsigned int thread,U32_GUITHREADINFO *info){(void)thread;if(!info||info->cbSize<sizeof(*info))return 0;info->flags=0;info->hwndActive=GetActiveWindow();info->hwndFocus=info->hwndActive;info->hwndCapture=0;info->hwndMenuOwner=0;info->hwndMoveSize=0;info->hwndCaret=u32_caret_created?info->hwndFocus:0;info->rcCaret.left=u32_caret_x;info->rcCaret.top=u32_caret_y;info->rcCaret.right=u32_caret_x+u32_caret_w;info->rcCaret.bottom=u32_caret_y+u32_caret_h;return 1;}
 typedef struct { unsigned int cbSize,dwTime; } U32_LASTINPUTINFO;
-__attribute__((dllexport)) BOOL GetLastInputInfo(U32_LASTINPUTINFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->dwTime=0;return 1;}
+__attribute__((dllexport)) BOOL GetLastInputInfo(U32_LASTINPUTINFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->dwTime=u32_last_input_time;return 1;}
 __attribute__((dllexport)) void *GetCursor(void){return u32_current_cursor;}
 typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos; } U32_CURSORINFO;
 __attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=u32_current_cursor;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
@@ -2131,11 +2132,11 @@ __attribute__((dllexport)) BOOL SetUserObjectInformationW(void *object,int index
 
 __attribute__((dllexport)) BOOL EnumDisplayMonitors(void *dc,const U32_RECT *clip,void *callback,long long data){(void)dc;(void)clip;if(!callback)return 0;typedef BOOL(*CB)(void*,void*,U32_RECT*,long long);U32_RECT r={0,0,(int)g_fw,(int)g_fh};return ((CB)callback)(0,(void*)1,&r,data);}
 
-__attribute__((dllexport)) void *MonitorFromWindow(void *hwnd,DWORD flags){(void)flags;return IsWindow(hwnd)?(void *)1:(void *)1;}
+__attribute__((dllexport)) void *MonitorFromWindow(void *hwnd,DWORD flags){if(IsWindow(hwnd))return (void*)1;return (flags&3u)?(void*)1:0;}
 
-__attribute__((dllexport)) void *MonitorFromPoint(U32_POINT pt,DWORD flags){(void)pt;(void)flags;return (void *)1;}
+__attribute__((dllexport)) void *MonitorFromPoint(U32_POINT pt,DWORD flags){ensure_fb();if(pt.x>=0&&pt.y>=0&&(u32)pt.x<g_fw&&(u32)pt.y<g_fh)return (void*)1;return (flags&3u)?(void*)1:0;}
 
-__attribute__((dllexport)) void *MonitorFromRect(const U32_RECT *r,DWORD flags){(void)r;(void)flags;return (void *)1;}
+__attribute__((dllexport)) void *MonitorFromRect(const U32_RECT *r,DWORD flags){ensure_fb();if(r&&r->right>0&&r->bottom>0&&r->left<(int)g_fw&&r->top<(int)g_fh&&r->right>r->left&&r->bottom>r->top)return (void*)1;return (flags&3u)?(void*)1:0;}
 
 __attribute__((dllexport)) BOOL GetMonitorInfoA(void *monitor,void *info){(void)monitor;if(!info)return 0;unsigned int *p=(unsigned int*)info;if(p[0]<sizeof(unsigned int)*7)return 0;U32_RECT *r=(U32_RECT*)((unsigned char*)info+4);r->left=0;r->top=0;r->right=(int)g_fw;r->bottom=(int)g_fh;return 1;}
 
@@ -2265,9 +2266,20 @@ __attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,
 
 __attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data){(void)setting;(void)flags;if(!IsWindow(hwnd)||!size)return 0;if(data&&*size)((unsigned char*)data)[0]=0;*size=0;return 1;}
 
-__attribute__((dllexport)) BOOL GetWindowCompositionAttribute(void *hwnd,void *data){(void)data;return IsWindow(hwnd)?0:0;}
+typedef struct { DWORD attribute; void *data; unsigned long long size; } U32_COMPOSITION_DATA;
+__attribute__((dllexport)) BOOL GetWindowCompositionAttribute(void *hwnd,void *data){
+    if(!IsWindow(hwnd)||!data)return 0;U32_COMPOSITION_DATA *p=(U32_COMPOSITION_DATA*)data;
+    if(p->attribute>=16||!p->data||!u32_composition_sizes[p->attribute])return 0;
+    unsigned int need=u32_composition_sizes[p->attribute];if(p->size<need){p->size=need;return 0;}
+    unsigned char *out=(unsigned char*)p->data;for(unsigned int i=0;i<need;i++)out[i]=u32_composition_values[p->attribute][i];p->size=need;return 1;
+}
 
-__attribute__((dllexport)) BOOL SetWindowCompositionAttribute(void *hwnd,const void *data){(void)data;return IsWindow(hwnd);}
+__attribute__((dllexport)) BOOL SetWindowCompositionAttribute(void *hwnd,const void *data){
+    if(!IsWindow(hwnd)||!data)return 0;const U32_COMPOSITION_DATA *p=(const U32_COMPOSITION_DATA*)data;
+    if(p->attribute>=16||p->size>64||(!p->data&&p->size))return 0;
+    const unsigned char *in=(const unsigned char*)p->data;for(unsigned int i=0;i<(unsigned int)p->size;i++)u32_composition_values[p->attribute][i]=in[i];
+    u32_composition_sizes[p->attribute]=(unsigned int)p->size;return 1;
+}
 
 __attribute__((dllexport)) BOOL GetMenuInfoEx(void *menu,U32_MENUINFO *info){return GetMenuInfo(menu,info);}
 
@@ -2277,7 +2289,7 @@ __attribute__((dllexport)) unsigned int GetMenuItemIDEx(void *menu,unsigned int 
 
 __attribute__((dllexport)) void *GetSubMenuEx(void *menu,int pos){return GetSubMenu(menu,pos);}
 
-__attribute__((dllexport)) BOOL SetWindowRedraw(void *hwnd,BOOL redraw){(void)redraw;return IsWindow(hwnd);}
+__attribute__((dllexport)) BOOL SetWindowRedraw(void *hwnd,BOOL redraw){if(!IsWindow(hwnd))return 0;int old=u32_redraw_enabled;u32_redraw_enabled=redraw!=0;if(!old&&u32_redraw_enabled)compose();return 1;}
 
 __attribute__((dllexport)) BOOL GetWindowRedraw(void *hwnd){return IsWindow(hwnd);}
 

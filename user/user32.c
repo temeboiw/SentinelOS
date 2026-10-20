@@ -38,6 +38,7 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
 
 typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
 typedef struct { int type, x, y, btn; char key; } InputEvent;
+typedef struct { int left, top, right, bottom; } U32_RECT;
 typedef struct {
     u32 hwnd, message;
     u64 wParam;
@@ -497,7 +498,6 @@ static void compose(void) {
             u64 pid = sy3(
                 SYS_WmQuery, (u64)i, (u64)name, (u64)&minv
             );
-
             if (!pid) break;
 
             int same = 1;
@@ -997,8 +997,7 @@ BOOL DestroyWindow(void *hwnd) {
 }
 
 __attribute__((dllexport))
-BOOL PostQuitMessage(int code) {
-    MSG m = {0};
+BOOL PostQuitMessage(int code) {    MSG m = {0};
     m.message = 0x0012; /* WM_QUIT */
     m.wParam = (u64)(unsigned int)code;
     m.pt_x = g_mx;
@@ -1028,7 +1027,7 @@ typedef long long U32_LPARAM;
 typedef long long U32_LRESULT;
 typedef unsigned int U32_UINT;
 typedef unsigned short U32_WCHAR;
-typedef struct { int left, top, right, bottom; } U32_RECT;
+
 typedef struct { unsigned int cbSize,fMask; int nMin,nMax; unsigned int nPage; int nPos,nTrackPos; } U32_SCROLLINFO;
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
@@ -1497,8 +1496,7 @@ __attribute__((dllexport)) int GetClassNameW(void *hwnd, U32_LPWSTR out, int cap
     char name[128];
     int n=GetClassNameA(hwnd,name,sizeof(name));
     if (!out || cap<=0) return 0;
-    return u32_ansi_to_wide(out,cap,name) < n ? cap-1 : n;
-}
+    return u32_ansi_to_wide(out,cap,name) < n ? cap-1 : n;}
 __attribute__((dllexport)) void *LoadCursorW(void *instance, const U32_WCHAR *name) {
     char narrow[128];
     const char *arg;
@@ -1997,7 +1995,6 @@ __attribute__((dllexport)) DWORD SetBkColor(void *dc,DWORD color){(void)dc;stati
 __attribute__((dllexport)) int SetBkMode(void *dc,int mode){(void)dc;static int current=1;int old=current;current=mode;return old;}
 
 __attribute__((dllexport)) unsigned int SetTextAlign(void *dc,unsigned int align){(void)dc;unsigned int old=u32_text_align;u32_text_align=align;return old;}
-
 __attribute__((dllexport)) unsigned int GetTextAlign(void *dc){(void)dc;return u32_text_align;}
 
 __attribute__((dllexport)) int GetDeviceCaps(void *dc,int index){(void)dc;switch(index){case 8:case 10:return (int)g_fw;case 9:case 11:return (int)g_fh;case 88:return 32;case 12:return 96;case 14:return 96;case 2:return 1;default:return 0;}}
@@ -2497,7 +2494,6 @@ __attribute__((dllexport)) BOOL SetWindowFeedbackSetting(void *hwnd,int setting,
     if(slot<0)return 0;U32_FEEDBACK_SETTING *p=&u32_feedback_settings[slot];p->hwnd=hwnd;p->setting=setting;p->flags=flags;p->size=size;p->used=1;
     const unsigned char *src=(const unsigned char*)data;for(DWORD i=0;i<size;i++)p->data[i]=src[i];return 1;
 }
-
 __attribute__((dllexport)) BOOL GetWindowFeedbackSetting(void *hwnd,int setting,DWORD flags,DWORD *size,void *data) {
     (void)flags;if(!IsWindow(hwnd)||!size)return 0;
     U32_FEEDBACK_SETTING *p=0;for(int i=0;i<16;i++)if(u32_feedback_settings[i].used&&u32_feedback_settings[i].hwnd==hwnd&&u32_feedback_settings[i].setting==setting){p=&u32_feedback_settings[i];break;}

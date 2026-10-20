@@ -518,18 +518,39 @@ __attribute__((dllexport)) BOOL SetCurrentConsoleFontEx(HANDLE h,BOOL max,const 
 typedef struct { DWORD cbSize,HistoryBufferSize,NumberOfHistoryBuffers; BOOL dwFlags; } K32_CONSOLE_HISTORY_INFO;
 __attribute__((dllexport)) BOOL GetConsoleHistoryInfo(K32_CONSOLE_HISTORY_INFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->HistoryBufferSize=50;info->NumberOfHistoryBuffers=4;info->dwFlags=0;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleHistoryInfo(const K32_CONSOLE_HISTORY_INFO *info){return info&&info->cbSize>=sizeof(*info)&&info->HistoryBufferSize>0&&info->NumberOfHistoryBuffers>0;}
-__attribute__((dllexport)) unsigned long long GetConsoleCommandHistoryA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleCommandHistoryW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasesA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasesW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasesLengthA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasesLengthW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasExesA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasExesW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasExesLengthA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetConsoleAliasExesLengthW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+typedef struct { int used; char exe[64],source[64],target[128]; } K32_ALIAS;
+static K32_ALIAS k32_aliases[32];
+static const char *k32_alias_exe(LPCSTR exe){return exe&&*exe?exe:"sentinel.exe";}
+static int k32_alias_find(LPCSTR source,LPCSTR exe){const char *e=k32_alias_exe(exe);for(int i=0;i<32;i++)if(k32_aliases[i].used&&k32_eqi(k32_aliases[i].exe,e)&&k32_eqi(k32_aliases[i].source,source))return i;return -1;}
+__attribute__((dllexport)) void AddConsoleAliasA(LPCSTR source,LPCSTR target,LPCSTR exe){
+ if(!source||!*source){k32_last_error=87;return;}int i=k32_alias_find(source,exe);
+ if(!target){if(i>=0)k32_aliases[i].used=0;return;}
+ if(i<0){for(i=0;i<32;i++)if(!k32_aliases[i].used)break;if(i==32){k32_last_error=8;return;}}
+ K32_ALIAS *a=&k32_aliases[i];a->used=1;const char *e=k32_alias_exe(exe);int j=0;while(e[j]&&j<63){a->exe[j]=e[j];j++;}a->exe[j]=0;
+ j=0;while(source[j]&&j<63){a->source[j]=source[j];j++;}a->source[j]=0;
+ j=0;while(target[j]&&j<127){a->target[j]=target[j];j++;}a->target[j]=0;k32_last_error=0;
+}
+__attribute__((dllexport)) void AddConsoleAliasW(K32_LPCWSTR source,K32_LPCWSTR target,K32_LPCWSTR exe){char a[64],b[128],e[64];if(!source){k32_last_error=87;return;}k32_wide_to_ansi(a,sizeof(a),source);if(target)k32_wide_to_ansi(b,sizeof(b),target);if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;AddConsoleAliasA(a,target?b:0,e);}
+static DWORD k32_alias_list_a(LPSTR out,DWORD cap,LPCSTR exe){
+ DWORD used=0;for(int i=0;i<32;i++)if(k32_aliases[i].used&&k32_eqi(k32_aliases[i].exe,k32_alias_exe(exe))){
+  DWORD n=0;while(k32_aliases[i].source[n])n++;DWORD t=0;while(k32_aliases[i].target[t])t++;DWORD need=n+1+t+1;
+  if(out&&used+need+1<=cap){DWORD p=used;for(DWORD j=0;j<n;j++)out[p++]=k32_aliases[i].source[j];out[p++]='=';for(DWORD j=0;j<t;j++)out[p++]=k32_aliases[i].target[j];out[p]=0;}
+  used+=need;
+ }
+ if(out&&cap){if(used<cap)out[used]=0;else out[cap-1]=0;if(used+1<cap)out[used+1]=0;}return used;
+}
+__attribute__((dllexport)) DWORD GetConsoleAliasesA(LPSTR buffer,DWORD cap,LPCSTR exe){return k32_alias_list_a(buffer,cap,exe);}
+__attribute__((dllexport)) DWORD GetConsoleAliasesW(K32_LPWSTR buffer,DWORD cap,K32_LPCWSTR exe){char e[64],a[4096];if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;DWORD n=k32_alias_list_a(a,sizeof(a),e);if(!buffer||!cap)return n;DWORD i=0;while(i<n&&i+1<cap){buffer[i]=(unsigned char)a[i];i++;}if(i<cap)buffer[i]=0;if(i+1<cap)buffer[i+1]=0;return n;}
+__attribute__((dllexport)) DWORD GetConsoleAliasesLengthA(LPCSTR exe){return k32_alias_list_a(0,0,exe);}
+__attribute__((dllexport)) DWORD GetConsoleAliasesLengthW(K32_LPCWSTR exe){char e[64];if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;return k32_alias_list_a(0,0,e);}
+__attribute__((dllexport)) DWORD GetConsoleAliasA(LPCSTR source,LPSTR target,DWORD cap,LPCSTR exe){if(!source||!target||!cap){k32_last_error=87;return 0;}int i=k32_alias_find(source,exe);if(i<0){target[0]=0;k32_last_error=2;return 0;}DWORD n=0;while(k32_aliases[i].target[n])n++;if(n+1>cap){target[0]=0;k32_last_error=122;return 0;}for(DWORD j=0;j<=n;j++)target[j]=k32_aliases[i].target[j];k32_last_error=0;return n;}
+__attribute__((dllexport)) DWORD GetConsoleAliasW(K32_LPCWSTR source,K32_LPWSTR target,DWORD cap,K32_LPCWSTR exe){char a[64],e[64],b[128];if(!source||!target||!cap){k32_last_error=87;return 0;}k32_wide_to_ansi(a,sizeof(a),source);if(exe)k32_wide_to_ansi(e,sizeof(e),exe);else e[0]=0;DWORD n=GetConsoleAliasA(a,b,sizeof(b),e);if(!n){target[0]=0;return 0;}if(n+1>cap){target[0]=0;k32_last_error=122;return 0;}k32_ansi_to_wide(target,cap,b);return n;}
+__attribute__((dllexport)) DWORD GetConsoleAliasExesA(LPSTR out,DWORD cap){DWORD used=0;for(int i=0;i<32;i++)if(k32_aliases[i].used){int seen=0;for(int j=0;j<i;j++)if(k32_aliases[j].used&&k32_eqi(k32_aliases[j].exe,k32_aliases[i].exe))seen=1;if(seen)continue;DWORD n=0;while(k32_aliases[i].exe[n])n++;if(out&&used+n+2<=cap){for(DWORD j=0;j<n;j++)out[used+j]=k32_aliases[i].exe[j];out[used+n]=0;}used+=n+1;}if(out&&cap){if(used<cap)out[used]=0;else out[cap-1]=0;if(used+1<cap)out[used+1]=0;}return used;}
+__attribute__((dllexport)) DWORD GetConsoleAliasExesW(K32_LPWSTR out,DWORD cap){char a[2048];DWORD n=GetConsoleAliasExesA(a,sizeof(a));if(!out||!cap)return n;DWORD i=0;while(i<n&&i+1<cap){out[i]=(unsigned char)a[i];i++;}if(i<cap)out[i]=0;if(i+1<cap)out[i+1]=0;return n;}
+__attribute__((dllexport)) DWORD GetConsoleAliasExesLengthA(void){return GetConsoleAliasExesA(0,0);}
+__attribute__((dllexport)) DWORD GetConsoleAliasExesLengthW(void){return GetConsoleAliasExesLengthA();}
+__attribute__((dllexport)) void GetConsoleCommandHistoryA(LPSTR buffer,DWORD cap,LPCSTR exe){(void)exe;if(buffer&&cap){buffer[0]=0;if(cap>1)buffer[1]=0;}}
+__attribute__((dllexport)) void GetConsoleCommandHistoryW(K32_LPWSTR buffer,DWORD cap,K32_LPCWSTR exe){(void)exe;if(buffer&&cap){buffer[0]=0;if(cap>1)buffer[1]=0;}}
 __attribute__((dllexport)) DWORD GetConsoleInputExeNameA(DWORD cap,LPSTR out){const char *n="sentinel.exe";DWORD len=11;if(!out||cap<=len)return len+1;for(DWORD i=0;i<=len;i++)out[i]=n[i];return len;}
 __attribute__((dllexport)) DWORD GetConsoleInputExeNameW(DWORD cap,K32_LPWSTR out){const char *n="sentinel.exe";DWORD len=11;if(!out||cap<=len)return len+1;k32_ansi_to_wide(out,cap,n);return len;}
 __attribute__((dllexport)) DWORD GetConsoleOutputExeNameA(DWORD cap,LPSTR out){return GetConsoleInputExeNameA(cap,out);}

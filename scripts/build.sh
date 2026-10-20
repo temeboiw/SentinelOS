@@ -368,6 +368,66 @@ lld -flavor link \
   /export:GetWindowsDirectoryA \
   /export:GetUserDefaultLCID \
   /export:GetACP \
+  /export:GetOEMCP \
+  /export:GetConsoleCP \
+  /export:GetConsoleOutputCP \
+  /export:SetConsoleCP \
+  /export:SetConsoleOutputCP \
+  /export:GetFileSizeEx \
+  /export:GetFileInformationByHandleEx \
+  /export:GetFinalPathNameByHandleA \
+  /export:GetFinalPathNameByHandleW \
+  /export:GetVolumePathNameA \
+  /export:GetVolumePathNameW \
+  /export:GetVolumePathNamesForVolumeNameA \
+  /export:GetVolumePathNamesForVolumeNameW \
+  /export:GetDriveTypeW \
+  /export:GetLogicalDriveStringsW \
+  /export:GetVolumeInformationW \
+  /export:GetDiskFreeSpaceW \
+  /export:GetDiskFreeSpaceExW \
+  /export:GetFileAttributesExW \
+  /export:GetTempPath2A \
+  /export:GetTempPath2W \
+  /export:GetShortPathNameW \
+  /export:GetLongPathNameW \
+  /export:GetSystemDirectoryW \
+  /export:GetWindowsDirectoryW \
+  /export:GetComputerNameW \
+  /export:GetUserNameA \
+  /export:GetUserNameW \
+  /export:GetComputerNameExA \
+  /export:GetComputerNameExW \
+  /export:GetEnvironmentStringsW \
+  /export:FreeEnvironmentStringsW \
+  /export:ExpandEnvironmentStringsA \
+  /export:ExpandEnvironmentStringsW \
+  /export:GetModuleHandleExA \
+  /export:GetModuleHandleExW \
+  /export:GetStartupInfoW \
+  /export:GetProcessId \
+  /export:GetThreadId \
+  /export:GetProcessIdOfThread \
+  /export:OpenProcess \
+  /export:OpenThread \
+  /export:GetCurrentProcessToken \
+  /export:GetCurrentThreadToken \
+  /export:GetProcessVersion \
+  /export:GetProcessShutdownParameters \
+  /export:SetProcessShutdownParameters \
+  /export:SetErrorMode \
+  /export:GetErrorMode \
+  /export:GetSystemTimeAdjustment \
+  /export:GetSystemTimePreciseAsFileTime \
+  /export:GetThreadLocale \
+  /export:SetThreadLocale \
+  /export:GetUserDefaultLangID \
+  /export:GetThreadUILanguage \
+  /export:GetUserDefaultUILanguage \
+  /export:GetSystemDefaultUILanguage \
+  /export:GetSystemDefaultLangID \
+  /export:GetSystemDefaultLCID \
+  /export:GetConsoleTitleA \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 
@@ -514,6 +574,66 @@ lld -flavor link \
   /export:GetMenuDefaultItem \
   /export:GetSystemMenu \
   /export:GetScrollInfo \
+  /export:SetScrollInfo \
+  /export:ShowScrollBar \
+  /export:SetScrollRange \
+  /export:GetScrollRange \
+  /export:GetScrollPos \
+  /export:SetScrollPos \
+  /export:SetWindowRgn \
+  /export:GetWindowRgn \
+  /export:MapWindowPoints \
+  /export:ClientToScreen \
+  /export:ScreenToClient \
+  /export:WindowFromPoint \
+  /export:ChildWindowFromPoint \
+  /export:SetDoubleClickTime \
+  /export:GetLastActivePopup \
+  /export:GetWindowTextLengthA \
+  /export:GetWindowTextLengthW \
+  /export:GetWindowLongPtrA \
+  /export:SetWindowLongPtrA \
+  /export:GetWindowLongPtrW \
+  /export:SetWindowLongPtrW \
+  /export:GetClassLongA \
+  /export:SetClassLongA \
+  /export:GetClassLongPtrA \
+  /export:SetClassLongPtrA \
+  /export:GetClassLongW \
+  /export:SetClassLongW \
+  /export:GetClassLongPtrW \
+  /export:SetClassLongPtrW \
+  /export:GetWindowModuleFileNameW \
+  /export:GetWindowRgnBox \
+  /export:GetWindowDisplayAffinity \
+  /export:SetWindowDisplayAffinity \
+  /export:IsChild \
+  /export:IsWindowUnicode \
+  /export:IsWindowEnabled \
+  /export:GetWindowOwner \
+  /export:GetWindowWord \
+  /export:SetWindowWord \
+  /export:GetWindowLongW \
+  /export:SetWindowLongW \
+  /export:GetDlgCtrlID \
+  /export:GetDlgItemInt \
+  /export:SetDlgItemInt \
+  /export:CheckDlgButton \
+  /export:IsDlgButtonChecked \
+  /export:CheckRadioButton \
+  /export:GetNextDlgTabItem \
+  /export:GetNextDlgGroupItem \
+  /export:GetDialogBaseUnits \
+  /export:MapDialogRect \
+  /export:AdjustWindowRect \
+  /export:AdjustWindowRectEx \
+  /export:AdjustWindowRectExForDpi \
+  /export:GetDpiForWindow \
+  /export:GetDpiForSystem \
+  /export:GetSystemMetricsForDpi \
+  /export:GetShellWindow \
+  /export:ClipCursor \
+  /export:GetClipCursor \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"
 

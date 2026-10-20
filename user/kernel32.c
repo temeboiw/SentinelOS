@@ -44,6 +44,23 @@ static HANDLE k32_pipe_handle(unsigned int slot,unsigned int side) {
     return (HANDLE)(K32_PIPE_BASE+1ULL+(unsigned long long)slot*2ULL+side);
 }
 static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static DWORD k32_cursor_size=25; static unsigned short k32_console_attr=7;
+typedef struct { HANDLE handle; char path[260]; int used; } K32_OPEN_PATH;
+static K32_OPEN_PATH k32_open_paths[32];
+static void k32_track_path(HANDLE h,const char *path) {
+    if(!h||h==INVALID_HANDLE_VALUE||!path)return;
+    int slot=-1;
+    for(int i=0;i<32;i++){if(k32_open_paths[i].used&&k32_open_paths[i].handle==h){slot=i;break;}if(!k32_open_paths[i].used&&slot<0)slot=i;}
+    if(slot<0)return;
+    K32_OPEN_PATH *p=&k32_open_paths[slot];p->handle=h;int j=0;
+    while(path[j]&&j<259){p->path[j]=path[j];j++;}p->path[j]=0;p->used=1;
+}
+static K32_OPEN_PATH *k32_find_path(HANDLE h) {
+    for(int i=0;i<32;i++)if(k32_open_paths[i].used&&k32_open_paths[i].handle==h)return &k32_open_paths[i];
+    return 0;
+}
+static void k32_untrack_path(HANDLE h) {
+    K32_OPEN_PATH *p=k32_find_path(h);if(p){p->used=0;p->path[0]=0;p->handle=0;}
+}
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 
@@ -92,8 +109,10 @@ __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD 
 }
 __attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, void *sec, DWORD d, DWORD f, HANDLE t) {
     (void)a;(void)s;(void)sec;(void)d;(void)f;(void)t;
+    if(!name||!*name){k32_last_error=87;return INVALID_HANDLE_VALUE;}
     i64 h = (i64)sy3(SYS_OpenFile, (u64)name, 0, 0);
-    return h < 0 ? INVALID_HANDLE_VALUE : (HANDLE)h;
+    if(h<0){k32_last_error=2;return INVALID_HANDLE_VALUE;}
+    k32_track_path((HANDLE)h,name);k32_last_error=0;return (HANDLE)h;
 }
 __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD *rd, void *ov) {
     (void)ov;
@@ -124,7 +143,7 @@ __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
     }
     if(h==(HANDLE)1||h==(HANDLE)2){k32_last_error=6;return 0;}
     if(sy3(SYS_CloseFile, (u64)h, 0, 0) == 0){k32_last_error=6;return 0;}
-    k32_last_error=0;return 1;
+    k32_untrack_path(h);k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) DWORD QueryDirectoryA(DWORD index, LPSTR name, DWORD max) {
     return (DWORD)sy3(SYS_QueryDir, index, (u64)name, (u64)max);
@@ -591,10 +610,47 @@ __attribute__((dllexport)) DWORD GetConsoleCP(void){return k32_console_cp_in;}
 __attribute__((dllexport)) DWORD GetConsoleOutputCP(void){return k32_console_cp_out;}
 __attribute__((dllexport)) BOOL SetConsoleCP(DWORD cp){if(!cp){k32_last_error=87;return 0;}k32_console_cp_in=cp;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleOutputCP(DWORD cp){if(!cp){k32_last_error=87;return 0;}k32_console_cp_out=cp;return 1;}
-__attribute__((dllexport)) BOOL GetFileSizeEx(HANDLE file,K32_LARGE_INTEGER *size) { if(!file||file==INVALID_HANDLE_VALUE||!size){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) BOOL GetFileInformationByHandleEx(HANDLE file,int infoClass,void *info,DWORD size) { (void)infoClass;(void)size;if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) DWORD GetFinalPathNameByHandleA(HANDLE file,LPSTR out,DWORD cap,DWORD flags) { (void)flags;if(!file||file==INVALID_HANDLE_VALUE||!out||!cap){k32_last_error=87;return 0;}out[0]=0;k32_last_error=50;return 0; }
-__attribute__((dllexport)) DWORD GetFinalPathNameByHandleW(HANDLE file,K32_LPWSTR out,DWORD cap,DWORD flags) { (void)flags;if(!file||file==INVALID_HANDLE_VALUE||!out||!cap){k32_last_error=87;return 0;}out[0]=0;k32_last_error=50;return 0; }
+__attribute__((dllexport)) BOOL GetFileSizeEx(HANDLE file,K32_LARGE_INTEGER *size) {
+    if(!file||file==INVALID_HANDLE_VALUE||!size){k32_last_error=6;return 0;}
+    DWORD high=0,low=GetFileSize(file,&high);if(low==0xFFFFFFFFu&&GetLastError()!=0)return 0;
+    size->QuadPart=((unsigned long long)high<<32)|low;k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) BOOL GetFileInformationByHandleEx(HANDLE file,int infoClass,void *info,DWORD size) {
+    if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}
+    if(infoClass==0) {
+        typedef struct { long long CreationTime,LastAccessTime,LastWriteTime,ChangeTime; DWORD FileAttributes; } BASIC_INFO;
+        if(size<sizeof(BASIC_INFO)){k32_last_error=122;return 0;}
+        BASIC_INFO *p=(BASIC_INFO*)info;p->CreationTime=p->LastAccessTime=p->LastWriteTime=p->ChangeTime=0;p->FileAttributes=0x80u;k32_last_error=0;return 1;
+    }
+    if(infoClass==1) {
+        typedef struct { long long AllocationSize,EndOfFile; DWORD NumberOfLinks; unsigned char DeletePending,Directory; } STANDARD_INFO;
+        if(size<sizeof(STANDARD_INFO)){k32_last_error=122;return 0;}
+        DWORD high=0,low=GetFileSize(file,&high);if(low==0xFFFFFFFFu&&GetLastError()!=0)return 0;
+        STANDARD_INFO *p=(STANDARD_INFO*)info;p->EndOfFile=(long long)(((unsigned long long)high<<32)|low);p->AllocationSize=(p->EndOfFile+4095LL)&~4095LL;p->NumberOfLinks=1;p->DeletePending=0;p->Directory=0;k32_last_error=0;return 1;
+    }
+    if(infoClass==2) {
+        K32_OPEN_PATH *path=k32_find_path(file);if(!path){k32_last_error=50;return 0;}
+        DWORD n=0;while(path->path[n])n++;if(size<sizeof(DWORD)+(n+1u)*sizeof(K32_WCHAR)){k32_last_error=122;return 0;}
+        struct { DWORD FileNameLength; K32_WCHAR FileName[1]; } *p=info;p->FileNameLength=n*sizeof(K32_WCHAR);
+        for(DWORD i=0;i<=n;i++)p->FileName[i]=(unsigned char)path->path[i];k32_last_error=0;return 1;
+    }
+    k32_last_error=50;return 0;
+}
+__attribute__((dllexport)) DWORD GetFinalPathNameByHandleA(HANDLE file,LPSTR out,DWORD cap,DWORD flags) {
+    if(!file||file==INVALID_HANDLE_VALUE||!out||!cap){k32_last_error=87;return 0;}
+    unsigned int volume=flags&0xFu;if(volume!=0&&volume!=4){out[0]=0;k32_last_error=50;return 0;}
+    K32_OPEN_PATH *p=k32_find_path(file);if(!p){out[0]=0;k32_last_error=6;return 0;}
+    char full[768];DWORD n=GetFullPathNameA(p->path,sizeof(full),full,0);if(!n||n>=sizeof(full)){out[0]=0;return 0;}
+    DWORD prefix=volume==4?0:0; (void)prefix;
+    if(cap<=n){DWORD i=0;while(i+1<cap){out[i]=full[i];i++;}out[i]=0;k32_last_error=122;return n+1;}
+    for(DWORD i=0;i<=n;i++)out[i]=full[i];k32_last_error=0;return n;
+}
+__attribute__((dllexport)) DWORD GetFinalPathNameByHandleW(HANDLE file,K32_LPWSTR out,DWORD cap,DWORD flags) {
+    char path[768];DWORD n=GetFinalPathNameByHandleA(file,path,sizeof(path),flags);if(!n){if(out&&cap)out[0]=0;return 0;}
+    DWORD i=0;while(path[i])i++;if(!out||!cap)return i+1;
+    if(cap<=i){k32_ansi_to_wide(out,cap,path);k32_last_error=122;return i+1;}
+    k32_ansi_to_wide(out,cap,path);k32_last_error=0;return i;
+}
 __attribute__((dllexport)) BOOL GetVolumePathNameA(LPCSTR path,LPSTR out,DWORD cap){if(!path||!out||cap<4||!((path[0]=='C'||path[0]=='c')&&path[1]==':'&&(path[2]=='\\'||path[2]=='/'||path[2]==0))){k32_last_error=3;return 0;}out[0]='C';out[1]=':';out[2]='\\';out[3]=0;return 1;}
 __attribute__((dllexport)) BOOL GetVolumePathNameW(K32_LPCWSTR path,K32_LPWSTR out,DWORD cap){if(!path||!out||cap<4||!((path[0]=='C'||path[0]=='c')&&path[1]==':'&&(path[2]=='\\'||path[2]=='/'||path[2]==0))){k32_last_error=3;return 0;}out[0]='C';out[1]=':';out[2]='\\';out[3]=0;return 1;}
 __attribute__((dllexport)) BOOL GetVolumePathNamesForVolumeNameA(LPCSTR volume,LPSTR paths,DWORD cap,DWORD *required) { const char *known="\\\\?\\Volume{00000000-0000-0000-0000-000000000001}\\";if(!volume||!k32_eqi(volume,known)){if(required)*required=0;k32_last_error=2;return 0;}if(required)*required=5;if(!paths||cap<5){if(paths&&cap)paths[0]=0;k32_last_error=234;return 0;}paths[0]='C';paths[1]=':';paths[2]='\\';paths[3]=0;paths[4]=0;k32_last_error=0;return 1; }
@@ -726,7 +782,13 @@ __attribute__((dllexport)) BOOL LockFile(HANDLE file,DWORD offsetLow,DWORD offse
 __attribute__((dllexport)) BOOL UnlockFile(HANDLE file,DWORD offsetLow,DWORD offsetHigh,DWORD bytesLow,DWORD bytesHigh) { (void)offsetLow;(void)offsetHigh;(void)bytesLow;(void)bytesHigh;if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL LockFileEx(HANDLE file,DWORD flags,DWORD reserved,DWORD bytesLow,DWORD bytesHigh,void *overlapped) { (void)flags;(void)reserved;(void)bytesLow;(void)bytesHigh;if(!file||file==INVALID_HANDLE_VALUE||!overlapped){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL UnlockFileEx(HANDLE file,DWORD reserved,DWORD bytesLow,DWORD bytesHigh,void *overlapped) { (void)reserved;(void)bytesLow;(void)bytesHigh;if(!file||file==INVALID_HANDLE_VALUE||!overlapped){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) DWORD GetCompressedFileSizeA(LPCSTR path,DWORD *high) { if(high)*high=0;if(!path){k32_last_error=87;return 0xFFFFFFFFu;}k32_last_error=50;return 0xFFFFFFFFu; }
+__attribute__((dllexport)) DWORD GetCompressedFileSizeA(LPCSTR path,DWORD *high) {
+    if(!path||!*path){k32_last_error=87;return 0xFFFFFFFFu;}
+    HANDLE h=CreateFileA(path,0,0,0,3,0,0);if(h==INVALID_HANDLE_VALUE)return 0xFFFFFFFFu;
+    DWORD hi=0,lo=GetFileSize(h,&hi);DWORD err=GetLastError();CloseHandle(h);
+    if(lo==0xFFFFFFFFu&&err!=0){k32_last_error=err;return 0xFFFFFFFFu;}
+    if(high)*high=hi;k32_last_error=0;return lo;
+}
 __attribute__((dllexport)) DWORD GetCompressedFileSizeW(K32_LPCWSTR path,DWORD *high) { char p[260];if(!path){k32_last_error=87;return 0xFFFFFFFFu;}k32_wide_to_ansi(p,sizeof(p),path);return GetCompressedFileSizeA(p,high); }
 __attribute__((dllexport)) DWORD SearchPathA(LPCSTR path,LPCSTR file,LPCSTR ext,DWORD cap,LPSTR out,LPSTR *part){(void)path;if(!file)return 0;char joined[512];DWORD i=0;while(file[i]&&i+1<sizeof(joined)){joined[i]=file[i];i++;}joined[i]=0;if(i==0||!out||!cap)return 0;if(ext&&i+1<sizeof(joined)){int has=0;for(DWORD j=0;j<i;j++)if(joined[j]=='.')has=1;if(!has){DWORD j=0;while(ext[j]&&i+1<sizeof(joined))joined[i++]=ext[j++];joined[i]=0;}}DWORD n=GetFullPathNameA(joined,cap,out,part);return n;}
 __attribute__((dllexport)) DWORD SearchPathW(K32_LPCWSTR path,K32_LPCWSTR file,K32_LPCWSTR ext,DWORD cap,K32_LPWSTR out,K32_LPWSTR *part){(void)path;(void)part;char f[512],e[64],b[512];k32_wide_to_ansi(f,sizeof(f),file);k32_wide_to_ansi(e,sizeof(e),ext);DWORD n=SearchPathA(0,f,ext?e:0,sizeof(b),b,0);if(out&&cap)k32_ansi_to_wide(out,cap,b);return n;}

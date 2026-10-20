@@ -1875,16 +1875,16 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
-    case SYS_NtDeleteFile:
+    case SYS_NtDeleteFile: {
+        char name[256];
+        f->rax = copy_user_str(f->rdi,name,sizeof name)==0 &&
+                 vfs_delete_regular_file(name) ? 1 : 0;
+        return f;
+    }
     case SYS_NtRemoveDirectory: {
         char name[256];
-        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
-            f->rax = 0;
-        } else if (f->rax == SYS_NtDeleteFile) {
-            f->rax = vfs_delete_regular_file(name) ? 1 : 0;
-        } else {
-            f->rax = vfs_remove_empty_directory(name) ? 1 : 0;
-        }
+        f->rax = copy_user_str(f->rdi,name,sizeof name)==0 &&
+                 vfs_remove_empty_directory(name) ? 1 : 0;
         return f;
     }
 

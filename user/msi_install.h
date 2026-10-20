@@ -18,6 +18,8 @@ typedef struct {
 static MsiDirPath msi_dir_paths[MSI_MAX_DIRS];
 static MsiFilePlan msi_file_plans[MSI_MAX_FILE_PLANS];
 static u32 msi_dir_count, msi_file_plan_count;
+static MsiSequenceRow msi_install_rows[512];
+static u8 msi_install_enabled[512];
 static u8 msi_copy_buffer[65536];
 
 static int msi_cell_text(const char *table,u32 row,u32 col,char *out_text,u32 cap) {
@@ -266,9 +268,12 @@ static int msi_long_filename(const char *raw,char *dst,u32 cap) {
 }
 static int msi_file_name_matches(const char *raw,const char *name) {
     if(same_name(raw,name)) return 1;
-    for(u32 i=0;raw[i];i++) if(raw[i]=='|')
-        return same_name(name,raw+i+1) || (i && i<sizeof msi_file_plans[0].name &&
-               same_name(name,raw));
+    for(u32 i=0;raw[i];i++) if(raw[i]=='|') {
+        char shortname[240]; if(i>=sizeof shortname) return 0;
+        for(u32 j=0;j<i;j++) shortname[j]=raw[j];
+        shortname[i]=0;
+        return same_name(name,shortname) || same_name(name,raw+i+1);
+    }
     return 0;
 }
 static int msi_build_file_plan(void) {
@@ -370,7 +375,7 @@ static int msi_copy_staged_files(void) {
     return 1;
 }
 static int msi_install_package(void) {
-    MsiSequenceRow rows[512]; u8 enabled[512]; u32 count=0;
+    MsiSequenceRow *rows=msi_install_rows; u8 *enabled=msi_install_enabled; u32 count=0;
     if(!msi_db_ok || !msi_load_sequence(rows,enabled,512,&count) ||
        !msi_build_file_plan()) {
         out("Install preflight failed; no destination files changed.\n"); return 0;

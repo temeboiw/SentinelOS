@@ -963,6 +963,7 @@ typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle
 #define U32_MIIM_BITMAP 0x00000080u
 #define U32_MIIM_FTYPE 0x00000100u
 #define U32_MFS_STATE_MASK 0x0000018Bu
+#define U32_MFT_TYPE_MASK 0x00006B64u
 typedef struct { unsigned int flags,state,type; unsigned long long id,data; void *submenu; void *bmp_checked,*bmp_unchecked,*bmp_item; char text[80]; } U32_MENUITEM;
 typedef struct { int used, count, default_pos; unsigned int style,max_height,help_id; void *background; unsigned long long menu_data; U32_MENUITEM items[16]; } U32_MENUDATA;
 static U32_MENUDATA u32_menus[16];
@@ -992,7 +993,7 @@ static int u32_menu_insert(void *handle, unsigned int position, unsigned int fla
                   : u32_menu_index(m,position,0));
     if (at<0 || at>m->count) return 0;
     for (int i=m->count;i>at;i--) m->items[i]=m->items[i-1];
-    U32_MENUITEM *it=&m->items[at]; it->flags=flags;it->state=flags&U32_MFS_STATE_MASK;it->type=flags&0x0000FF70u;it->id=id; it->data=0;it->bmp_checked=it->bmp_unchecked=it->bmp_item=0;it->submenu=(flags&0x0010u)?(void *)id:0;
+    U32_MENUITEM *it=&m->items[at]; it->flags=flags;it->state=flags&U32_MFS_STATE_MASK;it->type=flags&U32_MFT_TYPE_MASK;it->id=id; it->data=0;it->bmp_checked=it->bmp_unchecked=it->bmp_item=0;it->submenu=(flags&0x0010u)?(void *)id:0;
     u32_menu_text(it->text,sizeof(it->text),text); m->count++;
     if (m->default_pos>=at) m->default_pos++;
     return 1;
@@ -1566,7 +1567,7 @@ __attribute__((dllexport)) unsigned int EnableMenuItem(void *menu, unsigned int 
 __attribute__((dllexport)) BOOL DeleteMenu(void *menu, unsigned int item, unsigned int flags) { return u32_menu_remove(menu,item,flags,1); }
 __attribute__((dllexport)) BOOL RemoveMenu(void *menu, unsigned int item, unsigned int flags) { return u32_menu_remove(menu,item,flags,0); }
 __attribute__((dllexport)) BOOL InsertMenuA(void *menu, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) { return u32_menu_insert(menu,position,flags,id,text); }
-__attribute__((dllexport)) BOOL ModifyMenuA(void *menu, unsigned int item, unsigned int flags, unsigned long long id, LPCSTR text) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0) return 0; m->items[i].flags=flags;m->items[i].state=flags&U32_MFS_STATE_MASK;m->items[i].type=flags&0x0000FF70u;m->items[i].id=id; m->items[i].submenu=(flags&0x0010u)?(void *)id:0; u32_menu_text(m->items[i].text,sizeof(m->items[i].text),text); return 1; }
+__attribute__((dllexport)) BOOL ModifyMenuA(void *menu, unsigned int item, unsigned int flags, unsigned long long id, LPCSTR text) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0) return 0; m->items[i].flags=flags;m->items[i].state=flags&U32_MFS_STATE_MASK;m->items[i].type=flags&U32_MFT_TYPE_MASK;m->items[i].id=id; m->items[i].submenu=(flags&0x0010u)?(void *)id:0; u32_menu_text(m->items[i].text,sizeof(m->items[i].text),text); return 1; }
 typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; char *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOA;
 typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; U32_WCHAR *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOW;
 __attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOA *info) {
@@ -1576,7 +1577,7 @@ __attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BO
     if(info->fMask&U32_MIIM_ID)it->id=info->wID;
     if(info->fMask&U32_MIIM_SUBMENU){it->submenu=info->hSubMenu;if(it->submenu)it->flags|=0x0010u;else it->flags&=~0x0010u;}
     if(info->fMask&U32_MIIM_STATE){it->state=info->fState&U32_MFS_STATE_MASK;it->flags=(it->flags&~0x0000008Bu)|(info->fState&0x0000008Bu);}
-    if(info->fMask&U32_MIIM_FTYPE){it->type=info->fType&0x0000FF70u;it->flags=(it->flags&~0x0000FF70u)|it->type;}
+    if(info->fMask&U32_MIIM_FTYPE){it->type=info->fType&U32_MFT_TYPE_MASK;it->flags=(it->flags&~U32_MFT_TYPE_MASK)|it->type;}
     if(info->fMask&U32_MIIM_DATA)it->data=info->dwItemData;
     if(info->fMask&U32_MIIM_CHECKMARKS){it->bmp_checked=info->hbmpChecked;it->bmp_unchecked=info->hbmpUnchecked;}
     if(info->fMask&U32_MIIM_BITMAP)it->bmp_item=info->hbmpItem;

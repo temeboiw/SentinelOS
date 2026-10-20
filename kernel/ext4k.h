@@ -91,8 +91,9 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
 }
 
 /* Mutation is intentionally restricted to a small ext4-compatible subset.
- * We refuse layouts needing checksums, 64-bit descriptors, journaling recovery,
- * flex/meta block groups, or other unimplemented metadata semantics. */
+ * We refuse checksums, 64-bit descriptors, journaling, meta_bg, and unknown
+ * feature semantics. flex_bg is safe here because group bitmap locations are
+ * read from each descriptor and its block bitmap still governs allocation. */
 static int e4_can_mutate(Ext4k *fs) {
     if (!fs || !fs->ok || fs->is64 || fs->dsize != 32 ||
         fs->isize < 128 || fs->isize > 256 ||

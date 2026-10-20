@@ -812,6 +812,49 @@ static int e4_dir_has_space(uint32_t dir_ino, uint32_t name_len) {
     return 0;
 }
 
+/* Directory growth is isolated from the directory-browser state. It only
+ * supports an unindexed directory whose extent tree fits in the inode root. */
+static int e4_dir_can_grow(uint32_t dir_ino) {
+    uint8_t inode[256];
+    if (!e4_can_mutate(&g_ext4) ||
+        e4_inode(&g_ext4, dir_ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000) != 0x4000 ||
+        (E32(inode, 32) & 0x1000u)) return 0;
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0) return 0;
+    uint16_t n = E16(root, 2), max = E16(root, 4);
+    return max <= 4 && n <= max && n < max &&
+           e4_size(inode) <= 0xFFFFFFFFULL - g_ext4.blksz &&
+           E32(inode, 28) <= 0xFFFFFFFFu - g_ext4.blksz / 512u;
+}
+
+static int e4_grow_dir_one_block(uint32_t dir_ino) {
+    uint8_t inode[256];
+    if (!e4_dir_can_grow(dir_ino) ||
+        e4_inode(&g_ext4, dir_ino, inode) < 0) return -1;
+    uint64_t old_size = e4_size(inode);
+    if (old_size % g_ext4.blksz) return -1;
+    uint32_t logical = (uint32_t)(old_size / g_ext4.blksz);
+    if (e4_map(&g_ext4, inode, logical)) return -1;
+    uint64_t physical = e4_alloc_block(&g_ext4);
+    if (!physical) return -1;
+    static uint8_t block[4096];
+    for (uint32_t i = 0; i < g_ext4.blksz; ++i) block[i] = 0;
+    E16(block, 4) = (uint16_t)g_ext4.blksz; /* one reusable free dirent */
+    if (e4_write(&g_ext4, physical * g_ext4.blksz, block, g_ext4.blksz) < 0) {
+        (void)e4_free_block(&g_ext4, physical);
+        return -1;
+    }
+    if (e4_add_inline_extent(&g_ext4, inode, logical, physical) < 0) {
+        (void)e4_free_block(&g_ext4, physical);
+        return -1;
+    }
+    E32(inode, 4) = (uint32_t)(old_size + g_ext4.blksz);
+    E32(inode, 28) += g_ext4.blksz / 512u;
+    if (e4_write_inode(&g_ext4, dir_ino, inode) < 0) return -1;
+    return 0;
+}
+
 static int e4_insert_dirent(uint32_t dir_ino, const char *name, uint32_t ino, uint8_t file_type) {
     if (!e4_can_mutate(&g_ext4) || !name || !name[0]) return -1;
     uint32_t nl = 0;
@@ -858,7 +901,10 @@ static int e4_insert_dirent(uint32_t dir_ino, const char *name, uint32_t ino, ui
             o += rec;
         }
     }
-    return -1; /* no slack in existing directory blocks; no directory growth yet */
+    /* If all existing blocks are full, grow only a simple inline-extent
+       directory. Refuse indexed or external extent trees rather than corrupt them. */
+    if (e4_grow_dir_one_block(dir_ino) < 0) return -1;
+    return e4_insert_dirent(dir_ino, name, ino, file_type);
 }
 
 static uint32_t vfs_create_empty_regular(const char *path) {
@@ -921,7 +967,7 @@ static uint32_t vfs_create_empty_regular(const char *path) {
             o += rec;
         }
     }
-    if (!has_space) return 0;
+    if (!has_space && !e4_dir_can_grow(parent_ino)) return 0;
 
     uint32_t ino = e4_alloc_inode(&g_ext4, 0);
     if (!ino) return 0;

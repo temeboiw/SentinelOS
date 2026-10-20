@@ -709,21 +709,84 @@ typedef struct {
 } VfsUserHandle;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
 
+/* Path lookup for file handles. This is deliberately separate from the
+ * interactive folder listing/navigation state (vfs_ents/vfs_depth). */
+static int e4_name_equal_ci(const uint8_t *a, uint8_t alen, const char *b) {
+    uint32_t blen = 0;
+    while (b[blen] && blen < 256) blen++;
+    if (alen != blen) return 0;
+    for (uint32_t i = 0; i < alen; i++) {
+        uint8_t x = a[i], y = (uint8_t)b[i];
+        if (x >= 'A' && x <= 'Z') x = (uint8_t)(x + ('a' - 'A'));
+        if (y >= 'A' && y <= 'Z') y = (uint8_t)(y + ('a' - 'A'));
+        if (x != y) return 0;
+    }
+    return 1;
+}
+
+static uint32_t e4_lookup_ci(Ext4k *fs, uint32_t dir, const char *name) {
+    uint8_t inode[256];
+    if (!name || !name[0] || e4_inode(fs, dir, inode) < 0) return 0;
+    uint64_t size = e4_size(inode);
+    static uint8_t buf[4096];
+    for (uint64_t pos = 0; pos < size; pos += fs->blksz) {
+        uint64_t pb = e4_map(fs, inode, (uint32_t)(pos / fs->blksz));
+        if (!pb || e4_read(fs, pb * fs->blksz, buf, fs->blksz) < 0) continue;
+        for (uint32_t o = 0; o + 8 <= fs->blksz; ) {
+            uint16_t rl = E16(buf, o + 4);
+            if (rl < 8 || o + rl > fs->blksz) break;
+            uint32_t ino = E32(buf, o);
+            uint8_t nl = buf[o + 6];
+            if (ino && nl && nl <= 255 && o + 8u + nl <= fs->blksz &&
+                e4_name_equal_ci(buf + o + 8, nl, name)) return ino;
+            o += rl;
+        }
+    }
+    return 0;
+}
+
+static uint32_t vfs_resolve_user_path(const char *path) {
+    if (!g_ext4_ok || !path || !path[0]) return 0;
+    uint32_t dir = vfs_cwd_ino ? vfs_cwd_ino : 2;
+    const char *p = path;
+    /* Accept Win32 drive-rooted paths and either slash style. */
+    if (p[0] && p[1] == ':' && (p[0] == 'C' || p[0] == 'c')) {
+        p += 2;
+        dir = 2;
+    }
+    if (*p == '/' || *p == '\\') {
+        dir = 2;
+        while (*p == '/' || *p == '\\') p++;
+    }
+    while (*p) {
+        char part[256];
+        uint32_t n = 0;
+        while (*p && *p != '/' && *p != '\\') {
+            if (n + 1 >= sizeof part) return 0;
+            part[n++] = *p++;
+        }
+        while (*p == '/' || *p == '\\') p++;
+        if (!n) continue;
+        part[n] = 0;
+        if (n == 1 && part[0] == '.') continue;
+        uint32_t next = e4_lookup_ci(&g_ext4, dir, part);
+        if (!next) return 0;
+        uint8_t inode[256];
+        if (e4_inode(&g_ext4, next, inode) < 0) return 0;
+        if (*p) {
+            if ((E16(inode, 0) & 0xF000) != 0x4000) return 0;
+            dir = next;
+        } else {
+            return next;
+        }
+    }
+    return dir;
+}
+
 static int vfs_open_user_file(const char *name, uint64_t access, uint64_t disposition) {
     /* Only OPEN_EXISTING is supported until ext4 create/truncate exists. */
     if (!g_ext4_ok || !name || !name[0] || disposition != 3) return -1;
-    uint32_t ino = 0;
-    for (int i = 0; i < vfs_nent; i++) {
-        const char *a = vfs_ents[i].name, *b = name;
-        int same = 1;
-        while (*a || *b) {
-            char ca = *a++, cb = *b++;
-            if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-            if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-            if (ca != cb) { same = 0; break; }
-        }
-        if (same && !vfs_ents[i].is_dir) { ino = vfs_ents[i].ino; break; }
-    }
+    uint32_t ino = vfs_resolve_user_path(name);
     if (!ino) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, ino, inode) < 0 ||
@@ -1422,7 +1485,7 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtOpenFile: {
-        char name[64];
+        char name[256];
         if (copy_user_str(f->rdi, name, sizeof name) != 0) {
             f->rax = (uint64_t)-1LL;
             return f;

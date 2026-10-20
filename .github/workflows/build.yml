@@ -30,11 +30,23 @@ jobs:
         shell: bash
         run: |
           mkdir -p build
-          dd if=/dev/zero of=build/vars.fd bs=1M count=2 status=none
+          OVMF_CODE=""
+          OVMF_VARS=""
+          for pair in \
+            "/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd" \
+            "/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd" \
+            "/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd" \
+            "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd|/usr/share/edk2-ovmf/x64/OVMF_VARS.fd"; do
+            code="${pair%%|*}"
+            vars="${pair#*|}"
+            if [[ -f "$code" && -f "$vars" ]]; then OVMF_CODE="$code"; OVMF_VARS="$vars"; break; fi
+          done
+          if [[ -z "$OVMF_CODE" ]]; then echo "OVMF code/vars pair not found"; exit 1; fi
+          cp "$OVMF_VARS" build/vars.fd
           set +e
           timeout 35s qemu-system-x86_64 \
             -machine q35 -m 1024 \
-            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=build/vars.fd \
             -drive file=build/magic-disk.img,format=raw,if=none,id=d0 \
             -device virtio-blk-pci,drive=d0 \

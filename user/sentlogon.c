@@ -177,6 +177,7 @@ void sentlogon_main(void) {
         }
         cursor_restore(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h);
     }
+    session_loading_screen();
     NtWriteConsole("sentlogon: interactive session accepted\n");
     char name[]={'e','x','p','l','o','r','e','r','.','e','x','e',0};
     if((u64)NtCreateProcess(name)==0)NtWriteConsole("sentlogon: explorer launch failed\n");

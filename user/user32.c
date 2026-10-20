@@ -94,7 +94,7 @@ typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
 static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
-static unsigned char u32_key_state[256]; static DWORD u32_display_affinity,u32_layered_color,u32_layered_flags; static unsigned char u32_layered_alpha; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
+static unsigned char u32_key_state[256]; static int u32_process_dpi_awareness=1; static void *u32_thread_dpi_context=(void *)-2; static DWORD u32_display_affinity,u32_layered_color,u32_layered_flags; static unsigned char u32_layered_alpha; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
 typedef struct { void *hwnd; int setting; DWORD flags,size; unsigned char data[64]; int used; } U32_FEEDBACK_SETTING;
 static U32_FEEDBACK_SETTING u32_feedback_settings[16];
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
@@ -2098,13 +2098,19 @@ __attribute__((dllexport)) DWORD GetListBoxInfo(void *hwnd){return IsWindow(hwnd
 
 __attribute__((dllexport)) DWORD GetWindowModuleFileName(void *hwnd,char *out,DWORD cap){return GetWindowModuleFileNameA(hwnd,out,cap);}
 
-__attribute__((dllexport)) void *GetWindowDpiAwarenessContext(void *hwnd){return IsWindow(hwnd)?(void *)1:0;}
+static int u32_dpi_context_awareness(void *context) {
+    if(context==(void*)-1||context==(void*)-5)return 0;
+    if(context==(void*)-2)return 1;
+    if(context==(void*)-3||context==(void*)-4)return 2;
+    return -1;
+}
+__attribute__((dllexport)) void *GetWindowDpiAwarenessContext(void *hwnd){return IsWindow(hwnd)?u32_thread_dpi_context:0;}
 
-__attribute__((dllexport)) BOOL AreDpiAwarenessContextsEqual(void *a,void *b){return a==b;}
+__attribute__((dllexport)) BOOL AreDpiAwarenessContextsEqual(void *a,void *b){return u32_dpi_context_awareness(a)>=0&&u32_dpi_context_awareness(b)>=0&&a==b;}
 
-__attribute__((dllexport)) int GetAwarenessFromDpiAwarenessContext(void *context){return context?1:-1;}
+__attribute__((dllexport)) int GetAwarenessFromDpiAwarenessContext(void *context){return u32_dpi_context_awareness(context);}
 
-__attribute__((dllexport)) int GetProcessDpiAwareness(HANDLE process,int *awareness){if(!awareness||(process!=(void*)-1&&process!=(void*)1))return 0;*awareness=1;return 0;}
+__attribute__((dllexport)) int GetProcessDpiAwareness(HANDLE process,int *awareness){if(!awareness||(process!=(void*)-1&&process!=(void*)1))return (int)0x80070057u;*awareness=u32_process_dpi_awareness;return 0;}
 
 __attribute__((dllexport)) BOOL SetPropA(void *hwnd,const char *name,void *data){if(!IsWindow(hwnd)||!name||!name[0])return 0;int free_slot=-1;for(int i=0;i<32;i++){if(u32_props[i].used&&u32_props[i].hwnd==hwnd){int j=0;while(name[j]&&u32_props[i].name[j]==name[j])j++;if(!name[j]&&!u32_props[i].name[j]){u32_props[i].data=data;return 1;}}if(!u32_props[i].used&&free_slot<0)free_slot=i;}if(free_slot<0)return 0;u32_props[free_slot].used=1;u32_props[free_slot].hwnd=hwnd;u32_props[free_slot].data=data;int j=0;while(name[j]&&j<47){u32_props[free_slot].name[j]=name[j];j++;}u32_props[free_slot].name[j]=0;return 1;} 
 
@@ -2179,13 +2185,13 @@ __attribute__((dllexport)) long GetDpiForMonitor(void *monitor,int type,unsigned
 
 __attribute__((dllexport)) BOOL EnableNonClientDpiScaling(void *hwnd){return IsWindow(hwnd);}
 
-__attribute__((dllexport)) void *SetThreadDpiAwarenessContext(void *context){static void *current=(void *)1;void *old=current;current=context;return old;}
+__attribute__((dllexport)) void *SetThreadDpiAwarenessContext(void *context){if(u32_dpi_context_awareness(context)<0)return 0;void *old=u32_thread_dpi_context;u32_thread_dpi_context=context;return old;}
 
-__attribute__((dllexport)) void *GetThreadDpiAwarenessContext(void){return (void *)1;}
+__attribute__((dllexport)) void *GetThreadDpiAwarenessContext(void){return u32_thread_dpi_context;}
 
-__attribute__((dllexport)) unsigned int GetDpiFromDpiAwarenessContext(void *context){return context?96:0;}
+__attribute__((dllexport)) unsigned int GetDpiFromDpiAwarenessContext(void *context){return u32_dpi_context_awareness(context)>=0?96u:0u;}
 
-__attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){return context!=0;}
+__attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){int awareness=u32_dpi_context_awareness(context);if(awareness<0)return 0;u32_process_dpi_awareness=awareness;u32_thread_dpi_context=context;return 1;}
 
 static int u32_station_inherit,u32_desktop_inherit;
 #define U32_WINSTA_HANDLE ((void *)0x1100)
@@ -2357,9 +2363,9 @@ __attribute__((dllexport)) void *RegisterDeviceNotificationW(void *recipient,voi
 
 __attribute__((dllexport)) BOOL UnregisterDeviceNotification(void *handle){return handle!=0;}
 
-__attribute__((dllexport)) BOOL SetProcessDPIAware(void){return 1;}
+__attribute__((dllexport)) BOOL SetProcessDPIAware(void){u32_process_dpi_awareness=1;u32_thread_dpi_context=(void*)-2;return 1;}
 
-__attribute__((dllexport)) BOOL IsProcessDPIAware(void){return 1;}
+__attribute__((dllexport)) BOOL IsProcessDPIAware(void){return u32_process_dpi_awareness!=0;}
 
 __attribute__((dllexport)) BOOL SetThreadDesktop(void *desktop){if(desktop!=U32_DESKTOP_HANDLE)return 0;u32_thread_desktop=desktop;return 1;}
 

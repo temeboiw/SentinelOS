@@ -29,6 +29,8 @@ typedef int (*InvalidateRect_t)(void *, void *, int);
 #define PATH_SIZE  64
 #define DATA_SIZE  256
 
+typedef struct { int left, top, right, bottom; } CMD_RECT;
+
 typedef struct {
     char path[PATH_SIZE];
     int used;
@@ -124,7 +126,13 @@ static void redraw_prompt(void) {
     line[n] = 0;
 
     if (g_text) g_text(g_window, 0, g_line_count, line, -1);
-    if (g_invalidate) g_invalidate(g_window, 0, 1);
+    /* Typing changes only the prompt row. Do not invalidate the entire client
+       area: USER32 composes the desktop behind every invalidated pixel. */
+    if (g_invalidate) {
+        CMD_RECT dirty = { 0, 40 + g_line_count * 16,
+                           640, 40 + (g_line_count + 1) * 16 };
+        g_invalidate(g_window, &dirty, 0);
+    }
 }
 
 /* Canonicalize a shell path into a root-relative path using backslashes. */
@@ -329,12 +337,20 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, cls, dir, mkdir, echo, cat, exit");
+        print_line("Commands: help, ver, ipconfig, cls, dir, mkdir, echo, cat, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
     } else if (equals(cmd, "ver")) {
         print_line("SentinelOS [experimental x86-64]");
+    } else if (equals(cmd, "ipconfig")) {
+        print_line("SentinelOS IP Configuration");
+        print_line("Ethernet adapter: no network interface registered");
+        print_line("IPv4 address . . . : not configured");
+        print_line("Subnet mask . . .  : none");
+        print_line("Default gateway .  : none");
+        print_line("DNS servers . . .  : none");
+        print_line("DHCP . . . . . .  : unavailable (network driver/IP stack missing)");
     } else if (equals(cmd, "cls") || equals(cmd, "clear")) {
         g_line_count = 0;
         for (int i = 0; i < LINE_COUNT; i++) g_lines[i][0] = 0;

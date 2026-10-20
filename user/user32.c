@@ -1226,6 +1226,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                      * footprint immediately restores that fresh cursor's
                      * underlay and can make the cursor blink/disappear. */
                     compose_region(prev_mx,prev_my,prev_mx+16,prev_my+16);
+                    /* Explicitly present the cursor after restoring the
+                     * caller's clip state. The scene repaint may have reset
+                     * cursor bookkeeping while the cursor itself was drawn
+                     * outside the dirty rectangle. */
+                    present_cursor_only();
                     u32_render_clip=was_clipped;
                     u32_clip_x0=old_x0; u32_clip_y0=old_y0;
                     u32_clip_x1=old_x1; u32_clip_y1=old_y1;

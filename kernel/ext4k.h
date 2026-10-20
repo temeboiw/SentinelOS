@@ -45,8 +45,16 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     uint8_t sb[1024];
     fs->part_off = part_lba * 512;
     fs->ok = 0;
-    if (e4_read(fs, 1024, sb, 1024) < 0) return -1;
-    if (E16(sb, 56) != 0xEF53) return -1;
+    if (e4_read(fs, 1024, sb, 1024) < 0) {
+        DbgPrint("ext4: superblock read failed at lba=%llu\n",
+                 (unsigned long long)part_lba);
+        return -1;
+    }
+    if (E16(sb, 56) != 0xEF53) {
+        DbgPrint("ext4: bad magic at lba=%llu value=0x%x\n",
+                 (unsigned long long)part_lba, E16(sb, 56));
+        return -1;
+    }
     fs->blksz = 1024u << E32(sb, 24);
     fs->inode_count = E32(sb, 0);
     fs->blocks_count = E32(sb, 4);
@@ -62,7 +70,11 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     fs->is64 = (fs->feature_incompat & 0x80) != 0;
     fs->dsize = fs->is64 ? E16(sb, 254) : 32;
     if (!fs->dsize) fs->dsize = 32;
-    if (fs->blksz > 4096 || !fs->ipg) return -1;
+    if (fs->blksz > 4096 || !fs->ipg) {
+        DbgPrint("ext4: unsupported superblock block_size=%u inodes_per_group=%u\n",
+                 fs->blksz, fs->ipg);
+        return -1;
+    }
     fs->ok = 1;
     return 0;
 }

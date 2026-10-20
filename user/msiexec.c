@@ -18,6 +18,10 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 #define MAX_DIR (256u * 1024u)
 #define MAX_MINIFAT 262144u
 #define MAX_MINI_STREAM (8u * 1024u * 1024u)
+#define MAX_TABLE_STREAM (8u * 1024u * 1024u)
+#define MSI_MAX_STRINGS 65536u
+#define MSI_MAX_TABLES 512u
+#define MSI_MAX_COLUMNS 4096u
 #define MINI_SECTOR_SIZE 64u
 #define FREE_SECTOR 0xFFFFFFFFu
 #define END_OF_CHAIN 0xFFFFFFFEu
@@ -33,8 +37,18 @@ static u8 dir_buffer[MAX_DIR];
 /* CFB mini-stream storage is separate from the main FAT stream space. */
 static u32 mini_fat[MAX_MINIFAT];
 static u8 mini_stream[MAX_MINI_STREAM];
+static u8 table_buffer[MAX_TABLE_STREAM];
+static u8 string_data[MAX_TABLE_STREAM];
+static u32 string_offset[MSI_MAX_STRINGS], string_length[MSI_MAX_STRINGS];
+static u32 string_count, string_data_size;
 static u32 mini_fat_count, mini_stream_size, mini_sector_count;
-static u32 fat_count, sector_size, sector_count, mini_cutoff;
+static u32 fat_count, sector_size, sector_count, mini_cutoff, directory_bytes;
+static u32 msi_table_count, msi_column_count, msi_codepage;
+static int msi_long_refs, msi_db_ok;
+typedef struct { char name[64]; u32 rows, columns, row_size, stream_size; } MsiTable;
+typedef struct { char table[64], name[64]; u16 type, number; u8 width; } MsiColumn;
+static MsiTable msi_tables[MSI_MAX_TABLES];
+static MsiColumn msi_columns[MSI_MAX_COLUMNS];
 static const u8 *file_bytes;
 static u32 file_size;
 
@@ -180,15 +194,165 @@ static u32 read_entry_stream(const u8 *e, u8 *dst, u32 cap) {
     return read_chain(rd32(e+116),dst,size);
 }
 
-static void print_stream_name(const u8 *e) {
+static int msi_name_value(u16 c) {
+    if (c>='0' && c<='9') return c-'0';
+    if (c>='A' && c<='Z') return c-'A'+10;
+    if (c>='a' && c<='z') return c-'a'+36;
+    if (c=='.') return 62;
+    if (c=='_') return 63;
+    return -1;
+}
+static char msi_name_char(u32 v) {
+    static const char alphabet[]="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._";
+    return alphabet[v&63u];
+}
+static u32 decode_stream_name(const u8 *e, char *dst, u32 cap, int *is_table) {
     u16 chars=rd16(e+64)/2;
-    if (chars>32) chars=32;
-    for (u16 i=0;i+1<chars;i++) {
+    if (!chars || chars>32 || cap<2) return 0;
+    u32 outn=0, i=0;
+    if (rd16(e)==0x4840) { if (is_table) *is_table=1; i=1; }
+    else if (is_table) *is_table=0;
+    for (; i+1<chars && outn+2<cap; i++) {
         u16 ch=rd16(e+i*2);
-        char b[2];
-        b[0]=(ch>=32 && ch<127)?(char)ch:'?'; b[1]=0;
-        out(b);
+        if (ch>=0x3800 && ch<0x4800) {
+            u32 v=ch-0x3800;
+            dst[outn++]=msi_name_char(v&63u);
+            dst[outn++]=msi_name_char((v>>6)&63u);
+        } else if (ch>=0x4800 && ch<0x4840) {
+            dst[outn++]=msi_name_char(ch-0x4800);
+        } else {
+            dst[outn++]=(ch>=32 && ch<127)?(char)ch:'?';
+        }
     }
+    dst[outn]=0;
+    return outn;
+}
+static void print_stream_name(const u8 *e) {
+    char name[96];
+    (void)decode_stream_name(e,name,sizeof(name),0);
+    out(name);
+}
+static int same_name(const char *a, const char *b) {
+    u32 i=0;
+    if (!a || !b) return 0;
+    while (a[i] && b[i] && a[i]==b[i]) i++;
+    return a[i]==0 && b[i]==0;
+}
+static const u8 *find_stream_entry(const char *name, int table_stream) {
+    for (u32 off=0; off+128<=directory_bytes; off+=128) {
+        const u8 *e=dir_buffer+off;
+        if (e[66]!=2) continue;
+        char decoded[96]; int is_table=0;
+        (void)decode_stream_name(e,decoded,sizeof(decoded),&is_table);
+        if (is_table==table_stream && same_name(decoded,name)) return e;
+    }
+    return 0;
+}
+static u32 read_named_stream(const char *name, int table_stream, u8 *dst, u32 cap) {
+    const u8 *e=find_stream_entry(name,table_stream);
+    if (!e) return 0;
+    return read_entry_stream(e,dst,cap);
+}
+static u32 msi_string_width(void) { return msi_long_refs?3u:2u; }
+static u32 read_string_ref(const u8 *p) {
+    return msi_long_refs ? ((u32)p[0]|((u32)p[1]<<8)|((u32)p[2]<<16)) : rd16(p);
+}
+static int msi_string(u32 id, char *dst, u32 cap) {
+    if (!dst || !cap) return 0;
+    dst[0]=0;
+    if (!id) return 1;
+    if (id>string_count) return 0;
+    u32 off=string_offset[id-1], len=string_length[id-1];
+    if (off>string_data_size || len>string_data_size-off) return 0;
+    u32 n=len;
+    if (n>=cap) n=cap-1;
+    for (u32 i=0;i<n;i++) {
+        u8 c=string_data[off+i];
+        dst[i]=(c>=32 && c<127)?(char)c:'?';
+    }
+    dst[n]=0;
+    return 1;
+}
+static int parse_msi_string_pool(void) {
+    u32 pool_size=read_named_stream("_StringPool",1,table_buffer,MAX_TABLE_STREAM);
+    if (pool_size<4) return 0;
+    string_data_size=read_named_stream("_StringData",1,string_data,MAX_TABLE_STREAM);
+    if (!string_data_size) return 0;
+    msi_codepage=rd16(table_buffer);
+    msi_long_refs=(rd16(table_buffer+2)&0x8000u)!=0;
+    string_count=0;
+    u32 pos=4, data_pos=0;
+    while (pos+4<=pool_size && string_count<MSI_MAX_STRINGS) {
+        u32 len=rd16(table_buffer+pos);
+        u32 refs=rd16(table_buffer+pos+2);
+        pos+=4;
+        if (!len && refs) {
+            if (pos+4>pool_size) return 0;
+            len=rd32(table_buffer+pos);
+            pos+=4;
+        }
+        if (len>string_data_size-data_pos) return 0;
+        string_offset[string_count]=data_pos;
+        string_length[string_count]=len;
+        string_count++;
+        data_pos+=len;
+    }
+    return pos==pool_size || pool_size-pos<4;
+}
+static u8 msi_column_width(u16 type) {
+    if ((type&0x0800u) && !(type&0x0400u)) return 2; /* binary/object cell */
+    if (type&0x0800u) return (u8)msi_string_width();
+    return ((type&0xFFu)==4u)?4u:2u;
+}
+static int parse_msi_catalog(void) {
+    if (!parse_msi_string_pool()) return 0;
+    u32 tables_size=read_named_stream("_Tables",1,table_buffer,MAX_TABLE_STREAM);
+    u32 sw=msi_string_width();
+    if (!tables_size || tables_size%sw) return 0;
+    msi_table_count=0;
+    for (u32 pos=0; pos<tables_size && msi_table_count<MSI_MAX_TABLES; pos+=sw) {
+        u32 id=read_string_ref(table_buffer+pos);
+        MsiTable *t=&msi_tables[msi_table_count];
+        if (!msi_string(id,t->name,sizeof(t->name)) || !t->name[0]) return 0;
+        t->rows=t->columns=t->row_size=t->stream_size=0;
+        msi_table_count++;
+    }
+    u32 cols_size=read_named_stream("_Columns",1,table_buffer,MAX_TABLE_STREAM);
+    u32 col_row_size=2u*sw+4u;
+    if (!cols_size || cols_size%col_row_size) return 0;
+    u32 rows=cols_size/col_row_size;
+    if (rows>MSI_MAX_COLUMNS) return 0;
+    msi_column_count=rows;
+    const u8 *table_col=table_buffer;
+    const u8 *number_col=table_col+rows*sw;
+    const u8 *name_col=number_col+rows*2;
+    const u8 *type_col=name_col+rows*sw;
+    for (u32 i=0;i<rows;i++) {
+        MsiColumn *c=&msi_columns[i];
+        if (!msi_string(read_string_ref(table_col+i*sw),c->table,sizeof(c->table)) ||
+            !msi_string(read_string_ref(name_col+i*sw),c->name,sizeof(c->name))) return 0;
+        c->number=(u16)(rd16(number_col+i*2)^0x8000u);
+        c->type=(u16)(rd16(type_col+i*2)^0x8000u);
+        c->width=msi_column_width(c->type);
+        if (!c->table[0] || !c->name[0] || !c->width) return 0;
+    }
+    for (u32 i=0;i<msi_table_count;i++) {
+        MsiTable *t=&msi_tables[i];
+        for (u32 j=0;j<msi_column_count;j++) if (same_name(msi_columns[j].table,t->name)) {
+            t->columns++;
+            t->row_size+=msi_columns[j].width;
+        }
+        const u8 *e=find_stream_entry(t->name,1);
+        if (e) {
+            u64 sz=rd64(e+120);
+            if (sz>0xFFFFFFFFu) return 0;
+            t->stream_size=(u32)sz;
+            if (t->row_size && sz%t->row_size) return 0;
+            t->rows=t->row_size?(u32)(sz/t->row_size):0;
+        }
+    }
+    msi_db_ok=1;
+    return 1;
 }
 static void inspect_msi(void) {
     static const u8 signature[8]={0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1};
@@ -210,9 +374,9 @@ static void inspect_msi(void) {
     if (!mini_cutoff) mini_cutoff=4096;
     u32 dir_sid=rd32(file_bytes+48);
     u8 *dir=dir_buffer;
-    u32 dir_bytes=read_chain(dir_sid,dir,MAX_DIR);
-    if (dir_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
-    if (!load_mini_stream(dir,dir_bytes)) {
+    directory_bytes=read_chain(dir_sid,dir,MAX_DIR);
+    if (directory_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
+    if (!load_mini_stream(dir,directory_bytes)) {
         out("msiexec: mini-stream metadata is unsupported or exceeds limits\n");
         return;
     }
@@ -237,7 +401,21 @@ static void inspect_msi(void) {
     msi_entry_count=count;
     out("Entries: "); out_u32(count); out("\n");
     out("CFB mini-streams: readable\n");
-    out("MSI table decoding and installation actions are still pending; no files were changed.\n");
+    if (parse_msi_catalog()) {
+        out("MSI database catalog: decoded\n");
+        out("Code page: "); out_u32(msi_codepage); out("\n");
+        out("String references: "); out_u32(string_count); out("\n");
+        out("Tables: "); out_u32(msi_table_count); out("\n");
+        out("Columns: "); out_u32(msi_column_count); out("\n");
+        for (u32 i=0;i<msi_table_count;i++) {
+            out("  "); out(msi_tables[i].name); out(": ");
+            out_u32(msi_tables[i].rows); out(" rows, ");
+            out_u32(msi_tables[i].columns); out(" columns\n");
+        }
+    } else {
+        out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
+    }
+    out("File extraction, install sequencing, and writable storage are still pending; no files were changed.\n");
     out("Custom actions were not executed.\n");
 }
 typedef struct {
@@ -305,15 +483,14 @@ static void show_installer_window(const char *name) {
     }
     entries[en]=0;
     msi_ui_line(text,hwnd,10,entries);
-    msi_ui_line(text,hwnd,11,"Installation: NOT STARTED");
-    msi_ui_line(text,hwnd,12,"");
-    msi_ui_line(text,hwnd,13,"This build reads the MSI container, but is not yet a");
-    msi_ui_line(text,hwnd,14,"Windows Installer engine. MSI tables, authored UI,");
-    msi_ui_line(text,hwnd,15,"file/component actions, rollback, and custom actions");
-    msi_ui_line(text,hwnd,16,"are not implemented. Install is intentionally disabled");
-    msi_ui_line(text,hwnd,17,"to avoid leaving a partial installation.");
-    msi_ui_line(text,hwnd,18,"");
-    msi_ui_line(text,hwnd,19,"Press Esc or click X to close.");
+    msi_ui_line(text,hwnd,11,msi_db_ok?"MSI database catalog: DECODED":"MSI database catalog: UNSUPPORTED");
+    msi_ui_line(text,hwnd,12,"Installation: NOT STARTED");
+    msi_ui_line(text,hwnd,13,"This build reads the container and decodes the table catalog.");
+    msi_ui_line(text,hwnd,14,"File extraction, component state, install sequences,");
+    msi_ui_line(text,hwnd,15,"rollback, and safe writable storage are not yet implemented.");
+    msi_ui_line(text,hwnd,16,"No files have been changed.");
+    msi_ui_line(text,hwnd,17,"");
+    msi_ui_line(text,hwnd,18,"Press Esc or click X to close.");
     (void)invalidate(hwnd,0,1);
     MSI_MSG msg;
     for (;;) {

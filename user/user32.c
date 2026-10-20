@@ -714,14 +714,22 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
     return 1;
 }
 
+static U32_RECT u32_invalid_rect;
+static int u32_update_pending;
+static BOOL u32_update_erase;
 __attribute__((dllexport))
 BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
-    (void)hwnd;
-    (void)rc;
-    (void)erase;
-
-    compose();
-    return 1;
+    if(hwnd&&!IsWindow(hwnd))return 0;
+    U32_RECT r;
+    if(rc)r=*(const U32_RECT*)rc;
+    else {r.left=0;r.top=0;r.right=g_wnd.visible?g_wnd.w:(int)g_fw;r.bottom=g_wnd.visible?g_wnd.h-32:(int)g_fh;}
+    if(r.left<0)r.left=0;if(r.top<0)r.top=0;
+    int maxw=g_wnd.visible?g_wnd.w:(int)g_fw,maxh=g_wnd.visible?g_wnd.h-32:(int)g_fh;
+    if(r.right>maxw)r.right=maxw;if(r.bottom>maxh)r.bottom=maxh;
+    if(r.right<=r.left||r.bottom<=r.top)return 1;
+    if(!u32_update_pending)u32_invalid_rect=r;
+    else {if(r.left<u32_invalid_rect.left)u32_invalid_rect.left=r.left;if(r.top<u32_invalid_rect.top)u32_invalid_rect.top=r.top;if(r.right>u32_invalid_rect.right)u32_invalid_rect.right=r.right;if(r.bottom>u32_invalid_rect.bottom)u32_invalid_rect.bottom=r.bottom;}
+    u32_update_pending=1;if(erase)u32_update_erase=1;compose();return 1;
 }
 
 __attribute__((dllexport))
@@ -1084,8 +1092,9 @@ __attribute__((dllexport)) void *GetDesktopWindow(void) { return (void *)2; }
 __attribute__((dllexport)) void *GetDC(void *hwnd) { (void)hwnd; ensure_fb(); return g_front ? (void *)1 : (void *)0; }
 __attribute__((dllexport)) int ReleaseDC(void *hwnd, void *dc) { (void)hwnd; (void)dc; return 1; }
 __attribute__((dllexport)) void *BeginPaint(void *hwnd, U32_PAINTSTRUCT *ps) {
-    (void)hwnd; if (!ps) return (void *)0; ps->hdc=GetDC(hwnd); ps->erase=0;
-    ps->paint.left=0; ps->paint.top=0; ps->paint.right=(int)g_fw; ps->paint.bottom=(int)g_fh; return ps->hdc;
+    if(!IsWindow(hwnd)||!ps)return 0;ps->hdc=GetDC(hwnd);ps->erase=u32_update_erase;
+    if(u32_update_pending)ps->paint=u32_invalid_rect;else{ps->paint.left=0;ps->paint.top=0;ps->paint.right=g_wnd.w;ps->paint.bottom=g_wnd.h-32;}
+    ps->restore=0;ps->inc_update=0;u32_update_pending=0;u32_update_erase=0;return ps->hdc;
 }
 __attribute__((dllexport)) BOOL EndPaint(void *hwnd, const U32_PAINTSTRUCT *ps) {
     (void)hwnd; (void)ps; compose(); return 1;
@@ -1168,7 +1177,9 @@ __attribute__((dllexport)) BOOL ScrollWindow(void *hwnd, int dx, int dy, const U
     (void)hwnd; (void)dx; (void)dy; (void)scroll; (void)clip; compose(); return 1;
 }
 __attribute__((dllexport)) BOOL GetUpdateRect(void *hwnd, U32_RECT *r, BOOL erase) {
-    (void)hwnd; (void)erase; if (r) { r->left=0; r->top=0; r->right=0; r->bottom=0; } return 0;
+    if(!IsWindow(hwnd)||!r){if(r)r->left=r->top=r->right=r->bottom=0;return 0;}
+    if(!u32_update_pending){r->left=r->top=r->right=r->bottom=0;return 0;}
+    *r=u32_invalid_rect;if(erase&&u32_update_erase)compose();return 1;
 }
 __attribute__((dllexport)) void *SetFocus(void *hwnd) { void *old=u32_focus; u32_focus=hwnd; return old; }
 __attribute__((dllexport)) void *GetFocus(void) { return u32_focus; }
@@ -1653,7 +1664,7 @@ __attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){
 __attribute__((dllexport)) BOOL IsZoomed(void *hwnd){return IsWindow(hwnd)&&g_wnd.x<=0&&g_wnd.y<=0&&g_wnd.w>=(int)g_fw&&g_wnd.h>=(int)g_fh;}
 __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
 __attribute__((dllexport)) BOOL UnregisterClassW(const U32_WCHAR *name,void *instance){char n[128];u32_wide_to_ansi(n,sizeof(n),name);return UnregisterClassA(n,instance);}
-__attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}
+__attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){if(!IsWindow(hwnd))return 0;if(!rect||(u32_update_pending&&rect->left<=u32_invalid_rect.left&&rect->top<=u32_invalid_rect.top&&rect->right>=u32_invalid_rect.right&&rect->bottom>=u32_invalid_rect.bottom)){u32_update_pending=0;u32_update_erase=0;}return 1;}
 
 __attribute__((dllexport)) long long GetMessageExtraInfo(void){return u32_message_extra_info;}
 

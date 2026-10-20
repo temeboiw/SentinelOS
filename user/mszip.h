@@ -2,7 +2,7 @@
 /* Bounded raw-DEFLATE decoder used by CAB MSZIP folders. Types u8/u16/u32 must be defined first. */
 typedef struct { const u8 *p; u32 n, pos, bits, bitbuf; } CabBits;
 typedef struct { u16 count[16], symbol[288]; } CabHuff;
-static u8 cab_window[32768], cab_out[32768], cab_comp[65536];
+static u8 cab_window[32768], cab_out[32768];
 static u32 cab_wpos, cab_wcount, cab_outlen;
 
 static int cab_bits(CabBits *b, u32 n, u32 *v) {

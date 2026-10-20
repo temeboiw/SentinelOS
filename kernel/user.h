@@ -45,6 +45,12 @@
 #define USER_VM_ALLOCATION_MAX 64
 typedef struct { KPROCESS *process; uint64_t base,size; int used; } UserVmAllocation;
 static UserVmAllocation user_vm_allocations[USER_VM_ALLOCATION_MAX];
+static void user_vm_forget_process(KPROCESS *proc) {
+    if(!proc)return;
+    for(int i=0;i<USER_VM_ALLOCATION_MAX;i++)if(user_vm_allocations[i].used&&user_vm_allocations[i].process==proc) {
+        user_vm_allocations[i].used=0;user_vm_allocations[i].process=0;user_vm_allocations[i].base=0;user_vm_allocations[i].size=0;
+    }
+}
 
 static uint8_t user_kstack[16 * 1024] __attribute__((aligned(16)));
 static uint64_t user_saved_ksp, user_saved_rip;
@@ -1172,6 +1178,7 @@ static Frame *syscall_handler(Frame *f) {
             }
             PspForgetUserImages(dying);
             PspForgetDiskModule(dying);
+            user_vm_forget_process(dying);
             MmDeleteAddressSpace(dying);
         }
 

@@ -1578,7 +1578,7 @@ static Frame *syscall_handler(Frame *f) {
         } UserMemoryBasicInformation;
         KPROCESS *caller=MmCurrentProcess;
         uint64_t address=f->rdi,out=f->rsi,length=f->rdx;
-        if(!caller||address<0x10000ULL||address>=0x0000800000000000ULL||
+        if(!caller||address>=0x0000800000000000ULL||
            length<sizeof(UserMemoryBasicInformation)||
            !MmValidateUserRange(caller,out,sizeof(UserMemoryBasicInformation),1)){f->rax=0;return f;}
         uint64_t page=address&~0xFFFULL,pte=MmLookupUserPte(caller,page,0);

@@ -2319,9 +2319,40 @@ __attribute__((dllexport)) unsigned int GetRawInputData(void *raw,unsigned int c
 
 __attribute__((dllexport)) unsigned int GetRawInputBuffer(void *data,unsigned int *size,unsigned int header){(void)data;(void)header;if(size)*size=0;return 0xFFFFFFFFu;}
 
-__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoA(void *device,unsigned int command,void *data,unsigned int *size){(void)device;(void)command;(void)data;if(size)*size=0;return 0xFFFFFFFFu;}
+__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoA(void *device,unsigned int command,void *data,unsigned int *size){
+    typedef struct { unsigned int cbSize,dwType; union { struct { unsigned int dwId,dwNumberOfButtons,dwSampleRate,fHasHorizontalWheel; } mouse; unsigned char raw[16]; } u; } U32_RID_DEVICE_INFO;
+    static const char name[]="\\\\?\\HID#VID_0000&PID_0000#SENTINELOS_MOUSE";
+    if(device!=(void*)0x200||!size)return 0xFFFFFFFFu;
+    if(command==0x20000007u){
+        unsigned int need=sizeof(name);
+        if(!data){*size=need;return need-1;}
+        if(*size<need){*size=need;return 0xFFFFFFFFu;}
+        for(unsigned int i=0;i<need;i++)((char*)data)[i]=name[i];
+        *size=need;
+        return need-1;
+    }
+    if(command==0x2000000Bu){
+        unsigned int need=sizeof(U32_RID_DEVICE_INFO);
+        if(!data||*size<need){*size=need;return 0xFFFFFFFFu;}
+        U32_RID_DEVICE_INFO *info=(U32_RID_DEVICE_INFO*)data;
+        info->cbSize=need;info->dwType=0;info->u.mouse.dwId=0;
+        info->u.mouse.dwNumberOfButtons=3;info->u.mouse.dwSampleRate=60;
+        info->u.mouse.fHasHorizontalWheel=0;*size=need;return 0;
+    }
+    *size=0;return 0xFFFFFFFFu;
+}
 
-__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoW(void *device,unsigned int command,void *data,unsigned int *size){return GetRawInputDeviceInfoA(device,command,data,size);}
+__attribute__((dllexport)) unsigned int GetRawInputDeviceInfoW(void *device,unsigned int command,void *data,unsigned int *size){
+    if(command!=0x20000007u)return GetRawInputDeviceInfoA(device,command,data,size);
+    static const char name[]="\\\\?\\HID#VID_0000&PID_0000#SENTINELOS_MOUSE";
+    unsigned int chars=sizeof(name);
+    if(device!=(void*)0x200||!size)return 0xFFFFFFFFu;
+    if(!data){*size=chars;return chars-1;}
+    if(*size<chars){*size=chars;return 0xFFFFFFFFu;}
+    unsigned short *out=(unsigned short*)data;
+    for(unsigned int i=0;i<chars;i++)out[i]=(unsigned char)name[i];
+    *size=chars;return chars-1;
+}
 
 __attribute__((dllexport)) unsigned int GetRawInputDeviceList(void *list,unsigned int *count,unsigned int size){
     typedef struct { void *hDevice; unsigned int dwType; } U32_RAWINPUTDEVICELIST;

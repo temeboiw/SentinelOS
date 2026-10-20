@@ -69,6 +69,7 @@ static long u32_class_style; static void *u32_class_proc;
 static long u32_class_extra[2];
 static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
 static unsigned int u32_double_click_time=500;
+static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
 static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
@@ -1414,12 +1415,20 @@ __attribute__((dllexport)) int GetMenuStringA(void *menu, unsigned int item, cha
 __attribute__((dllexport)) BOOL SetMenuDefaultItem(void *menu, unsigned int item, unsigned int by_position) { U32_MENUDATA *m=u32_menu_data(menu); if (!m) return 0; int i=u32_menu_index(m,item,by_position!=0); if (i<0) return 0; m->default_pos=i; return 1; }
 __attribute__((dllexport)) unsigned int GetMenuDefaultItem(void *menu, unsigned int by_position, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); (void)flags; if (!m || m->default_pos<0 || m->default_pos>=m->count) return 0xFFFFFFFFu; return by_position ? (unsigned int)m->default_pos : (unsigned int)m->items[m->default_pos].id; }
 __attribute__((dllexport)) void *GetSystemMenu(void *hwnd, BOOL revert) { if (!IsWindow(hwnd)) return 0; if (revert) { if (u32_system_menu) DestroyMenu(u32_system_menu); u32_system_menu=0; } if (!u32_system_menu) u32_system_menu=CreateMenu(); return u32_system_menu; }
-__attribute__((dllexport)) unsigned long long GetScrollInfo(void) { return 0; }
+__attribute__((dllexport)) BOOL GetScrollInfo(void *hwnd,int bar,U32_SCROLLINFO *info){
+    if(!IsWindow(hwnd)||!info||(bar!=0&&bar!=1)||info->cbSize<sizeof(U32_SCROLLINFO))return 0;
+    int i=bar==0?0:1;
+    if(info->fMask&1u){info->nMin=u32_scroll_min[i];info->nMax=u32_scroll_max[i];}
+    if(info->fMask&2u)info->nPage=(unsigned int)u32_scroll_page[i];
+    if(info->fMask&4u)info->nPos=u32_scroll_pos[i];
+    if(info->fMask&16u)info->nTrackPos=u32_scroll_pos[i];
+    return 1;
+}
 
 
 /* Additional Win32 entry points. These ABI placeholders are intentionally conservative;
    replace with OS-backed implementations as the corresponding subsystems mature. */
-__attribute__((dllexport)) int SetScrollInfo(void *hwnd,int bar,const U32_SCROLLINFO *info,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||!info||(bar!=0&&bar!=1)||info->cbSize<sizeof(U32_SCROLLINFO))return 0;int i=bar==0?0:1,old=u32_scroll_pos[i];if(info->fMask&1u)u32_scroll_min[i]=info->nMin;if(info->fMask&2u)u32_scroll_max[i]=info->nMax;if(info->fMask&4u)u32_scroll_page[i]=(int)info->nPage;if(info->fMask&8u)u32_scroll_pos[i]=info->nPos;if(u32_scroll_pos[i]<u32_scroll_min[i])u32_scroll_pos[i]=u32_scroll_min[i];if(u32_scroll_pos[i]>u32_scroll_max[i])u32_scroll_pos[i]=u32_scroll_max[i];return old;}
+__attribute__((dllexport)) int SetScrollInfo(void *hwnd,int bar,const U32_SCROLLINFO *info,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||!info||(bar!=0&&bar!=1)||info->cbSize<sizeof(U32_SCROLLINFO))return 0;int i=bar==0?0:1,old=u32_scroll_pos[i];if(info->fMask&1u){u32_scroll_min[i]=info->nMin;u32_scroll_max[i]=info->nMax;}if(info->fMask&2u)u32_scroll_page[i]=(int)info->nPage;if(info->fMask&4u)u32_scroll_pos[i]=info->nPos;if(u32_scroll_pos[i]<u32_scroll_min[i])u32_scroll_pos[i]=u32_scroll_min[i];if(u32_scroll_pos[i]>u32_scroll_max[i])u32_scroll_pos[i]=u32_scroll_max[i];return old;}
 __attribute__((dllexport)) BOOL ShowScrollBar(void *hwnd,int bar,BOOL show){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;u32_scroll_visible[bar]=show!=0;return 1;}
 __attribute__((dllexport)) BOOL SetScrollRange(void *hwnd,int bar,int min,int max,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1||max<min)return 0;u32_scroll_min[bar]=min;u32_scroll_max[bar]=max;if(u32_scroll_pos[bar]<min)u32_scroll_pos[bar]=min;if(u32_scroll_pos[bar]>max)u32_scroll_pos[bar]=max;return 1;}
 __attribute__((dllexport)) BOOL GetScrollRange(void *hwnd,int bar,int *min,int *max){if(!IsWindow(hwnd)||bar<0||bar>1||!min||!max)return 0;*min=u32_scroll_min[bar];*max=u32_scroll_max[bar];return 1;}
@@ -1581,13 +1590,13 @@ __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return G
 __attribute__((dllexport)) unsigned long long UnregisterClassW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}
 
-__attribute__((dllexport)) long long GetMessageExtraInfo(void){return 0;}
+__attribute__((dllexport)) long long GetMessageExtraInfo(void){return u32_message_extra_info;}
 
-__attribute__((dllexport)) long long SetMessageExtraInfo(long long value){static long long extra;long long old=extra;extra=value;return old;}
+__attribute__((dllexport)) long long SetMessageExtraInfo(long long value){long long old=u32_message_extra_info;u32_message_extra_info=value;return old;}
 
-__attribute__((dllexport)) DWORD GetQueueStatus(DWORD flags){(void)flags;return 0;}
+__attribute__((dllexport)) DWORD GetQueueStatus(DWORD flags){DWORD current=u32_msg_count?0x0008u:0u;DWORD changed=current;return ((current&flags)<<16)|(changed&flags);}
 
-__attribute__((dllexport)) BOOL GetInputState(void){return 0;}
+__attribute__((dllexport)) BOOL GetInputState(void){return u32_msg_count!=0;}
 
 __attribute__((dllexport)) BOOL WaitMessage(void){InputEvent e;return (BOOL)sy3(SYS_GetInput,(u64)&e,0,0);}
 

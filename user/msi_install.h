@@ -90,6 +90,7 @@ static int msi_condition_eval(const char *condition) {
     }
     char *op=0; u32 oplen=0;
     for(u32 i=0;c[i];i++) {
+        if(c[i]=='~'||c[i]=='&'||c[i]=='|'||c[i]=='!') return -1;
         if(c[i]=='=' && c[i+1]!='>') { op=c+i; oplen=1; break; }
         if(c[i]=='<' && c[i+1]=='>') { op=c+i; oplen=2; break; }
         if(c[i]=='>' && c[i+1]=='=') return -1;

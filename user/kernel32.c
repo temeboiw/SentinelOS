@@ -228,14 +228,14 @@ __attribute__((dllexport)) LPVOID HeapReAlloc(HANDLE heap, DWORD flags, LPVOID m
 __attribute__((dllexport)) K32_SIZE_T HeapSize(HANDLE heap, DWORD flags, LPCVOID mem) {
     (void)heap; (void)flags; (void)mem; return (K32_SIZE_T)-1;
 }
-__attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags, K32_SIZE_T size) {
-    (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
-}
-__attribute__((dllexport)) LPVOID LocalFree(LPVOID mem) { (void)mem; return mem; }
-__attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags, K32_SIZE_T size) {
-    (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
-}
-__attribute__((dllexport)) LPVOID GlobalFree(LPVOID mem) { (void)mem; return mem; }
+typedef struct { void *ptr; K32_SIZE_T size; } K32_MEMENTRY;
+static K32_MEMENTRY k32_mem_table[64];
+static void k32_mem_register(void *p,K32_SIZE_T size){if(!p)return;int free_slot=-1;for(int i=0;i<64;i++){if(k32_mem_table[i].ptr==p){k32_mem_table[i].size=size;return;}if(!k32_mem_table[i].ptr&&free_slot<0)free_slot=i;}if(free_slot>=0){k32_mem_table[free_slot].ptr=p;k32_mem_table[free_slot].size=size;}}
+static K32_SIZE_T k32_mem_size(void *p){for(int i=0;i<64;i++)if(k32_mem_table[i].ptr==p)return k32_mem_table[i].size;return 0;}
+__attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}
+__attribute__((dllexport)) LPVOID LocalFree(LPVOID mem){(void)mem;return mem;}
+__attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}
+__attribute__((dllexport)) LPVOID GlobalFree(LPVOID mem){(void)mem;return mem;}
 __attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h,DWORD *mode){if(!h||!mode){k32_last_error=6;return 0;}*mode=k32_console_mode;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h,DWORD mode){if(!h){k32_last_error=6;return 0;}k32_console_mode=mode;return 1;}
 __attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DWORD *read, void *reserved) {
@@ -516,10 +516,10 @@ __attribute__((dllexport)) unsigned long long HeapValidate(unsigned long long a,
 __attribute__((dllexport)) unsigned long long HeapCompact(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetProcessHeaps(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long LocalReAlloc(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) K32_SIZE_T LocalSize(HANDLE mem){(void)mem;return 0;}
+__attribute__((dllexport)) K32_SIZE_T LocalSize(HANDLE mem){return k32_mem_size(mem);}
 __attribute__((dllexport)) unsigned long long GlobalReAlloc(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) K32_SIZE_T GlobalSize(HANDLE mem){(void)mem;return 0;}
+__attribute__((dllexport)) K32_SIZE_T GlobalSize(HANDLE mem){return k32_mem_size(mem);}
 __attribute__((dllexport)) LPVOID GlobalLock(HANDLE mem){return mem;}
-__attribute__((dllexport)) BOOL GlobalUnlock(HANDLE mem){return mem!=0;}
+__attribute__((dllexport)) BOOL GlobalUnlock(HANDLE mem){return mem!=0&&k32_mem_size(mem)!=0;}
 __attribute__((dllexport)) HANDLE GlobalHandle(LPCVOID mem){return (HANDLE)mem;}
 __attribute__((dllexport)) BOOL GetBinaryTypeA(LPCSTR file,DWORD *type){if(!file||!type)return 0;DWORD n=0;while(file[n])n++;if(n<4||file[n-4]!='.'||file[n-3]!='e'||file[n-2]!='x'||file[n-1]!='e')return 0;*type=0;return 1;}

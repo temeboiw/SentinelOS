@@ -69,6 +69,10 @@ static long u32_class_style; static void *u32_class_proc;
 static long u32_class_extra[2];
 static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
 static unsigned int u32_double_click_time=500;
+static unsigned int u32_text_align;
+static void *u32_wnd_region;
+typedef struct { void *hwnd; int id; unsigned int mod,key; int used; } U32_HOTKEY;
+static U32_HOTKEY u32_hotkeys[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
 static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
@@ -1103,7 +1107,7 @@ __attribute__((dllexport)) BOOL DrawMenuBar(void *hwnd) { (void)hwnd; compose();
 __attribute__((dllexport)) unsigned long GetMessagePos(void) { return ((unsigned long)(g_my & 0xFFFF)<<16) | (unsigned long)(g_mx & 0xFFFF); }
 __attribute__((dllexport)) long GetMessageTime(void) { return (long)u32_last_msg_time; }
 __attribute__((dllexport)) unsigned int GetDoubleClickTime(void) { return 500; }
-__attribute__((dllexport)) BOOL MessageBeep(unsigned int type) { (void)type; return 0; }
+__attribute__((dllexport)) BOOL MessageBeep(unsigned int type) { (void)type; static const char bell=7; return sy3(SYS_Write,1,(u64)&bell,1)!=((u64)-1); }
 __attribute__((dllexport)) BOOL RedrawWindow(void *hwnd, const U32_RECT *update, void *region, unsigned int flags) {
     (void)hwnd; (void)update; (void)region; (void)flags; compose(); return 1;
 }
@@ -1434,8 +1438,8 @@ __attribute__((dllexport)) BOOL SetScrollRange(void *hwnd,int bar,int min,int ma
 __attribute__((dllexport)) BOOL GetScrollRange(void *hwnd,int bar,int *min,int *max){if(!IsWindow(hwnd)||bar<0||bar>1||!min||!max)return 0;*min=u32_scroll_min[bar];*max=u32_scroll_max[bar];return 1;}
 __attribute__((dllexport)) int GetScrollPos(void *hwnd,int bar){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;return u32_scroll_pos[bar];}
 __attribute__((dllexport)) int SetScrollPos(void *hwnd,int bar,int pos,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1)return 0;int old=u32_scroll_pos[bar];if(pos<u32_scroll_min[bar])pos=u32_scroll_min[bar];if(pos>u32_scroll_max[bar])pos=u32_scroll_max[bar];u32_scroll_pos[bar]=pos;return old;}
-__attribute__((dllexport)) int SetWindowRgn(void *hwnd,void *region,BOOL redraw){(void)hwnd;(void)region;(void)redraw;return 0;}
-__attribute__((dllexport)) int GetWindowRgn(void *hwnd,void *region){(void)hwnd;(void)region;return 0;}
+__attribute__((dllexport)) int SetWindowRgn(void *hwnd,void *region,BOOL redraw){if(!IsWindow(hwnd))return 0;u32_wnd_region=region;if(redraw)compose();return 1;}
+__attribute__((dllexport)) int GetWindowRgn(void *hwnd,void *region){if(!IsWindow(hwnd)||!region)return 0;return u32_wnd_region?2:1;}
 __attribute__((dllexport)) int MapWindowPoints(void *from,void *to,U32_POINT *pts,unsigned int count){if(!pts||count>256)return 0;int dx=0,dy=0;if(IsWindow(from)){dx+=g_wnd.x;dy+=g_wnd.y+24;}if(IsWindow(to)){dx-=g_wnd.x;dy-=g_wnd.y+24;}for(unsigned int i=0;i<count;i++){pts[i].x+=dx;pts[i].y+=dy;}return (int)(((unsigned short)dx)|((unsigned int)(unsigned short)dy<<16));}
 __attribute__((dllexport)) BOOL ClientToScreen(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x+=g_wnd.x;pt->y+=g_wnd.y+24;return 1;}
 __attribute__((dllexport)) BOOL ScreenToClient(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x-=g_wnd.x;pt->y-=g_wnd.y+24;return 1;}
@@ -1585,7 +1589,7 @@ __attribute__((dllexport)) BOOL GetMenuInfo(void *menu,U32_MENUINFO *info){U32_M
 __attribute__((dllexport)) BOOL SetMenuInfo(void *menu,const U32_MENUINFO *info){U32_MENUDATA *m=u32_menu_data(menu);if(!m||!info||info->cbSize<sizeof(U32_MENUINFO))return 0;if(info->fMask&1u)m->max_height=info->dwMaxHeight;if(info->fMask&2u)m->background=info->hbrBack;if(info->fMask&4u)m->help_id=info->dwContextHelpID;if(info->fMask&8u)m->menu_data=info->dwMenuData;if(info->fMask&0x10u)m->style=info->dwStyle;return 1;}
 __attribute__((dllexport)) BOOL GetMenuItemRect(void *hwnd,void *menu,unsigned int item,U32_RECT *rect){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,1);if(!IsWindow(hwnd)||i<0||!rect)return 0;rect->left=g_wnd.x+i*80;rect->top=g_wnd.y+24;rect->right=rect->left+80;rect->bottom=rect->top+24;return 1;}
 __attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){U32_MENUDATA *m=u32_menu_data(menu);if(!m||count>16)return 0;while(m->count<(int)count){U32_MENUITEM *it=&m->items[m->count++];it->flags=0;it->id=0;it->submenu=0;it->text[0]=0;}m->count=(int)count;if(m->default_pos>=m->count)m->default_pos=-1;return 1;}
-__attribute__((dllexport)) BOOL IsZoomed(void *hwnd){(void)hwnd;return 0;}
+__attribute__((dllexport)) BOOL IsZoomed(void *hwnd){return IsWindow(hwnd)&&g_wnd.x<=0&&g_wnd.y<=0&&g_wnd.w>=(int)g_fw&&g_wnd.h>=(int)g_fh;}
 __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
 __attribute__((dllexport)) unsigned long long UnregisterClassW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}
@@ -1711,9 +1715,9 @@ __attribute__((dllexport)) DWORD SetBkColor(void *dc,DWORD color){(void)dc;stati
 
 __attribute__((dllexport)) int SetBkMode(void *dc,int mode){(void)dc;static int current=1;int old=current;current=mode;return old;}
 
-__attribute__((dllexport)) unsigned int SetTextAlign(void *dc,unsigned int align){(void)dc;static unsigned int current=0;unsigned int old=current;current=align;return old;}
+__attribute__((dllexport)) unsigned int SetTextAlign(void *dc,unsigned int align){(void)dc;unsigned int old=u32_text_align;u32_text_align=align;return old;}
 
-__attribute__((dllexport)) unsigned int GetTextAlign(void *dc){(void)dc;return 0;}
+__attribute__((dllexport)) unsigned int GetTextAlign(void *dc){(void)dc;return u32_text_align;}
 
 __attribute__((dllexport)) int GetDeviceCaps(void *dc,int index){(void)dc;switch(index){case 8:case 10:return (int)g_fw;case 9:case 11:return (int)g_fh;case 88:return 32;case 12:return 96;case 14:return 96;case 2:return 1;default:return 0;}}
 
@@ -1831,9 +1835,9 @@ __attribute__((dllexport)) BOOL GetLayeredWindowAttributes(void *hwnd,DWORD *col
 
 __attribute__((dllexport)) BOOL UpdateLayeredWindow(void *hwnd,void *dc,const U32_POINT *dst,const U32_POINT *size,void *src,const U32_POINT *srcpt,DWORD key,const void *blend,DWORD flags){(void)dc;(void)src;(void)srcpt;(void)key;(void)blend;(void)flags;if(!IsWindow(hwnd))return 0;if(dst){g_wnd.x=dst->x;g_wnd.y=dst->y;}if(size){g_wnd.w=size->x;g_wnd.h=size->y;}return 1;}
 
-__attribute__((dllexport)) BOOL RegisterHotKey(void *hwnd,int id,unsigned int modifiers,unsigned int key){if(hwnd&&!IsWindow(hwnd))return 0;static struct {void *hwnd;int id;unsigned int mod,key;int used;} h[16];for(int i=0;i<16;i++){if(h[i].used&&h[i].hwnd==hwnd&&h[i].id==id)return 0;if(!h[i].used){h[i].used=1;h[i].hwnd=hwnd;h[i].id=id;h[i].mod=modifiers;h[i].key=key;return 1;}}return 0;}
+__attribute__((dllexport)) BOOL RegisterHotKey(void *hwnd,int id,unsigned int modifiers,unsigned int key){if(hwnd&&!IsWindow(hwnd))return 0;for(int i=0;i<16;i++){if(u32_hotkeys[i].used&&u32_hotkeys[i].hwnd==hwnd&&u32_hotkeys[i].id==id)return 0;if(!u32_hotkeys[i].used){u32_hotkeys[i].used=1;u32_hotkeys[i].hwnd=hwnd;u32_hotkeys[i].id=id;u32_hotkeys[i].mod=modifiers;u32_hotkeys[i].key=key;return 1;}}return 0;}
 
-__attribute__((dllexport)) BOOL UnregisterHotKey(void *hwnd,int id){(void)hwnd;(void)id;return 0;}
+__attribute__((dllexport)) BOOL UnregisterHotKey(void *hwnd,int id){for(int i=0;i<16;i++)if(u32_hotkeys[i].used&&u32_hotkeys[i].hwnd==hwnd&&u32_hotkeys[i].id==id){u32_hotkeys[i].used=0;return 1;}return 0;}
 
 __attribute__((dllexport)) void *SetWindowsHookExA(int id,void *proc,void *module,DWORD thread){(void)id;(void)module;(void)thread;if(!proc)return 0;static void *hooks[16];for(int i=0;i<16;i++)if(!hooks[i]){hooks[i]=proc;return &hooks[i];}return 0;}
 
@@ -1925,7 +1929,7 @@ __attribute__((dllexport)) BOOL EnumDisplaySettingsA(const char *device,DWORD mo
 
 __attribute__((dllexport)) BOOL EnumDisplaySettingsW(const unsigned short *device,DWORD mode,void *devmode){(void)device;return EnumDisplaySettingsA(0,mode,devmode);}
 
-__attribute__((dllexport)) long ChangeDisplaySettingsA(void *devmode, DWORD flags){(void)devmode;(void)flags;return 0;}
+__attribute__((dllexport)) long ChangeDisplaySettingsA(void *devmode, DWORD flags){(void)flags;return devmode? -2L:0L;}
 
 __attribute__((dllexport)) long ChangeDisplaySettingsW(void *devmode,DWORD flags){return ChangeDisplaySettingsA(devmode,flags);}
 

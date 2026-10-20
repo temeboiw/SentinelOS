@@ -61,14 +61,17 @@ static int msi_condition_eval(const char *condition) {
     u32 n=0; while(condition && condition[n] && n+1<sizeof c){c[n]=condition[n];n++;}
     if(condition && condition[n]) return -1;
     c[n]=0; msi_trim(c);
+    n=0; while(c[n]) n++;
     if(!c[0] || same_name(c,"1") || same_name(c,"TRUE")) return 1;
     if(same_name(c,"0") || same_name(c,"FALSE") || same_name(c,"Installed")) return 0;
     if(same_name(c,"NOT Installed")) return 1;
-    if(c[0]=='(' && n>2 && c[n-1]==')') { c[n-1]=0; for(u32 i=0;i<n-2;i++)c[i]=c[i+1]; c[n-2]=0; msi_trim(c); }
+    if(c[0]=='(' && n>2 && c[n-1]==')') { c[n-1]=0; for(u32 i=0;i<n-2;i++)c[i]=c[i+1]; c[n-2]=0; msi_trim(c); n=0; while(c[n]) n++; }
 
     int neg=0;
     if(c[0]=='N' && c[1]=='O' && c[2]=='T' && c[3]==' ') {
+        if(n<4) return -1;
         neg=1; for(u32 i=0;c[i+4];i++)c[i]=c[i+4]; c[n-4]=0; msi_trim(c);
+        n=0; while(c[n]) n++;
     }
     char *op=0; u32 oplen=0;
     for(u32 i=0;c[i];i++) {

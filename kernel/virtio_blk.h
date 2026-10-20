@@ -29,6 +29,7 @@ static uint8_t pci_cfg_read8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 #define VIRTQ_DESC_F_NEXT  1
 #define VIRTQ_DESC_F_WRITE 2
 #define VIRTIO_BLK_T_IN    0
+#define VIRTIO_BLK_T_OUT   1
 
 struct virtq_desc {
     uint64_t addr;
@@ -237,6 +238,75 @@ static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
     uint8_t *out = (uint8_t *)buf512;
     for (int i = 0; i < 512; i++) out[i] = vb_data[i];
     return 0;
+}
+
+/* Write one 512-byte sector to the virtio block device. */
+static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
+    if (!vb_ok) return -1;
+    const uint8_t *in = (const uint8_t *)buf512;
+    for (int i = 0; i < 512; i++) vb_data[i] = in[i];
+    vb_req->type = VIRTIO_BLK_T_OUT;
+    vb_req->reserved = 0;
+    vb_req->sector = sector;
+    *vb_status = 0xFF;
+
+    vb_desc[0].addr = vb_req_pa;
+    vb_desc[0].len = 16;
+    vb_desc[0].flags = VIRTQ_DESC_F_NEXT;
+    vb_desc[0].next = 1;
+    vb_desc[1].addr = vb_data_pa;
+    vb_desc[1].len = 512;
+    vb_desc[1].flags = VIRTQ_DESC_F_NEXT;
+    vb_desc[1].next = 2;
+    vb_desc[2].addr = vb_status_pa;
+    vb_desc[2].len = 1;
+    vb_desc[2].flags = VIRTQ_DESC_F_WRITE;
+    vb_desc[2].next = 0;
+
+    uint16_t a = vb_avail_idx;
+    vb_avail->ring[a % vb_qsize] = 0;
+    __asm__ volatile("sfence" ::: "memory");
+    vb_avail->idx = ++vb_avail_idx;
+    __asm__ volatile("sfence" ::: "memory");
+
+    if (vb_notify && vb_common) {
+        uint16_t noff = *(volatile uint16_t *)(vb_common + 30);
+        *(volatile uint16_t *)(vb_notify + (uint32_t)noff * vb_notify_mult) = 0;
+    }
+    for (int i = 0; i < 10000000; i++) {
+        if (vb_used->idx != vb_last_used) {
+            vb_last_used = vb_used->idx;
+            return *vb_status == 0 ? 0 : -1;
+        }
+        __asm__ volatile("pause");
+    }
+    return -1;
+}
+
+static int blk_write(uint64_t off, const void *src, uint64_t len) {
+    uint8_t sec[512];
+    const uint8_t *in = (const uint8_t *)src;
+    while (len) {
+        uint64_t lba = off / 512;
+        uint32_t skip = (uint32_t)(off % 512);
+        uint32_t n = 512 - skip;
+        if (n > len) n = (uint32_t)len;
+        if (skip || n != 512) {
+            if (blk_read(lba * 512, sec, 512) < 0) return -1;
+        }
+        if (skip || n != 512) {
+            for (uint32_t i = 0; i < n; i++) sec[skip + i] = in[i];
+        } else {
+            for (uint32_t i = 0; i < 512; i++) sec[i] = in[i];
+        }
+        if (virtio_blk_write_sector(lba, sec) < 0) return -1;
+        in += n; off += n; len -= n;
+    }
+    return 0;
+}
+
+static int blk_write_lba(uint32_t lba, const uint8_t *buf) {
+    return virtio_blk_write_sector(lba, buf);
 }
 
 static int blk_read(uint64_t off, void *dst, uint64_t len) {

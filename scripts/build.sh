@@ -308,6 +308,66 @@ lld -flavor link \
   /export:WaitForMultipleObjects \
   /export:GetFileType \
   "/implib:$B/obj/kernel32.lib" \
+  /export:GetCommandLineW \
+  /export:GetModuleHandleW \
+  /export:GetModuleFileNameW \
+  /export:CreateFileW \
+  /export:DeleteFileW \
+  /export:MoveFileW \
+  /export:CopyFileW \
+  /export:CreateDirectoryW \
+  /export:RemoveDirectoryW \
+  /export:GetCurrentDirectoryW \
+  /export:SetCurrentDirectoryW \
+  /export:GetFullPathNameW \
+  /export:GetTempPathW \
+  /export:GetEnvironmentVariableW \
+  /export:SetEnvironmentVariableW \
+  /export:GetFileAttributesW \
+  /export:SetFileAttributesW \
+  /export:GetTempFileNameA \
+  /export:GetTempFileNameW \
+  /export:GetShortPathNameA \
+  /export:GetLongPathNameA \
+  /export:GetDiskFreeSpaceA \
+  /export:GetDiskFreeSpaceExA \
+  /export:GetDriveTypeA \
+  /export:GetLogicalDrives \
+  /export:GetLogicalDriveStringsA \
+  /export:GetVolumeInformationA \
+  /export:GetFileTime \
+  /export:SetFileTime \
+  /export:GetSystemTimeAsFileTime \
+  /export:SystemTimeToFileTime \
+  /export:FileTimeToSystemTime \
+  /export:CompareFileTime \
+  /export:GetFileAttributesExA \
+  /export:GetFileInformationByHandle \
+  /export:SetEndOfFile \
+  /export:GetOverlappedResult \
+  /export:CancelIo \
+  /export:CreatePipe \
+  /export:PeekNamedPipe \
+  /export:SetHandleInformation \
+  /export:GetHandleInformation \
+  /export:DuplicateHandle \
+  /export:CreateProcessA \
+  /export:GetStartupInfoA \
+  /export:GetEnvironmentStringsA \
+  /export:FreeEnvironmentStringsA \
+  /export:GetProcessTimes \
+  /export:GetThreadTimes \
+  /export:GetPriorityClass \
+  /export:SetPriorityClass \
+  /export:GetThreadPriority \
+  /export:SetThreadPriority \
+  /export:GetCurrentProcessorNumber \
+  /export:GetNativeSystemInfo \
+  /export:IsProcessorFeaturePresent \
+  /export:GetSystemDirectoryA \
+  /export:GetWindowsDirectoryA \
+  /export:GetUserDefaultLCID \
+  /export:GetACP \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 
@@ -394,6 +454,66 @@ lld -flavor link \
   /export:SetFocus \
   /export:GetFocus \
   "/implib:$B/obj/user32.lib" \
+  /export:MessageBoxW \
+  /export:CreateWindowExW \
+  /export:RegisterClassW \
+  /export:DefWindowProcW \
+  /export:SendMessageW \
+  /export:PostMessageW \
+  /export:PeekMessageW \
+  /export:GetMessageW \
+  /export:CreateDialogParamA \
+  /export:CreateDialogParamW \
+  /export:DialogBoxParamA \
+  /export:DialogBoxParamW \
+  /export:EndDialog \
+  /export:IsDialogMessageA \
+  /export:IsDialogMessageW \
+  /export:GetWindowTextW \
+  /export:SetWindowTextW \
+  /export:GetClassNameW \
+  /export:LoadCursorW \
+  /export:LoadIconW \
+  /export:LoadImageW \
+  /export:FindWindowA \
+  /export:FindWindowW \
+  /export:FindWindowExA \
+  /export:FindWindowExW \
+  /export:GetParent \
+  /export:SetParent \
+  /export:GetWindow \
+  /export:GetWindowThreadProcessId \
+  /export:GetAncestor \
+  /export:EnumWindows \
+  /export:EnumChildWindows \
+  /export:EnumThreadWindows \
+  /export:GetTopWindow \
+  /export:BringWindowToTop \
+  /export:SetWindowPlacement \
+  /export:GetWindowPlacement \
+  /export:GetWindowInfo \
+  /export:GetWindowModuleFileNameA \
+  /export:GetWindowContextHelpId \
+  /export:SetWindowContextHelpId \
+  /export:GetMenu \
+  /export:SetMenu \
+  /export:GetSubMenu \
+  /export:GetMenuItemCount \
+  /export:GetMenuItemID \
+  /export:GetMenuState \
+  /export:CheckMenuItem \
+  /export:EnableMenuItem \
+  /export:DeleteMenu \
+  /export:RemoveMenu \
+  /export:InsertMenuA \
+  /export:ModifyMenuA \
+  /export:SetMenuItemInfoA \
+  /export:GetMenuItemInfoA \
+  /export:GetMenuStringA \
+  /export:SetMenuDefaultItem \
+  /export:GetMenuDefaultItem \
+  /export:GetSystemMenu \
+  /export:GetScrollInfo \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"
 

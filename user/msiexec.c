@@ -921,9 +921,10 @@ static void inspect_msi(void) {
     } else {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }
-    out("Install execution is not implemented yet; this inspection pass changed no files.\n");
-    out("Kernel file writes are limited to existing files and preallocated extents.\n");
-    out("New-file creation, CAB extraction, and MSI action execution are pending.\n");
+    out("Inspection mode: this pass changed no files.\n");
+    out("CAB folders: bounded uncompressed/MSZIP decoding and validation; payloads are not extracted yet.\n");
+    out("Kernel storage: guarded ext4 file/directory creation and bounded block allocation; not yet tested.\n");
+    out("MSI standard-action execution, transaction rollback, and Windows custom-action compatibility remain pending.\n");
     out("Custom actions were not executed.\n");
 }
 typedef struct {

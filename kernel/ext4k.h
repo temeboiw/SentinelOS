@@ -75,9 +75,10 @@ static int e4_can_mutate(Ext4k *fs) {
         !fs->ipg || fs->ipg > fs->blksz*8u || (fs->blksz != 1024 && fs->blksz != 2048 &&
                      fs->blksz != 4096)) return 0;
     /* Mutations require extent-backed files and plain 32-byte group
-       descriptors. Unknown incompat features are not safe to write around. */
+       descriptors. flex_bg is supported because bitmap locations come from
+       each group descriptor; other incompat features are refused. */
     if ((fs->feature_incompat & 0x42u) != 0x42u) return 0; /* FILETYPE + EXTENTS */
-    if (fs->feature_incompat & ~0x42u) return 0;
+    if (fs->feature_incompat & ~0x242u) return 0; /* plus FLEX_BG only */
     if (fs->feature_compat & 0x4u) return 0; /* journal needs transactions */
     if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u))
         return 0; /* gdt_csum, bigalloc, metadata_csum */

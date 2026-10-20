@@ -58,7 +58,7 @@ static U32_MOUSEMOVEPOINT u32_mouse_history[32];
 static unsigned int u32_mouse_history_head,u32_mouse_history_count,u32_mouse_time;
 typedef struct { unsigned short usagePage,usage; DWORD flags; void *hwndTarget; } U32_RAWINPUTDEVICE;
 static U32_RAWINPUTDEVICE u32_raw_devices[16];
-typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceDevice,*hwndTarget; U32_POINT ptPixelLocation,ptHimetricLocation,ptPixelLocationRaw,ptHimetricLocationRaw; DWORD dwTime,historyCount; int InputData; DWORD dwKeyStates; unsigned long long PerformanceCount; DWORD ButtonChangeType; } U32_POINTER_INFO;
+typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceDevice,*hwndTarget; struct { int x,y; } ptPixelLocation,ptHimetricLocation,ptPixelLocationRaw,ptHimetricLocationRaw; DWORD dwTime,historyCount; int InputData; DWORD dwKeyStates; unsigned long long PerformanceCount; DWORD ButtonChangeType; } U32_POINTER_INFO;
 
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 

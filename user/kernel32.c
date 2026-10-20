@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -269,10 +269,7 @@ __attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DW
 __attribute__((dllexport)) BOOL WriteConsoleA(HANDLE h, LPCVOID buf, DWORD len, DWORD *written, void *reserved) {
     (void)reserved; return WriteFile(h,buf,len,written,0);
 }
-__attribute__((dllexport)) void GetSystemTime(K32_SYSTEMTIME *t) {
-    if (!t) return; t->wYear=2026; t->wMonth=1; t->wDayOfWeek=0; t->wDay=1;
-    t->wHour=0; t->wMinute=0; t->wSecond=0; t->wMilliseconds=0;
-}
+__attribute__((dllexport)) void GetSystemTime(K32_SYSTEMTIME *t) { if(!t)return; if(sy3(SYS_GetSystemTime,(u64)t,0,0)!=(u64)-1){return;} t->wYear=1601;t->wMonth=1;t->wDayOfWeek=1;t->wDay=1;t->wHour=t->wMinute=t->wSecond=t->wMilliseconds=0;k32_last_error=50; }
 __attribute__((dllexport)) void GetLocalTime(K32_SYSTEMTIME *t) { GetSystemTime(t); }
 typedef struct { int used, type, signaled, manual, owner; LONG count, maximum; char name[64]; } K32_SYNC_OBJECT;
 static K32_SYNC_OBJECT k32_sync[32];

@@ -20,6 +20,7 @@ typedef int (*ShowWindow_t)(void *, int);
 typedef int (*GetMessageA_t)(MSG *, void *, u32, u32);
 typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef int (*InvalidateRect_t)(void *, void *, int);
+typedef void (*RedrawBatch_t)(void);
 
 #define LINE_COUNT 20
 #define LINE_SIZE  80
@@ -380,6 +381,8 @@ void mainCRTStartup(void) {
         (GetMessageA_t)NtGetProcAddress(u32name, "GetMessageA");
     g_text = (TextOutA_t)NtGetProcAddress(u32name, "TextOutA");
     g_invalidate = (InvalidateRect_t)NtGetProcAddress(u32name, "InvalidateRect");
+    RedrawBatch_t begin_batch = (RedrawBatch_t)NtGetProcAddress(u32name, "BeginRedrawBatch");
+    RedrawBatch_t end_batch = (RedrawBatch_t)NtGetProcAddress(u32name, "EndRedrawBatch");
 
     if (!create || !show || !getmsg || !g_text) {
         NtWriteConsole("cmd: required user32 APIs missing\n");
@@ -392,6 +395,7 @@ void mainCRTStartup(void) {
     g_command_len = 0;
     g_command[0] = 0;
 
+    if (begin_batch) begin_batch();
     g_window = create(0, "CMD", "SentinelOS CMD",
                       0, 120, 70, 680, 420, 0, 0, 0, 0);
     show(g_window, 1);
@@ -401,6 +405,7 @@ void mainCRTStartup(void) {
     print_line("");
 
     redraw_prompt();
+    if (end_batch) end_batch();
 
     MSG msg;
     for (;;) {

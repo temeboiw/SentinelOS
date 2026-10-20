@@ -215,9 +215,55 @@ __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i+1;
 }
 __attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR out, LPSTR *part) {
-    DWORD i=0; (void)part; if (!path || !out || !cap) return 0;
-    while (path[i] && i+1<cap) { out[i]=path[i]; i++; } out[i]=0;
-    return path[i] ? i+1 : i;
+    char input[512], full[768], normalized[768];
+    DWORD n=0, f=0, pos=0, starts[128], depth=0;
+    if (part) *part=0;
+    if (!path || !*path) { k32_last_error=87; return 0; }
+    while(path[n] && n+1<sizeof(input)){input[n]=path[n];n++;}
+    if(path[n]){k32_last_error=206;return 0;} input[n]=0;
+    for(DWORD i=0;i<n;i++)if(input[i]=='/')input[i]='\\';
+    if(((input[0]>='A'&&input[0]<='Z')||(input[0]>='a'&&input[0]<='z'))&&input[1]==':'){
+        full[f++]=input[0];full[f++]= ':'; 
+        if(input[2]=='\\'){full[f++]='\\';pos=3;}
+        else {full[f++]='\\';full[f++]='C';full[f++]=':';full[f++]='\\';pos=2;}
+    } else {
+        full[f++]='C';full[f++]=':';full[f++]='\\';
+        if(input[0]=='\\') pos=0; else pos=0;
+    }
+    if(input[0]!='\\' && !(input[1]==':' && input[2]=='\\')) {
+        if(input[1]==':' && input[2]!='\\') { /* drive-relative paths use that drive's root in SentinelOS */ }
+        else {
+            const char *cwd="C:\\";
+            for(DWORD j=0;cwd[j] && f+1<sizeof(full);j++)full[f++]=cwd[j];
+        }
+    }
+    if(input[1]==':' && input[2]!='\\') pos=2;
+    else if(input[1]==':' && input[2]=='\\') pos=3;
+    else if(input[0]=='\\') pos=0;
+    while(input[pos]=='\\')pos++;
+    while(input[pos]){
+        DWORD begin=pos; while(input[pos] && input[pos]!='\\')pos++;
+        DWORD len=pos-begin;
+        if(len==1&&input[begin]=='.'){}
+        else if(len==2&&input[begin]=='.'&&input[begin+1]=='.'){
+            if(depth){f=starts[--depth];if(f>3&&full[f-1]=='\\')f--;}
+        } else if(len){
+            if(f && full[f-1]!='\\' && f+1<sizeof(full))full[f++]='\\';
+            if(depth<128)starts[depth++]=f>3?f-1:f;
+            for(DWORD j=0;j<len&&f+1<sizeof(full);j++)full[f++]=input[begin+j];
+        }
+        while(input[pos]=='\\')pos++;
+    }
+    if(f==2){full[f++]='\\';}
+    full[f]=0;
+    for(DWORD i=0;i<=f;i++)normalized[i]=full[i];
+    DWORD last=0; for(DWORD i=0;i<f;i++)if(normalized[i]=='\\')last=i+1;
+    if(part && out && cap>f) *part=out+last;
+    if(!out||!cap){k32_last_error=0;return f+1;}
+    if(cap<=f){DWORD i=0;while(i+1<cap){out[i]=normalized[i];i++;}out[i]=0;k32_last_error=122;return f+1;}
+    for(DWORD i=0;i<=f;i++)out[i]=normalized[i];
+    if(part)*part=out+last;
+    k32_last_error=0;return f;
 }
 typedef struct { char name[32]; char value[128]; int used; } K32_ENV_ENTRY;
 static K32_ENV_ENTRY k32_env[16]; static int k32_env_init;
@@ -959,7 +1005,14 @@ __attribute__((dllexport)) BOOL SetWaitableTimer(HANDLE timer,const K32_LARGE_IN
 
 __attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){(void)timer;k32_last_error=50;return 0;}
 
-__attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){(void)name;k32_last_error=126;return 0;}
+__attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){
+    char narrow[260]; DWORD i=0;
+    if(!name||!name[0]){k32_last_error=87;return 0;}
+    while(name[i]&&i+1<sizeof(narrow)){narrow[i]=name[i]<128?(char)name[i]:'?';i++;}
+    if(name[i]){k32_last_error=206;return 0;}
+    narrow[i]=0;
+    return LoadLibraryA(narrow);
+}
 
 __attribute__((dllexport)) void FreeLibraryAndExitThread(HANDLE module,DWORD code){FreeLibrary(module);ExitProcess(code);}
 

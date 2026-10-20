@@ -558,8 +558,11 @@ static BOOL k32_query_volume_metadata(K32_VOLUME_METADATA *meta) {
 }
 static BOOL k32_is_c_volume_path(LPCSTR path) {
     if(!path||!*path)return 1;
-    return (path[0]=='C'||path[0]=='c')&&path[1]==':'&&
-        (path[2]==0||(path[2]=='\\'&&path[3]==0));
+    return (path[0]=='C'||path[0]=='c')&&path[1]==':'&&(path[2]==0||(path[2]=='\\'&&path[3]==0));
+}
+static BOOL k32_is_c_path(LPCSTR path) {
+    if(!path||!*path)return 1;
+    return (path[0]=='C'||path[0]=='c')&&path[1]==':'&&(path[2]==0||path[2]=='\\');
 }
 static unsigned long long k32_blocks_to_bytes(unsigned long long blocks,DWORD block_size) {
     if(block_size&&blocks>(~0ULL)/block_size)return ~0ULL;
@@ -573,7 +576,7 @@ __attribute__((dllexport)) BOOL GetDiskFreeSpaceA(LPCSTR root,DWORD *sectorsPerC
     *bytesPerSector=512u;*freeClusters=(DWORD)available;*totalClusters=(DWORD)m.total_blocks;k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) BOOL GetDiskFreeSpaceExA(LPCSTR path,unsigned long long *available,unsigned long long *total,unsigned long long *freeBytes) {
-    if(!k32_is_c_volume_path(path)){k32_last_error=3;return 0;}
+    if(!k32_is_c_path(path)){k32_last_error=3;return 0;}
     K32_VOLUME_METADATA m;if(!k32_query_volume_metadata(&m)){k32_last_error=50;return 0;}
     unsigned long long avail=m.free_blocks>m.reserved_blocks?m.free_blocks-m.reserved_blocks:0;
     if(available)*available=k32_blocks_to_bytes(avail,m.block_size);

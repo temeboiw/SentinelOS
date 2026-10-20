@@ -693,7 +693,7 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
         u32 total=0;
         if (!cab_read_folder_payload(folders[i].data_off,folders[i].blocks,
                                      folders[i].compression,reserve_data,
-                                     sectors,stream_size,i,0,0,&total)) {
+                                     sectors,cab_size,i,0,0,&total)) {
             out("  CAB folder "); out_u32(i); out(": unsupported or corrupt compression/data\n");
             return 0;
         }

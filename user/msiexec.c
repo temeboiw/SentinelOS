@@ -56,6 +56,11 @@ static MsiTable msi_tables[MSI_MAX_TABLES];
 static MsiColumn msi_columns[MSI_MAX_COLUMNS];
 static const u8 *file_bytes;
 static u32 file_size;
+typedef struct { char path[512]; u8 is_dir, temporary; } MsiChange;
+#define MSI_MAX_CHANGES 4096u
+static MsiChange msi_changes[MSI_MAX_CHANGES];
+static u32 msi_change_count;
+static int msi_tx_active;
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
@@ -85,6 +90,62 @@ static int init_msi_workspace(void) {
     MSI_WS(table_buffer,u8,MAX_TABLE_STREAM);
     MSI_WS(string_data,u8,MAX_TABLE_STREAM);
 #undef MSI_WS
+    return 1;
+}
+static u64 msi_path_type(const char *path) {
+    return sy3(28,(u64)path,0,0);
+}
+static int msi_record_change(const char *path, int is_dir, int temporary) {
+    if (!msi_tx_active || !path || !path[0] || msi_change_count>=MSI_MAX_CHANGES) return 0;
+    u32 n=0; while(path[n] && n+1<sizeof msi_changes[0].path) n++;
+    if(path[n]) return 0;
+    MsiChange *c=&msi_changes[msi_change_count++];
+    for(u32 i=0;i<=n;i++) c->path[i]=path[i];
+    c->is_dir=(u8)(is_dir!=0); c->temporary=(u8)(temporary!=0);
+    return 1;
+}
+static void msi_rollback(void) {
+    for(u32 i=msi_change_count;i>0;i--) {
+        MsiChange *c=&msi_changes[i-1];
+        if(!c->path[0]) continue;
+        if(c->is_dir) (void)sy3(27,(u64)c->path,0,0);
+        else (void)sy3(26,(u64)c->path,0,0);
+    }
+    msi_change_count=0; msi_tx_active=0;
+}
+static int msi_commit_cleanup(void) {
+    int ok=1;
+    for(u32 i=msi_change_count;i>0;i--) {
+        MsiChange *c=&msi_changes[i-1];
+        if(!c->path[0] || !c->temporary) continue;
+        u64 r=sy3(c->is_dir?27:26,(u64)c->path,0,0);
+        if(!r) ok=0;
+        else c->path[0]=0;
+    }
+    u32 w=0;
+    for(u32 i=0;i<msi_change_count;i++) if(msi_changes[i].path[0]) {
+        if(w!=i) msi_changes[w]=msi_changes[i];
+        w++;
+    }
+    msi_change_count=w;
+    if(!ok) return 0;
+    msi_change_count=0; msi_tx_active=0;
+    return 1;
+}
+static int msi_make_path(char *out_path, u32 cap, const char *dir, const char *leaf) {
+    if(!out_path || !cap || !dir || !leaf || !leaf[0]) return 0;
+    u32 n=0;
+    while(dir[n] && n+1<cap){out_path[n]=dir[n];n++;}
+    if(dir[n]) return 0;
+    if(n && out_path[n-1]!='\\' && out_path[n-1]!='/') {
+        if(n+1>=cap) return 0;
+        out_path[n++]='\\';
+    }
+    for(u32 i=0;leaf[i];i++) {
+        if(n+1>=cap) return 0;
+        out_path[n++]=leaf[i];
+    }
+    out_path[n]=0;
     return 1;
 }
 static void out(const char *s) {

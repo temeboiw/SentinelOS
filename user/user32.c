@@ -954,6 +954,15 @@ typedef struct { unsigned int cbSize,fMask; int nMin,nMax; unsigned int nPage; i
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
 typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle, dwWindowStatus, cxWindowBorders, cyWindowBorders; unsigned short atomWindowType, wCreatorVersion; } U32_WINDOWINFO;
+#define U32_MIIM_STATE 0x00000001u
+#define U32_MIIM_ID 0x00000002u
+#define U32_MIIM_SUBMENU 0x00000004u
+#define U32_MIIM_CHECKMARKS 0x00000008u
+#define U32_MIIM_DATA 0x00000020u
+#define U32_MIIM_STRING 0x00000040u
+#define U32_MIIM_BITMAP 0x00000080u
+#define U32_MIIM_FTYPE 0x00000100u
+#define U32_MFS_STATE_MASK 0x0000018Bu
 typedef struct { unsigned int flags,state,type; unsigned long long id,data; void *submenu; void *bmp_checked,*bmp_unchecked,*bmp_item; char text[80]; } U32_MENUITEM;
 typedef struct { int used, count, default_pos; unsigned int style,max_height,help_id; void *background; unsigned long long menu_data; U32_MENUITEM items[16]; } U32_MENUDATA;
 static U32_MENUDATA u32_menus[16];
@@ -1559,15 +1568,6 @@ __attribute__((dllexport)) BOOL RemoveMenu(void *menu, unsigned int item, unsign
 __attribute__((dllexport)) BOOL InsertMenuA(void *menu, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) { return u32_menu_insert(menu,position,flags,id,text); }
 __attribute__((dllexport)) BOOL ModifyMenuA(void *menu, unsigned int item, unsigned int flags, unsigned long long id, LPCSTR text) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0) return 0; m->items[i].flags=flags;m->items[i].state=flags&U32_MFS_STATE_MASK;m->items[i].type=flags&0x0000FF70u;m->items[i].id=id; m->items[i].submenu=(flags&0x0010u)?(void *)id:0; u32_menu_text(m->items[i].text,sizeof(m->items[i].text),text); return 1; }
 typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; char *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOA;
-#define U32_MIIM_STATE 0x00000001u
-#define U32_MIIM_ID 0x00000002u
-#define U32_MIIM_SUBMENU 0x00000004u
-#define U32_MIIM_CHECKMARKS 0x00000008u
-#define U32_MIIM_DATA 0x00000020u
-#define U32_MIIM_STRING 0x00000040u
-#define U32_MIIM_BITMAP 0x00000080u
-#define U32_MIIM_FTYPE 0x00000100u
-#define U32_MFS_STATE_MASK 0x0000018Bu
 typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; U32_WCHAR *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOW;
 __attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOA *info) {
     U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);

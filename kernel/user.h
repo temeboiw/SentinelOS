@@ -819,7 +819,7 @@ static int e4_dir_can_grow(uint32_t dir_ino) {
     if (!e4_can_mutate(&g_ext4) ||
         e4_inode(&g_ext4, dir_ino, inode) < 0 ||
         (E16(inode, 0) & 0xF000) != 0x4000 ||
-        (E32(inode, 32) & 0x1000u)) return 0;
+        (E32(inode, 32) & (0x1000u | 0x40000u))) return 0;
     uint8_t *root = inode + 40;
     if (E16(root, 0) != 0xF30A || E16(root, 6) != 0) return 0;
     uint16_t n = E16(root, 2), max = E16(root, 4);

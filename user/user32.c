@@ -992,7 +992,7 @@ __attribute__((dllexport)) BOOL GetWindowRect(void *hwnd, U32_RECT *r) {
 }
 __attribute__((dllexport)) BOOL IsWindow(void *hwnd) { return hwnd==(void *)1 && g_wnd.visible; }
 __attribute__((dllexport)) BOOL IsWindowVisible(void *hwnd) { return IsWindow(hwnd) && !g_wnd.minimized; }
-__attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) { (void)hwnd; (void)enable; return 1; }
+__attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) {if(!IsWindow(hwnd))return 0;BOOL was_disabled=(u32_wnd_style&0x08000000u)!=0;if(enable)u32_wnd_style&=~0x08000000u;else u32_wnd_style|=0x08000000u;if(was_disabled!=!enable)compose();return was_disabled;}
 __attribute__((dllexport)) BOOL IsIconic(void *hwnd) { (void)hwnd; return g_wnd.visible && g_wnd.minimized; }
 __attribute__((dllexport)) void *GetForegroundWindow(void) { return g_wnd.visible && !g_wnd.minimized ? (void *)1 : (void *)0; }
 __attribute__((dllexport)) BOOL SetForegroundWindow(void *hwnd) { if (!IsWindow(hwnd)) return 0; u32_active=hwnd; return 1; }

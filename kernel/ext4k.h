@@ -10,6 +10,7 @@ typedef struct {
     uint32_t blksz, ipg, isize, dsize, first_data;
     uint32_t inode_count, blocks_count, blocks_per_group;
     uint32_t feature_compat, feature_incompat, feature_ro_compat;
+    uint32_t alloc_hint;
     int is64;
     uint8_t blk[4096];
     int ok;
@@ -44,6 +45,7 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     fs->feature_compat = E32(sb, 92);
     fs->feature_incompat = E32(sb, 96);
     fs->feature_ro_compat = E32(sb, 100);
+    fs->alloc_hint = fs->first_data + 1;
     fs->is64 = (fs->feature_incompat & 0x80) != 0;
     fs->dsize = fs->is64 ? E16(sb, 254) : 32;
     if (!fs->dsize) fs->dsize = 32;
@@ -137,7 +139,11 @@ static uint64_t e4_alloc_block(Ext4k *fs) {
     uint32_t groups = (fs->blocks_count - fs->first_data +
                        fs->blocks_per_group - 1) / fs->blocks_per_group;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
-    for (uint32_t g = 0; g < groups; ++g) {
+    uint32_t hint_group = fs->alloc_hint >= fs->first_data
+        ? (fs->alloc_hint - fs->first_data) / fs->blocks_per_group : 0;
+    if (hint_group >= groups) hint_group = 0;
+    for (uint32_t step = 0; step < groups; ++step) {
+        uint32_t g = (hint_group + step) % groups;
         if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
         if (!E16(gd, 12)) continue;
         uint32_t bb = E32(gd, 0);
@@ -148,19 +154,28 @@ static uint64_t e4_alloc_block(Ext4k *fs) {
         if (group_start + valid > fs->blocks_count)
             valid = (uint32_t)(fs->blocks_count - group_start);
         if (valid > fs->blksz * 8u) return 0;
-        for (uint32_t b = 0; b < valid; ++b) {
-            uint64_t blockno = group_start + b;
-            if (blockno < fs->first_data ||
-                (bitmap[b >> 3] & (1u << (b & 7)))) continue;
-            bitmap[b >> 3] |= (uint8_t)(1u << (b & 7));
-            if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return 0;
-            E16(gd, 12) = (uint16_t)(E16(gd, 12) - 1);
-            if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
-            uint32_t freeb = E32(sb, 12);
-            if (!freeb) return 0;
-            E32(sb, 12) = freeb - 1;
-            if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
-            return blockno;
+        uint32_t begin = 0;
+        if (step == 0 && fs->alloc_hint > group_start)
+            begin = (uint32_t)(fs->alloc_hint - group_start);
+        for (uint32_t pass = 0; pass < (step == 0 && begin ? 2u : 1u); ++pass) {
+            uint32_t lo = pass == 0 ? begin : 0;
+            uint32_t hi = pass == 0 && begin ? valid : (pass == 1 ? begin : valid);
+            for (uint32_t b = lo; b < hi; ++b) {
+                uint64_t blockno = group_start + b;
+                if (blockno < fs->first_data ||
+                    (bitmap[b >> 3] & (1u << (b & 7)))) continue;
+                bitmap[b >> 3] |= (uint8_t)(1u << (b & 7));
+                if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return 0;
+                E16(gd, 12) = (uint16_t)(E16(gd, 12) - 1);
+                if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
+                uint32_t freeb = E32(sb, 12);
+                if (!freeb) return 0;
+                E32(sb, 12) = freeb - 1;
+                if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
+                fs->alloc_hint = blockno + 1;
+                if (fs->alloc_hint >= fs->blocks_count) fs->alloc_hint = fs->first_data;
+                return blockno;
+            }
         }
     }
     return 0;

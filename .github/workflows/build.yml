@@ -15,6 +15,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld qemu-utils qemu-system-x86 ovmf util-linux dosfstools e2fsprogs mtools gnu-efi
+      - name: Test CAB/MSZIP decoder
+        run: |
+          mkdir -p build
+          clang -std=c11 -Wall -Wextra tests/mszip_test.c -o build/mszip_test
+          ./build/mszip_test
       - name: Fetch EDK2 headers
         run: |
           git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"

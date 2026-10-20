@@ -44,12 +44,12 @@
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
 #define USER_IMAGE_PAGE 0x1000ULL
 #define USER_VM_ALLOCATION_MAX 64
-typedef struct { KPROCESS *process; uint64_t base,size; int used; } UserVmAllocation;
+typedef struct { KPROCESS *process; uint64_t base,size; uint32_t allocation_protect; int used; } UserVmAllocation;
 static UserVmAllocation user_vm_allocations[USER_VM_ALLOCATION_MAX];
 static void user_vm_forget_process(KPROCESS *proc) {
     if(!proc)return;
     for(int i=0;i<USER_VM_ALLOCATION_MAX;i++)if(user_vm_allocations[i].used&&user_vm_allocations[i].process==proc) {
-        user_vm_allocations[i].used=0;user_vm_allocations[i].process=0;user_vm_allocations[i].base=0;user_vm_allocations[i].size=0;
+        user_vm_allocations[i].used=0;user_vm_allocations[i].process=0;user_vm_allocations[i].base=0;user_vm_allocations[i].size=0;user_vm_allocations[i].allocation_protect=0;
     }
 }
 static int user_vm_set_page_writable(KPROCESS *proc,uint64_t va,int writable) {
@@ -1247,6 +1247,7 @@ static Frame *syscall_handler(Frame *f) {
         KPROCESS *caller = MmCurrentProcess;
         uint64_t prefer = f->rdi;
         uint64_t requested = f->rsi;
+        uint64_t protect = f->rdx ? f->rdx : 0x04ULL;
 
         if (!caller || caller == PspSystemProcess ||
             requested > UINT64_MAX - 0xFFFULL) {
@@ -1255,6 +1256,7 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         uint64_t size = (requested + 0xFFFULL) & ~0xFFFULL;
+        if(protect!=0x02ULL&&protect!=0x04ULL&&protect!=0x20ULL&&protect!=0x40ULL){f->rax=0;return f;}
         if (!size || size > 16ull * 1024 * 1024) {
             f->rax = 0;
             return f;
@@ -1302,6 +1304,9 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = 0;
             return f;
         }
+        if(protect==0x02ULL||protect==0x20ULL) {
+            for(uint64_t off=0;off<size;off+=USER_IMAGE_PAGE)user_vm_set_page_writable(caller,prefer+off,0);
+        }
 
         int alloc_slot=-1;
         for(int i=0;i<USER_VM_ALLOCATION_MAX;i++)if(!user_vm_allocations[i].used){alloc_slot=i;break;}
@@ -1312,6 +1317,7 @@ static Frame *syscall_handler(Frame *f) {
         user_vm_allocations[alloc_slot].process=caller;
         user_vm_allocations[alloc_slot].base=prefer;
         user_vm_allocations[alloc_slot].size=size;
+        user_vm_allocations[alloc_slot].allocation_protect=(uint32_t)protect;
         user_vm_allocations[alloc_slot].used=1;
         MmSwitchToProcess(caller);
         f->rax = prefer;
@@ -1560,6 +1566,54 @@ static Frame *syscall_handler(Frame *f) {
             if(!user_vm_set_page_writable(caller,page,writable)){ok=0;break;}
         MmSwitchToProcess(caller);
         f->rax=ok?old_protect:0;return f;
+    }
+
+    case 29: {
+        typedef struct {
+            uint64_t BaseAddress,AllocationBase;
+            uint32_t AllocationProtect;
+            uint16_t PartitionId,Padding;
+            uint64_t RegionSize;
+            uint32_t State,Protect,Type,Padding2;
+        } UserMemoryBasicInformation;
+        KPROCESS *caller=MmCurrentProcess;
+        uint64_t address=f->rdi,out=f->rsi,length=f->rdx;
+        if(!caller||address<0x10000ULL||address>=0x0000800000000000ULL||
+           length<sizeof(UserMemoryBasicInformation)||
+           !MmValidateUserRange(caller,out,sizeof(UserMemoryBasicInformation),1)){f->rax=0;return f;}
+        uint64_t page=address&~0xFFFULL,pte=MmLookupUserPte(caller,page,0);
+        UserMemoryBasicInformation info={0};
+        UserVmAllocation *allocation=0;
+        for(int i=0;i<USER_VM_ALLOCATION_MAX;i++) {
+            UserVmAllocation *a=&user_vm_allocations[i];
+            if(a->used&&a->process==caller&&page>=a->base&&page<a->base+a->size){allocation=a;break;}
+        }
+        if(allocation&&pte) {
+            uint32_t protect_now=(pte&PTE_RW)?0x04u:0x02u;
+            uint64_t start=page,end=page+USER_IMAGE_PAGE,alloc_end=allocation->base+allocation->size;
+            while(start>allocation->base) {
+                uint64_t prev=MmLookupUserPte(caller,start-USER_IMAGE_PAGE,0);
+                if(!prev||!(prev&PTE_OWNED)||(((prev&PTE_RW)?0x04u:0x02u)!=protect_now))break;
+                start-=USER_IMAGE_PAGE;
+            }
+            while(end<alloc_end) {
+                uint64_t next=MmLookupUserPte(caller,end,0);
+                if(!next||!(next&PTE_OWNED)||(((next&PTE_RW)?0x04u:0x02u)!=protect_now))break;
+                end+=USER_IMAGE_PAGE;
+            }
+            info.BaseAddress=start;info.AllocationBase=allocation->base;
+            info.AllocationProtect=allocation->allocation_protect;info.RegionSize=end-start;
+            info.State=0x1000u;info.Protect=protect_now;info.Type=0x20000u;
+        } else if(pte) {
+            info.BaseAddress=page;info.AllocationBase=page;info.AllocationProtect=(pte&PTE_RW)?0x04u:0x02u;
+            info.RegionSize=USER_IMAGE_PAGE;info.State=0x1000u;info.Protect=(pte&PTE_RW)?0x04u:0x02u;
+            info.Type=(pte&PTE_OWNED)?0x20000u:0x1000000u;
+        } else {
+            info.BaseAddress=page;info.AllocationBase=0;info.AllocationProtect=0;info.RegionSize=USER_IMAGE_PAGE;
+            info.State=0x10000u;info.Protect=0;info.Type=0;
+        }
+        *(UserMemoryBasicInformation*)out=info;
+        f->rax=sizeof(UserMemoryBasicInformation);return f;
     }
 
     case SYS_NtQueryDirectoryFile: {

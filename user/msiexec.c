@@ -642,7 +642,7 @@ static int cab_skip_string(u32 sectors, u64 stream_size, u64 cab_size, u64 *pos)
     }
     return 0;
 }
-static int msi_list_embedded_cabinet(const char *stream_name) {
+static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
     const u8 *entry=find_stream_entry(stream_name,0);
     if (!entry) {
         out("  Embedded cabinet stream missing: "); out(stream_name); out("\n");
@@ -694,6 +694,8 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
         pos+=8u+reserve_folder;
     }
 
+    if (files>CAB_MAX_FILES) return 0;
+    cab_file_count=0;
     out("Embedded cabinet "); out(stream_name); out(": ");
     out_u32(files); out(" files, "); out_u32(folder_count); out(" folders\n");
     pos=files_off;
@@ -713,19 +715,26 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
             name[n++]=(ch>=32 && ch<127)?(char)ch:'?';
         }
         name[n]=0;
-        if (!ended) return 0;
-        if (folder_id>=folder_count) {
-            out("  Unsupported split-cabinet file record: "); out(name); out("\n");
-            return 0;
+        if (!ended || n>=sizeof cab_files[0].name ||
+            folder_id>=folder_count || !name[0] ||
+            (name[0]=='.' && (!name[1] || (name[1]=='.' && !name[2])))) return 0;
+        if (extract) {
+            for (u32 j=0;j<n;j++)
+                if (name[j]=='/' || name[j]=='\\' || name[j]==':' ||
+                    (u8)name[j]<32 || (u8)name[j]>=127) return 0;
+            for (u32 j=0;j<cab_file_count;j++) if (same_name(cab_files[j].name,name)) return 0;
         }
+        CabFile *cf=&cab_files[cab_file_count++];
+        cf->size=file_len; cf->offset=rd32(rec+4); cf->folder=folder_id;
+        for (u32 j=0;j<=n;j++) cf->name[j]=name[j];
         if (i<16) {
             out("    "); out(name); out(" ("); out_u32(file_len); out(" bytes)\n");
         }
     }
     if (files>16) { out("    ... "); out_u32(files-16); out(" additional files\n"); }
 
-    /* Decompress and validate each folder now. The installer stage will route
-       these decoded blocks to destination files after MSI sequence planning. */
+    /* First pass validates every folder and every file range without writes. */
+    static u32 folder_totals[128];
     for (u32 i=0;i<folder_count;i++) {
         u32 total=0;
         if (!cab_read_folder_payload(folders[i].data_off,folders[i].blocks,
@@ -734,8 +743,36 @@ static int msi_list_embedded_cabinet(const char *stream_name) {
             out("  CAB folder "); out_u32(i); out(": unsupported or corrupt compression/data\n");
             return 0;
         }
+        folder_totals[i]=total;
         out("  CAB folder "); out_u32(i); out(": decompressed ");
-        out_u32(total); out(" bytes (validated; not installed)\n");
+        out_u32(total); out(" bytes (validated)\n");
+    }
+    for (u32 i=0;i<cab_file_count;i++) {
+        CabFile *cf=&cab_files[i];
+        if ((u64)cf->offset+cf->size>folder_totals[cf->folder]) return 0;
+    }
+    if (extract) {
+        (void)sy3(SYS_CreateDirectory,(u64)cab_stage_path,0,0);
+        /* Pre-create all destinations before streaming blocks. */
+        for (u32 i=0;i<cab_file_count;i++) {
+            char path[256]; u32 p=0;
+            for (u32 j=0;cab_stage_path[j] && p+1<sizeof path;j++) path[p++]=cab_stage_path[j];
+            if (p+1<sizeof path) path[p++]='\\';
+            for (u32 j=0;cab_files[i].name[j] && p+1<sizeof path;j++) path[p++]=cab_files[i].name[j];
+            if (p+1>=sizeof path) return 0;
+            path[p]=0;
+            long long fh=(long long)sy3(SYS_OpenFile,(u64)path,0x40000000u,1);
+            if (fh<0) return 0;
+            (void)sy3(SYS_CloseFile,(u64)fh,0,0);
+        }
+        for (u32 i=0;i<folder_count;i++) {
+            u32 total=0;
+            if (!cab_read_folder_payload(folders[i].data_off,folders[i].blocks,
+                                         folders[i].compression,reserve_data,
+                                         sectors,cab_size,i,cab_stage_block,0,&total) ||
+                total!=folder_totals[i]) return 0;
+        }
+        out("  CAB payloads extracted to C:\\MSIStage\\ (staging only)\n");
     }
     return 1;
 }
@@ -747,7 +784,7 @@ static void print_msi_cabinets(void) {
         if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) || !is_text)
             continue;
         if (cabinet[0]=='#' && cabinet[1])
-            (void)msi_list_embedded_cabinet(cabinet+1);
+            (void)msi_list_embedded_cabinet(cabinet+1,0);
         else if (cabinet[0])
             { out("External cabinet required: "); out(cabinet); out("\n"); }
     }

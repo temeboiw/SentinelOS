@@ -50,6 +50,36 @@ static int g_count;
 static char g_path[128];
 static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
+static int g_hover_row = -1;
+
+/* Reserve one character at the start of every row for the hover marker.
+   Changing it never shifts the filename or any neighboring controls. */
+static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
+    pText(0, 0, 0, g_path, -1);
+    pText(0, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
+    for (int i = 0; i < g_count; i++) {
+        char line[80];
+        int p = 0;
+        line[p++] = (i == g_hover_row) ? '>' : ' ';
+        if (g_isdir[i]) {
+            line[p++]='['; line[p++]='D'; line[p++]='I'; line[p++]='R'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".exe")) {
+            line[p++]='['; line[p++]='E'; line[p++]='X'; line[p++]='E'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".dll")) {
+            line[p++]='['; line[p++]='D'; line[p++]='L'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".msi")) {
+            line[p++]='['; line[p++]='M'; line[p++]='S'; line[p++]='I'; line[p++]=']'; line[p++]=' ';
+        } else {
+            line[p++]='['; line[p++]='F'; line[p++]='I'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
+        }
+        for (int j = 0; g_names[i][j] && p < 78; j++) line[p++] = g_names[i][j];
+        line[p] = 0;
+        pText(0, 0, 2 + i, line, -1);
+    }
+    for (int i = g_count; i < 28; i++)
+        pText(0, 0, 2 + i, " ", -1);
+    if (pInv) pInv(0, 0, 1);
+}
 
 
 static void path_init(void) {
@@ -71,17 +101,27 @@ static int ends_with(const char *n, const char *ext) {
 
 static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
     g_count = 0;
-    for (DWORD i = 0; i < MAX_ENT; i++) {
+    g_hover_row = -1;
+
+    /* Always provide a parent-directory entry, even if the VFS omits it. */
+    g_names[g_count][0] = '.';
+    g_names[g_count][1] = '.';
+    g_names[g_count][2] = 0;
+    g_isdir[g_count++] = 1;
+
+    for (DWORD i = 0; i < MAX_ENT - 1 && g_count < MAX_ENT; i++) {
         char name[64];
         name[0] = 0;
         DWORD t = pQuery(i, name, 64);
         if (t == 1) break;
+
+        /* Avoid duplicate parent entries if the filesystem supplies one. */
+        if (name[0] == '.' && name[1] == '.' && !name[2]) continue;
+
         int k = 0;
         for (; name[k] && k < 63; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
         g_isdir[g_count] = (t == 2);
-        if (g_names[g_count][0]=='.' && g_names[g_count][1]=='.' && !g_names[g_count][2])
-            g_isdir[g_count] = 1;
         if (!g_isdir[g_count]) {
             int dot = 0;
             for (int j = 0; g_names[g_count][j]; j++)
@@ -90,30 +130,9 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         }
         g_count++;
     }
-    /* TextOut lines: 0=path 1=hint 2..=entries  => click must subtract 2 */
-    pText(0, 0, 0, g_path, -1);
-    pText(0, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
-    for (int i = 0; i < g_count; i++) {
-        char line[80];
-        int p = 0;
-        if (g_isdir[i]) {
-            line[p++]='['; line[p++]='D'; line[p++]='I'; line[p++]='R'; line[p++]=']'; line[p++]=' ';
-        } else if (ends_with(g_names[i], ".exe")) {
-            line[p++]='['; line[p++]='E'; line[p++]='X'; line[p++]='E'; line[p++]=']'; line[p++]=' ';
-        } else if (ends_with(g_names[i], ".dll")) {
-            line[p++]='['; line[p++]='D'; line[p++]='L'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
-        } else if (ends_with(g_names[i], ".msi")) {
-            line[p++]='['; line[p++]='M'; line[p++]='S'; line[p++]='I'; line[p++]=']'; line[p++]=' ';
-        } else {
-            line[p++]='['; line[p++]='F'; line[p++]='I'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
-        }
-        for (int j = 0; g_names[i][j] && p < 78; j++) line[p++] = g_names[i][j];
-        line[p] = 0;
-        pText(0, 0, 2 + i, line, -1);
-    }
-    for (int i = g_count; i < 28; i++)
-        pText(0, 0, 2 + i, " ", -1);
-    if (pInv) pInv(0, 0, 1);
+
+    /* TextOut lines: 0=path 1=hint 2..=entries => click row = line - 2. */
+    draw_rows(pText, pInv);
 }
 
 void mainCRTStartup(void) {
@@ -151,6 +170,20 @@ void mainCRTStartup(void) {
         if (!pGetMsg(&msg, 0, 0, 0)) continue;
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
+
+        /*
+         * Mouse move: update a fixed-width hover marker. The marker occupies
+         * a reserved character, so row text and controls never jump sideways.
+         */
+        if (msg.message == 0x0200) {
+            int line = (msg.y - (g_win_y + 44)) / 16;
+            int row = line - 2;
+            if (row < 0 || row >= g_count) row = -1;
+            if (row != g_hover_row) {
+                g_hover_row = row;
+                draw_rows(pText, pInv);
+            }
+        }
 
         if (msg.message == 0x0201) {
             /*

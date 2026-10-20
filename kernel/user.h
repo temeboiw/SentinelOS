@@ -1119,6 +1119,7 @@ static Frame *syscall_handler(Frame *f) {
                 }
             }
             PspForgetUserImages(dying);
+            PspForgetDiskModule(dying);
             MmDeleteAddressSpace(dying);
         }
 
@@ -1241,6 +1242,11 @@ static Frame *syscall_handler(Frame *f) {
         MmSwitchToProcess(PspSystemProcess);
 
         BootModule *mod = PspFindModule(user_bootinfo, name);
+        UserDiskModule *disk_mod = 0;
+        if (!mod) {
+            disk_mod = PspLoadDiskModule(name);
+            if (disk_mod) mod = &disk_mod->module;
+        }
 
         if (!mod) {
             MmSwitchToProcess(caller);
@@ -1251,13 +1257,16 @@ static Frame *syscall_handler(Frame *f) {
         KPROCESS *proc = MmCreateAddressSpace(name);
 
         if (!proc) {
+            if (disk_mod) PspFreeDiskModule(disk_mod);
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;
         }
+        if (disk_mod) disk_mod->owner = proc;
         if (PspMapUserImage(proc, mod) != 0) {
             PspForgetUserImages(proc);
             MmDeleteAddressSpace(proc);
+            if (disk_mod) PspFreeDiskModule(disk_mod);
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;
@@ -1268,6 +1277,9 @@ static Frame *syscall_handler(Frame *f) {
         UserImage *main_image = PspGetUserImage(proc, mod);
 
         if (!main_image) {
+            PspForgetUserImages(proc);
+            MmDeleteAddressSpace(proc);
+            if (disk_mod) PspFreeDiskModule(disk_mod);
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;
@@ -1286,6 +1298,7 @@ static Frame *syscall_handler(Frame *f) {
                 if (!pa) {
                     PspForgetUserImages(proc);
                     MmDeleteAddressSpace(proc);
+                    if (disk_mod) PspFreeDiskModule(disk_mod);
                     MmSwitchToProcess(caller);
                     f->rax = (uint64_t)-1LL;
                     return f;

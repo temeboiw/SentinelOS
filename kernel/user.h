@@ -1006,6 +1006,117 @@ static uint32_t vfs_create_directory(const char *path) {
     return ino;
 }
 
+static int vfs_split_user_path(const char *path, uint32_t *parent_ino, char base[256]) {
+    if (!path || !path[0] || !parent_ino) return 0;
+    char full[256], parent[256];
+    uint32_t len=0;
+    while(path[len] && len+1<sizeof full){full[len]=path[len];len++;}
+    if(path[len] || !len) return 0;
+    while(len>1 && (full[len-1]=='/' || full[len-1]=='\\')) len--;
+    full[len]=0;
+    int sep=-1;
+    for(uint32_t i=0;i<len;i++) if(full[i]=='/' || full[i]=='\\') sep=(int)i;
+    uint32_t start=(uint32_t)(sep+1), n=len-start;
+    if(!n || n>255) return 0;
+    for(uint32_t i=0;i<n;i++) base[i]=full[start+i];
+    base[n]=0;
+    if((n==1 && base[0]=='.') || (n==2 && base[0]=='.' && base[1]=='.')) return 0;
+    *parent_ino=vfs_cwd_ino?vfs_cwd_ino:2;
+    if(sep>=0) {
+        if(sep==0){parent[0]='/';parent[1]=0;}
+        else {for(uint32_t i=0;i<(uint32_t)sep;i++)parent[i]=full[i];parent[sep]=0;}
+        *parent_ino=vfs_resolve_user_path(parent);
+        if(!*parent_ino) return 0;
+    }
+    return 1;
+}
+
+static int e4_remove_dirent(uint32_t parent_ino, const char *name, uint32_t target_ino) {
+    uint8_t dir[256];
+    if(e4_inode(&g_ext4,parent_ino,dir)<0 ||
+       (E16(dir,0)&0xF000)!=0x4000 || (E32(dir,32)&0x1000u)) return -1;
+    uint64_t size=e4_size(dir);
+    static uint8_t block[4096];
+    for(uint64_t pos=0;pos<size;pos+=g_ext4.blksz) {
+        uint64_t pb=e4_map(&g_ext4,dir,(uint32_t)(pos/g_ext4.blksz));
+        if(!pb || e4_read(&g_ext4,pb*g_ext4.blksz,block,g_ext4.blksz)<0) continue;
+        for(uint32_t o=0;o+8<=g_ext4.blksz;) {
+            uint16_t rec=E16(block,o+4); uint32_t ino=E32(block,o);
+            uint8_t nl=block[o+6];
+            if(rec<8 || (rec&3) || o+rec>g_ext4.blksz || nl>rec-8) break;
+            if(ino==target_ino && e4_name_equal_ci(block+o+8,nl,name)) {
+                E32(block,o)=0; block[o+6]=0; block[o+7]=0;
+                for(uint32_t j=8;j<rec;j++) block[o+j]=0;
+                return e4_write(&g_ext4,pb*g_ext4.blksz,block,g_ext4.blksz);
+            }
+            o+=rec;
+        }
+    }
+    return -1;
+}
+
+static int vfs_delete_regular_file(const char *path) {
+    if(!g_ext4_ok || !e4_can_mutate(&g_ext4)) return 0;
+    uint32_t parent=0; char base[256];
+    if(!vfs_split_user_path(path,&parent,base)) return 0;
+    uint32_t ino=vfs_resolve_user_path(path);
+    if(!ino) return 0;
+    for(int i=0;i<VFS_USER_HANDLES;i++)
+        if(vfs_user_handles[i].used && vfs_user_handles[i].ino==ino) return 0;
+    uint8_t inode[256];
+    if(e4_inode(&g_ext4,ino,inode)<0 ||
+       (E16(inode,0)&0xF000)!=0x8000 ||
+       E16(inode+40,6)!=0 || E16(inode+40,2)>E16(inode+40,4) ||
+       E16(inode+40,2)>4) return 0;
+    if(e4_remove_dirent(parent,base,ino)<0) return 0;
+    uint64_t size=e4_size(inode);
+    uint32_t blocks=(uint32_t)((size+g_ext4.blksz-1)/g_ext4.blksz);
+    for(uint32_t lb=0;lb<blocks;lb++) {
+        uint64_t pb=e4_map(&g_ext4,inode,lb);
+        if(pb && e4_free_block(&g_ext4,pb)<0) return 0;
+    }
+    for(uint32_t i=0;i<g_ext4.isize;i++) inode[i]=0;
+    if(e4_write_inode(&g_ext4,ino,inode)<0) return 0;
+    return e4_free_inode_bit(&g_ext4,ino,0)==0;
+}
+
+static int vfs_remove_empty_directory(const char *path) {
+    if(!g_ext4_ok || !e4_can_mutate(&g_ext4)) return 0;
+    uint32_t parent=0; char base[256];
+    if(!vfs_split_user_path(path,&parent,base)) return 0;
+    uint32_t ino=vfs_resolve_user_path(path);
+    if(!ino || ino==2) return 0;
+    uint8_t inode[256], pino[256];
+    if(e4_inode(&g_ext4,ino,inode)<0 || e4_inode(&g_ext4,parent,pino)<0 ||
+       (E16(inode,0)&0xF000)!=0x4000 ||
+       (E32(inode,32)&0x1000u) || E16(pino,26)<=2 ||
+       E16(inode+40,6)!=0 || E16(inode+40,2)>4) return 0;
+    uint64_t size=e4_size(inode);
+    static uint8_t block[4096];
+    for(uint64_t pos=0;pos<size;pos+=g_ext4.blksz) {
+        uint64_t pb=e4_map(&g_ext4,inode,(uint32_t)(pos/g_ext4.blksz));
+        if(!pb || e4_read(&g_ext4,pb*g_ext4.blksz,block,g_ext4.blksz)<0) return 0;
+        for(uint32_t o=0;o+8<=g_ext4.blksz;) {
+            uint16_t rec=E16(block,o+4); uint32_t ent=E32(block,o);
+            uint8_t nl=block[o+6];
+            if(rec<8 || (rec&3) || o+rec>g_ext4.blksz || nl>rec-8) return 0;
+            if(ent && !((nl==1 && block[o+8]=='.') ||
+                        (nl==2 && block[o+8]=='.' && block[o+9]=='.'))) return 0;
+            o+=rec;
+        }
+    }
+    if(e4_remove_dirent(parent,base,ino)<0) return 0;
+    for(uint32_t lb=0;lb<(uint32_t)((size+g_ext4.blksz-1)/g_ext4.blksz);lb++) {
+        uint64_t pb=e4_map(&g_ext4,inode,lb);
+        if(pb && e4_free_block(&g_ext4,pb)<0) return 0;
+    }
+    for(uint32_t i=0;i<g_ext4.isize;i++) inode[i]=0;
+    if(e4_write_inode(&g_ext4,ino,inode)<0 ||
+       e4_free_inode_bit(&g_ext4,ino,1)<0) return 0;
+    E16(pino,26)=(uint16_t)(E16(pino,26)-1);
+    return e4_write_inode(&g_ext4,parent,pino)==0;
+}
+
 static int vfs_open_user_file(const char *name, uint64_t access, uint64_t disposition) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = vfs_resolve_user_path(name);

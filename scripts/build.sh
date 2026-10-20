@@ -1505,7 +1505,7 @@ dd if="$B/esp.fat" \
 
 rm -f "$B/esp.fat"
 
-FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode"
+FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode,^dir_index"
 
 if ! mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
   -d "$B/rootfs" \

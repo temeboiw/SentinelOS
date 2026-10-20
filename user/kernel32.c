@@ -15,6 +15,8 @@ typedef unsigned short K32_WCHAR;
 typedef const K32_WCHAR *K32_LPCWSTR;
 typedef K32_WCHAR *K32_LPWSTR;
 static DWORD k32_last_error;
+typedef struct { int used,refs; char name[64]; } K32_MODULE_HANDLE;
+static K32_MODULE_HANDLE k32_modules[16];
 static DWORD k32_console_cp_in=65001, k32_console_cp_out=65001;
 static DWORD k32_error_mode;
 static int k32_eqi(const char *a, const char *b);
@@ -28,7 +30,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -137,7 +139,7 @@ __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2
 __attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
 __attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
 __attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
-__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name){if(!name||k32_eqi(name,"sentinel.exe")||k32_eqi(name,"C:\\sentinel.exe"))return (HANDLE)1;k32_last_error=126;return 0;}
+__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name){if(!name||k32_eqi(name,"sentinel.exe")||k32_eqi(name,"C:\\sentinel.exe"))return (HANDLE)1;for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name))return (HANDLE)&k32_modules[i];k32_last_error=126;return 0;}
 __attribute__((dllexport)) LPSTR GetCommandLineA(void) { return k32_cmdline; }
 __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DWORD cap) {
     const char *s = "C:\\sentinel.exe"; DWORD i=0; (void)module;
@@ -145,10 +147,15 @@ __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DW
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
 }
 __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
-    (void)module; (void)name; return (void *)0;
+    if(!name||!*name){k32_last_error=87;return 0;}
+    const char *dll="sentinel.exe";
+    if(module&&(unsigned long long)module!=1){int found=0;for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){dll=k32_modules[i].name;found=1;break;}if(!found){k32_last_error=126;return 0;}}
+    void *address=(void*)sy3(SYS_GetProcAddress,(u64)dll,(u64)name,0);
+    if(!address)k32_last_error=127;else k32_last_error=0;
+    return address;
 }
-__attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { (void)name; return (HANDLE)0; }
-__attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { (void)module; return 0; }
+__attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { if(!name||!*name){k32_last_error=87;return 0;}for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)){k32_modules[i].refs++;return (HANDLE)&k32_modules[i];}for(int i=0;i<16;i++)if(!k32_modules[i].used){int j=0;while(name[j]&&j<63){k32_modules[i].name[j]=name[j];j++;}k32_modules[i].name[j]=0;k32_modules[i].refs=1;k32_modules[i].used=1;return (HANDLE)&k32_modules[i];}k32_last_error=8;return 0; }
+__attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){if(k32_modules[i].refs>0)k32_modules[i].refs--;if(!k32_modules[i].refs)k32_modules[i].used=0;k32_last_error=0;return 1;}k32_last_error=126;return 0; }
 __attribute__((dllexport)) BOOL VirtualFree(LPVOID address, u64 size, DWORD type) {
     (void)address; (void)size; (void)type; return 0;
 }

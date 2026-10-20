@@ -570,7 +570,8 @@ static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression
     if(method>1) return 0; /* none and MSZIP only */
     for(u32 i=0;i<blocks;i++) {
         u8 hdr[8];
-        if(!cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,hdr,8)) return 0;
+        if (pos>cab_size || 8u+reserve_data>cab_size-pos ||
+            !cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,hdr,8)) return 0;
         u32 checksum=rd32(hdr); u16 cbdata=rd16(hdr+4), cbuncomp=rd16(hdr+6);
         pos+=8u+reserve_data;
         if(!cbuncomp || cbuncomp>32768 || cbdata>sizeof cab_comp ||
@@ -585,6 +586,7 @@ static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression
             if(cbdata<2 || cab_comp[0]!='C' || cab_comp[1]!='K') return 0;
             if(!cab_inflate_raw(cab_comp+2,cbdata-2,cbuncomp)) return 0;
         }
+        if (*total_out > 0xFFFFFFFFu - cab_outlen) return 0;
         *total_out += cab_outlen;
         pos += cbdata;
     }

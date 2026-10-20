@@ -716,7 +716,7 @@ static const char *k32_module_basename(const char *s){const char *base=s;if(!s)r
 static BOOL k32_create_process_name(const char *name,K32_PROCESS_INFORMATION *pi){if(!name||!*name){k32_last_error=87;return 0;}const char *base=k32_module_basename(name);i64 pid=(i64)sy3(SYS_CreateProcess,(u64)base,0,0);if(pid<0){k32_last_error=2;return 0;}if(pi){pi->hProcess=(HANDLE)(unsigned long long)pid;pi->hThread=0;pi->dwProcessId=(DWORD)pid;pi->dwThreadId=0;}k32_last_error=0;return 1;}
 __attribute__((dllexport)) BOOL CreateProcessA(LPCSTR app,LPSTR cmd,void *process_security,void *thread_security,BOOL inherit,DWORD flags,void *environment,LPCSTR cwd,void *startup,void *process_info){
  (void)process_security;(void)thread_security;(void)inherit;(void)flags;(void)environment;(void)cwd;(void)startup;char name[256];const char *src=app;
- if(!src||!*src){if(!cmd||!*cmd){k32_last_error=87;return 0;}src=cmd;while(*src==' '||*src=='\\t')src++;int i=0;while(src[i]&&src[i]!=' '&&src[i]!='\\t'&&i<255){name[i]=src[i];i++;}name[i]=0;src=name;}return k32_create_process_name(src,(K32_PROCESS_INFORMATION*)process_info);
+ if(!src||!*src){if(!cmd||!*cmd){k32_last_error=87;return 0;}src=cmd;while(*src==' '||*src=='\t')src++;int i=0;while(src[i]&&src[i]!=' '&&src[i]!='\t'&&i<255){name[i]=src[i];i++;}name[i]=0;src=name;}return k32_create_process_name(src,(K32_PROCESS_INFORMATION*)process_info);
 }
 typedef struct { DWORD cb; char *lpReserved,*lpDesktop,*lpTitle; DWORD dwX,dwY,dwXSize,dwYSize,dwXCountChars,dwYCountChars,dwFillAttribute,dwFlags; unsigned short wShowWindow,cbReserved2; unsigned char *lpReserved2; HANDLE hStdInput,hStdOutput,hStdError; } K32_STARTUPINFOA;
 __attribute__((dllexport)) void GetStartupInfoA(K32_STARTUPINFOA *si){if(!si)return;si->cb=sizeof(*si);si->lpReserved=si->lpDesktop=si->lpTitle=0;si->dwX=si->dwY=si->dwXSize=si->dwYSize=0;si->dwXCountChars=80;si->dwYCountChars=25;si->dwFillAttribute=7;si->dwFlags=0;si->wShowWindow=1;si->cbReserved2=0;si->lpReserved2=0;si->hStdInput=(HANDLE)0;si->hStdOutput=(HANDLE)1;si->hStdError=(HANDLE)2;}
@@ -1929,7 +1929,7 @@ __attribute__((dllexport)) int wcscmp(const K32_WCHAR*a,const K32_WCHAR*b){retur
 
 __attribute__((dllexport)) int wcsncmp(const K32_WCHAR*a,const K32_WCHAR*b,u64 n){return k32x_wcmp(a,b,n,0);}
 
-__attribute__((dllexport)) K32_WCHAR *wcscpy(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while((*d++=*s++));return r;}
+__attribute__((dllexport)) K32_WCHAR *wcscpy(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while((*d++=*s++)!=0) { }return r;}
 
 __attribute__((dllexport)) K32_WCHAR *wcsncpy(K32_WCHAR*d,const K32_WCHAR*s,u64 n){if(!d||!s)return d;u64 i=0;while(i<n&&s[i]){d[i]=s[i];i++;}while(i<n)d[i++]=0;return d;}
 

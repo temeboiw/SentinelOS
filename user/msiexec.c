@@ -33,6 +33,7 @@ static u32 msi_entry_count, msi_major;
 static u32 fat[MAX_FAT];
 /* Keep the FAT-sector index off the small user-mode stack. */
 static u32 fat_sids[MAX_FAT/128];
+static u32 cab_sector_ids[MAX_FAT];
 static u8 dir_buffer[MAX_DIR];
 /* CFB mini-stream storage is separate from the main FAT stream space. */
 static u32 mini_fat[MAX_MINIFAT];
@@ -356,6 +357,97 @@ static int msi_table_cell(const char *table, u32 row, u32 column,
     }
     return 1;
 }
+static u32 cfb_stream_sector_list(const u8 *entry, u32 *ids, u32 cap) {
+    u32 sid=rd32(entry+116), count=0;
+    while (sid!=END_OF_CHAIN && sid!=FREE_SECTOR && sid<fat_count &&
+           count<cap && count<sector_count) {
+        ids[count++]=sid;
+        u32 next=fat[sid];
+        if (next==sid || next==FAT_SECTOR || next==DIFAT_SECTOR) return 0;
+        sid=next;
+    }
+    return sid==END_OF_CHAIN ? count : 0;
+}
+static int cfb_stream_read_list(const u32 *ids, u32 count, u64 stream_size,
+                                u64 offset, u8 *dst, u32 len) {
+    if (offset>stream_size || len>stream_size-offset) return 0;
+    u32 done=0;
+    while (done<len) {
+        u64 pos=offset+done;
+        u64 idx=pos/sector_size;
+        u32 in=(u32)(pos%sector_size);
+        if (idx>=count) return 0;
+        const u8 *p=sector(ids[idx]);
+        if (!p) return 0;
+        u32 n=sector_size-in;
+        if (n>len-done) n=len-done;
+        for (u32 i=0;i<n;i++) dst[done+i]=p[in+i];
+        done+=n;
+    }
+    return 1;
+}
+static int msi_list_embedded_cabinet(const char *stream_name) {
+    const u8 *entry=find_stream_entry(stream_name,0);
+    if (!entry) {
+        out("  Embedded cabinet stream missing: "); out(stream_name); out("\n");
+        return 0;
+    }
+    u64 stream_size=rd64(entry+120);
+    if (stream_size<36 || stream_size>file_size) return 0;
+    u32 sectors=cfb_stream_sector_list(entry,cab_sector_ids,MAX_FAT);
+    if (!sectors) return 0;
+    u8 h[40];
+    if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,0,h,36) ||
+        h[0]!='M' || h[1]!='S' || h[2]!='C' || h[3]!='F') {
+        out("  Invalid embedded cabinet: "); out(stream_name); out("\n");
+        return 0;
+    }
+    u32 cab_size=rd32(h+8), files_off=rd32(h+16);
+    u16 files=rd16(h+28);
+    if (cab_size>stream_size || files_off>=cab_size) return 0;
+    out("Embedded cabinet "); out(stream_name); out(": ");
+    out_u32(files); out(" files\n");
+    u64 pos=files_off;
+    u32 shown=0;
+    for (u32 i=0;i<files;i++) {
+        u8 rec[16];
+        if (pos+16>cab_size || !cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,rec,16))
+            return 0;
+        u32 file_size=rd32(rec);
+        pos+=16;
+        char name[260]; u32 n=0; int ended=0;
+        while (pos<cab_size && n+1<sizeof(name)) {
+            u8 c;
+            if (!cfb_stream_read_list(cab_sector_ids,sectors,stream_size,pos,&c,1)) return 0;
+            pos++;
+            if (!c) { ended=1; break; }
+            name[n++]=(c>=32 && c<127)?(char)c:'?';
+        }
+        name[n]=0;
+        if (!ended) return 0;
+        if (shown<16) {
+            out("    "); out(name); out(" ("); out_u32(file_size); out(" bytes)\n");
+            shown++;
+        }
+    }
+    if (files>shown) {
+        out("    ... "); out_u32(files-shown); out(" additional files\n");
+    }
+    return 1;
+}
+static void print_msi_cabinets(void) {
+    MsiTable *media=msi_find_table("Media");
+    if (!media) { out("Media table: absent\n"); return; }
+    for (u32 r=0;r<media->rows;r++) {
+        char cabinet[256]; long long v=0; int is_text=0;
+        if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) || !is_text)
+            continue;
+        if (cabinet[0]=='#' && cabinet[1])
+            (void)msi_list_embedded_cabinet(cabinet+1);
+        else if (cabinet[0])
+            { out("External cabinet required: "); out(cabinet); out("\n"); }
+    }
+}
 static void print_msi_product_summary(void) {
     MsiTable *p=msi_find_table("Property");
     if (p) {
@@ -488,6 +580,7 @@ static void inspect_msi(void) {
         }
         out("Package metadata:\n");
         print_msi_product_summary();
+        print_msi_cabinets();
     } else {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }

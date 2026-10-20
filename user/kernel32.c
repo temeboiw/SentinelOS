@@ -7,6 +7,7 @@ typedef void *LPVOID;
 typedef const char *LPCSTR;
 typedef const void *LPCVOID;
 typedef char *LPSTR;
+static DWORD k32_last_error;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 
@@ -97,7 +98,6 @@ typedef struct { K32_WORD wYear,wMonth,wDayOfWeek,wDay,wHour,wMinute,wSecond,wMi
 typedef struct { K32_LONG dwOemId; K32_LONG dwPageSize; void *lpMinimumApplicationAddress; void *lpMaximumApplicationAddress; K32_SIZE_T dwActiveProcessorMask; K32_LONG dwNumberOfProcessors; K32_LONG dwProcessorType; K32_LONG dwAllocationGranularity; K32_WORD wProcessorLevel; K32_WORD wProcessorRevision; } K32_SYSTEM_INFO;
 typedef struct { K32_SIZE_T QuadPart; } K32_LARGE_INTEGER;
 static DWORD k32_heap_tag;
-static DWORD k32_last_error;
 static char k32_cmdline[] = "sentinel.exe";
 
 __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }

@@ -459,7 +459,7 @@ lld -flavor link \
   /export:GetConsoleAliasExesW \
   /export:GetConsoleAliasExesLengthA \
   /export:GetConsoleAliasExesLengthW \
-  /export:GetConsoleInputExeNameA \
+  /export:AddConsoleAliasA /export:AddConsoleAliasW /export:GetConsoleInputExeNameA \
   /export:GetConsoleInputExeNameW \
   /export:GetConsoleOutputExeNameA \
   /export:GetConsoleOutputExeNameW \

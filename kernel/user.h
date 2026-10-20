@@ -1288,8 +1288,13 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     if (end > old_size) {
         E32(inode, 4) = (uint32_t)end;
         E32(inode, 108) = 0;
-        if (e4_write_inode(&g_ext4, h->ino, inode) < 0) return done ? (int)done : -1;
-        h->size = end;
+    }
+    /* Persist extent-root changes even when writing into a hole inside the
+       existing logical file size; otherwise the allocated blocks are orphaned. */
+    if (end > old_size || missing) {
+        if (e4_write_inode(&g_ext4, h->ino, inode) < 0)
+            return done ? (int)done : -1;
+        if (end > old_size) h->size = end;
     }
     h->pos += done;
     return (int)done;

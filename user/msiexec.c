@@ -23,6 +23,8 @@ enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS
 
 static int msi_ok;
 static u32 fat[MAX_FAT];
+/* Keep the FAT-sector index off the small user-mode stack. */
+static u32 fat_sids[MAX_FAT/128];
 static u8 dir_buffer[MAX_DIR];
 static u32 fat_count, sector_size, sector_count;
 static const u8 *file_bytes;
@@ -67,7 +69,6 @@ static const u8 *sector(u32 sid) {
 static int load_fat(void) {
     const u8 *h=file_bytes;
     u32 num_fat=rd32(h+44), difat_sid=rd32(h+68), num_difat=rd32(h+72);
-    u32 fat_sids[MAX_FAT/128];
     if (!num_fat || num_fat > MAX_FAT/128 ||
         num_fat > MAX_FAT/(sector_size/4)) return 0;
     u32 nfat=0;

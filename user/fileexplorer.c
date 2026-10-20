@@ -102,6 +102,8 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
             line[p++]='['; line[p++]='E'; line[p++]='X'; line[p++]='E'; line[p++]=']'; line[p++]=' ';
         } else if (ends_with(g_names[i], ".dll")) {
             line[p++]='['; line[p++]='D'; line[p++]='L'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".msi")) {
+            line[p++]='['; line[p++]='M'; line[p++]='S'; line[p++]='I'; line[p++]=']'; line[p++]=' ';
         } else {
             line[p++]='['; line[p++]='F'; line[p++]='I'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
         }

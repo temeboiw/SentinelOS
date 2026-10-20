@@ -701,6 +701,8 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 /* Read-only VFS file handles used by the initial Win32 file APIs. */
 #define VFS_USER_HANDLES 32
 #define SYS_NtCloseFile 22
+#define SYS_NtQueryFileSize 25
+#define SYS_NtSetFilePosition 26
 typedef struct {
     uint32_t ino;
     uint64_t pos, size;
@@ -1438,6 +1440,27 @@ static Frame *syscall_handler(Frame *f) {
         vfs_close_user_file(f->rdi);
         f->rax = 1;
         return f;
+
+    case SYS_NtQueryFileSize: {
+        uint64_t h=f->rdi;
+        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used){f->rax=(uint64_t)-1LL;return f;}
+        f->rax=vfs_user_handles[h-0x100].size;
+        return f;
+    }
+
+    case SYS_NtSetFilePosition: {
+        uint64_t h=f->rdi;
+        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used){f->rax=(uint64_t)-1LL;return f;}
+        VfsUserHandle *vh=&vfs_user_handles[h-0x100];
+        int64_t offset=(int64_t)f->rsi;
+        uint64_t base=0;
+        if(f->rdx==1)base=vh->pos;
+        else if(f->rdx==2)base=vh->size;
+        else if(f->rdx!=0){f->rax=(uint64_t)-1LL;return f;}
+        int64_t target=(int64_t)base+offset;
+        if(target<0||(uint64_t)target>vh->size){f->rax=(uint64_t)-1LL;return f;}
+        vh->pos=(uint64_t)target;f->rax=vh->pos;return f;
+    }
 
     case SYS_NtQueryDirectoryFile: {
         uint32_t index = (uint32_t)f->rdi;

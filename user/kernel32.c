@@ -80,3 +80,165 @@ __attribute__((dllexport)) HANDLE CreateThread(
 __attribute__((dllexport)) DWORD WaitForSingleObject(HANDLE h, DWORD ms) {
     return (DWORD)sy3(SYS_Wait, (u64)h, (u64)ms, 0);
 }
+
+
+/* -------------------------------------------------------------------------
+ * Additional Win32 compatibility exports.
+ *
+ * These exports intentionally provide a small, documented compatibility
+ * subset. APIs requiring kernel services not present in SentinelOS return a
+ * safe failure/default rather than pretending the service succeeded.
+ * ------------------------------------------------------------------------- */
+typedef unsigned char K32_BYTE;
+typedef unsigned short K32_WORD;
+typedef unsigned long long K32_SIZE_T;
+typedef long K32_LONG;
+typedef struct { K32_WORD wYear,wMonth,wDayOfWeek,wDay,wHour,wMinute,wSecond,wMilliseconds; } K32_SYSTEMTIME;
+typedef struct { K32_LONG dwOemId; K32_LONG dwPageSize; void *lpMinimumApplicationAddress; void *lpMaximumApplicationAddress; K32_SIZE_T dwActiveProcessorMask; K32_LONG dwNumberOfProcessors; K32_LONG dwProcessorType; K32_LONG dwAllocationGranularity; K32_WORD wProcessorLevel; K32_WORD wProcessorRevision; } K32_SYSTEM_INFO;
+typedef struct { K32_SIZE_T QuadPart; } K32_LARGE_INTEGER;
+static DWORD k32_heap_tag;
+static char k32_cmdline[] = "sentinel.exe";
+
+__attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }
+__attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
+__attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
+__attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
+__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) { (void)name; return (HANDLE)1; }
+__attribute__((dllexport)) LPSTR GetCommandLineA(void) { return k32_cmdline; }
+__attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DWORD cap) {
+    const char *s = "C:\\sentinel.exe"; DWORD i=0; (void)module;
+    if (!out || !cap) return 0;
+    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
+}
+__attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
+    (void)module; (void)name; return (void *)0;
+}
+__attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { (void)name; return (HANDLE)0; }
+__attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { (void)module; return 0; }
+__attribute__((dllexport)) BOOL VirtualFree(LPVOID address, u64 size, DWORD type) {
+    (void)address; (void)size; (void)type; return 0;
+}
+__attribute__((dllexport)) BOOL VirtualProtect(LPVOID address, u64 size, DWORD protect, DWORD *old) {
+    (void)address; (void)size; (void)protect; if (old) *old=0; return 0;
+}
+__attribute__((dllexport)) K32_SIZE_T VirtualQuery(LPCVOID address, void *info, K32_SIZE_T len) {
+    (void)address; (void)info; (void)len; return 0;
+}
+__attribute__((dllexport)) DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
+    const char *s="C:\\"; DWORD i=0; if (!out || !cap) return 0;
+    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
+}
+__attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path, void *security) {
+    (void)path; (void)security; return 0;
+}
+__attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) { (void)path; return 0; }
+__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path; return 0; }
+__attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { (void)from; (void)to; return 0; }
+__attribute__((dllexport)) BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
+    (void)from; (void)to; (void)fail_if_exists; return 0;
+}
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
+__attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (void)path; (void)attrs; return 0; }
+__attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
+    (void)file; if (high) *high=0; return 0xFFFFFFFFu;
+}
+__attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG *high, DWORD method) {
+    (void)file; (void)distance; (void)method; if (high) *high=0; return 0xFFFFFFFFu;
+}
+__attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { (void)file; return 0; }
+__attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {
+    const char *s="C:\\TEMP\\"; DWORD i=0; if (!out || !cap) return 0;
+    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i+1;
+}
+__attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR out, LPSTR *part) {
+    DWORD i=0; (void)part; if (!path || !out || !cap) return 0;
+    while (path[i] && i+1<cap) { out[i]=path[i]; i++; } out[i]=0;
+    return path[i] ? i+1 : i;
+}
+__attribute__((dllexport)) DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR out, DWORD cap) {
+    (void)name; if (out && cap) out[0]=0; return 0;
+}
+__attribute__((dllexport)) BOOL SetEnvironmentVariableA(LPCSTR name, LPCSTR value) {
+    (void)name; (void)value; return 0;
+}
+__attribute__((dllexport)) BOOL GetComputerNameA(LPSTR out, DWORD *size) {
+    const char *s="SENTINELOS"; DWORD i=0;
+    if (!out || !size || *size < 10) { if (size) *size=10; return 0; }
+    while (s[i]) { out[i]=s[i]; i++; } out[i]=0; *size=i; return 1;
+}
+__attribute__((dllexport)) void GetSystemInfo(K32_SYSTEM_INFO *s) {
+    if (!s) return;
+    s->dwOemId=0; s->dwPageSize=4096; s->lpMinimumApplicationAddress=(void *)0x10000;
+    s->lpMaximumApplicationAddress=(void *)0x7FFFFFFFFFFFULL; s->dwActiveProcessorMask=1;
+    s->dwNumberOfProcessors=1; s->dwProcessorType=8664; s->dwAllocationGranularity=65536;
+    s->wProcessorLevel=6; s->wProcessorRevision=0;
+}
+__attribute__((dllexport)) DWORD GetVersion(void) { return 0x00000001u; }
+__attribute__((dllexport)) BOOL QueryPerformanceCounter(K32_LARGE_INTEGER *out) {
+    if (!out) return 0; out->QuadPart=0; return 1;
+}
+__attribute__((dllexport)) BOOL QueryPerformanceFrequency(K32_LARGE_INTEGER *out) {
+    if (!out) return 0; out->QuadPart=1000; return 1;
+}
+__attribute__((dllexport)) DWORD GetTickCount(void) { return 0; }
+__attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE process, DWORD *code) {
+    (void)process; if (!code) return 0; *code=259; return 1;
+}
+__attribute__((dllexport)) BOOL TerminateProcess(HANDLE process, DWORD code) {
+    (void)process; (void)code; return 0;
+}
+__attribute__((dllexport)) HANDLE GetProcessHeap(void) { return (HANDLE)&k32_heap_tag; }
+__attribute__((dllexport)) LPVOID HeapAlloc(HANDLE heap, DWORD flags, K32_SIZE_T size) {
+    (void)heap; (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
+}
+__attribute__((dllexport)) BOOL HeapFree(HANDLE heap, DWORD flags, LPVOID mem) {
+    (void)heap; (void)flags; (void)mem; return 0;
+}
+__attribute__((dllexport)) LPVOID HeapReAlloc(HANDLE heap, DWORD flags, LPVOID mem, K32_SIZE_T size) {
+    (void)heap; (void)flags; (void)mem; (void)size; return (LPVOID)0;
+}
+__attribute__((dllexport)) K32_SIZE_T HeapSize(HANDLE heap, DWORD flags, LPCVOID mem) {
+    (void)heap; (void)flags; (void)mem; return (K32_SIZE_T)-1;
+}
+__attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags, K32_SIZE_T size) {
+    (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
+}
+__attribute__((dllexport)) LPVOID LocalFree(LPVOID mem) { (void)mem; return mem; }
+__attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags, K32_SIZE_T size) {
+    (void)flags; return VirtualAlloc((LPVOID)0,size,0x3000,4);
+}
+__attribute__((dllexport)) LPVOID GlobalFree(LPVOID mem) { (void)mem; return mem; }
+__attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h, DWORD *mode) {
+    (void)h; if (!mode) return 0; *mode=0; return 0;
+}
+__attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h, DWORD mode) { (void)h; (void)mode; return 0; }
+__attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DWORD *read, void *reserved) {
+    (void)h; (void)buf; (void)len; (void)reserved; if (read) *read=0; return 0;
+}
+__attribute__((dllexport)) BOOL WriteConsoleA(HANDLE h, LPCVOID buf, DWORD len, DWORD *written, void *reserved) {
+    (void)reserved; return WriteFile(h,buf,len,written,0);
+}
+__attribute__((dllexport)) void GetSystemTime(K32_SYSTEMTIME *t) {
+    if (!t) return; t->wYear=2026; t->wMonth=1; t->wDayOfWeek=0; t->wDay=1;
+    t->wHour=0; t->wMinute=0; t->wSecond=0; t->wMilliseconds=0;
+}
+__attribute__((dllexport)) void GetLocalTime(K32_SYSTEMTIME *t) { GetSystemTime(t); }
+__attribute__((dllexport)) HANDLE CreateEventA(void *security, BOOL manual, BOOL initial, LPCSTR name) {
+    (void)security; (void)manual; (void)initial; (void)name; return (HANDLE)0;
+}
+__attribute__((dllexport)) BOOL SetEvent(HANDLE event) { (void)event; return 0; }
+__attribute__((dllexport)) BOOL ResetEvent(HANDLE event) { (void)event; return 0; }
+__attribute__((dllexport)) HANDLE CreateMutexA(void *security, BOOL owner, LPCSTR name) {
+    (void)security; (void)owner; (void)name; return (HANDLE)0;
+}
+__attribute__((dllexport)) BOOL ReleaseMutex(HANDLE mutex) { (void)mutex; return 0; }
+__attribute__((dllexport)) HANDLE CreateSemaphoreA(void *security, LONG initial, LONG maximum, LPCSTR name) {
+    (void)security; (void)initial; (void)maximum; (void)name; return (HANDLE)0;
+}
+__attribute__((dllexport)) BOOL ReleaseSemaphore(HANDLE semaphore, LONG count, LONG *previous) {
+    (void)semaphore; (void)count; if (previous) *previous=0; return 0;
+}
+__attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count, const HANDLE *handles, BOOL wait_all, DWORD ms) {
+    (void)count; (void)handles; (void)wait_all; (void)ms; return 0xFFFFFFFFu;
+}
+__attribute__((dllexport)) DWORD GetFileType(HANDLE file) { (void)file; return 0; }

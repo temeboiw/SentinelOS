@@ -46,7 +46,7 @@ static void shell_copy(char *d,const char *s,unsigned cap) {
     d[i]=0;
 }
 static int shell_is_absolute(const char *p) {
-    return p && (((p[0]=='C'||p[0]=='c')&&p[1]==':') || p[0]=='\\\\' || p[0]=='/');
+    return p && (((p[0]=='C'||p[0]=='c')&&p[1]==':') || p[0]=='\\' || p[0]=='/');
 }
 
 /* Win32 ShellExecuteA: values > 32 mean success. */
@@ -60,7 +60,7 @@ E u64 ShellExecuteA(HWND hwnd,LPCSTR verb,LPCSTR file,LPCSTR params,LPCSTR dir,i
     const char *image=file;
     if(shell_is_absolute(file)) {
         const char *last=file;
-        for(const char *p=file;*p;p++)if(*p=='\\\\'||*p=='/')last=p+1;
+        for(const char *p=file;*p;p++)if(*p=='\\'||*p=='/')last=p+1;
         image=last;
     }
     i64 pid=(i64)shell_sy3(4,(u64)image,0,0);
@@ -135,31 +135,31 @@ E LPSTR *CommandLineToArgvA(LPCSTR command,int *argc_out) {
     if(argc_out)*argc_out=0;
     if(!command)return 0;
     unsigned i=0,o=0,argc=0;
-    while(command[i]==' '||command[i]=='\\t')i++;
+    while(command[i]==' '||command[i]=='\t')i++;
     while(command[i] && argc<63) {
         shell_argv[argc++]=&shell_argv_text[o];
         int quoted=0;
         while(command[i]) {
             char c=command[i];
             if(c=='"') { quoted=!quoted; i++; continue; }
-            if(!quoted && (c==' '||c=='\\t'))break;
-            if(c=='\\\\') {
+            if(!quoted && (c==' '||c=='\t'))break;
+            if(c=='\\') {
                 unsigned bs=0;
-                while(command[i]=='\\\\'){bs++;i++;}
+                while(command[i]=='\\'){bs++;i++;}
                 if(command[i]=='"') {
-                    for(unsigned k=0;k<bs/2 && o<sizeof(shell_argv_text)-2;k++)shell_argv_text[o++]='\\\\';
+                    for(unsigned k=0;k<bs/2 && o<sizeof(shell_argv_text)-2;k++)shell_argv_text[o++]='\\';
                     if(bs&1) { if(o<sizeof(shell_argv_text)-2)shell_argv_text[o++]='"'; i++; }
                     else { quoted=!quoted; i++; }
                     continue;
                 }
-                while(bs-- && o<sizeof(shell_argv_text)-2)shell_argv_text[o++]='\\\\';
+                while(bs-- && o<sizeof(shell_argv_text)-2)shell_argv_text[o++]='\\';
                 continue;
             }
             if(o>=sizeof(shell_argv_text)-2) { if(argc_out)*argc_out=0;return 0; }
             shell_argv_text[o++]=c;i++;
         }
         shell_argv_text[o++]=0;
-        while(command[i]==' '||command[i]=='\\t')i++;
+        while(command[i]==' '||command[i]=='\t')i++;
     }
     shell_argv[argc]=0;
     if(argc_out)*argc_out=(int)argc;

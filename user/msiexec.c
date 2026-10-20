@@ -814,7 +814,6 @@ static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
         if ((u64)cf->offset+cf->size>folder_totals[cf->folder]) return 0;
     }
     if (extract) {
-        (void)sy3(SYS_CreateDirectory,(u64)cab_stage_path,0,0);
         /* Pre-create all destinations before streaming blocks. */
         for (u32 i=0;i<cab_file_count;i++) {
             char path[256]; u32 p=0;
@@ -826,6 +825,10 @@ static int msi_list_embedded_cabinet(const char *stream_name, int extract) {
             long long fh=(long long)sy3(SYS_OpenFile,(u64)path,0x40000000u,1);
             if (fh<0) return 0;
             (void)sy3(SYS_CloseFile,(u64)fh,0,0);
+            if (!msi_record_change(path,0,1)) {
+                (void)sy3(26,(u64)path,0,0);
+                return 0;
+            }
         }
         for (u32 i=0;i<folder_count;i++) {
             u32 total=0;
@@ -853,21 +856,36 @@ static void print_msi_cabinets(void) {
 }
 static int msi_extract_embedded_cabinets(void) {
     MsiTable *media=msi_find_table("Media");
-    if (!media) { out("Install blocked: MSI has no Media table.\n"); return 0; }
+    if (!msi_tx_active || !media) {
+        out("Install blocked: no active transaction or Media table.\n"); return 0;
+    }
     int found=0;
     for (u32 r=0;r<media->rows;r++) {
         char cabinet[256]; long long v=0; int is_text=0;
-        if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) || !is_text ||
-            !cabinet[0]) continue;
-        if (cabinet[0]=='#' && cabinet[1]) {
-            found=1;
-            if (!msi_list_embedded_cabinet(cabinet+1,1)) return 0;
-        } else {
+        if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) ||
+            !is_text || !cabinet[0]) continue;
+        if (cabinet[0]=='#' && cabinet[1]) found=1;
+        else {
             out("Install blocked: external cabinet is unsupported: "); out(cabinet); out("\n");
             return 0;
         }
     }
-    return found;
+    if (!found || msi_path_type(cab_stage_path)!=0 ||
+        !sy3(SYS_CreateDirectory,(u64)cab_stage_path,0,0)) {
+        out("Install blocked: staging directory is unavailable or already exists.\n");
+        return 0;
+    }
+    if (!msi_record_change(cab_stage_path,1,1)) {
+        (void)sy3(SYS_RemoveDirectory,(u64)cab_stage_path,0,0);
+        return 0;
+    }
+    for (u32 r=0;r<media->rows;r++) {
+        char cabinet[256]; long long v=0; int is_text=0;
+        if (!msi_table_cell("Media",r,3,cabinet,sizeof(cabinet),&v,&is_text) ||
+            !is_text || !cabinet[0]) continue;
+        if (!msi_list_embedded_cabinet(cabinet+1,1)) return 0;
+    }
+    return 1;
 }
 static void print_msi_product_summary(void) {
     MsiTable *p=msi_find_table("Property");

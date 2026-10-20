@@ -195,8 +195,31 @@ __attribute__((dllexport)) void Sleep(DWORD ms) { if(!ms){sy3(21,0,0,0);return;}
 __attribute__((dllexport)) BOOL PeekInput(void *out) {
     return (BOOL)sy3(SYS_GetInput, (u64)out, 0, 0);
 }
+typedef struct { u64 va; DWORD w, h, pitch; } K32_FBINFO;
+typedef int (*K32_TextOutA)(void *, int, int, const char *, int);
+static void k32_shutdown_screen(void) {
+    K32_FBINFO fb = {0};
+    if (!sy3(8, (u64)&fb, 0, 0) || !fb.va || fb.w < 320 || fb.h < 200) return;
+    volatile DWORD *pixels = (volatile DWORD *)(u64)fb.va;
+    for (DWORD y = 0; y < fb.h; ++y)
+        for (DWORD x = 0; x < fb.w; ++x)
+            pixels[(u64)y * fb.pitch + x] = 0xFF003399;
+    K32_TextOutA draw = (K32_TextOutA)sy3(9, (u64)"user32.dll", (u64)"TextOutA", 0);
+    if (draw) {
+        draw(0, (int)(fb.w / 2) - 90, (int)(fb.h / 2) - 20, "SENTINELOS", -1);
+        draw(0, (int)(fb.w / 2) - 150, (int)(fb.h / 2) + 12, "SHUTTING DOWN...", -1);
+        draw(0, (int)(fb.w / 2) - 175, (int)(fb.h / 2) + 42, "PLEASE WAIT WHILE SENTINELOS CLOSES", -1);
+    }
+    u64 start = sy3(24, 0, 0, 0);
+    if (start != (u64)-1) {
+        while (sy3(24, 0, 0, 0) - start < 900) sy3(21, 0, 0, 0);
+    } else {
+        for (volatile u64 i = 0; i < 20000000ULL; ++i) __asm__ volatile("pause");
+    }
+}
 __attribute__((dllexport)) int ExitWindowsEx(unsigned int flags, unsigned int reason) {
     (void)reason;
+    k32_shutdown_screen();
     return (int)sy3(11, (flags & 2) ? 1 : 0, 0, 0);
 }
 __attribute__((dllexport)) HANDLE CreateThread(

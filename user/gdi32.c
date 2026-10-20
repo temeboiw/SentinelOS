@@ -78,7 +78,7 @@ static HGDIOBJ obj_new(int type,DWORD color,int width) {
 }
 static DWORD obj_color(u64 h,DWORD fallback) {GdiObject *o=obj_get((HGDIOBJ)h);return o?o->color:fallback;}
 
-E HDC CreateCompatibleDC(HDC d){(void)d;return (HDC)(dc_new()?dcs[0].handle:0);}
+E HDC CreateCompatibleDC(HDC d){(void)d;GdiState*s=dc_new();return s?(HDC)s->handle:0;}
 E BOOL DeleteDC(HDC h){GdiState*d=dc_get(h);if(!d||d->handle==1)return 0;d->used=0;return 1;}
 E HGDIOBJ SelectObject(HDC h,HGDIOBJ o) {
     GdiState*d=dc_get(h);GdiObject*g=obj_get(o);if(!d||!g)return 0;
@@ -134,7 +134,7 @@ E BOOL TextOutA(HDC h,int x,int y,const char*s,int n) {
 E int SetBkMode(HDC h,int m){GdiState*d=dc_get(h);if(!d)return 0;int old=d->bk_mode;d->bk_mode=m;return old;}
 E DWORD SetTextColor(HDC h,DWORD c){GdiState*d=dc_get(h);if(!d)return 0xFFFFFFFFu;DWORD old=d->text;d->text=c;return old;}
 E DWORD SetBkColor(HDC h,DWORD c){GdiState*d=dc_get(h);if(!d)return 0xFFFFFFFFu;DWORD old=d->bk;d->bk=c;return old;}
-E BOOL GetTextExtentPoint32A(HDC h,const char*s,int n,SIZE*z){(void)h;if(!s||!z||n<0)return 0;if(n<0){n=0;while(s[n])n++;}z->cx=n*8;z->cy=16;return 1;}
+E BOOL GetTextExtentPoint32A(HDC h,const char*s,int n,SIZE*z){(void)h;if(!s||!z)return 0;if(n<0){n=0;while(s[n])n++;}z->cx=n*8;z->cy=16;return 1;}
 E int SaveDC(HDC h) {
     GdiState*d=dc_get(h);if(!d)return 0;int idx=(int)(d-dcs);
     if(saved_n[idx]>=MAX_SAVE)return 0;GdiSaved*s=&saved[idx][saved_n[idx]++];

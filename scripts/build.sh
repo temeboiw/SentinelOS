@@ -302,6 +302,9 @@ lld -flavor link \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
   /export:GdiFillRect /export:GdiLine /export:GdiTextOut \
+  /export:GetDC /export:GetWindowDC /export:ReleaseDC /export:GetClientRect \
+  /export:BeginPaint /export:EndPaint /export:GetSystemMetrics \
+  /export:SetWindowTextA /export:GetWindowTextA \
   "/implib:$B/obj/user32.lib" \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"

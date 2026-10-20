@@ -1456,11 +1456,13 @@ ls -lh \
 echo "==> GPT disk image (FAT32 ESP + ext4, 20 GiB)"
 
 # 20 GiB raw disk: 41,943,040 sectors at 512 bytes each.
-# Keep a 128 MiB EFI System Partition and use the remaining space for ext4.
+# GPT reserves the final 33 sectors, so end the ext4 partition at the
+# last usable LBA (DISK_SECTORS - 34), not at the physical end of disk.
 DISK_SECTORS=$((20 * 1024 * 1024 * 1024 / 512))
+GPT_LAST_USABLE=$((DISK_SECTORS - 34))
 ESP_SECTORS=262144
 EXT_START=264192
-EXT_SECTORS=$((DISK_SECTORS - EXT_START))
+EXT_SECTORS=$((GPT_LAST_USABLE - EXT_START + 1))
 
 rm -f "$DISKIMG"
 qemu-img create -f raw "$DISKIMG" 20G >/dev/null

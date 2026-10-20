@@ -1242,6 +1242,7 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
         !(E32(inode, 32) & 0x80000)) return -1;
 
     uint64_t old_size = e4_size(inode);
+    if (E32(inode, 32) & 0x00040000u) return -1; /* huge_file changes i_blocks units */
     uint32_t last_lb = (uint32_t)((end - 1) / g_ext4.blksz);
     uint16_t en = E16(inode + 40, 2), em = E16(inode + 40, 4);
     if (E16(inode + 40, 6) != 0 || em > 4 || en > em) return -1;
@@ -1255,6 +1256,8 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     /* Blocks may coalesce into a single extent; only refuse up front when the
        inline root is already full. Fragmentation can still exhaust it safely. */
     if (missing && en >= em) return -1;
+    uint64_t sectors_added = (uint64_t)missing * (g_ext4.blksz / 512u);
+    if (sectors_added > 0xFFFFFFFFu - E32(inode, 28)) return -1;
     for (uint32_t lb = first_needed; lb <= last_lb; ++lb) {
         if (e4_map(&g_ext4, inode, lb)) continue;
         uint64_t pb = e4_alloc_block(&g_ext4);
@@ -1285,6 +1288,7 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
             return done ? (int)done : -1;
         done += chunk;
     }
+    if (sectors_added) E32(inode, 28) += (uint32_t)sectors_added;
     if (end > old_size) {
         E32(inode, 4) = (uint32_t)end;
         E32(inode, 108) = 0;

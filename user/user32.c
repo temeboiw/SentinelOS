@@ -1122,7 +1122,7 @@ __attribute__((dllexport)) void *GetParent(void *hwnd) {
 }
 __attribute__((dllexport)) unsigned long long SetParent(void) { return 0; }
 __attribute__((dllexport)) unsigned long long GetWindow(void) { return 0; }
-__attribute__((dllexport)) DWORD GetWindowThreadProcessId(void *hwnd, DWORD *process_id) {
+__attribute__((dllexport)) DWORD GetWindowThreadProcessId(void *hwnd, u32 *process_id) {
     if (!IsWindow(hwnd)) { if (process_id) *process_id=0; return 0; }
     if (process_id) *process_id=(DWORD)sy3(2,0,0,0);
     return 1;

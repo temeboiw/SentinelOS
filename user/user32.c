@@ -1701,3 +1701,99 @@ __attribute__((dllexport)) BOOL AreDpiAwarenessContextsEqual(void *a,void *b){re
 __attribute__((dllexport)) int GetAwarenessFromDpiAwarenessContext(void *context){return context?1:-1;}
 
 __attribute__((dllexport)) int GetProcessDpiAwareness(HANDLE process,int *awareness){if(!awareness||(process!=(void*)-1&&process!=(void*)1))return 0;*awareness=1;return 0;}
+
+__attribute__((dllexport)) BOOL SetPropA(void *hwnd,const char *name,void *data){if(!IsWindow(hwnd)||!name)return 0;static struct {void *hwnd;char name[48];void *data;int used;} p[32];int slot=-1;for(int i=0;i<32;i++){if(p[i].used&&p[i].hwnd==hwnd){int j=0;while(name[j]&&p[i].name[j]==name[j])j++;if(!name[j]&&!p[i].name[j]){p[i].data=data;return 1;}}if(!p[i].used&&slot<0)slot=i;}if(slot<0)return 0;p[slot].used=1;p[slot].hwnd=hwnd;p[slot].data=data;int j=0;while(name[j]&&j<47){p[slot].name[j]=name[j];j++;}p[slot].name[j]=0;return 1;}
+
+__attribute__((dllexport)) void *GetPropA(void *hwnd,const char *name){if(!IsWindow(hwnd)||!name)return 0;static struct {void *hwnd;char name[48];void *data;int used;} p[32];(void)p;return 0;}
+
+__attribute__((dllexport)) void *RemovePropA(void *hwnd,const char *name){(void)hwnd;(void)name;return 0;}
+
+__attribute__((dllexport)) BOOL SetPropW(void *hwnd,const unsigned short *name,void *data){if(!name)return 0;char a[48];int i=0;while(name[i]&&i<47){a[i]=(char)name[i];i++;}a[i]=0;return SetPropA(hwnd,a,data);}
+
+__attribute__((dllexport)) void *GetPropW(void *hwnd,const unsigned short *name){if(!name)return 0;char a[48];int i=0;while(name[i]&&i<47){a[i]=(char)name[i];i++;}a[i]=0;return GetPropA(hwnd,a);}
+
+__attribute__((dllexport)) void *RemovePropW(void *hwnd,const unsigned short *name){if(!name)return 0;char a[48];int i=0;while(name[i]&&i<47){a[i]=(char)name[i];i++;}a[i]=0;return RemovePropA(hwnd,a);}
+
+__attribute__((dllexport)) BOOL SetLayeredWindowAttributes(void *hwnd,DWORD color,unsigned char alpha,DWORD flags){if(!IsWindow(hwnd))return 0;u32_window_affinity=(u32_window_affinity&0xFFFF0000u)|((DWORD)alpha<<8)|(flags&0xFFu);return 1;}
+
+__attribute__((dllexport)) BOOL GetLayeredWindowAttributes(void *hwnd,DWORD *color,unsigned char *alpha,DWORD *flags){if(!IsWindow(hwnd))return 0;if(color)*color=0;if(alpha)*alpha=(unsigned char)((u32_window_affinity>>8)&0xFF);if(flags)*flags=u32_window_affinity&0xFF;return 1;}
+
+__attribute__((dllexport)) BOOL UpdateLayeredWindow(void *hwnd,void *dc,const U32_POINT *dst,const U32_POINT *size,void *src,const U32_POINT *srcpt,DWORD key,const void *blend,DWORD flags){(void)dc;(void)src;(void)srcpt;(void)key;(void)blend;(void)flags;if(!IsWindow(hwnd))return 0;if(dst){g_wnd.x=dst->x;g_wnd.y=dst->y;}if(size){g_wnd.w=size->x;g_wnd.h=size->y;}return 1;}
+
+__attribute__((dllexport)) BOOL RegisterHotKey(void *hwnd,int id,unsigned int modifiers,unsigned int key){if(hwnd&&!IsWindow(hwnd))return 0;static struct {void *hwnd;int id;unsigned int mod,key;int used;} h[16];for(int i=0;i<16;i++){if(h[i].used&&h[i].hwnd==hwnd&&h[i].id==id)return 0;if(!h[i].used){h[i].used=1;h[i].hwnd=hwnd;h[i].id=id;h[i].mod=modifiers;h[i].key=key;return 1;}}return 0;}
+
+__attribute__((dllexport)) BOOL UnregisterHotKey(void *hwnd,int id){(void)hwnd;(void)id;return 0;}
+
+__attribute__((dllexport)) void *SetWindowsHookExA(int id,void *proc,void *module,DWORD thread){(void)id;(void)module;(void)thread;if(!proc)return 0;static void *hooks[16];for(int i=0;i<16;i++)if(!hooks[i]){hooks[i]=proc;return &hooks[i];}return 0;}
+
+__attribute__((dllexport)) void *SetWindowsHookExW(int id,void *proc,void *module,DWORD thread){return SetWindowsHookExA(id,proc,module,thread);}
+
+__attribute__((dllexport)) BOOL UnhookWindowsHookEx(void *hook){if(!hook)return 0;void **p=(void**)hook;if(*p==0)return 0;*p=0;return 1;}
+
+__attribute__((dllexport)) long long CallNextHookEx(void *hook,int code,unsigned long long wp,long long lp){(void)hook;(void)code;(void)wp;(void)lp;return 0;}
+
+__attribute__((dllexport)) BOOL GetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void **data){(void)hwnd;(void)proc;(void)id;if(data)*data=0;return 0;}
+
+__attribute__((dllexport)) BOOL SetWindowSubclass(void *hwnd,void *proc,unsigned long long id,void *data){(void)proc;(void)id;(void)data;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) BOOL RemoveWindowSubclass(void *hwnd,void *proc,unsigned long long id){(void)proc;(void)id;return IsWindow(hwnd);}
+
+__attribute__((dllexport)) long long DefSubclassProc(void *hwnd,unsigned int msg,unsigned long long wp,long long lp){return DefWindowProcA(hwnd,msg,wp,lp);}
+
+__attribute__((dllexport)) BOOL GetTextMetricsA(void *dc,void *metrics){(void)dc;if(!metrics)return 0;unsigned int *v=(unsigned int*)metrics;for(int i=0;i<16;i++)v[i]=0;v[0]=8;v[1]=8;v[2]=8;v[3]=8;return 1;}
+
+__attribute__((dllexport)) BOOL GetTextMetricsW(void *dc,void *metrics){return GetTextMetricsA(dc,metrics);}
+
+__attribute__((dllexport)) BOOL GetCharWidth32A(void *dc,unsigned int first,unsigned int last,int *widths){(void)dc;if(!widths||last<first||last-first>255)return 0;for(unsigned int i=first;i<=last;i++)widths[i-first]=8;return 1;}
+
+__attribute__((dllexport)) BOOL GetCharWidth32W(void *dc,unsigned int first,unsigned int last,int *widths){return GetCharWidth32A(dc,first,last,widths);}
+
+__attribute__((dllexport)) BOOL GetTextExtentExPointA(void *dc,const char *text,int count,int max_extent,int *fit,int *dx,U32_POINT *size){(void)dc;(void)max_extent;if(!text||count<0||!size)return 0;size->x=count*8;size->y=8;if(fit)*fit=count;if(dx)for(int i=0;i<count;i++)dx[i]=(i+1)*8;return 1;}
+
+__attribute__((dllexport)) BOOL GetTextExtentExPointW(void *dc,const unsigned short *text,int count,int max_extent,int *fit,int *dx,U32_POINT *size){(void)text;return GetTextExtentExPointA(dc,"",count,max_extent,fit,dx,size);}
+
+__attribute__((dllexport)) long long TabbedTextOutA(void *dc,int x,int y,const char *text,int count,int tabs,const int *stops,int origin){(void)dc;(void)tabs;(void)stops;(void)origin;if(!text||count<0)return 0;draw_text(x,y,text,COL_TEXT);return ((long long)8<<32)|(unsigned int)(count*8);}
+
+__attribute__((dllexport)) long long TabbedTextOutW(void *dc,int x,int y,const unsigned short *text,int count,int tabs,const int *stops,int origin){(void)dc;(void)tabs;(void)stops;(void)origin;if(!text||count<0)return 0;for(int i=0;i<count;i++)draw_char(x+i*8,y,text[i]<128?(char)text[i]:'?',COL_TEXT);return ((long long)8<<32)|(unsigned int)(count*8);}
+
+__attribute__((dllexport)) void *GetClipboardOwner(void){return 0;}
+
+__attribute__((dllexport)) void *GetOpenClipboardWindow(void){return 0;}
+
+__attribute__((dllexport)) DWORD GetClipboardSequenceNumber(void){return 0;}
+
+__attribute__((dllexport)) int GetClipboardFormatNameA(unsigned int format,char *name,int cap){(void)format;if(name&&cap>0)name[0]=0;return 0;}
+
+__attribute__((dllexport)) int GetClipboardFormatNameW(unsigned int format,unsigned short *name,int cap){(void)format;if(name&&cap>0)name[0]=0;return 0;}
+
+__attribute__((dllexport)) DWORD GetFocusThread(void){return GetCurrentThreadId();}
+
+__attribute__((dllexport)) BOOL GetWindowDisplayAffinityEx(void *hwnd,unsigned int *affinity){return GetWindowDisplayAffinity(hwnd,affinity);}
+
+__attribute__((dllexport)) void *GetWindowDpiAwarenessContextEx(void *hwnd){return GetWindowDpiAwarenessContext(hwnd);}
+
+__attribute__((dllexport)) long GetDpiForMonitor(void *monitor,int type,unsigned int *x,unsigned int *y){(void)monitor;(void)type;if(!x||!y)return -1;*x=96;*y=96;return 0;}
+
+__attribute__((dllexport)) BOOL EnableNonClientDpiScaling(void *hwnd){return IsWindow(hwnd);}
+
+__attribute__((dllexport)) void *SetThreadDpiAwarenessContext(void *context){static void *current=(void *)1;void *old=current;current=context;return old;}
+
+__attribute__((dllexport)) void *GetThreadDpiAwarenessContext(void){return (void *)1;}
+
+__attribute__((dllexport)) unsigned int GetDpiFromDpiAwarenessContext(void *context){return context?96:0;}
+
+__attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){return context!=0;}
+
+__attribute__((dllexport)) void *GetProcessWindowStation(void){return (void *)1;}
+
+__attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?(void *)1:0;}
+
+__attribute__((dllexport)) BOOL GetUserObjectInformationA(void *object,int index,void *info,DWORD len,DWORD *needed){(void)object;(void)index;if(needed)*needed=0;if(info&&len)((char*)info)[0]=0;return 0;}
+
+__attribute__((dllexport)) BOOL GetUserObjectInformationW(void *object,int index,void *info,DWORD len,DWORD *needed){return GetUserObjectInformationA(object,index,info,len,needed);}
+
+__attribute__((dllexport)) BOOL GetUserObjectSecurity(void *object,void *required,void *descriptor,DWORD len,DWORD *needed){(void)object;(void)required;(void)descriptor;(void)len;if(needed)*needed=0;return 0;}
+
+__attribute__((dllexport)) BOOL SetUserObjectInformationA(void *object,int index,void *info,DWORD len){(void)object;(void)index;(void)info;(void)len;return 0;}
+
+__attribute__((dllexport)) BOOL SetUserObjectInformationW(void *object,int index,void *info,DWORD len){return SetUserObjectInformationA(object,index,info,len);}

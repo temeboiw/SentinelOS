@@ -2323,7 +2323,19 @@ __attribute__((dllexport)) unsigned int GetRawInputDeviceInfoA(void *device,unsi
 
 __attribute__((dllexport)) unsigned int GetRawInputDeviceInfoW(void *device,unsigned int command,void *data,unsigned int *size){return GetRawInputDeviceInfoA(device,command,data,size);}
 
-__attribute__((dllexport)) unsigned int GetRawInputDeviceList(void *list,unsigned int *count,unsigned int size){(void)list;(void)size;if(count)*count=0;return 0;}
+__attribute__((dllexport)) unsigned int GetRawInputDeviceList(void *list,unsigned int *count,unsigned int size){
+    typedef struct { void *hDevice; unsigned int dwType; } U32_RAWINPUTDEVICELIST;
+    const unsigned int available=1;
+    if(!count)return 0xFFFFFFFFu;
+    if(size!=sizeof(U32_RAWINPUTDEVICELIST))return 0xFFFFFFFFu;
+    if(!list){*count=available;return available;}
+    if(*count<available){*count=available;return 0xFFFFFFFFu;}
+    U32_RAWINPUTDEVICELIST *devices=(U32_RAWINPUTDEVICELIST*)list;
+    devices[0].hDevice=(void*)0x200;
+    devices[0].dwType=0; /* RIM_TYPEMOUSE */
+    *count=available;
+    return available;
+}
 
 __attribute__((dllexport)) BOOL RegisterRawInputDevices(const void *devices,unsigned int count,unsigned int size){
     if(!devices||!count||count>16||size!=sizeof(U32_RAWINPUTDEVICE))return 0;

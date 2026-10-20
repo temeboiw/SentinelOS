@@ -72,7 +72,7 @@ static int e4_can_mutate(Ext4k *fs) {
     if (!fs || !fs->ok || fs->is64 || fs->dsize != 32 ||
         fs->isize < 128 || fs->isize > 256 ||
         !fs->inode_count || !fs->blocks_count || !fs->blocks_per_group ||
-        !fs->ipg || (fs->blksz != 1024 && fs->blksz != 2048 &&
+        !fs->ipg || fs->ipg > fs->blksz*8u || (fs->blksz != 1024 && fs->blksz != 2048 &&
                      fs->blksz != 4096)) return 0;
     if (fs->feature_incompat & ~0x10242u) return 0; /* filetype, extents, flex_bg, orphan_file */
     if (fs->feature_compat & 0x4u) return 0; /* journal requires transactions */
@@ -114,6 +114,7 @@ static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
         uint32_t valid = fs->ipg;
         uint32_t remain = fs->inode_count - g * fs->ipg;
         if (valid > remain) valid = remain;
+        if (valid > fs->blksz*8u) return 0;
         for (uint32_t b = 0; b < valid; ++b) {
             uint32_t ino = g * fs->ipg + b + 1;
             if (ino < first_ino || (bitmap[b >> 3] & (1u << (b & 7)))) continue;

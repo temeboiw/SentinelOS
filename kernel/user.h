@@ -20,6 +20,7 @@
 #define SYS_NtCreateProcess         4
 #define SYS_NtOpenFile              5
 #define SYS_NtWriteExistingFile     23
+#define SYS_NtSeekFile               24
 #define SYS_NtReadFile              6
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
@@ -801,6 +802,18 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     return (int)done;
 }
 
+static int64_t vfs_seek_user_file(uint64_t handle, int64_t offset, uint64_t method) {
+    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES || method > 2) return -1;
+    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+    if (!h->used) return -1;
+    int64_t base = method == 0 ? 0 : (method == 1 ? (int64_t)h->pos : (int64_t)h->size);
+    if ((offset < 0 && base < -offset) || (offset > 0 && base > INT64_MAX - offset)) return -1;
+    int64_t next = base + offset;
+    if (next < 0 || (uint64_t)next > h->size) return -1;
+    h->pos = (uint64_t)next;
+    return next;
+}
+
 static void vfs_close_user_file(uint64_t handle) {
     if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES)
         vfs_user_handles[handle - 0x100].used = 0;
@@ -1420,6 +1433,10 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtReadFile:
         f->rax = (uint64_t)(int64_t)vfs_read_user_file(f->rdi, f->rsi, f->rdx);
+        return f;
+
+    case SYS_NtSeekFile:
+        f->rax = (uint64_t)vfs_seek_user_file(f->rdi, (int64_t)f->rsi, f->rdx);
         return f;
 
     case SYS_NtWriteExistingFile:

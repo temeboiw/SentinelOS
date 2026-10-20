@@ -240,6 +240,8 @@ static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
     return 0;
 }
 
+static int blk_read(uint64_t off, void *dst, uint64_t len);
+
 /* Write one 512-byte sector to the virtio block device. */
 static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
     if (!vb_ok) return -1;

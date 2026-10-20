@@ -116,6 +116,7 @@ static BOOL u32_msg_push(const MSG *msg) {
     return 1;
 }
 static BOOL u32_msg_matches(const MSG *m,void *hwnd,u32 min,u32 max) {
+    if(m->message==0x0012u)return 1;
     if(hwnd&&m->hwnd!=(u32)(u64)hwnd)return 0;
     if(min&&m->message<min)return 0;
     if(max&&m->message>max)return 0;

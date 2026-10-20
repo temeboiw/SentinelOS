@@ -832,3 +832,118 @@ __attribute__((dllexport)) HANDLE CreateWaitableTimerW(void *security,BOOL manua
 __attribute__((dllexport)) BOOL SetWaitableTimer(HANDLE timer,const K32_LARGE_INTEGER *due,LONG period,void *completion,void *arg,BOOL resume){(void)timer;(void)due;(void)period;(void)completion;(void)arg;(void)resume;k32_last_error=50;return 0;}
 
 __attribute__((dllexport)) BOOL CancelWaitableTimer(HANDLE timer){(void)timer;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){(void)name;k32_last_error=126;return 0;}
+
+__attribute__((dllexport)) void FreeLibraryAndExitThread(HANDLE module,DWORD code){FreeLibrary(module);ExitProcess(code);}
+
+__attribute__((dllexport)) DWORD GetDllDirectoryA(DWORD cap,LPSTR out){(void)cap;if(out)out[0]=0;return 0;}
+
+__attribute__((dllexport)) DWORD GetDllDirectoryW(DWORD cap,K32_LPWSTR out){if(out&&cap)out[0]=0;return 0;}
+
+__attribute__((dllexport)) BOOL SetDllDirectoryA(LPCSTR path){return !path||path[0]==0;}
+
+__attribute__((dllexport)) BOOL SetDllDirectoryW(K32_LPCWSTR path){return !path||path[0]==0;}
+
+__attribute__((dllexport)) DWORD GetSystemWindowsDirectoryA(LPSTR out,DWORD cap){return GetWindowsDirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetSystemWindowsDirectoryW(K32_LPWSTR out,DWORD cap){return GetWindowsDirectoryW(out,cap);}
+
+__attribute__((dllexport)) DWORD GetSystemWow64DirectoryA(LPSTR out,DWORD cap){(void)out;(void)cap;k32_last_error=3;return 0;}
+
+__attribute__((dllexport)) DWORD GetSystemWow64DirectoryW(K32_LPWSTR out,DWORD cap){(void)out;(void)cap;k32_last_error=3;return 0;}
+
+__attribute__((dllexport)) DWORD GetSystemWow64Directory2A(LPSTR out,DWORD cap,WORD machine){(void)machine;return GetSystemWow64DirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetSystemWow64Directory2W(K32_LPWSTR out,DWORD cap,WORD machine){(void)machine;return GetSystemWow64DirectoryW(out,cap);}
+
+__attribute__((dllexport)) BOOL CreateProcessW(K32_LPCWSTR app,K32_LPWSTR cmd,void *pa,void *ta,BOOL inherit,DWORD flags,void *env,K32_LPCWSTR cwd,void *startup,void *process_info){(void)app;(void)cmd;(void)pa;(void)ta;(void)inherit;(void)flags;(void)env;(void)cwd;(void)startup;(void)process_info;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) unsigned int WinExec(LPCSTR command,unsigned int show){(void)command;(void)show;k32_last_error=50;return 31;}
+
+__attribute__((dllexport)) typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; char szCSDVersion[128]; } K32_OSVERSIONINFOA;
+BOOL GetVersionExA(K32_OSVERSIONINFOA *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
+
+__attribute__((dllexport)) typedef struct { DWORD dwOSVersionInfoSize,dwMajorVersion,dwMinorVersion,dwBuildNumber,dwPlatformId; K32_WCHAR szCSDVersion[128]; } K32_OSVERSIONINFOW;
+BOOL GetVersionExW(K32_OSVERSIONINFOW *v){if(!v||v->dwOSVersionInfoSize<sizeof(DWORD)*5){k32_last_error=87;return 0;}v->dwMajorVersion=1;v->dwMinorVersion=0;v->dwBuildNumber=1;v->dwPlatformId=2;v->szCSDVersion[0]=0;return 1;}
+
+__attribute__((dllexport)) BOOL VerifyVersionInfoA(const void *v,DWORD type,unsigned long long mask){(void)v;(void)type;(void)mask;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL VerifyVersionInfoW(const void *v,DWORD type,unsigned long long mask){return VerifyVersionInfoA(v,type,mask);}
+
+__attribute__((dllexport)) BOOL GetSystemTimes(K32_FILETIME *idle,K32_FILETIME *kernel,K32_FILETIME *user){if(!idle||!kernel||!user)return 0;idle->dwLowDateTime=idle->dwHighDateTime=0;kernel->dwLowDateTime=kernel->dwHighDateTime=0;user->dwLowDateTime=user->dwHighDateTime=0;return 1;}
+
+__attribute__((dllexport)) DWORD GlobalFlags(HANDLE mem){return k32_mem_size(mem)?0:0x8000u;}
+
+__attribute__((dllexport)) DWORD LocalFlags(HANDLE mem){return k32_mem_size(mem)?0:0x8000u;}
+
+__attribute__((dllexport)) HANDLE HeapCreate(DWORD options,K32_SIZE_T initial,K32_SIZE_T maximum){(void)options;(void)initial;(void)maximum;return (HANDLE)&k32_heap_tag;}
+
+__attribute__((dllexport)) BOOL HeapDestroy(HANDLE heap){return heap==(HANDLE)&k32_heap_tag;}
+
+__attribute__((dllexport)) BOOL HeapLock(HANDLE heap){return heap==(HANDLE)&k32_heap_tag;}
+
+__attribute__((dllexport)) BOOL HeapUnlock(HANDLE heap){return heap==(HANDLE)&k32_heap_tag;}
+
+__attribute__((dllexport)) BOOL HeapSetInformation(HANDLE heap,int info,void *data,K32_SIZE_T size){(void)info;(void)data;(void)size;return heap==(HANDLE)&k32_heap_tag;}
+
+__attribute__((dllexport)) BOOL HeapQueryInformation(HANDLE heap,int info,void *data,K32_SIZE_T size,K32_SIZE_T *needed){(void)info;if(heap!=(HANDLE)&k32_heap_tag||!data||!size){if(needed)*needed=0;return 0;}if(needed)*needed=0;return 1;}
+
+__attribute__((dllexport)) typedef struct { DWORD dwLength; DWORD dwMemoryLoad; K32_SIZE_T ullTotalPhys,ullAvailPhys,ullTotalPageFile,ullAvailPageFile,ullTotalVirtual,ullAvailVirtual,ullAvailExtendedVirtual; } K32_MEMORYSTATUSEX;
+BOOL GlobalMemoryStatusEx(K32_MEMORYSTATUSEX *m){if(!m||m->dwLength<sizeof(*m))return 0;m->dwMemoryLoad=0;m->ullTotalPhys=256ull*1024*1024;m->ullAvailPhys=128ull*1024*1024;m->ullTotalPageFile=m->ullTotalPhys;m->ullAvailPageFile=m->ullAvailPhys;m->ullTotalVirtual=m->ullTotalPhys;m->ullAvailVirtual=m->ullAvailPhys;m->ullAvailExtendedVirtual=0;return 1;}
+
+__attribute__((dllexport)) typedef struct { DWORD dwLength,dwMemoryLoad; K32_SIZE_T dwTotalPhys,dwAvailPhys,dwTotalPageFile,dwAvailPageFile,dwTotalVirtual,dwAvailVirtual; } K32_MEMORYSTATUS;
+void GlobalMemoryStatus(K32_MEMORYSTATUS *m){if(!m)return;m->dwLength=sizeof(*m);m->dwMemoryLoad=50;m->dwTotalPhys=256ull*1024*1024;m->dwAvailPhys=128ull*1024*1024;m->dwTotalPageFile=m->dwTotalPhys;m->dwAvailPageFile=m->dwAvailPhys;m->dwTotalVirtual=m->dwTotalPhys;m->dwAvailVirtual=m->dwAvailPhys;}
+
+__attribute__((dllexport)) BOOL GetPhysicallyInstalledSystemMemory(unsigned long long *kb){if(!kb)return 0;*kb=262144;return 1;}
+
+__attribute__((dllexport)) typedef struct { unsigned long long ProcessorMask; DWORD Relationship; unsigned char Reserved[32]; } K32_LOGICAL_PROCESSOR_INFO;
+BOOL GetLogicalProcessorInformation(K32_LOGICAL_PROCESSOR_INFO *buffer,DWORD *length){if(!length)return 0;if(!buffer||*length<sizeof(K32_LOGICAL_PROCESSOR_INFO)){*length=sizeof(K32_LOGICAL_PROCESSOR_INFO);k32_last_error=122;return 0;}buffer->ProcessorMask=1;buffer->Relationship=0;for(int i=0;i<32;i++)buffer->Reserved[i]=0;*length=sizeof(*buffer);return 1;}
+
+__attribute__((dllexport)) BOOL GetLogicalProcessorInformationEx(DWORD relationship,void *buffer,DWORD *length){(void)relationship;(void)buffer;if(length)*length=0;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL GetProcessDefaultCpuSets(HANDLE process,DWORD *ids,DWORD cap,DWORD *count){(void)ids;(void)cap;if(count)*count=0;return process==GetCurrentProcess()||process==(HANDLE)1;}
+
+__attribute__((dllexport)) BOOL SetProcessDefaultCpuSets(HANDLE process,const DWORD *ids,DWORD count){(void)ids;return (process==GetCurrentProcess()||process==(HANDLE)1)&&count==0;}
+
+__attribute__((dllexport)) BOOL GetThreadSelectedCpuSets(HANDLE thread,DWORD *ids,DWORD cap,DWORD *count){(void)ids;(void)cap;if(count)*count=0;return thread==GetCurrentThread()||thread==(HANDLE)1;}
+
+__attribute__((dllexport)) BOOL SetThreadSelectedCpuSets(HANDLE thread,const DWORD *ids,DWORD count){(void)ids;return (thread==GetCurrentThread()||thread==(HANDLE)1)&&count==0;}
+
+__attribute__((dllexport)) BOOL GetProcessGroupAffinity(HANDLE process,WORD *count,WORD *groups){if(process!=GetCurrentProcess()&&process!=(HANDLE)1)return 0;if(!count)return 0;if(!groups||*count<1){*count=1;k32_last_error=122;return 0;}groups[0]=0;*count=1;return 1;}
+
+__attribute__((dllexport)) BOOL GetThreadGroupAffinity(HANDLE thread,void *group){if((thread!=GetCurrentThread()&&thread!=(HANDLE)1)||!group)return 0;((WORD*)group)[0]=1;((WORD*)group)[1]=1;return 1;}
+
+__attribute__((dllexport)) BOOL SetThreadGroupAffinity(HANDLE thread,const void *group,void *previous){if((thread!=GetCurrentThread()&&thread!=(HANDLE)1)||!group||((const WORD*)group)[0]!=1||((const WORD*)group)[1]!=1)return 0;if(previous){((WORD*)previous)[0]=1;((WORD*)previous)[1]=1;}return 1;}
+
+__attribute__((dllexport)) BOOL GetNumaNodeProcessorMaskEx(WORD node,void *mask){if(!mask||node)return 0;((unsigned long long*)mask)[0]=1;((unsigned long long*)mask)[1]=0;return 1;}
+
+__attribute__((dllexport)) DWORD GetProcessVersionEx(DWORD pid){return GetProcessVersion(pid);}
+
+__attribute__((dllexport)) DWORD GetSystemDefaultLCIDEx(void){return GetSystemDefaultLCID();}
+
+__attribute__((dllexport)) DWORD GetUserDefaultLCIDEx(void){return GetUserDefaultLCID();}
+
+__attribute__((dllexport)) DWORD GetSystemDirectory(LPSTR out,DWORD cap){return GetSystemDirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetWindowsDirectory(LPSTR out,DWORD cap){return GetWindowsDirectoryA(out,cap);}
+
+__attribute__((dllexport)) DWORD GetModuleFileName(HANDLE module,LPSTR out,DWORD cap){return GetModuleFileNameA(module,out,cap);}
+
+__attribute__((dllexport)) HANDLE GetModuleHandle(LPCSTR name){return GetModuleHandleA(name);}
+
+__attribute__((dllexport)) LPSTR GetCommandLine(void){return GetCommandLineA();}
+
+__attribute__((dllexport)) DWORD GetTempPath(DWORD cap,LPSTR out){return GetTempPathA(cap,out);}
+
+__attribute__((dllexport)) DWORD GetCurrentDirectory(DWORD cap,LPSTR out){return GetCurrentDirectoryA(cap,out);}
+
+__attribute__((dllexport)) BOOL SetCurrentDirectory(LPCSTR path){return SetCurrentDirectoryA(path);}
+
+__attribute__((dllexport)) DWORD GetEnvironmentVariable(LPCSTR name,LPSTR out,DWORD cap){return GetEnvironmentVariableA(name,out,cap);}
+
+__attribute__((dllexport)) BOOL SetEnvironmentVariable(LPCSTR name,LPCSTR value){return SetEnvironmentVariableA(name,value);}
+
+__attribute__((dllexport)) DWORD GetFileAttributes(LPCSTR path){return GetFileAttributesA(path);}
+
+__attribute__((dllexport)) BOOL SetFileAttributes(LPCSTR path,DWORD attr){return SetFileAttributesA(path,attr);}

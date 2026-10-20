@@ -866,7 +866,7 @@ static uint32_t vfs_create_empty_regular(const char *path) {
     char full[256];
     uint32_t len = 0;
     while (path[len] && len + 1 < sizeof full) { full[len] = path[len]; len++; }
-    if (path[len]) return 0;
+    if (path[len] || !len || full[len-1]=='/' || full[len-1]=='\\') return 0;
     while (len > 1 && (full[len - 1] == '/' || full[len - 1] == '\\')) len--;
     full[len] = 0;
     int last_sep = -1;
@@ -898,6 +898,7 @@ static uint32_t vfs_create_empty_regular(const char *path) {
     uint8_t pino[256];
     if (e4_inode(&g_ext4, parent_ino, pino) < 0 ||
         (E16(pino, 0) & 0xF000) != 0x4000 ||
+        (E32(pino,32) & 0x1000u) ||
         e4_lookup_ci(&g_ext4, parent_ino, base)) return 0;
 
     /* Preflight directory slack before changing allocation metadata. */

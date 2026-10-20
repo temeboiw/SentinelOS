@@ -1213,6 +1213,8 @@ __attribute__((dllexport)) BOOL GetMessageW(MSG *msg, void *hwnd, U32_UINT min, 
     return GetMessageA(msg,hwnd,min,max);
 }
 static void *u32_dialog_hwnd; static int u32_dialog_active; static long long u32_dialog_result;
+__attribute__((dllexport)) void *GetNextDlgTabItem(void *,void *,BOOL);
+__attribute__((dllexport)) BOOL SetFocus(void *);
 typedef long long (*U32_DIALOGPROC)(void *,unsigned int,unsigned long long,long long);
 __attribute__((dllexport)) void *CreateDialogParamA(void *instance,const char *templ,void *parent,void *proc,long long param){
  (void)param;const char *title="Dialog";if(templ&&(unsigned long long)templ>0x10000ULL)title=templ;

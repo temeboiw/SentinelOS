@@ -2025,9 +2025,41 @@ __attribute__((dllexport)) int CopyAcceleratorTableA(void *table,void *entries,i
 
 __attribute__((dllexport)) int CopyAcceleratorTableW(void *table,void *entries,int count){return CopyAcceleratorTableA(table,entries,count);}
 
-__attribute__((dllexport)) int LoadStringA(void *instance,unsigned int id,char *buffer,int cap){(void)instance;(void)id;if(buffer&&cap>0)buffer[0]=0;return 0;}
-
-__attribute__((dllexport)) int LoadStringW(void *instance,unsigned int id,unsigned short *buffer,int cap){(void)instance;(void)id;if(buffer&&cap>0)buffer[0]=0;return 0;}
+static unsigned short u32_pe_u16(const unsigned char *p){return (unsigned short)(p[0]|((unsigned short)p[1]<<8));}
+static unsigned int u32_pe_u32(const unsigned char *p){return (unsigned int)p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16)|((unsigned int)p[3]<<24);}
+static int u32_pe_range(unsigned int size,unsigned int off,unsigned int len){return off<=size&&len<=size-off;}
+static int u32_pe_string_resource(void *instance,unsigned int id,const unsigned short **text,unsigned int *length){
+    if(!instance||!text||!length||(unsigned long long)instance<0x10000ULL)return 0;
+    const unsigned char *base=(const unsigned char*)instance;
+    if(u32_pe_u16(base)!=0x5A4D)return 0;
+    unsigned int peoff=u32_pe_u32(base+0x3C);if(peoff>0x1000000u)return 0;
+    const unsigned char *nt=base+peoff;if(u32_pe_u32(nt)!=0x00004550u)return 0;
+    unsigned int optsize=u32_pe_u16(nt+20);const unsigned char *opt=nt+24;
+    unsigned short magic=u32_pe_u16(opt);unsigned int dd=(magic==0x20Bu)?112u:(magic==0x10Bu)?96u:0xFFFFFFFFu;
+    if(dd==0xFFFFFFFFu||optsize<dd+24u)return 0;
+    unsigned int image_size=u32_pe_u32(opt+56),rrva=u32_pe_u32(opt+dd+16),rsize=u32_pe_u32(opt+dd+20);
+    if(!image_size||!rrva||!rsize||!u32_pe_range(image_size,rrva,rsize))return 0;
+    const unsigned char *root=base+rrva;
+    unsigned int type_off=0,block_off=0,lang_off=0;
+    unsigned int count=(unsigned int)u32_pe_u16(root+12)+u32_pe_u16(root+14);
+    if(!u32_pe_range(rsize,16,count*8u))return 0;
+    for(unsigned int i=0;i<count;i++){const unsigned char *e=root+16+i*8;if(!(u32_pe_u32(e)&0x80000000u)&&(u32_pe_u32(e)&0xFFFFu)==6u){unsigned int o=u32_pe_u32(e+4);if(o&0x80000000u)type_off=o&0x7FFFFFFFu;break;}}
+    if(!type_off||!u32_pe_range(rsize,type_off,16))return 0;
+    const unsigned char *td=root+type_off;count=(unsigned int)u32_pe_u16(td+12)+u32_pe_u16(td+14);if(!u32_pe_range(rsize,type_off+16,count*8u))return 0;
+    unsigned int block_id=(id>>4)+1;
+    for(unsigned int i=0;i<count;i++){const unsigned char *e=td+16+i*8;if(!(u32_pe_u32(e)&0x80000000u)&&(u32_pe_u32(e)&0xFFFFu)==block_id){unsigned int o=u32_pe_u32(e+4);if(o&0x80000000u)block_off=o&0x7FFFFFFFu;break;}}
+    if(!block_off||!u32_pe_range(rsize,block_off,16))return 0;
+    const unsigned char *bd=root+block_off;count=(unsigned int)u32_pe_u16(bd+12)+u32_pe_u16(bd+14);if(!count||!u32_pe_range(rsize,block_off+16,count*8u))return 0;
+    unsigned int lo=u32_pe_u32(bd+20);if(!(lo&0x80000000u))return 0;lang_off=lo&0x7FFFFFFFu;
+    if(!u32_pe_range(rsize,lang_off,16))return 0;const unsigned char *ld=root+lang_off;count=(unsigned int)u32_pe_u16(ld+12)+u32_pe_u16(ld+14);if(!count||!u32_pe_range(rsize,lang_off+16,count*8u))return 0;
+    unsigned int data_off=u32_pe_u32(ld+20)&0x7FFFFFFFu;if(!u32_pe_range(rsize,data_off,16))return 0;
+    const unsigned char *de=root+data_off;unsigned int rva=u32_pe_u32(de),bytes=u32_pe_u32(de+4);if(!u32_pe_range(image_size,rva,bytes))return 0;
+    const unsigned char *p=base+rva;unsigned int idx=id&15u;
+    for(unsigned int i=0;i<=idx;i++){if(!u32_pe_range(bytes,(unsigned int)(p-(base+rva)),2))return 0;unsigned int n=u32_pe_u16(p);p+=2;if(i==idx){if(!u32_pe_range(bytes,(unsigned int)(p-(base+rva)),n*2u))return 0;*text=(const unsigned short*)p;*length=n;return 1;}if(!u32_pe_range(bytes,(unsigned int)(p-(base+rva)),n*2u))return 0;p+=n*2u;}
+    return 0;
+}
+__attribute__((dllexport)) int LoadStringA(void *instance,unsigned int id,char *buffer,int cap){if(!buffer||cap<=0){return 0;}buffer[0]=0;const unsigned short *src=0;unsigned int len=0;if(!u32_pe_string_resource(instance,id,&src,&len))return 0;unsigned int n=len<(unsigned int)(cap-1)?len:(unsigned int)(cap-1);for(unsigned int i=0;i<n;i++)buffer[i]=src[i]<128?(char)src[i]:'?';buffer[n]=0;return (int)n;}
+__attribute__((dllexport)) int LoadStringW(void *instance,unsigned int id,unsigned short *buffer,int cap){if(!buffer||cap<=0)return 0;buffer[0]=0;const unsigned short *src=0;unsigned int len=0;if(!u32_pe_string_resource(instance,id,&src,&len))return 0;unsigned int n=len<(unsigned int)(cap-1)?len:(unsigned int)(cap-1);for(unsigned int i=0;i<n;i++)buffer[i]=src[i];buffer[n]=0;return (int)n;}
 
 __attribute__((dllexport)) void *LoadMenuIndirectA(const void *template_data){return template_data?CreateMenu():0;}
 

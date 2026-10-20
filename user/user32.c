@@ -2331,7 +2331,7 @@ __attribute__((dllexport)) BOOL RegisterRawInputDevices(const void *devices,unsi
 
 __attribute__((dllexport)) long long DefRawInputProc(void **packets,int count,unsigned int size){if(count<0||(!packets&&count)||size==0)return -1;return 0;}
 
-__attribute__((dllexport)) BOOL GetPointerType(unsigned int id,unsigned int *type){(void)id;if(!type)return 0;*type=2;return 1;}
+__attribute__((dllexport)) BOOL GetPointerType(unsigned int id,unsigned int *type){if(id!=1||!type)return 0;*type=4;return 1;}
 
 __attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){
     if(id!=1||!info)return 0;
@@ -2344,19 +2344,19 @@ __attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){
     p->dwTime=u32_mouse_time;p->historyCount=1;p->InputData=0;p->dwKeyStates=u32_key_state[1]?1u:0u;p->PerformanceCount=0;p->ButtonChangeType=0;return 1;
 }
 
-__attribute__((dllexport)) BOOL GetPointerInfoHistory(unsigned int id,unsigned int *count,void *info){(void)id;(void)info;if(count)*count=0;return 0;}
+__attribute__((dllexport)) BOOL GetPointerInfoHistory(unsigned int id,unsigned int *count,void *info){if(id!=1||!count)return 0;unsigned int available=u32_mouse_history_count?u32_mouse_history_count:1,capacity=*count;if(!info){*count=available;return 1;}if(!capacity){*count=available;return 0;}unsigned int n=capacity<available?capacity:available;U32_POINTER_INFO *out=(U32_POINTER_INFO*)info;for(unsigned int i=0;i<n;i++){int x=g_mx,y=g_my;unsigned int tm=u32_mouse_time;if(u32_mouse_history_count){unsigned int idx=(u32_mouse_history_head+u32_mouse_history_count-n+i)%32;x=u32_mouse_history[idx].x;y=u32_mouse_history[idx].y;tm=u32_mouse_history[idx].time;}out[i].pointerType=4;out[i].pointerId=1;out[i].frameId=tm;out[i].pointerFlags=0x2002u;out[i].sourceDevice=(void*)0x200;out[i].hwndTarget=g_wnd.visible?(void*)1:(void*)2;out[i].ptPixelLocation.x=x;out[i].ptPixelLocation.y=y;out[i].ptHimetricLocation.x=(x*2540)/96;out[i].ptHimetricLocation.y=(y*2540)/96;out[i].ptPixelLocationRaw=out[i].ptPixelLocation;out[i].ptHimetricLocationRaw=out[i].ptHimetricLocation;out[i].dwTime=tm;out[i].historyCount=available;out[i].InputData=0;out[i].dwKeyStates=u32_key_state[1]?1u:0u;out[i].PerformanceCount=0;out[i].ButtonChangeType=0;}*count=n;return 1;}
 
-__attribute__((dllexport)) BOOL GetPointerPenInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+__attribute__((dllexport)) BOOL GetPointerPenInfo(unsigned int id,void *info){(void)info;return id!=1?0:0;}
 
-__attribute__((dllexport)) BOOL GetPointerTouchInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+__attribute__((dllexport)) BOOL GetPointerTouchInfo(unsigned int id,void *info){(void)info;return id!=1?0:0;}
 
-__attribute__((dllexport)) BOOL GetPointerFrameInfo(unsigned int id,unsigned int *count,void *info){(void)id;(void)info;if(count)*count=0;return 0;}
+__attribute__((dllexport)) BOOL GetPointerFrameInfo(unsigned int id,unsigned int *count,void *info){return GetPointerInfoHistory(id,count,info);}
 
-__attribute__((dllexport)) BOOL GetPointerDevice(unsigned int id,void **device){(void)id;if(device)*device=0;return 0;}
+__attribute__((dllexport)) BOOL GetPointerDevice(unsigned int id,void **device){if(id!=1||!device)return 0;*device=(void*)0x200;return 1;}
 
-__attribute__((dllexport)) BOOL GetPointerDeviceRects(void *device,U32_RECT *pointer,U32_RECT *display){(void)device;if(pointer){pointer->left=pointer->top=pointer->right=pointer->bottom=0;}if(display){display->left=display->top=0;display->right=(int)g_fw;display->bottom=(int)g_fh;}return 0;}
+__attribute__((dllexport)) BOOL GetPointerDeviceRects(void *device,U32_RECT *pointer,U32_RECT *display){if(device!=(void*)0x200)return 0;if(pointer){pointer->left=0;pointer->top=0;pointer->right=(int)g_fw;pointer->bottom=(int)g_fh;}if(display){display->left=0;display->top=0;display->right=(int)g_fw;display->bottom=(int)g_fh;}return 1;}
 
-__attribute__((dllexport)) BOOL GetPointerDevices(unsigned int *count,void *devices){(void)devices;if(count)*count=0;return 1;}
+__attribute__((dllexport)) BOOL GetPointerDevices(unsigned int *count,void *devices){if(!count)return 0;if(!devices){*count=1;return 1;}*count=1;return 0;}
 
 __attribute__((dllexport)) BOOL GetGestureInfo(void *handle,void *info){(void)handle;(void)info;return 0;}
 

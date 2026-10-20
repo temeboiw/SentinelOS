@@ -807,7 +807,7 @@ static int64_t vfs_seek_user_file(uint64_t handle, int64_t offset, uint64_t meth
     VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
     if (!h->used) return -1;
     int64_t base = method == 0 ? 0 : (method == 1 ? (int64_t)h->pos : (int64_t)h->size);
-    if ((offset < 0 && base < -offset) || (offset > 0 && base > INT64_MAX - offset)) return -1;
+    if ((offset < 0 && offset < -base) || (offset > 0 && base > INT64_MAX - offset)) return -1;
     int64_t next = base + offset;
     if (next < 0 || (uint64_t)next > h->size) return -1;
     h->pos = (uint64_t)next;

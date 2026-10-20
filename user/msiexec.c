@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -410,6 +410,16 @@ static int cfb_stream_read_list(const u32 *ids, u32 count, u64 stream_size,
     }
     return 1;
 }
+typedef struct {
+    char name[240];
+    u32 size, offset;
+    u16 folder;
+} CabFile;
+#define CAB_MAX_FILES 4096u
+static CabFile cab_files[CAB_MAX_FILES];
+static u32 cab_file_count;
+static const char cab_stage_path[]="C:\\MSIStage";
+
 /* Bounded raw-DEFLATE decoder for CAB MSZIP blocks. The 32-KiB history
  * persists across CFDATA blocks in one folder, as required by MSZIP. */
 typedef struct { const u8 *p; u32 n, pos, bits, bitbuf; } CabBits;
@@ -562,6 +572,33 @@ static u32 cab_checksum(const u8 *p, u32 n, u16 unpacked) {
     return sum;
 }
 typedef int (*CabBlockSink)(u32 folder, u32 offset, const u8 *data, u32 len, void *context);
+static int cab_stage_block(u32 folder, u32 offset, const u8 *data, u32 len, void *context) {
+    (void)context;
+    u64 block_end=(u64)offset+len;
+    for (u32 i=0;i<cab_file_count;i++) {
+        CabFile *f=&cab_files[i];
+        if (f->folder!=folder || !f->size) continue;
+        u64 file_start=f->offset, file_end=file_start+f->size;
+        u64 lo=file_start>offset?file_start:offset;
+        u64 hi=file_end<block_end?file_end:block_end;
+        if (lo>=hi) continue;
+        char path[256]; u32 p=0;
+        for (u32 j=0;cab_stage_path[j] && p+1<sizeof path;j++) path[p++]=cab_stage_path[j];
+        if (p+1<sizeof path) path[p++]='\\';
+        for (u32 j=0;f->name[j] && p+1<sizeof path;j++) path[p++]=f->name[j];
+        if (f->name[0]==0 || p+1>=sizeof path) return 0;
+        path[p]=0;
+        long long h=(long long)sy3(SYS_OpenFile,(u64)path,0x40000000u,3);
+        if (h<0) return 0;
+        long long seek=(long long)sy3(SYS_SeekFile,(u64)h,lo-file_start,0);
+        if (seek<0) { (void)sy3(SYS_CloseFile,(u64)h,0,0); return 0; }
+        u64 wrote=sy3(SYS_WriteFileHandle,(u64)h,(u64)(data+(u32)(lo-offset)),hi-lo);
+        (void)sy3(SYS_CloseFile,(u64)h,0,0);
+        if ((long long)wrote<0 || wrote!=hi-lo) return 0;
+    }
+    return 1;
+}
+
 static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression,
                                    u8 reserve_data, u32 sectors, u64 cab_size,
                                    u32 folder_index, CabBlockSink sink, void *context,

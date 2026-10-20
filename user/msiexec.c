@@ -45,6 +45,8 @@ static u32 mini_fat_count, mini_stream_size, mini_sector_count;
 static u32 fat_count, sector_size, sector_count, mini_cutoff, directory_bytes;
 static u32 msi_table_count, msi_column_count, msi_codepage;
 static int msi_long_refs, msi_db_ok;
+static char msi_cached_table[64];
+static u32 msi_cached_table_size;
 typedef struct { char name[64]; u32 rows, columns, row_size, stream_size; } MsiTable;
 typedef struct { char table[64], name[64]; u16 type, number; u8 width; } MsiColumn;
 static MsiTable msi_tables[MSI_MAX_TABLES];
@@ -194,14 +196,6 @@ static u32 read_entry_stream(const u8 *e, u8 *dst, u32 cap) {
     return read_chain(rd32(e+116),dst,size);
 }
 
-static int msi_name_value(u16 c) {
-    if (c>='0' && c<='9') return c-'0';
-    if (c>='A' && c<='Z') return c-'A'+10;
-    if (c>='a' && c<='z') return c-'a'+36;
-    if (c=='.') return 62;
-    if (c=='_') return 63;
-    return -1;
-}
 static char msi_name_char(u32 v) {
     static const char alphabet[]="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._";
     return alphabet[v&63u];
@@ -322,9 +316,17 @@ static int msi_table_cell(const char *table, u32 row, u32 column,
     MsiTable *t=msi_find_table(table);
     if (!t || row>=t->rows || column>=t->columns || !t->stream_size ||
         t->stream_size>MAX_TABLE_STREAM) return 0;
-    const u8 *entry=find_stream_entry(table,1);
-    if (!entry || read_entry_stream(entry,table_buffer,MAX_TABLE_STREAM)!=t->stream_size)
-        return 0;
+    if (!same_name(msi_cached_table,table) || msi_cached_table_size!=t->stream_size) {
+        const u8 *entry=find_stream_entry(table,1);
+        if (!entry || read_entry_stream(entry,table_buffer,MAX_TABLE_STREAM)!=t->stream_size)
+            return 0;
+        u32 i=0;
+        while (table[i] && i+1<sizeof(msi_cached_table)) {
+            msi_cached_table[i]=table[i]; i++;
+        }
+        msi_cached_table[i]=0;
+        msi_cached_table_size=t->stream_size;
+    }
     MsiColumn *target=msi_find_column(table,column+1);
     if (!target) return 0;
     u32 width=target->width, base=0;

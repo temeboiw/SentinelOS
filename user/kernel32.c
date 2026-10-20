@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25, SYS_DeleteFile=26, SYS_RemoveDirectory=27
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25, SYS_DeleteFile=26, SYS_RemoveDirectory=27, SYS_PathType=28
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -196,7 +196,11 @@ __attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { (void)from; 
 __attribute__((dllexport)) BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
     (void)from; (void)to; (void)fail_if_exists; return 0;
 }
-__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) { (void)path; return 0xFFFFFFFFu; }
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) {
+    if (!path) return 0xFFFFFFFFu;
+    u64 type=sy3(SYS_PathType,(u64)path,0,0);
+    return type==2?0x10u:(type==1?0x80u:0xFFFFFFFFu);
+}
 __attribute__((dllexport)) BOOL SetFileAttributesA(LPCSTR path, DWORD attrs) { (void)path; (void)attrs; return 0; }
 __attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
     (void)file; if (high) *high=0; return 0xFFFFFFFFu;

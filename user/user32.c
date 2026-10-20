@@ -2062,7 +2062,7 @@ __attribute__((dllexport)) void *GetPropW(void *hwnd,const unsigned short *name)
 
 __attribute__((dllexport)) void *RemovePropW(void *hwnd,const unsigned short *name){if(!name)return 0;char a[48];int i=0;while(name[i]&&i<47){a[i]=(char)name[i];i++;}a[i]=0;return RemovePropA(hwnd,a);}
 
-__attribute__((dllexport)) BOOL SetLayeredWindowAttributes(void *hwnd,DWORD color,unsigned char alpha,DWORD flags){if(!IsWindow(hwnd)||(flags&~7u))return 0;u32_layered_color=color;u32_layered_alpha=alpha;u32_layered_flags=flags;return 1;}
+__attribute__((dllexport)) BOOL SetLayeredWindowAttributes(void *hwnd,DWORD color,unsigned char alpha,DWORD flags){if(!IsWindow(hwnd)||(flags&~3u))return 0;u32_layered_color=color;u32_layered_alpha=alpha;u32_layered_flags=flags;return 1;}
 
 __attribute__((dllexport)) BOOL GetLayeredWindowAttributes(void *hwnd,DWORD *color,unsigned char *alpha,DWORD *flags){if(!IsWindow(hwnd))return 0;if(color)*color=u32_layered_color;if(alpha)*alpha=u32_layered_alpha;if(flags)*flags=u32_layered_flags;return 1;}
 
@@ -2549,7 +2549,11 @@ __attribute__((dllexport)) void *CreateWindowA(const char *cls,const char *title
 
 __attribute__((dllexport)) void *CreateWindowW(const unsigned short *cls,const unsigned short *title,unsigned long style,int x,int y,int w,int h,void *parent,void *menu,void *instance,void *param){return CreateWindowExW(0,cls,title,style,x,y,w,h,parent,menu,instance,param);}
 
-__attribute__((dllexport)) long long DispatchMessageW(const MSG *msg){if(!msg)return 0;return (long long)SendMessageW((void *)(unsigned long long)msg->hwnd,msg->message,msg->wParam,msg->lParam);}
+__attribute__((dllexport)) long long DispatchMessageW(const MSG *msg){
+    if(!msg)return 0;
+    if(msg->message==0x0113u&&msg->lParam)return (long long)DispatchMessageA(msg);
+    return (long long)SendMessageW((void *)(unsigned long long)msg->hwnd,msg->message,msg->wParam,msg->lParam);
+}
 
 __attribute__((dllexport)) void *CreateDialogIndirectParamA(void *instance,const void *templ,void *parent,void *proc,long long param){(void)instance;(void)templ;(void)proc;(void)param;return IsWindow(parent)?parent:CreateWindowExA(0,"DIALOG","Dialog",0x10000000,0,0,320,200,parent,0,0,0);}
 

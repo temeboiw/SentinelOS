@@ -274,10 +274,8 @@ __attribute__((dllexport)) K32_SIZE_T HeapSize(HANDLE heap, DWORD flags, LPCVOID
     (void)flags;if(heap!=GetProcessHeap()||!mem){k32_last_error=87;return (K32_SIZE_T)-1;}
     K32_MEMENTRY *e=k32_mem_entry(mem);if(!e){k32_last_error=87;return (K32_SIZE_T)-1;}k32_last_error=0;return e->size;
 }
-__attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}
-__attribute__((dllexport)) LPVOID LocalFree(LPVOID mem){(void)mem;return mem;}
-__attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){(void)flags;void *p=VirtualAlloc((LPVOID)0,size,0x3000,4);k32_mem_register(p,size);return p;}
-__attribute__((dllexport)) LPVOID GlobalFree(LPVOID mem){(void)mem;return mem;}
+__attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags,K32_SIZE_T size){if(!size){k32_last_error=87;return 0;}void *p=VirtualAlloc(0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}k32_mem_register(p,size);if(flags&0x40u){unsigned char *b=p;for(K32_SIZE_T i=0;i<size;i++)b[i]=0;}k32_last_error=0;return p;}
+__attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){if(!size){k32_last_error=87;return 0;}void *p=VirtualAlloc(0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}k32_mem_register(p,size);if(flags&0x40u){unsigned char *b=p;for(K32_SIZE_T i=0;i<size;i++)b[i]=0;}k32_last_error=0;return p;}
 __attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h,DWORD *mode){if(!h||!mode){k32_last_error=6;return 0;}*mode=k32_console_mode;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h,DWORD mode){if(!h){k32_last_error=6;return 0;}k32_console_mode=mode;return 1;}
 __attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DWORD *read, void *reserved) {

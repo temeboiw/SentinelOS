@@ -68,9 +68,9 @@ static void redraw_desktop(void **hwnd) {
         pShow(*hwnd, 1);
 
     if (pText) {
-        pText(0, 0, 4, "FILE EXPLORER", -1);
-        pText(0, 0, 5, "(click the cube)", -1);
-        pText(0, 0, 7, "[ Search apps: type cmd and press Enter ]", -1);
+        pText(0, 0, 4, "Welcome to SentinelOS", -1);
+        pText(0, 0, 5, "A fresh breeze for your desktop", -1);
+        pText(0, 0, 7, "Search apps below: type cmd and press Enter", -1);
         pText(0, 0, 8, "Search: ", -1);
     }
 
@@ -157,7 +157,7 @@ static void handle_search_key(MSG *msg, void **hwnd) {
 }
 
 void explorer_main(void) {
-    NtWriteConsole("explorer: desktop shell\n");
+    NtWriteConsole("explorer: Frutiger Aero desktop shell\n");
 
     char u32n[] = {
         'u','s','e','r','3','2','.','d','l','l',0
@@ -181,7 +181,7 @@ void explorer_main(void) {
     void *hwnd = 0;
     redraw_desktop(&hwnd);
 
-    NtWriteConsole("explorer: desktop ready; search supports cmd\n");
+    NtWriteConsole("explorer: glass desktop ready; search supports cmd\n");
 
     MSG msg;
 

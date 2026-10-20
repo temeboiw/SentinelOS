@@ -523,3 +523,83 @@ __attribute__((dllexport)) HANDLE GlobalHandle(LPCVOID mem){return (HANDLE)mem;}
 __attribute__((dllexport)) BOOL GetBinaryTypeA(LPCSTR file,DWORD *type){if(!file||!type)return 0;DWORD n=0;while(file[n])n++;if(n<4||file[n-4]!='.'||((file[n-3]|32)!='e')||((file[n-2]|32)!='x')||((file[n-1]|32)!='e'))return 0;*type=0;return 1;}
 
 __attribute__((dllexport)) BOOL GetBinaryTypeW(K32_LPCWSTR file,DWORD *type){char p[512];if(!file)return 0;k32_wide_to_ansi(p,sizeof(p),file);return GetBinaryTypeA(p,type);}
+
+__attribute__((dllexport)) int lstrlenA(LPCSTR s){int n=0;if(s)while(s[n])n++;return n;}
+
+__attribute__((dllexport)) int lstrlenW(K32_LPCWSTR s){int n=0;if(s)while(s[n])n++;return n;}
+
+__attribute__((dllexport)) int lstrcmpA(LPCSTR a,LPCSTR c){if(!a)a="";if(!c)c="";while(*a&&*a==*c){a++;c++;}return (unsigned char)*a-(unsigned char)*c;}
+
+__attribute__((dllexport)) int lstrcmpiA(LPCSTR a,LPCSTR c){if(!a)a="";if(!c)c="";while(*a&&(((*a>='A'&&*a<='Z')?*a+32:*a)==((*c>='A'&&*c<='Z')?*c+32:*c))){a++;c++;}return (unsigned char)((*a>='A'&&*a<='Z')?*a+32:*a)-(unsigned char)((*c>='A'&&*c<='Z')?*c+32:*c);}
+
+__attribute__((dllexport)) int lstrcmpW(K32_LPCWSTR a,K32_LPCWSTR c){if(!a||!c)return a?1:c?-1:0;while(*a&&*a==*c){a++;c++;}return (int)*a-(int)*c;}
+
+__attribute__((dllexport)) int lstrcmpiW(K32_LPCWSTR a,K32_LPCWSTR c){if(!a||!c)return a?1:c?-1:0;while(*a){unsigned short x=*a,y=*c;if(x>='A'&&x<='Z')x+=32;if(y>='A'&&y<='Z')y+=32;if(x!=y)return (int)x-(int)y;if(!*c)return 1;a++;c++;}return *c?-1:0;}
+
+__attribute__((dllexport)) LPSTR lstrcpyA(LPSTR d,LPCSTR s){if(!d)return d;int i=0;if(s)while((d[i]=s[i])!=0)i++;else d[0]=0;return d;}
+
+__attribute__((dllexport)) LPSTR lstrcpynA(LPSTR d,LPCSTR s,int n){if(!d||n<=0)return d;int i=0;if(s)while(i<n-1&&s[i]){d[i]=s[i];i++;}d[i]=0;return d;}
+
+__attribute__((dllexport)) LPSTR lstrcatA(LPSTR d,LPCSTR s){if(!d)return d;int i=0;while(d[i])i++;if(s)for(int j=0;s[j];j++)d[i++]=s[j];d[i]=0;return d;}
+
+__attribute__((dllexport)) LPSTR CharLowerA(LPSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
+
+__attribute__((dllexport)) LPSTR CharUpperA(LPSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
+
+__attribute__((dllexport)) DWORD CharLowerBuffA(LPSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return n;}
+
+__attribute__((dllexport)) DWORD CharUpperBuffA(LPSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return n;}
+
+__attribute__((dllexport)) K32_LPWSTR CharLowerW(K32_LPWSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
+
+__attribute__((dllexport)) K32_LPWSTR CharUpperW(K32_LPWSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
+
+__attribute__((dllexport)) DWORD CharLowerBuffW(K32_LPWSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return n;}
+
+__attribute__((dllexport)) DWORD CharUpperBuffW(K32_LPWSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return n;}
+
+__attribute__((dllexport)) BOOL IsCharAlphaA(char c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z');}
+
+__attribute__((dllexport)) BOOL IsCharAlphaNumericA(char c){return IsCharAlphaA(c)||(c>='0'&&c<='9');}
+
+__attribute__((dllexport)) BOOL IsCharUpperA(char c){return c>='A'&&c<='Z';}
+
+__attribute__((dllexport)) BOOL IsCharLowerA(char c){return c>='a'&&c<='z';}
+
+__attribute__((dllexport)) BOOL IsCharAlphaW(K32_WCHAR c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z');}
+
+__attribute__((dllexport)) BOOL IsCharAlphaNumericW(K32_WCHAR c){return IsCharAlphaW(c)||(c>='0'&&c<='9');}
+
+__attribute__((dllexport)) BOOL IsCharUpperW(K32_WCHAR c){return c>='A'&&c<='Z';}
+
+__attribute__((dllexport)) BOOL IsCharLowerW(K32_WCHAR c){return c>='a'&&c<='z';}
+
+__attribute__((dllexport)) LPSTR CharNextA(LPCSTR s){return (LPSTR)(s&&*s?s+1:s);}
+
+__attribute__((dllexport)) LPSTR CharPrevA(LPCSTR start,LPCSTR cur){return (LPSTR)(start&&cur>start?cur-1:start);}
+
+__attribute__((dllexport)) K32_LPWSTR CharNextW(K32_LPCWSTR s){return (K32_LPWSTR)(s&&*s?s+1:s);}
+
+__attribute__((dllexport)) K32_LPWSTR CharPrevW(K32_LPCWSTR start,K32_LPCWSTR cur){return (K32_LPWSTR)(start&&cur>start?cur-1:start);}
+
+__attribute__((dllexport)) LPVOID EncodePointer(LPVOID p){return p;}
+
+__attribute__((dllexport)) LPVOID DecodePointer(LPVOID p){return p;}
+
+__attribute__((dllexport)) BOOL IsBadReadPtr(LPCVOID p,K32_SIZE_T n){(void)n;return p==0;}
+
+__attribute__((dllexport)) BOOL IsBadWritePtr(LPVOID p,K32_SIZE_T n){(void)n;return p==0;}
+
+__attribute__((dllexport)) BOOL IsBadCodePtr(void *p){return p==0;}
+
+__attribute__((dllexport)) K32_SIZE_T IsBadStringPtrA(LPCSTR s,K32_SIZE_T max){if(!s)return max?1:0;for(K32_SIZE_T i=0;i<max;i++)if(!s[i])return 0;return max;}
+
+__attribute__((dllexport)) K32_SIZE_T IsBadStringPtrW(K32_LPCWSTR s,K32_SIZE_T max){if(!s)return max?1:0;for(K32_SIZE_T i=0;i<max;i++)if(!s[i])return 0;return max;}
+
+__attribute__((dllexport)) BOOL GetStringTypeA(DWORD locale,DWORD type,LPCSTR src,int len,unsigned short *out){(void)locale;if(!src||!out||len<0)return 0;for(int i=0;i<len;i++){unsigned short v=0;char c=src[i];if(c>='A'&&c<='Z')v|=1;if(c>='a'&&c<='z')v|=2;if(c>='0'&&c<='9')v|=4;if(c==' '||c=='\t')v|=8;if(c>=32&&c<127)v|=0x10;out[i]=type==1?v:(unsigned short)c;}return 1;}
+
+__attribute__((dllexport)) BOOL GetStringTypeW(DWORD locale,DWORD type,K32_LPCWSTR src,int len,unsigned short *out){(void)locale;if(!src||!out||len<0)return 0;for(int i=0;i<len;i++){unsigned short c=src[i],v=0;if(c>='A'&&c<='Z')v|=1;if(c>='a'&&c<='z')v|=2;if(c>='0'&&c<='9')v|=4;if(c==' '||c=='\t')v|=8;if(c>=32&&c<127)v|=0x10;out[i]=type==1?v:c;}return 1;}
+
+__attribute__((dllexport)) int CompareStringA(DWORD locale,DWORD flags,LPCSTR a,int na,LPCSTR c,int nc){(void)locale;if(!a||!c)return 0;int i=0;while((na<0?a[i]!=0:i<na)&&(nc<0?c[i]!=0:i<nc)){unsigned char x=a[i],y=c[i];if(flags&1){if(x>='A'&&x<='Z')x+=32;if(y>='A'&&y<='Z')y+=32;}if(x<y)return 1;if(x>y)return 3;i++;}int ea=na<0?!a[i]:i>=na,ec=nc<0?!c[i]:i>=nc;return ea?(ec?2:1):3;}
+
+__attribute__((dllexport)) int CompareStringW(DWORD locale,DWORD flags,K32_LPCWSTR a,int na,K32_LPCWSTR c,int nc){(void)locale;if(!a||!c)return 0;int i=0;while((na<0?a[i]!=0:i<na)&&(nc<0?c[i]!=0:i<nc)){unsigned short x=a[i],y=c[i];if(flags&1){if(x>='A'&&x<='Z')x+=32;if(y>='A'&&y<='Z')y+=32;}if(x<y)return 1;if(x>y)return 3;i++;}int ea=na<0?!a[i]:i>=na,ec=nc<0?!c[i]:i>=nc;return ea?(ec?2:1):3;}

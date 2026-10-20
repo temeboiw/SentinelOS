@@ -684,6 +684,83 @@ static uint64_t NtStatusResult(NTSTATUS status) {
     return (uint64_t)(int64_t)status;
 }
 
+
+/* Read-only VFS file handles used by the initial Win32 file APIs. */
+#define VFS_USER_HANDLES 32
+#define SYS_NtCloseFile 22
+typedef struct {
+    uint32_t ino;
+    uint64_t pos, size;
+    int used;
+} VfsUserHandle;
+static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
+
+static int vfs_open_user_file(const char *name) {
+    if (!g_ext4_ok || !name || !name[0]) return -1;
+    uint32_t ino = 0;
+    for (int i = 0; i < vfs_nent; i++) {
+        const char *a = vfs_ents[i].name, *b = name;
+        int same = 1;
+        while (*a || *b) {
+            char ca = *a++, cb = *b++;
+            if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+            if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+            if (ca != cb) { same = 0; break; }
+        }
+        if (same && !vfs_ents[i].is_dir) { ino = vfs_ents[i].ino; break; }
+    }
+    if (!ino) return -1;
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4, ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000) != 0x8000) return -1;
+    for (int i = 0; i < VFS_USER_HANDLES; i++) {
+        if (!vfs_user_handles[i].used) {
+            vfs_user_handles[i].ino = ino;
+            vfs_user_handles[i].pos = 0;
+            vfs_user_handles[i].size = e4_size(inode);
+            vfs_user_handles[i].used = 1;
+            return 0x100 + i;
+        }
+    }
+    return -1;
+}
+
+static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
+    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
+        !len || len > 1024 * 1024) return -1;
+    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+    KPROCESS *proc = MmCurrentProcess;
+    if (!h->used || !proc ||
+        !MmValidateUserRange(proc, dst, len, 1)) return -1;
+    if (h->pos >= h->size) return 0;
+    if (len > h->size - h->pos) len = h->size - h->pos;
+
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4, h->ino, inode) < 0) return -1;
+    uint64_t done = 0;
+    while (done < len) {
+        uint64_t pos = h->pos + done;
+        uint32_t block_off = (uint32_t)(pos % g_ext4.blksz);
+        uint64_t chunk = g_ext4.blksz - block_off;
+        if (chunk > len - done) chunk = len - done;
+        uint64_t phys_block = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
+        if (!phys_block) {
+            for (uint64_t j = 0; j < chunk; j++) ((uint8_t *)dst)[done + j] = 0;
+        } else if (e4_read(&g_ext4, phys_block * g_ext4.blksz + block_off,
+                           (void *)(dst + done), chunk) < 0) {
+            return done ? (int)done : -1;
+        }
+        done += chunk;
+    }
+    h->pos += done;
+    return (int)done;
+}
+
+static void vfs_close_user_file(uint64_t handle) {
+    if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES)
+        vfs_user_handles[handle - 0x100].used = 0;
+}
+
 static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
@@ -1115,18 +1192,21 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtOpenFile: {
         char name[64];
-
         if (copy_user_str(f->rdi, name, sizeof name) != 0) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
-
-        f->rax = 1;
+        f->rax = (uint64_t)(int64_t)vfs_open_user_file(name);
         return f;
     }
 
     case SYS_NtReadFile:
-        f->rax = 0;
+        f->rax = (uint64_t)(int64_t)vfs_read_user_file(f->rdi, f->rsi, f->rdx);
+        return f;
+
+    case SYS_NtCloseFile:
+        vfs_close_user_file(f->rdi);
+        f->rax = 1;
         return f;
 
     case SYS_NtQueryDirectoryFile: {

@@ -130,6 +130,86 @@ static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
     return 0;
 }
 
+static uint64_t e4_alloc_block(Ext4k *fs) {
+    if (!e4_can_mutate(fs) || fs->blocks_count <= fs->first_data) return 0;
+    uint8_t sb[1024], gd[32], bitmap[4096];
+    if (e4_read(fs, 1024, sb, sizeof sb) < 0) return 0;
+    uint32_t groups = (fs->blocks_count - fs->first_data +
+                       fs->blocks_per_group - 1) / fs->blocks_per_group;
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    for (uint32_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
+        if (!E16(gd, 12)) continue;
+        uint32_t bb = E32(gd, 0);
+        if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return 0;
+        uint64_t group_start = (uint64_t)fs->first_data +
+                               (uint64_t)g * fs->blocks_per_group;
+        uint32_t valid = fs->blocks_per_group;
+        if (group_start + valid > fs->blocks_count)
+            valid = (uint32_t)(fs->blocks_count - group_start);
+        if (valid > fs->blksz * 8u) return 0;
+        for (uint32_t b = 0; b < valid; ++b) {
+            uint64_t blockno = group_start + b;
+            if (blockno < fs->first_data ||
+                (bitmap[b >> 3] & (1u << (b & 7)))) continue;
+            bitmap[b >> 3] |= (uint8_t)(1u << (b & 7));
+            if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return 0;
+            E16(gd, 12) = (uint16_t)(E16(gd, 12) - 1);
+            if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
+            uint32_t freeb = E32(sb, 12);
+            if (!freeb) return 0;
+            E32(sb, 12) = freeb - 1;
+            if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
+            return blockno;
+        }
+    }
+    return 0;
+}
+
+/* Insert one initialized data block into an inode's inline extent root.
+ * Tree expansion is deliberately refused; callers must not create corrupt trees. */
+static int e4_add_inline_extent(Ext4k *fs, uint8_t *inode,
+                                uint32_t logical, uint64_t physical) {
+    if (!e4_can_mutate(fs) || !(E32(inode, 32) & 0x80000)) return -1;
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0) return -1;
+    uint16_t n = E16(root, 2), max = E16(root, 4);
+    if (max > 4 || n > max || physical > 0xFFFFFFFFFFFFULL) return -1;
+    uint8_t *ent = root + 12;
+    for (uint16_t i = 0; i < n; ++i, ent += 12) {
+        uint32_t start = E32(ent, 0);
+        uint16_t count = E16(ent, 4) & 0x7FFF;
+        uint64_t pstart = ((uint64_t)E16(ent, 6) << 32) | E32(ent, 8);
+        if (logical >= start && logical < start + count) return 0;
+        if (logical == start + count && physical == pstart + count && count < 0x7FFF) {
+            E16(ent, 4) = (uint16_t)(count + 1);
+            return 0;
+        }
+        if (start == logical + 1 && physical + 1 == pstart) {
+            E32(ent, 0) = logical;
+            E16(ent, 6) = (uint16_t)(physical >> 32);
+            E32(ent, 8) = (uint32_t)physical;
+            E16(ent, 4) = (uint16_t)(count + 1);
+            return 0;
+        }
+    }
+    if (n >= max) return -1;
+    uint16_t at = n;
+    while (at && E32(root + 12 + (at - 1) * 12, 0) > logical) {
+        for (int j = 0; j < 12; ++j)
+            root[12 + at * 12 + j] = root[12 + (at - 1) * 12 + j];
+        --at;
+    }
+    ent = root + 12 + at * 12;
+    for (int j = 0; j < 12; ++j) ent[j] = 0;
+    E32(ent, 0) = logical;
+    E16(ent, 4) = 1;
+    E16(ent, 6) = (uint16_t)(physical >> 32);
+    E32(ent, 8) = (uint32_t)physical;
+    E16(root, 2) = (uint16_t)(n + 1);
+    return 0;
+}
+
 static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
     if (!e4_can_mutate(fs) || !ino || ino > fs->inode_count) return -1;
     uint32_t g = (ino - 1) / fs->ipg, b = (ino - 1) % fs->ipg;

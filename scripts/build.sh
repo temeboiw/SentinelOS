@@ -98,6 +98,7 @@ for src in \
   hal/hal.c \
   kernel/kernel.c \
   user/smss.c \
+  user/sentlogon.c \
   user/taskbar.c \
   user/kernel32.c \
   user/user32.c \
@@ -247,6 +248,18 @@ USER_CFLAGS=(
   -I"$ROOT/user"
   -I"$ROOT/shared"
 )
+
+echo "  -> sentlogon.exe"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/sentlogon.c" \
+  -o "$B/obj/sentlogon.o"
+
+lld -flavor link \
+  /subsystem:native /entry:sentlogon_main /nodefaultlib \
+  /fixed:no /base:0x40500000 \
+  "/out:$SYS32/sentlogon.exe" \
+  "$B/obj/sentlogon.o"
 
 echo "  -> smss.exe"
 
@@ -1480,6 +1493,7 @@ for image in \
   hal.dll \
   krnl.exe \
   smss.exe \
+  sentlogon.exe \
   explorer.exe \
   fileexplorer.exe \
   taskbar.dll \

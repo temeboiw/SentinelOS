@@ -39,6 +39,7 @@
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
 #define SYS_NtProtectVirtualMemory     28
+#define SYS_NtQueryVirtualMemory       29
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1568,7 +1569,7 @@ static Frame *syscall_handler(Frame *f) {
         f->rax=ok?old_protect:0;return f;
     }
 
-    case 29: {
+    case SYS_NtQueryVirtualMemory: {
         typedef struct {
             uint64_t BaseAddress,AllocationBase;
             uint32_t AllocationProtect;

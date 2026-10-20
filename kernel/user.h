@@ -980,23 +980,58 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     KPROCESS *proc = MmCurrentProcess;
     if (!h->used || !h->writable || !proc ||
         !MmValidateUserRange(proc, src, len, 0)) return -1;
-    /* No extension/allocation yet: never write beyond the existing file. */
-    if (h->pos > h->size || len > h->size - h->pos) return -1;
+    uint64_t end = h->pos + len;
+    if (end < h->pos || end > 0xFFFFFFFFULL || !e4_can_mutate(&g_ext4)) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, h->ino, inode) < 0 ||
-        (E16(inode, 0) & 0xF000) != 0x8000) return -1;
+        (E16(inode, 0) & 0xF000) != 0x8000 ||
+        !(E32(inode, 32) & 0x80000)) return -1;
+
+    uint64_t old_size = e4_size(inode);
+    uint32_t last_lb = (uint32_t)((end - 1) / g_ext4.blksz);
+    uint16_t en = E16(inode + 40, 2), em = E16(inode + 40, 4);
+    if (E16(inode + 40, 6) != 0 || em > 4 || en > em) return -1;
+    static uint8_t zero[4096];
+    /* Preflight extent capacity conservatively before allocating anything. */
+    uint32_t missing = 0;
+    for (uint32_t lb = 0; lb <= last_lb; ++lb)
+        if (!e4_map(&g_ext4, inode, lb)) missing++;
+    if (missing && missing > (uint32_t)(em - en)) return -1;
+    for (uint32_t lb = 0; lb <= last_lb; ++lb) {
+        if (e4_map(&g_ext4, inode, lb)) continue;
+        uint64_t pb = e4_alloc_block(&g_ext4);
+        if (!pb || e4_write(&g_ext4, pb * g_ext4.blksz, zero, g_ext4.blksz) < 0 ||
+            e4_add_inline_extent(&g_ext4, inode, lb, pb) < 0) return -1;
+    }
+
+    /* If seeking beyond EOF, zero the old partial block's gap explicitly. */
+    if (h->pos > old_size && old_size && (old_size % g_ext4.blksz)) {
+        uint64_t pb = e4_map(&g_ext4, inode, (uint32_t)(old_size / g_ext4.blksz));
+        uint64_t gap_end = h->pos;
+        uint64_t block_end = ((old_size / g_ext4.blksz) + 1) * g_ext4.blksz;
+        if (gap_end > block_end) gap_end = block_end;
+        if (pb && gap_end > old_size &&
+            e4_write(&g_ext4, pb * g_ext4.blksz + old_size % g_ext4.blksz,
+                     zero, gap_end - old_size) < 0) return -1;
+    }
+
     uint64_t done = 0;
     while (done < len) {
         uint64_t pos = h->pos + done;
         uint32_t block_off = (uint32_t)(pos % g_ext4.blksz);
         uint64_t chunk = g_ext4.blksz - block_off;
         if (chunk > len - done) chunk = len - done;
-        uint64_t phys_block = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
-        if (!phys_block ||
-            e4_write(&g_ext4, phys_block * g_ext4.blksz + block_off,
-                     (const void *)(src + done), chunk) < 0)
+        uint64_t pb = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
+        if (!pb || e4_write(&g_ext4, pb * g_ext4.blksz + block_off,
+                            (const void *)(src + done), chunk) < 0)
             return done ? (int)done : -1;
         done += chunk;
+    }
+    if (end > old_size) {
+        E32(inode, 4) = (uint32_t)end;
+        E32(inode, 108) = 0;
+        if (e4_write_inode(&g_ext4, h->ino, inode) < 0) return done ? (int)done : -1;
+        h->size = end;
     }
     h->pos += done;
     return (int)done;
@@ -1009,7 +1044,7 @@ static int64_t vfs_seek_user_file(uint64_t handle, int64_t offset, uint64_t meth
     int64_t base = method == 0 ? 0 : (method == 1 ? (int64_t)h->pos : (int64_t)h->size);
     if ((offset < 0 && offset < -base) || (offset > 0 && base > INT64_MAX - offset)) return -1;
     int64_t next = base + offset;
-    if (next < 0 || (uint64_t)next > h->size) return -1;
+    if (next < 0 || (uint64_t)next > 0xFFFFFFFFULL) return -1;
     h->pos = (uint64_t)next;
     return next;
 }

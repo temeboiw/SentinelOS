@@ -245,7 +245,8 @@ __attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE process, DWORD *code) 
     (void)process; if (!code) return 0; *code=259; return 1;
 }
 __attribute__((dllexport)) BOOL TerminateProcess(HANDLE process, DWORD code) {
-    (void)process; (void)code; return 0;
+    if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=50;return 0;}
+    sy3(SYS_Exit,code,0,0);for(;;)__asm__ volatile("hlt");
 }
 __attribute__((dllexport)) HANDLE GetProcessHeap(void) { return (HANDLE)&k32_heap_tag; }
 __attribute__((dllexport)) LPVOID HeapAlloc(HANDLE heap, DWORD flags, K32_SIZE_T size) {
@@ -591,9 +592,9 @@ __attribute__((dllexport)) DWORD SearchPathA(LPCSTR path,LPCSTR file,LPCSTR ext,
 __attribute__((dllexport)) DWORD SearchPathW(K32_LPCWSTR path,K32_LPCWSTR file,K32_LPCWSTR ext,DWORD cap,K32_LPWSTR out,K32_LPWSTR *part){(void)path;(void)part;char f[512],e[64],b[512];k32_wide_to_ansi(f,sizeof(f),file);k32_wide_to_ansi(e,sizeof(e),ext);DWORD n=SearchPathA(0,f,ext?e:0,sizeof(b),b,0);if(out&&cap)k32_ansi_to_wide(out,cap,b);return n;}
 __attribute__((dllexport)) DWORD GetModuleFileNameExA(HANDLE process,HANDLE module,LPSTR out,DWORD cap){if(process!=(HANDLE)(i64)-1&&process!=(HANDLE)1)return 0;return GetModuleFileNameA(module,out,cap);}
 __attribute__((dllexport)) DWORD GetModuleFileNameExW(HANDLE process,HANDLE module,K32_LPWSTR out,DWORD cap){if(process!=(HANDLE)(i64)-1&&process!=(HANDLE)1)return 0;return GetModuleFileNameW(module,out,cap);}
-__attribute__((dllexport)) unsigned long long HeapValidate(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long HeapCompact(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetProcessHeaps(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL HeapValidate(HANDLE heap,DWORD flags,LPCVOID mem) { (void)flags;if(heap!=GetProcessHeap())return 0;if(!mem)return 1;return k32_mem_size((void*)mem)!=0; }
+__attribute__((dllexport)) K32_SIZE_T HeapCompact(HANDLE heap,DWORD flags) { (void)flags;if(heap!=GetProcessHeap())return 0;k32_last_error=0;return 0; }
+__attribute__((dllexport)) DWORD GetProcessHeaps(DWORD count,HANDLE *heaps) { if(!count||!heaps)return 0;heaps[0]=GetProcessHeap();return 1; }
 __attribute__((dllexport)) unsigned long long LocalReAlloc(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) K32_SIZE_T LocalSize(HANDLE mem){return k32_mem_size(mem);}
 __attribute__((dllexport)) unsigned long long GlobalReAlloc(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
@@ -1143,7 +1144,7 @@ __attribute__((dllexport)) void OutputDebugStringA(LPCSTR text){if(text){DWORD n
 
 __attribute__((dllexport)) void OutputDebugStringW(K32_LPCWSTR text){if(text){char b[512];k32_wide_to_ansi(b,sizeof(b),text);DWORD written;WriteFile(GetStdHandle((DWORD)-11),b,(DWORD)lstrlenA(b),&written,0);}}
 
-__attribute__((dllexport)) void DebugBreak(void){}
+__attribute__((dllexport)) void DebugBreak(void){sy3(SYS_Exit,0x80000003u,0,0);for(;;)__asm__ volatile("hlt");}
 
 __attribute__((dllexport)) DWORD GetThreadErrorMode(void){return k32_error_mode;}
 

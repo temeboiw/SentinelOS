@@ -605,6 +605,15 @@ static void compose(void) {
             u32_aero_bg_w = g_fw;
             u32_aero_bg_h = g_fh;
             u32_render_clip = was_clipped;
+
+            /* The desktop's first composition must replace the login screen
+             * with the real desktop wallpaper. App processes build private
+             * caches too, but must never blast their cache over the desktop. */
+            if (u32_is_desktop_window()) {
+                for (u32 y=0; y<g_fh; ++y)
+                    for (u32 x=0; x<g_fw; ++x)
+                        g_front[y*g_pitch+x] = u32_aero_bg_cache[y*g_fw+x];
+            }
         } else {
             u32 x0=0,y0=0,x1=g_fw,y1=g_fh;
             if (u32_render_clip) {
@@ -1030,6 +1039,10 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
         u32_render_clip = 1;
         u32_clip_x0 = x0; u32_clip_y0 = y0;
         u32_clip_x1 = x1; u32_clip_y1 = y1;
+        /* Consume this damage batch before composing. Leaving it pending
+         * unions every future invalidation with stale rectangles. */
+        u32_update_pending = 0;
+        u32_update_erase = 0;
         compose();
         u32_render_clip = was_clipped;
         u32_clip_x0 = ox0; u32_clip_y0 = oy0;

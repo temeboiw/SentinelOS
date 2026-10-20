@@ -14,10 +14,32 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-utils util-linux dosfstools e2fsprogs mtools gnu-efi
+          sudo apt-get install -y clang lld qemu-utils qemu-system-x86 ovmf util-linux dosfstools e2fsprogs mtools gnu-efi
       - name: Fetch EDK2 headers
         run: |
           git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
           echo "EDK2=$RUNNER_TEMP/edk2" >> "$GITHUB_ENV"
       - name: Build SentinelOS disk image
         run: bash scripts/build.sh
+      - name: Boot smoke test
+        shell: bash
+        run: |
+          mkdir -p build
+          dd if=/dev/zero of=build/vars.fd bs=1M count=2 status=none
+          set +e
+          timeout 35s qemu-system-x86_64 \\
+            -machine q35 -m 1024 \\
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \\
+            -drive if=pflash,format=raw,file=build/vars.fd \\
+            -drive file=build/magic-disk.img,format=raw,if=none,id=d0 \\
+            -device virtio-blk-pci,drive=d0 \\
+            -display none -serial file:build/serial.log -monitor none -no-reboot
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 && $rc -ne 124 ]]; then
+            echo "QEMU exited unexpectedly with status $rc"
+            exit "$rc"
+          fi
+          grep -q "fs: C: volume root" build/serial.log
+          grep -q -- "-- usermode (smss) --" build/serial.log
+          echo "Boot smoke test passed: ext4 mounted and usermode entered."

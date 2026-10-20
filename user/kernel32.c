@@ -1825,3 +1825,218 @@ __attribute__((dllexport)) BOOL SetFilePointerEx(HANDLE file,K32_LARGE_INTEGER d
 __attribute__((dllexport)) LONG GetApplicationUserModelId(HANDLE token,DWORD *length,K32_LPWSTR id){(void)id;if(token&&token!=GetCurrentProcess()&&token!=(HANDLE)1){k32_last_error=6;return 6;}if(length)*length=0;return 15700;}
 
 __attribute__((dllexport)) LONG GetCurrentPackagePath(DWORD *length,K32_LPWSTR path){(void)path;if(length)*length=0;return 15700;}
+
+
+/* Win32 runtime batch 2: bounded memory and string compatibility APIs. */
+
+static u64 k32x_strlen(const char*s){u64 n=0;if(s)while(s[n])n++;return n;}
+static u64 k32x_wlen(const K32_WCHAR*s){u64 n=0;if(s)while(s[n])n++;return n;}
+static int k32x_fold(int c){return c>='A'&&c<='Z'?c+32:c;}
+static int k32x_wfold(int c){return c>='A'&&c<='Z'?c+32:c;}
+static int k32x_cmp(const char*a,const char*b,u64 lim,int fold){if(!a||!b)return a?1:b?-1:0;for(u64 i=0;i<lim;i++){int x=(unsigned char)a[i],y=(unsigned char)b[i];if(fold){x=k32x_fold(x);y=k32x_fold(y);}if(x!=y)return x-y;if(!x)return 0;}return 0;}
+static int k32x_wcmp(const K32_WCHAR*a,const K32_WCHAR*b,u64 lim,int fold){if(!a||!b)return a?1:b?-1:0;for(u64 i=0;i<lim;i++){int x=a[i],y=b[i];if(fold){x=k32x_wfold(x);y=k32x_wfold(y);}if(x!=y)return x-y;if(!x)return 0;}return 0;}
+static int k32x_copy(char*d,u64 cap,const char*s,u64 n){if(!d||!cap||(!s&&n))return 22;u64 i=0;while(i<n&&s[i]&&i+1<cap){d[i]=s[i];i++;}d[i]=0;return i<n&&s[i]?34:0;}
+static int k32x_wcopy(K32_WCHAR*d,u64 cap,const K32_WCHAR*s,u64 n){if(!d||!cap||(!s&&n))return 22;u64 i=0;while(i<n&&s[i]&&i+1<cap){d[i]=s[i];i++;}d[i]=0;return i<n&&s[i]?34:0;}
+static int k32x_cat(char*d,u64 cap,const char*s,u64 n){if(!d||!s||!cap)return 22;u64 i=0;while(i<cap&&d[i])i++;if(i==cap){d[0]=0;return 22;}u64 j=0;while(j<n&&s[j]&&i+1<cap)d[i++]=s[j++];d[i]=0;if(j<n&&s[j]){d[0]=0;return 34;}return 0;}
+static int k32x_wcat(K32_WCHAR*d,u64 cap,const K32_WCHAR*s,u64 n){if(!d||!s||!cap)return 22;u64 i=0;while(i<cap&&d[i])i++;if(i==cap){d[0]=0;return 22;}u64 j=0;while(j<n&&s[j]&&i+1<cap)d[i++]=s[j++];d[i]=0;if(j<n&&s[j]){d[0]=0;return 34;}return 0;}
+static void k32x_zero(void*p,u64 n){volatile unsigned char*q=p;if(q)while(n--)*q++=0;__atomic_signal_fence(__ATOMIC_SEQ_CST);}
+
+__attribute__((dllexport)) void RtlMoveMemory(void*d,const void*s,u64 n){unsigned char*a=d;const unsigned char*b=s;if(!a||!b)return;if(a<b){for(u64 i=0;i<n;i++)a[i]=b[i];}else if(a>b){while(n){--n;a[n]=b[n];}}}
+
+__attribute__((dllexport)) void RtlCopyMemory(void*d,const void*s,u64 n){unsigned char*a=d;const unsigned char*b=s;if(!a||!b)return;for(u64 i=0;i<n;i++)a[i]=b[i];}
+
+__attribute__((dllexport)) void RtlFillMemory(void*d,u64 n,BYTE v){unsigned char*p=d;if(p)for(u64 i=0;i<n;i++)p[i]=v;}
+
+__attribute__((dllexport)) void RtlZeroMemory(void*d,u64 n){RtlFillMemory(d,n,0);}
+
+__attribute__((dllexport)) void *RtlSecureZeroMemory(void*d,u64 n){k32x_zero(d,n);return d;}
+
+__attribute__((dllexport)) BOOL RtlEqualMemory(const void*a,const void*b,u64 n){const BYTE*x=a,*y=b;if((!x||!y)&&n)return 0;for(u64 i=0;i<n;i++)if(x[i]!=y[i])return 0;return 1;}
+
+__attribute__((dllexport)) u64 RtlCompareMemory(const void*a,const void*b,u64 n){const BYTE*x=a,*y=b;if(!x||!y)return 0;u64 i=0;while(i<n&&x[i]==y[i])i++;return i;}
+
+__attribute__((dllexport)) u64 RtlCompareMemoryUlong(const void*a,u64 n,DWORD v){const BYTE*p=a;if(!p)return 0;u64 i=0;for(;i+4<=n;i+=4){DWORD q=(DWORD)p[i]|((DWORD)p[i+1]<<8)|((DWORD)p[i+2]<<16)|((DWORD)p[i+3]<<24);if(q!=v)break;}return i;}
+
+__attribute__((dllexport)) void RtlFillMemoryUlong(void*d,u64 n,DWORD v){BYTE*p=d;if(p)for(u64 i=0;i+4<=n;i+=4)for(unsigned j=0;j<4;j++)p[i+j]=(BYTE)(v>>(8*j));}
+
+__attribute__((dllexport)) void RtlFillMemoryUlonglong(void*d,u64 n,u64 v){BYTE*p=d;if(p)for(u64 i=0;i+8<=n;i+=8)for(unsigned j=0;j<8;j++)p[i+j]=(BYTE)(v>>(8*j));}
+
+__attribute__((dllexport)) BOOL RtlIsZeroMemory(const void*d,u64 n){const BYTE*p=d;if(!p&&n)return 0;for(u64 i=0;i<n;i++)if(p[i])return 0;return 1;}
+
+__attribute__((dllexport)) u64 strnlen(const char*s,u64 n){u64 i=0;if(s)while(i<n&&s[i])i++;return i;}
+
+__attribute__((dllexport)) int stricmp(const char*a,const char*b){return k32x_cmp(a,b,~(u64)0,1);}
+
+__attribute__((dllexport)) int strnicmp(const char*a,const char*b,u64 n){return k32x_cmp(a,b,n,1);}
+
+__attribute__((dllexport)) int _stricmp(const char*a,const char*b){return stricmp(a,b);}
+
+__attribute__((dllexport)) int _strnicmp(const char*a,const char*b,u64 n){return strnicmp(a,b,n);}
+
+__attribute__((dllexport)) char *strlwr(char*s){if(s)for(char*p=s;*p;p++)if(*p>='A'&&*p<='Z')*p+=32;return s;}
+
+__attribute__((dllexport)) char *strupr(char*s){if(s)for(char*p=s;*p;p++)if(*p>='a'&&*p<='z')*p-=32;return s;}
+
+__attribute__((dllexport)) char *_strlwr(char*s){return strlwr(s);}
+
+__attribute__((dllexport)) char *_strupr(char*s){return strupr(s);}
+
+__attribute__((dllexport)) char *strrev(char*s){if(!s)return s;u64 n=k32x_strlen(s);for(u64 i=0;i<n/2;i++){char c=s[i];s[i]=s[n-1-i];s[n-1-i]=c;}return s;}
+
+__attribute__((dllexport)) char *_strrev(char*s){return strrev(s);}
+
+__attribute__((dllexport)) int memicmp(const void*a,const void*b,u64 n){const BYTE*x=a,*y=b;if(!x||!y)return x?1:y?-1:0;for(u64 i=0;i<n;i++){int c=k32x_fold(x[i]),d=k32x_fold(y[i]);if(c!=d)return c-d;}return 0;}
+
+__attribute__((dllexport)) void *memccpy(void*d,const void*s,int c,u64 n){BYTE*x=d;const BYTE*y=s;if(!x||!y)return 0;for(u64 i=0;i<n;i++){x[i]=y[i];if(y[i]==(BYTE)c)return x+i+1;}return 0;}
+
+__attribute__((dllexport)) char *strnset(char*s,int c,u64 n){if(s)for(u64 i=0;i<n&&s[i];i++)s[i]=(char)c;return s;}
+
+__attribute__((dllexport)) char *_strnset(char*s,int c,u64 n){return strnset(s,c,n);}
+
+__attribute__((dllexport)) char *strset(char*s,int c){if(s)for(char*p=s;*p;p++)*p=(char)c;return s;}
+
+__attribute__((dllexport)) char *_strset(char*s,int c){return strset(s,c);}
+
+__attribute__((dllexport)) char *stristr(const char*h,const char*n){if(!h||!n)return 0;u64 m=k32x_strlen(n);if(!m)return (char*)h;for(;*h;h++)if(!k32x_cmp(h,n,m,1))return (char*)h;return 0;}
+
+__attribute__((dllexport)) char *strnstr(const char*h,const char*n,u64 cap){if(!h||!n)return 0;u64 m=k32x_strlen(n);if(!m)return (char*)h;for(u64 i=0;i+m<=cap&&h[i];i++)if(!k32x_cmp(h+i,n,m,0))return (char*)h+i;return 0;}
+
+__attribute__((dllexport)) char *strnchr(const char*s,int c,u64 n){if(!s)return 0;for(u64 i=0;i<n;i++){if(s[i]==(char)c)return (char*)s+i;if(!s[i])break;}return 0;}
+
+__attribute__((dllexport)) int strset_s(char*s,u64 cap,int c){if(!s||!cap)return 22;u64 i=0;while(i<cap&&s[i])s[i++]=(char)c;return i==cap?34:0;}
+
+__attribute__((dllexport)) int memset_s(void*d,u64 cap,int c,u64 n){if(!d||n>cap)return 22;volatile BYTE*p=d;for(u64 i=0;i<n;i++)p[i]=(BYTE)c;__atomic_signal_fence(__ATOMIC_SEQ_CST);return 0;}
+
+__attribute__((dllexport)) int memcpy_s(void*d,u64 cap,const void*s,u64 n){if(!d||(!s&&n)||n>cap){if(d&&cap)k32x_zero(d,cap);return 22;}RtlCopyMemory(d,s,n);return 0;}
+
+__attribute__((dllexport)) int memmove_s(void*d,u64 cap,const void*s,u64 n){if(!d||(!s&&n)||n>cap){if(d&&cap)k32x_zero(d,cap);return 22;}RtlMoveMemory(d,s,n);return 0;}
+
+__attribute__((dllexport)) int strcpy_s(char*d,u64 cap,const char*s){if(!d||!s||!cap)return 22;return k32x_copy(d,cap,s,k32x_strlen(s));}
+
+__attribute__((dllexport)) int strncpy_s(char*d,u64 cap,const char*s,u64 n){if(!d||!s||!cap)return 22;return k32x_copy(d,cap,s,n);}
+
+__attribute__((dllexport)) int strcat_s(char*d,u64 cap,const char*s){return k32x_cat(d,cap,s,k32x_strlen(s));}
+
+__attribute__((dllexport)) int strncat_s(char*d,u64 cap,const char*s,u64 n){return k32x_cat(d,cap,s,n);}
+
+__attribute__((dllexport)) u64 strnlen_s(const char*s,u64 n){return strnlen(s,n);}
+
+__attribute__((dllexport)) char *strtok_s(char*s,const char*delim,char**ctx){if(!delim||!ctx)return 0;if(s)*ctx=s;else s=*ctx;if(!s)return 0;while(*s){int hit=0;for(const char*d=delim;*d;d++)if(*d==*s){hit=1;break;}if(!hit)break;s++;}if(!*s){*ctx=s;return 0;}char*start=s;while(*s){for(const char*d=delim;*d;d++)if(*d==*s){*s++=0;*ctx=s;return start;}s++;}*ctx=s;return start;}
+
+__attribute__((dllexport)) u64 wcslen(const K32_WCHAR*s){return k32x_wlen(s);}
+
+__attribute__((dllexport)) int wcscmp(const K32_WCHAR*a,const K32_WCHAR*b){return k32x_wcmp(a,b,~(u64)0,0);}
+
+__attribute__((dllexport)) int wcsncmp(const K32_WCHAR*a,const K32_WCHAR*b,u64 n){return k32x_wcmp(a,b,n,0);}
+
+__attribute__((dllexport)) K32_WCHAR *wcscpy(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while((*d++=*s++));return r;}
+
+__attribute__((dllexport)) K32_WCHAR *wcsncpy(K32_WCHAR*d,const K32_WCHAR*s,u64 n){if(!d||!s)return d;u64 i=0;while(i<n&&s[i]){d[i]=s[i];i++;}while(i<n)d[i++]=0;return d;}
+
+__attribute__((dllexport)) K32_WCHAR *wcscat(K32_WCHAR*d,const K32_WCHAR*s){if(!d||!s)return d;K32_WCHAR*r=d;while(*d)d++;while((*d++=*s++));return r;}
+
+__attribute__((dllexport)) K32_WCHAR *wcsncat(K32_WCHAR*d,const K32_WCHAR*s,u64 n){if(!d||!s)return d;K32_WCHAR*r=d;while(*d)d++;u64 i=0;while(i<n&&s[i])d[i]=s[i],i++;d[i]=0;return r;}
+
+__attribute__((dllexport)) K32_WCHAR *wcschr(const K32_WCHAR*s,K32_WCHAR c){if(!s)return 0;do{if(*s==c)return (K32_WCHAR*)s;}while(*s++);return 0;}
+
+__attribute__((dllexport)) K32_WCHAR *wcsrchr(const K32_WCHAR*s,K32_WCHAR c){if(!s)return 0;const K32_WCHAR*r=0;do{if(*s==c)r=s;}while(*s++);return (K32_WCHAR*)r;}
+
+__attribute__((dllexport)) K32_WCHAR *wcsstr(const K32_WCHAR*h,const K32_WCHAR*n){if(!h||!n)return 0;if(!*n)return (K32_WCHAR*)h;for(;*h;h++){u64 j=0;while(n[j]&&h[j]==n[j])j++;if(!n[j])return (K32_WCHAR*)h;}return 0;}
+
+__attribute__((dllexport)) K32_WCHAR *wcspbrk(const K32_WCHAR*s,const K32_WCHAR*set){if(!s||!set)return 0;for(;*s;s++)for(const K32_WCHAR*p=set;*p;p++)if(*p==*s)return (K32_WCHAR*)s;return 0;}
+
+__attribute__((dllexport)) u64 wcscspn(const K32_WCHAR*s,const K32_WCHAR*set){u64 n=0;if(!s||!set)return 0;for(;s[n];n++)for(const K32_WCHAR*p=set;*p;p++)if(*p==s[n])return n;return n;}
+
+__attribute__((dllexport)) u64 wcsspn(const K32_WCHAR*s,const K32_WCHAR*set){u64 n=0;if(!s||!set)return 0;for(;s[n];n++){int f=0;for(const K32_WCHAR*p=set;*p;p++)if(*p==s[n]){f=1;break;}if(!f)break;}return n;}
+
+__attribute__((dllexport)) int _wcsicmp(const K32_WCHAR*a,const K32_WCHAR*b){return k32x_wcmp(a,b,~(u64)0,1);}
+
+__attribute__((dllexport)) int _wcsnicmp(const K32_WCHAR*a,const K32_WCHAR*b,u64 n){return k32x_wcmp(a,b,n,1);}
+
+__attribute__((dllexport)) K32_WCHAR *_wcslwr(K32_WCHAR*s){if(s)for(K32_WCHAR*p=s;*p;p++)if(*p>='A'&&*p<='Z')*p+=32;return s;}
+
+__attribute__((dllexport)) K32_WCHAR *_wcsupr(K32_WCHAR*s){if(s)for(K32_WCHAR*p=s;*p;p++)if(*p>='a'&&*p<='z')*p-=32;return s;}
+
+__attribute__((dllexport)) K32_WCHAR *_wcsrev(K32_WCHAR*s){if(!s)return s;u64 n=k32x_wlen(s);for(u64 i=0;i<n/2;i++){K32_WCHAR c=s[i];s[i]=s[n-1-i];s[n-1-i]=c;}return s;}
+
+__attribute__((dllexport)) u64 wcsnlen(const K32_WCHAR*s,u64 n){u64 i=0;if(s)while(i<n&&s[i])i++;return i;}
+
+__attribute__((dllexport)) u64 wcsnlen_s(const K32_WCHAR*s,u64 n){return wcsnlen(s,n);}
+
+__attribute__((dllexport)) int wcscpy_s(K32_WCHAR*d,u64 cap,const K32_WCHAR*s){if(!d||!s||!cap)return 22;return k32x_wcopy(d,cap,s,k32x_wlen(s));}
+
+__attribute__((dllexport)) int wcsncpy_s(K32_WCHAR*d,u64 cap,const K32_WCHAR*s,u64 n){if(!d||!s||!cap)return 22;return k32x_wcopy(d,cap,s,n);}
+
+__attribute__((dllexport)) int wcscat_s(K32_WCHAR*d,u64 cap,const K32_WCHAR*s){return k32x_wcat(d,cap,s,k32x_wlen(s));}
+
+__attribute__((dllexport)) int wcsncat_s(K32_WCHAR*d,u64 cap,const K32_WCHAR*s,u64 n){return k32x_wcat(d,cap,s,n);}
+
+__attribute__((dllexport)) K32_WCHAR *wcstok_s(K32_WCHAR*s,const K32_WCHAR*delim,K32_WCHAR**ctx){if(!delim||!ctx)return 0;if(s)*ctx=s;else s=*ctx;if(!s)return 0;while(*s){int hit=0;for(const K32_WCHAR*d=delim;*d;d++)if(*d==*s){hit=1;break;}if(!hit)break;s++;}if(!*s){*ctx=s;return 0;}K32_WCHAR*start=s;while(*s){for(const K32_WCHAR*d=delim;*d;d++)if(*d==*s){*s++=0;*ctx=s;return start;}s++;}*ctx=s;return start;}
+
+__attribute__((dllexport)) int iswascii(unsigned int c){return c<=0x7f;}
+
+__attribute__((dllexport)) int iswalpha(unsigned int c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>=0xC0&&c<=0x2AF);}
+
+__attribute__((dllexport)) int iswdigit(unsigned int c){return c>='0'&&c<='9';}
+
+__attribute__((dllexport)) int iswalnum(unsigned int c){return iswalpha(c)||iswdigit(c);}
+
+__attribute__((dllexport)) int iswspace(unsigned int c){return c==' '||(c>='\t'&&c<='\r')||c==0xA0;}
+
+__attribute__((dllexport)) int iswupper(unsigned int c){return (c>='A'&&c<='Z')||(c>=0xC0&&c<=0xDE&&c!=0xD7);}
+
+__attribute__((dllexport)) int iswlower(unsigned int c){return (c>='a'&&c<='z')||(c>=0xDF&&c<=0xFF&&c!=0xF7);}
+
+__attribute__((dllexport)) int iswxdigit(unsigned int c){return (c>='0'&&c<='9')||(c>='A'&&c<='F')||(c>='a'&&c<='f');}
+
+__attribute__((dllexport)) int iswpunct(unsigned int c){return c<128&&((c>=33&&c<=47)||(c>=58&&c<=64)||(c>=91&&c<=96)||(c>=123&&c<=126));}
+
+__attribute__((dllexport)) int iswprint(unsigned int c){return c>=32&&c<=0x10FFFF&&!(c>=0xD800&&c<=0xDFFF);}
+
+__attribute__((dllexport)) int iswcntrl(unsigned int c){return c<32||(c>=0x7F&&c<=0x9F);}
+
+__attribute__((dllexport)) int iswgraph(unsigned int c){return iswprint(c)&&!iswspace(c);}
+
+__attribute__((dllexport)) unsigned int towlower(unsigned int c){return c>='A'&&c<='Z'?c+32:c;}
+
+__attribute__((dllexport)) unsigned int towupper(unsigned int c){return c>='a'&&c<='z'?c-32:c;}
+
+__attribute__((dllexport)) int isleadbyte(int c){(void)c;return 0;}
+
+__attribute__((dllexport)) int _isctype(int c,int mask){int r=0;if(iswupper(c))r|=1;if(iswlower(c))r|=2;if(iswdigit(c))r|=4;if(iswspace(c))r|=8;if(iswpunct(c))r|=16;if(iswxdigit(c))r|=32;return r&mask;}
+
+__attribute__((dllexport)) int _iscsym(int c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_';}
+
+__attribute__((dllexport)) int _iscsymf(int c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||c=='_';}
+
+__attribute__((dllexport)) int isblank(int c){return c==' '||c=='\t';}
+
+__attribute__((dllexport)) int isascii(int c){return (unsigned int)c<=0x7f;}
+
+__attribute__((dllexport)) int _isascii(int c){return isascii(c);}
+
+__attribute__((dllexport)) LONG RtlStringCchLengthA(const char*s,u64 cap,u64*out){if(!s||!out)return 87;u64 n=0;while(n<cap&&s[n])n++;if(n==cap)return 122;*out=n;return 0;}
+
+__attribute__((dllexport)) LONG RtlStringCchLengthW(const K32_WCHAR*s,u64 cap,u64*out){if(!s||!out)return 87;u64 n=0;while(n<cap&&s[n])n++;if(n==cap)return 122;*out=n;return 0;}
+
+__attribute__((dllexport)) LONG RtlStringCchCopyA(char*d,u64 cap,const char*s){return k32x_copy(d,cap,s,~(u64)0);}
+
+__attribute__((dllexport)) LONG RtlStringCchCopyW(K32_WCHAR*d,u64 cap,const K32_WCHAR*s){return k32x_wcopy(d,cap,s,~(u64)0);}
+
+__attribute__((dllexport)) LONG RtlStringCchCatA(char*d,u64 cap,const char*s){return k32x_cat(d,cap,s,~(u64)0);}
+
+__attribute__((dllexport)) LONG RtlStringCchCatW(K32_WCHAR*d,u64 cap,const K32_WCHAR*s){return k32x_wcat(d,cap,s,~(u64)0);}
+
+__attribute__((dllexport)) LONG RtlStringCbLengthA(const char*s,u64 cap,u64*out){return RtlStringCchLengthA(s,cap,out);}
+
+__attribute__((dllexport)) LONG RtlStringCbLengthW(const K32_WCHAR*s,u64 cb,u64*out){return RtlStringCchLengthW(s,cb/2,out);}
+
+__attribute__((dllexport)) LONG RtlStringCbCopyA(char*d,u64 cb,const char*s){return RtlStringCchCopyA(d,cb,s);}
+
+__attribute__((dllexport)) LONG RtlStringCbCopyW(K32_WCHAR*d,u64 cb,const K32_WCHAR*s){return RtlStringCchCopyW(d,cb/2,s);}
+
+__attribute__((dllexport)) LONG RtlStringCbCatA(char*d,u64 cb,const char*s){return RtlStringCchCatA(d,cb,s);}
+
+__attribute__((dllexport)) LONG RtlStringCbCatW(K32_WCHAR*d,u64 cb,const K32_WCHAR*s){return RtlStringCchCatW(d,cb/2,s);}
+
+__attribute__((dllexport)) LONG RtlStringCchCopyNA(char*d,u64 cap,const char*s,u64 n){return k32x_copy(d,cap,s,n);}

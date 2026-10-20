@@ -2131,9 +2131,10 @@ __attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){ret
 static int u32_station_inherit,u32_desktop_inherit;
 #define U32_WINSTA_HANDLE ((void *)0x1100)
 #define U32_DESKTOP_HANDLE ((void *)0x1101)
-__attribute__((dllexport)) void *GetProcessWindowStation(void){return U32_WINSTA_HANDLE;}
+static void *u32_process_station=U32_WINSTA_HANDLE,*u32_thread_desktop=U32_DESKTOP_HANDLE,*u32_active_desktop=U32_DESKTOP_HANDLE;
+__attribute__((dllexport)) void *GetProcessWindowStation(void){return u32_process_station;}
 
-__attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?U32_DESKTOP_HANDLE:0;}
+__attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?u32_thread_desktop:0;}
 
 static int u32_user_object_name(void *object,const char **name,const char **type) {
     if(object==U32_WINSTA_HANDLE){if(name)*name="WinSta0";if(type)*type="WindowStation";return 1;}
@@ -2301,15 +2302,15 @@ __attribute__((dllexport)) BOOL SetProcessDPIAware(void){return 1;}
 
 __attribute__((dllexport)) BOOL IsProcessDPIAware(void){return 1;}
 
-__attribute__((dllexport)) BOOL SetThreadDesktop(void *desktop){return desktop!=0;}
+__attribute__((dllexport)) BOOL SetThreadDesktop(void *desktop){if(desktop!=U32_DESKTOP_HANDLE)return 0;u32_thread_desktop=desktop;return 1;}
 
 __attribute__((dllexport)) void *OpenWindowStationA(const char *name,BOOL inherit,DWORD access){(void)access;if(!name||!u32_class_name_equal(name,"WinSta0"))return 0;u32_station_inherit=inherit!=0;return U32_WINSTA_HANDLE;}
 
 __attribute__((dllexport)) void *OpenWindowStationW(const unsigned short *name,BOOL inherit,DWORD access){char a[64];if(!name)return 0;u32_wide_to_ansi(a,sizeof(a),name);return OpenWindowStationA(a,inherit,access);}
 
-__attribute__((dllexport)) BOOL CloseWindowStation(void *station){return station!=0;}
+__attribute__((dllexport)) BOOL CloseWindowStation(void *station){return station==U32_WINSTA_HANDLE;}
 
-__attribute__((dllexport)) BOOL SetProcessWindowStation(void *station){return station!=0;}
+__attribute__((dllexport)) BOOL SetProcessWindowStation(void *station){if(station!=U32_WINSTA_HANDLE)return 0;u32_process_station=station;return 1;}
 
 __attribute__((dllexport)) BOOL EnumWindowStationsA(void *callback,long long data){if(!callback)return 0;typedef BOOL(*CB)(char*,long long);return ((CB)callback)("WinSta0",data);}
 
@@ -2323,9 +2324,9 @@ __attribute__((dllexport)) void *OpenDesktopA(const char *name,DWORD flags,BOOL 
 
 __attribute__((dllexport)) void *OpenDesktopW(const unsigned short *name,DWORD flags,BOOL inherit,DWORD access){char a[64];if(!name)return 0;u32_wide_to_ansi(a,sizeof(a),name);return OpenDesktopA(a,flags,inherit,access);}
 
-__attribute__((dllexport)) BOOL CloseDesktop(void *desktop){return desktop!=0;}
+__attribute__((dllexport)) BOOL CloseDesktop(void *desktop){return desktop==U32_DESKTOP_HANDLE;}
 
-__attribute__((dllexport)) BOOL SwitchDesktop(void *desktop){return desktop!=0;}
+__attribute__((dllexport)) BOOL SwitchDesktop(void *desktop){if(desktop!=U32_DESKTOP_HANDLE)return 0;u32_active_desktop=desktop;compose();return 1;}
 
 __attribute__((dllexport)) BOOL GetUserObjectInformation(void *object,int index,void *info,DWORD len,DWORD *needed){return GetUserObjectInformationA(object,index,info,len,needed);}
 

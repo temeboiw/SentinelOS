@@ -22,6 +22,7 @@ enum { SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=2
 #define DIFAT_SECTOR 0xFFFFFFFCu
 
 static u32 fat[MAX_FAT];
+static u8 dir_buffer[MAX_DIR];
 static u32 fat_count, sector_size, sector_count;
 static const u8 *file_bytes;
 static u32 file_size;
@@ -110,15 +111,6 @@ static void print_stream_name(const u8 *e) {
         out(b);
     }
 }
-static int is_name(const u8 *e,const char *name) {
-    u16 chars=rd16(e+64)/2;
-    u32 i=0;
-    while(name[i] && i+1<chars) {
-        if (rd16(e+i*2)!=(u8)name[i]) return 0;
-        i++;
-    }
-    return !name[i] && i+1==chars;
-}
 static void inspect_msi(void) {
     static const u8 signature[8]={0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1};
     if (file_size<512) { out("msiexec: file is too small for an MSI compound database\n"); return; }
@@ -135,8 +127,7 @@ static void inspect_msi(void) {
         out("msiexec: malformed or unsupported FAT/DIFAT layout\n"); return;
     }
     u32 dir_sid=rd32(file_bytes+48);
-    u8 *dir=(u8 *)sy3(SYS_Alloc,0,MAX_DIR,0);
-    if (!dir) { out("msiexec: cannot allocate directory buffer\n"); return; }
+    u8 *dir=dir_buffer;
     u32 dir_bytes=read_chain(dir_sid,dir,MAX_DIR);
     if (dir_bytes<128) { out("msiexec: invalid directory stream\n"); return; }
     out("MSI compound database: structurally readable\n");
@@ -179,7 +170,9 @@ void mainCRTStartup(void) {
     }
     u32 total=0;
     while(total<MAX_FILE) {
-        u64 n=sy3(SYS_ReadFile,h,(u64)(buf+total),MAX_FILE-total);
+        u64 want=MAX_FILE-total;
+        if (want>1024u*1024u) want=1024u*1024u;
+        u64 n=sy3(SYS_ReadFile,h,(u64)(buf+total),want);
         if ((long long)n<0) break;
         if (!n) break;
         total+=(u32)n;

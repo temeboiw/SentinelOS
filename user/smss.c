@@ -14,8 +14,8 @@ static void puts(const char *s) {
 }
 void smss_main(void) {
     puts("smss: Session Manager started\n");
-    puts("smss: starting sentlogon.exe\n");
-    char name[] = { 115,101,110,116,108,111,103,111,110,46,101,120,101,0 };
+    puts("smss: starting bootvid.exe\n");
+    char name[] = { 98,111,111,116,118,105,100,46,101,120,101,0 };
     (void)sy3(SYS_Create, (u64)name, 0, 0);
     puts("smss: session manager staying alive\n");
     for (;;) (void)sy3(SYS_Yield, 0, 0, 0);

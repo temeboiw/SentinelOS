@@ -1182,20 +1182,36 @@ static void show_installer_window(const char *name) {
     entries[en]=0;
     msi_ui_line(text,hwnd,10,entries);
     msi_ui_line(text,hwnd,11,msi_db_ok?"MSI database catalog: DECODED":"MSI database catalog: UNSUPPORTED");
-    msi_ui_line(text,hwnd,12,"Installation: NOT STARTED");
-    msi_ui_line(text,hwnd,13,"This build reads the container and decodes the table catalog.");
-    msi_ui_line(text,hwnd,14,"File extraction, component state, install sequences,");
-    msi_ui_line(text,hwnd,15,"rollback, and safe writable storage are not yet implemented.");
-    msi_ui_line(text,hwnd,16,"No files have been changed.");
+    msi_ui_line(text,hwnd,12,"Installation: READY FOR PREFLIGHT");
+    msi_ui_line(text,hwnd,13,"Press Enter to install the supported MSI subset.");
+    msi_ui_line(text,hwnd,14,"Unsupported actions and conditions are rejected.");
+    msi_ui_line(text,hwnd,15,"Runtime failures trigger best-effort file rollback.");
+    msi_ui_line(text,hwnd,16,"Native Windows DLL custom actions are never executed.");
     msi_ui_line(text,hwnd,17,"");
-    msi_ui_line(text,hwnd,18,"Press Esc or click X to close.");
+    msi_ui_line(text,hwnd,18,"Press Enter to install, Esc or X to close.");
     (void)invalidate(hwnd,0,1);
-    MSI_MSG msg;
+    MSI_MSG msg; int started=0;
     for (;;) {
         if (!getmsg(&msg,0,0,0)) continue;
         if (msg.message==0x0100u && msg.wParam==27u) {
             (void)sy3(SYS_Exit,0,0,0);
             for (;;) __asm__ volatile("pause");
+        }
+        if (msg.message==0x0100u && msg.wParam==13u && !started) {
+            started=1;
+            msi_ui_line(text,hwnd,12,"Installation: RUNNING PREFLIGHT");
+            (void)invalidate(hwnd,0,1);
+            if (msi_install_package()) {
+                msi_ui_line(text,hwnd,12,"Installation: COMPLETED");
+                msi_ui_line(text,hwnd,13,"Supported file payloads were installed.");
+                msi_ui_line(text,hwnd,14,"Registration and unsupported actions were skipped.");
+                msi_ui_line(text,hwnd,15,"");
+            } else {
+                msi_ui_line(text,hwnd,12,"Installation: FAILED (rollback attempted)");
+                msi_ui_line(text,hwnd,13,"Check the serial log for the reason.");
+                msi_ui_line(text,hwnd,14,"Power-loss rollback is not available.");
+            }
+            (void)invalidate(hwnd,0,1);
         }
     }
 }

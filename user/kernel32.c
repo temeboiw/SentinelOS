@@ -604,7 +604,7 @@ __attribute__((dllexport)) BOOL GetVolumeInformationA(LPCSTR root,LPSTR label,DW
     if(serial)*serial=m.volume_serial;if(maxComponent)*maxComponent=255u;if(flags)*flags=3u;
     k32_last_error=0;return 1;
 }
-typedef struct { unsigned long long creation_time,access_time,write_time,change_time,size; DWORD inode,mode; WORD links,reserved; } K32_FILE_METADATA;
+typedef struct { unsigned long long creation_time,access_time,write_time,change_time,size; DWORD inode,mode,volume_serial; WORD links,reserved; } K32_FILE_METADATA;
 static BOOL k32_query_file_metadata(HANDLE file,K32_FILE_METADATA *meta) {
     if(!file||file==INVALID_HANDLE_VALUE||!meta)return 0;
     return sy3(SYS_QueryFileMetadata,(u64)file,(u64)meta,sizeof(*meta))!=0;
@@ -650,7 +650,7 @@ __attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *inf
     for(unsigned int i=0;i<sizeof(*p)/sizeof(DWORD);i++)((DWORD*)p)[i]=0;
     p->dwFileAttributes=((meta.mode&0xF000u)==0x4000u)?0x10u:0x80u;
     k32_store_filetime(&p->ftCreationTime,meta.creation_time);k32_store_filetime(&p->ftLastAccessTime,meta.access_time);k32_store_filetime(&p->ftLastWriteTime,meta.write_time);
-    p->nFileSizeHigh=(DWORD)(meta.size>>32);p->nFileSizeLow=(DWORD)meta.size;p->nNumberOfLinks=meta.links;
+    p->dwVolumeSerialNumber=meta.volume_serial;p->nFileSizeHigh=(DWORD)(meta.size>>32);p->nFileSizeLow=(DWORD)meta.size;p->nNumberOfLinks=meta.links;
     p->nFileIndexLow=meta.inode;k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) BOOL SetEndOfFile(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }

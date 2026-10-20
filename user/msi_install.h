@@ -112,7 +112,8 @@ static int msi_condition_eval(const char *condition) {
         }
         char value[256]; (void)msi_property_value(lhs,value,sizeof value);
         int eq=same_name(value,rhs);
-        return oplen==1 ? eq : !eq;
+        int result=oplen==1 ? eq : !eq;
+        return neg ? !result : result;
     }
     if(!c[0]) return neg?0:1;
     for(u32 i=0;c[i];i++) if(c[i]==' '||c[i]=='\t'||c[i]=='('||c[i]==')') return -1;

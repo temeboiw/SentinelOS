@@ -494,6 +494,75 @@ static void print_msi_product_summary(void) {
     if (media) { out("Media records: "); out_u32(media->rows); out("\n"); }
     if (dirs) { out("Directory records: "); out_u32(dirs->rows); out("\n"); }
 }
+typedef struct {
+    char action[96];
+    char condition[128];
+    long long sequence;
+} MsiSequenceRow;
+
+static void inspect_execute_sequence(void) {
+    MsiTable *t = msi_find_table("InstallExecuteSequence");
+    if (!t) {
+        out("InstallExecuteSequence: absent\n");
+        return;
+    }
+    out("InstallExecuteSequence: ");
+    out_u32(t->rows);
+    out(" rows (inspection only; actions are not executed)\n");
+
+    /* Bounded, sorted preview. Sequence rows are database data and must not
+       be treated as executable instructions until condition/action support
+       and the transaction engine exist. */
+    static MsiSequenceRow rows[128];
+    u32 count = t->rows < 128 ? t->rows : 128;
+    for (u32 i = 0; i < count; ++i) {
+        long long seq = 0;
+        int action_text = 0, condition_text = 0;
+        rows[i].action[0] = rows[i].condition[0] = 0;
+        rows[i].sequence = 0;
+        if (!msi_table_cell("InstallExecuteSequence", i, 0,
+                            rows[i].action, sizeof rows[i].action,
+                            0, &action_text) || !action_text ||
+            !msi_table_cell("InstallExecuteSequence", i, 1,
+                            rows[i].condition, sizeof rows[i].condition,
+                            0, &condition_text) ||
+            !msi_table_cell("InstallExecuteSequence", i, 2,
+                            0, 0, &seq, 0)) {
+            rows[i].action[0] = 0;
+            continue;
+        }
+        if (!condition_text) rows[i].condition[0] = 0;
+        rows[i].sequence = seq;
+    }
+    /* Insertion sort is adequate for this small, fixed preview. */
+    for (u32 i = 1; i < count; ++i) {
+        MsiSequenceRow v = rows[i];
+        u32 j = i;
+        while (j && rows[j-1].sequence > v.sequence) {
+            rows[j] = rows[j-1];
+            --j;
+        }
+        rows[j] = v;
+    }
+    for (u32 i = 0; i < count; ++i) {
+        if (!rows[i].action[0]) continue;
+        out("  [");
+        out_u32((u32)rows[i].sequence);
+        out("] ");
+        out(rows[i].action);
+        if (rows[i].condition[0]) {
+            out(" if ");
+            out(rows[i].condition);
+        }
+        out("\n");
+    }
+    if (t->rows > count) {
+        out("  ... ");
+        out_u32(t->rows - count);
+        out(" additional sequence rows not shown\n");
+    }
+}
+
 static int parse_msi_catalog(void) {
     if (!parse_msi_string_pool()) return 0;
     u32 tables_size=read_named_stream("_Tables",1,table_buffer,MAX_TABLE_STREAM);
@@ -605,6 +674,7 @@ static void inspect_msi(void) {
         out("Package metadata:\n");
         print_msi_product_summary();
         print_msi_cabinets();
+        inspect_execute_sequence();
     } else {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }

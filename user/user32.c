@@ -59,8 +59,9 @@ static int g_search_len;
 static u32 cur_under[16][16];
 static int cur_on, cur_ox, cur_oy;
 static WINDOW g_wnd;
-static int u32_quit_pending;
-static int u32_quit_code;
+static MSG u32_msg_queue[32];
+static unsigned int u32_msg_head, u32_msg_count;
+static int u32_msg_time;
 static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
@@ -79,6 +80,24 @@ static struct {void *hwnd;char name[48];void *data;int used;} u32_props[32];
 static int u32_clipboard_open; static unsigned int u32_clipboard_format,u32_clipboard_seq; static void *u32_clipboard_data,*u32_clipboard_owner;
 static char g_lines[40][80];
 static int g_nlines, g_tb_n, g_tb_pids[8];
+
+static BOOL u32_msg_push(const MSG *msg) {
+    if (!msg || u32_msg_count >= 32) return 0;
+    unsigned int tail = (u32_msg_head + u32_msg_count) % 32;
+    u32_msg_queue[tail] = *msg;
+    if (!u32_msg_queue[tail].time) u32_msg_queue[tail].time = (u32)++u32_msg_time;
+    u32_msg_count++;
+    return 1;
+}
+static BOOL u32_msg_peek(MSG *msg, int remove) {
+    if (!u32_msg_count) return 0;
+    if (msg) *msg = u32_msg_queue[u32_msg_head];
+    if (remove) {
+        u32_msg_head = (u32_msg_head + 1) % 32;
+        u32_msg_count--;
+    }
+    return 1;
+}
 
 #define COL_BG       0xFF0D1117
 #define COL_PANEL    0xFF161B22
@@ -695,17 +714,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     if (!g_front) ensure_fb();
 
     for (;;) {
-        if (u32_quit_pending) {
-            msg->hwnd = 0;
-            msg->message = 0x0012;
-            msg->wParam = (u64)(unsigned int)u32_quit_code;
-            msg->lParam = 0;
-            msg->time = 0;
-            msg->pt_x = g_mx;
-            msg->pt_y = g_my;
-            u32_quit_pending = 0;
-            return 0;
-        }
+        if (u32_msg_peek(msg, 1)) return msg->message == 0x0012 ? 0 : 1;
         InputEvent ev = {0};
 
         if (sy3(SYS_GetInput, (u64)&ev, 0, 0)) {
@@ -791,8 +800,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
 
 __attribute__((dllexport))
 BOOL TranslateMessage(const MSG *m) {
-    if (!m || m->message != 0x0100) return 0;
-    return m->wParam >= 32 && m->wParam <= 126;
+    if (!m || m->message != 0x0100 || m->wParam < 32 || m->wParam > 126) return 0;
+    MSG ch = *m;
+    ch.message = 0x0102; /* WM_CHAR */
+    ch.wParam = m->wParam;
+    return u32_msg_push(&ch);
 }
 
 __attribute__((dllexport))
@@ -844,9 +856,12 @@ BOOL DestroyWindow(void *hwnd) {
 
 __attribute__((dllexport))
 BOOL PostQuitMessage(int code) {
-    u32_quit_code = code;
-    u32_quit_pending = 1;
-    return 1;
+    MSG m = {0};
+    m.message = 0x0012; /* WM_QUIT */
+    m.wParam = (u64)(unsigned int)code;
+    m.pt_x = g_mx;
+    m.pt_y = g_my;
+    return u32_msg_push(&m);
 }
 
 __attribute__((dllexport))
@@ -983,10 +998,17 @@ __attribute__((dllexport)) U32_LRESULT SendMessageA(void *hwnd, U32_UINT msg, U3
     return DefWindowProcA(hwnd,msg,wp,lp);
 }
 __attribute__((dllexport)) BOOL PostMessageA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
-    (void)hwnd; (void)msg; (void)wp; (void)lp; return 0;
+    MSG m = {0}; m.hwnd = (u32)(u64)hwnd; m.message = msg; m.wParam = wp; m.lParam = lp;
+    m.pt_x = g_mx; m.pt_y = g_my;
+    return u32_msg_push(&m);
 }
 __attribute__((dllexport)) BOOL PeekMessageA(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max, U32_UINT remove) {
-    (void)msg; (void)hwnd; (void)min; (void)max; (void)remove; return 0;
+    if (!msg) return 0;
+    if (!u32_msg_peek(msg, 0)) return 0;
+    if (hwnd && msg->hwnd != (u32)(u64)hwnd) return 0;
+    if ((min || max) && (msg->message < min || msg->message > max)) return 0;
+    if (remove & 1u) u32_msg_peek(msg, 1);
+    return 1;
 }
 __attribute__((dllexport)) short GetKeyState(int key) { (void)key; return 0; }
 __attribute__((dllexport)) short GetAsyncKeyState(int key) { (void)key; return 0; }

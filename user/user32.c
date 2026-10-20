@@ -150,19 +150,20 @@ static void u32_pump_timers(void) {
     }
 }
 
-#define COL_BG       0xFF0D1117
-#define COL_PANEL    0xFF161B22
-#define COL_TITLE    0xFF21262D
-#define COL_ACCENT   0xFF58A6FF
-#define COL_ACCENT2  0xFF3FB950
-#define COL_WARN     0xFFD29922
-#define COL_DANGER   0xFFF85149
-#define COL_TEXT     0xFFF0F6FC
-#define COL_MUTED    0xFF8B949E
-#define COL_TASK     0xE0161B22
-#define COL_TASKLINE 0xFF30363D
+/* Frutiger Aero palette: sky blue glass, aquatic cyan, white highlights. */
+#define COL_BG       0xFFB8E6F2
+#define COL_PANEL    0xFFEAF8FC
+#define COL_TITLE    0xFF247FA8
+#define COL_ACCENT   0xFF8DEBFA
+#define COL_ACCENT2  0xFF43BDA0
+#define COL_WARN     0xFFE8B95F
+#define COL_DANGER   0xFFE36F82
+#define COL_TEXT     0xFF173B52
+#define COL_MUTED    0xFF5D8295
+#define COL_TASK     0xFF246F91
+#define COL_TASKLINE 0xFFB8F4FC
 #define COL_WHITE    0xFFFFFFFF
-#define COL_ICON     0xFF1F6FEB
+#define COL_ICON     0xFF168DC1
 
 #include "font8x8.h"
 
@@ -187,6 +188,48 @@ static void panel(int x, int y, int w, int h, u32 f, u32 b) {
     fill(x, y, 1, h, b);
     fill(x + w - 1, y, 1, h, b);
 }
+
+static u32 color_mix(u32 a, u32 b, unsigned int t) {
+    unsigned int r=(((a>>16)&255)*(255-t)+((b>>16)&255)*t)/255;
+    unsigned int g=(((a>>8)&255)*(255-t)+((b>>8)&255)*t)/255;
+    unsigned int bl=((a&255)*(255-t)+(b&255)*t)/255;
+    return 0xFF000000u|(r<<16)|(g<<8)|bl;
+}
+static void gradient_v(int x,int y,int w,int h,u32 top,u32 bottom) {
+    if(w<=0||h<=0)return;
+    for(int yy=0;yy<h;yy++) {
+        u32 c=color_mix(top,bottom,(unsigned int)(yy*255/(h>1?h-1:1)));
+        fill(x,y+yy,w,1,c);
+    }
+}
+static void round_fill(int x,int y,int w,int h,int r,u32 c) {
+    if(w<=0||h<=0)return;
+    if(r>w/2)r=w/2;if(r>h/2)r=h/2;if(r<0)r=0;
+    for(int yy=0;yy<h;yy++) {
+        int dy=yy<r?r-yy-1:(yy>=h-r?yy-(h-r):0);
+        int inset=0;
+        if(dy>0) {
+            int rr=r*r-dy*dy;
+            while(inset<r && inset*inset<r*r-rr) inset++;
+        }
+        fill(x+inset,y+yy,w-2*inset,1,c);
+    }
+}
+static void aero_desktop(void) {
+    gradient_v(0,0,(int)g_fw,(int)g_fh,0xFFDDF7FC,0xFF3C9DC5);
+    /* Soft, layered water/sky ribbons; each row is clipped by putpx/fill. */
+    int h=(int)g_fh,w=(int)g_fw;
+    int base=h*2/3;
+    for(int x=0;x<w;x++) {
+        int wave1=base+(x-w/2)*(x-w/2)/(w>0?w*14:1);
+        int wave2=base+28+(x-w/2)*(x-w/2)/(w>0?w*19:1);
+        if(wave1>=0&&wave1<h)fill(x,wave1,1,h-wave1,color_mix(0xFF80D5E9,0xFF2B8CB9,(unsigned int)(wave1*100/(h?h:1))));
+        if(wave2>=0&&wave2<h)fill(x,wave2,1,h-wave2,0x302E9DC2);
+    }
+    fill(0,0,w,2,0xDFFFFFFF);
+}
+
+#include "font_ttf.h"
 
 static void draw_char(int x, int y, char ch, u32 col) {
     unsigned char code = (unsigned char)ch;
@@ -219,9 +262,13 @@ static void draw_char(int x, int y, char ch, u32 col) {
 }
 
 static void draw_text(int x, int y, const char *s, u32 col) {
+    if (!s) return;
     for (; *s; s++) {
-        draw_char(x, y, *s, col);
-        x += 8;
+        int adv = u32_ttf_font.valid
+            ? u32_ttf_draw(&u32_ttf_font,x,y+13,(unsigned char)*s,14,col)
+            : -1;
+        if (adv < 0) { draw_char(x,y,*s,col); x += 8; }
+        else x += adv > 0 ? adv : 1;
     }
 }
 
@@ -300,6 +347,7 @@ static void ensure_fb(void) {
     g_fw = g_fb.w;
     g_fh = g_fb.h;
     g_pitch = g_fb.pitch / 4;
+    u32_ttf_load();
 }
 
 static int hit(int x, int y, int x0, int y0, int x1, int y1) {    return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -362,11 +410,15 @@ static void draw_taskbar(void) {
     int w = (int)g_fw;
     int ty = h - 44;
 
-    fill(0, ty, w, 44, COL_TASK);
-    fill(0, ty, w, 1, COL_TASKLINE);
+    gradient_v(0,ty,w,44,0xFF9BE5F3,0xFF246F91);
+    fill(0,ty,w,1,0xFFFFFFFF);
+    fill(0,ty+1,w,1,0xFFB9F4FC);
+    fill(0,ty+43,w,1,0xFF164E6A);
 
-    panel(8, ty + 6, 70, 32, COL_ACCENT, COL_ACCENT);
-    draw_text(20, ty + 16, "START", COL_WHITE);
+    round_fill(8,ty+5,70,34,10,0xFF187FA6);
+    gradient_v(10,ty+6,66,16,0xFFB5F6FF,0xFF43B5D6);
+    round_fill(12,ty+9,62,26,8,0xFF1687AE);
+    draw_text(22, ty + 14, "Start", 0xFFFFFFFF);
 
     g_tb_n = 0;
     int ax = 90;
@@ -384,14 +436,12 @@ static void draw_taskbar(void) {
         g_tb_pids[g_tb_n++] = (int)pid;
 
         int bw = 110;
-        panel(ax, ty + 6, bw, 32,
-              minv ? COL_PANEL : COL_TITLE, COL_TASKLINE);
-
-        if (!minv)
-            fill(ax, ty + 34, bw, 2, COL_ACCENT);
-
-        draw_text(ax + 8, ty + 16,
-                  name[0] ? name : "APP", COL_TEXT);
+        round_fill(ax,ty+6,bw,32,7,minv?0xFF397E9B:0xFF165D7C);
+        gradient_v(ax+1,ty+7,bw-2,14,
+                    minv?0xFFB2EAF5:0xFF75D4E8,
+                    minv?0xFF7ABCD0:0xFF2E91B4);
+        if (!minv) fill(ax+8,ty+35,bw-16,2,0xFFB9F8FF);
+        draw_text(ax + 9, ty + 12,name[0]?name:"App",0xFFFFFFFF);
 
         ax += bw + 6;
         if (ax > w - 80) break;
@@ -467,49 +517,61 @@ static void compose(void) {
     }
 
     cursor_restore();
-    fill(0, 0, (int)g_fw, (int)g_fh, COL_BG);
+    aero_desktop();
 
-    draw_text(16, 14, "SENTINEL OS", COL_ACCENT);
-    draw_text(16, 28, "v1", COL_MUTED);
+    /* Floating glass identity plaque. */
+    round_fill(12,10,182,45,9,0xAFFFFFFF);
+    round_fill(14,12,178,41,8,0xEAFBFFFF);
+    fill(22,13,162,1,0xFFFFFFFF);
+    draw_text(24, 17, "SentinelOS", 0xFF1C6587);
+    draw_text(24, 33, "A calmer desktop", 0xFF477F95);
 
     {
         int ix = 36, iy = 72, s = 48;
 
-        fill(ix + 6, iy + 6, s, s, 0xFF0A1628);
-        fill(ix, iy, s, s, COL_ICON);
-        fill(ix + 4, iy + 4, s - 8, 10, COL_ACCENT);
-        fill(ix + 10, iy + 20, s - 20, 6, COL_WHITE);
-        fill(ix + 10, iy + 30, s - 20, 6, COL_WHITE);
-        fill(ix + 10, iy + 40, s - 24, 6, COL_MUTED);
-
-        draw_text(ix - 4, iy + s + 8, "File Explorer", COL_TEXT);
+        round_fill(ix + 5, iy + 7, s, s, 10, 0x66324D67);
+        round_fill(ix, iy, s, s, 10, 0xFF0B78A8);
+        gradient_v(ix+2,iy+2,s-4,20,0xFFB9F7FF,0xFF42B7DF);
+        round_fill(ix+9,iy+24,s-18,6,3,0xFFFFFFFF);
+        round_fill(ix+9,iy+34,s-18,5,2,0xFFD5F8FF);
+        fill(ix+9,iy+43,s-22,3,0xFF8AE5F6);
+        round_fill(ix-5,iy+s+7,86,20,5,0xBFFFFFFF);
+        draw_text(ix-1, iy+s+10, "Explorer", 0xFF164B68);
     }
 
     if (g_wnd.visible && !g_wnd.minimized) {
         int x = g_wnd.x, y = g_wnd.y;
         int w = g_wnd.w, h = g_wnd.h;
 
-        panel(x, y, w, h, COL_PANEL, COL_TASKLINE);
-        fill(x, y, w, 32, COL_TITLE);
-        fill(x, y, w, 2, COL_ACCENT);
+        /* Soft shadow, rounded glass frame, blue aero caption. */
+        round_fill(x+4,y+7,w,h,11,0x55314F62);
+        round_fill(x,y,w,h,10,0xFF6BB5D0);
+        round_fill(x+1,y+1,w-2,h-2,9,0xFFEAF8FC);
+        round_fill(x+2,y+2,w-4,34,8,0xFF3B9CC6);
+        fill(x+2,y+20,w-4,16,0xFF3B9CC6);
+        gradient_v(x+3,y+3,w-6,11,0xFFB9F2FC,0xFF69C5E1);
+        fill(x+4,y+3,w-8,1,0xFFFFFFFF);
+        fill(x+3,y+35,w-6,1,0xFFFFFFFF);
 
-        draw_text(x + 12, y + 12, g_wnd.title, COL_TEXT);
+        draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
 
         int by = y + 4;
         int bx = x + w - 56;
 
-        fill(bx, by, 24, 24, COL_PANEL);
-        fill(bx, by, 24, 1, COL_TASKLINE);
-        fill(bx, by + 23, 24, 1, COL_TASKLINE);
-        fill(bx, by, 1, 24, COL_TASKLINE);
-        fill(bx + 23, by, 1, 24, COL_TASKLINE);
-        fill(bx + 6, by + 11, 12, 3, COL_TEXT);
+        round_fill(bx,by,24,24,5,0xFF2B83A8);
+        gradient_v(bx+1,by+1,22,11,0xFFB9F4FC,0xFF55B7D9);
+        fill(bx+6,by+11,12,3,0xFF174F6A);
 
         bx = x + w - 28;
-        fill(bx, by, 24, 24, COL_DANGER);
-        draw_text(bx + 8, by + 8, "X", COL_WHITE);
+        round_fill(bx,by,24,24,5,0xFFB74F69);
+        gradient_v(bx+1,by+1,22,10,0xFFFFD4DD,0xFFE56D83);
+        fill(bx+7,by+7,2,10,0xFFFFFFFF);
+        fill(bx+15,by+7,2,10,0xFFFFFFFF);
+        fill(bx+7,by+7,10,2,0xFFFFFFFF);
+        fill(bx+7,by+15,10,2,0xFFFFFFFF);
 
-        fill(x + 4, y + 36, w - 8, h - 42, COL_BG);
+        round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
+        fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
 
         for (int i = 0; i < g_nlines; i++) {
             const char *s = g_lines[i];

@@ -86,7 +86,8 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
 }
 __attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) {
     if(n==0xFFFFFFF6u)return (HANDLE)3;
-    if(n==0xFFFFFFF5u||n==0xFFFFFFF4u)return (HANDLE)1;
+    if(n==0xFFFFFFF5u)return (HANDLE)1;
+    if(n==0xFFFFFFF4u)return (HANDLE)2;
     k32_last_error=87;return 0;
 }
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
@@ -104,7 +105,7 @@ __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWOR
         k32_last_error=(n==len)?0: 232;
         return n!=0 || len==0;
     }
-    if((h!=(HANDLE)1 && h!=(HANDLE)2 && h!=(HANDLE)3) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
+    if((h!=(HANDLE)1 && h!=(HANDLE)2) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
     u64 n = sy3(SYS_Write, 1, (u64)buf, len);
     if (w) *w = (DWORD)n;
     if(n==(u64)-1){k32_last_error=5;return 0;}
@@ -428,11 +429,11 @@ __attribute__((dllexport)) K32_SIZE_T HeapSize(HANDLE heap, DWORD flags, LPCVOID
 }
 __attribute__((dllexport)) LPVOID LocalAlloc(DWORD flags,K32_SIZE_T size){if(!size){k32_last_error=87;return 0;}void *p=VirtualAlloc(0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}k32_mem_register(p,size);if(flags&0x40u){unsigned char *b=p;for(K32_SIZE_T i=0;i<size;i++)b[i]=0;}k32_last_error=0;return p;}
 __attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){if(!size){k32_last_error=87;return 0;}void *p=VirtualAlloc(0,size,0x3000,4);if(!p){k32_last_error=8;return 0;}k32_mem_register(p,size);if(flags&0x40u){unsigned char *b=p;for(K32_SIZE_T i=0;i<size;i++)b[i]=0;}k32_last_error=0;return p;}
-__attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h,DWORD *mode){if(!h||!mode){k32_last_error=6;return 0;}*mode=k32_console_mode;return 1;}
-__attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h,DWORD mode){if(!h){k32_last_error=6;return 0;}k32_console_mode=mode;return 1;}
+__attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h,DWORD *mode){if((h!=(HANDLE)1&&h!=(HANDLE)2&&h!=(HANDLE)3)||!mode){k32_last_error=6;return 0;}*mode=k32_console_mode;k32_last_error=0;return 1;}
+__attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h,DWORD mode){if(h!=(HANDLE)1&&h!=(HANDLE)2&&h!=(HANDLE)3){k32_last_error=6;return 0;}k32_console_mode=mode;k32_last_error=0;return 1;}
 __attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DWORD *read, void *reserved) {
     (void)reserved;if(read)*read=0;
-    if((h!=(HANDLE)1&&h!=(HANDLE)2)||(!buf&&len)){k32_last_error=6;return 0;}
+    if(h!=(HANDLE)3||(!buf&&len)){k32_last_error=6;return 0;}
     if(!len){k32_last_error=0;return 1;}
     typedef struct { int type,x,y,btn; char key; } K32_INPUT_EVENT;
     char *out=(char*)buf;DWORD n=0;

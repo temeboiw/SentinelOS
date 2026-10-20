@@ -6,6 +6,21 @@
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     st = sys; bs = sys->BootServices;
 
+    /* Firmware-stage splash: simple UEFI text graphics, no extra assets. */
+    if (st->ConOut) {
+        st->ConOut->ClearScreen(st->ConOut);
+        st->ConOut->SetAttribute(st->ConOut, EFI_LIGHTCYAN | EFI_BACKGROUND_BLUE);
+        say(L"\r\n");
+        say(L"       _____             __  _             __\r\n");
+        say(L"      / ___/__  ___  ___ / /_(_)___  ___  / /\r\n");
+        say(L"      \\__ \\/ _ \\/ _ \\/ __/ / __ \\/ _ \\/ /\r\n");
+        say(L"     ___/ /  __/  __/ /_/ / / / /  __/ /\r\n");
+        say(L"    /____/\\___/\\___/\\__/_/_/ /_/\\___/_/\r\n\r\n");
+        say(L"                 SENTINELOS  |  BOOTING\r\n");
+        say(L"       Initializing session environment...\r\n\r\n");
+        st->ConOut->SetAttribute(st->ConOut, EFI_WHITE | EFI_BACKGROUND_BLUE);
+    }
+
     EFI_LOADED_IMAGE_PROTOCOL *li;
     EFI_DEVICE_PATH_PROTOCOL *dev;
     if (EFI_ERROR(bs->HandleProtocol(image, &gEfiLoadedImageProtocolGuid, (VOID **)&li)) ||

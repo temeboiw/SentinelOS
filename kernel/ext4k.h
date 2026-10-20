@@ -251,16 +251,15 @@ static int e4_free_inode_bit(Ext4k *fs, uint32_t ino, int is_dir) {
     if (e4_read(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0 ||
         e4_read(fs, 1024, sb, sizeof sb) < 0) return -1;
     uint32_t bb = E32(gd, 4);
-    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0 ||
+    if (!bb || b>=fs->blksz*8u ||
+        e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0 ||
         !(bitmap[b >> 3] & (1u << (b & 7))) ||
-        E16(gd,14)==0xFFFFu || E32(sb,16)==0xFFFFFFFFu) return -1;
+        E16(gd,14)==0xFFFFu || E32(sb,16)==0xFFFFFFFFu ||
+        (is_dir && !E16(gd,16))) return -1;
     bitmap[b >> 3] &= (uint8_t)~(1u << (b & 7));
     if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
     E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);
-    if (is_dir) {
-        if (!E16(gd,16)) return -1;
-        E16(gd,16) = (uint16_t)(E16(gd,16)-1);
-    }
+    if (is_dir) E16(gd,16) = (uint16_t)(E16(gd,16)-1);
     if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return -1;
     E32(sb, 16) = E32(sb, 16) + 1;
     return e4_write(fs, 1024, sb, sizeof sb);

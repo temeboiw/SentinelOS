@@ -954,7 +954,7 @@ typedef struct { unsigned int cbSize,fMask; int nMin,nMax; unsigned int nPage; i
 typedef struct { int x, y; } U32_POINT;
 typedef struct { unsigned int length, flags, showCmd; U32_POINT ptMinPosition, ptMaxPosition; U32_RECT rcNormalPosition; } U32_WINDOWPLACEMENT;
 typedef struct { u32 cbSize; U32_RECT rcWindow, rcClient; u32 dwStyle, dwExStyle, dwWindowStatus, cxWindowBorders, cyWindowBorders; unsigned short atomWindowType, wCreatorVersion; } U32_WINDOWINFO;
-typedef struct { unsigned int flags; unsigned long long id; void *submenu; void *bmp_checked,*bmp_unchecked; char text[80]; } U32_MENUITEM;
+typedef struct { unsigned int flags; unsigned long long id,data; void *submenu; void *bmp_checked,*bmp_unchecked,*bmp_item; char text[80]; } U32_MENUITEM;
 typedef struct { int used, count, default_pos; unsigned int style,max_height,help_id; void *background; unsigned long long menu_data; U32_MENUITEM items[16]; } U32_MENUDATA;
 static U32_MENUDATA u32_menus[16];
 static void *u32_system_menu;
@@ -983,7 +983,7 @@ static int u32_menu_insert(void *handle, unsigned int position, unsigned int fla
                   : u32_menu_index(m,position,0));
     if (at<0 || at>m->count) return 0;
     for (int i=m->count;i>at;i--) m->items[i]=m->items[i-1];
-    U32_MENUITEM *it=&m->items[at]; it->flags=flags; it->id=id; it->submenu=(flags&0x0010u)?(void *)id:0;
+    U32_MENUITEM *it=&m->items[at]; it->flags=flags; it->id=id; it->data=0;it->bmp_checked=it->bmp_unchecked=it->bmp_item=0;it->submenu=(flags&0x0010u)?(void *)id:0;
     u32_menu_text(it->text,sizeof(it->text),text); m->count++;
     if (m->default_pos>=at) m->default_pos++;
     return 1;
@@ -1562,12 +1562,41 @@ typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbm
 #define U32_MIIM_STATE 0x00000001u
 #define U32_MIIM_ID 0x00000002u
 #define U32_MIIM_SUBMENU 0x00000004u
+#define U32_MIIM_CHECKMARKS 0x00000008u
 #define U32_MIIM_DATA 0x00000020u
 #define U32_MIIM_STRING 0x00000040u
+#define U32_MIIM_BITMAP 0x00000080u
 #define U32_MIIM_FTYPE 0x00000100u
+#define U32_MFS_STATE_MASK 0x0000018Bu
 typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; U32_WCHAR *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOW;
-__attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOA *info){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;U32_MENUITEM *it=&m->items[i];if(info->fMask&U32_MIIM_ID)it->id=info->wID;if(info->fMask&U32_MIIM_SUBMENU)it->submenu=info->hSubMenu;if(info->fMask&U32_MIIM_STATE)it->flags=(it->flags&~0x103u)|(info->fState&0x103u);if(info->fMask&U32_MIIM_FTYPE)it->flags=(it->flags&~0x100u)|(info->fType&0x100u);if(info->fMask&U32_MIIM_DATA)it->id=info->dwItemData;if((info->fMask&U32_MIIM_STRING)&&info->dwTypeData)u32_menu_text(it->text,sizeof(it->text),info->dwTypeData);return 1;}
-__attribute__((dllexport)) BOOL GetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,U32_MENUITEMINFOA *info){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;U32_MENUITEM *it=&m->items[i];if(info->fMask&U32_MIIM_ID)info->wID=(unsigned int)it->id;if(info->fMask&U32_MIIM_SUBMENU)info->hSubMenu=it->submenu;if(info->fMask&U32_MIIM_STATE)info->fState=it->flags&0x103u;if(info->fMask&U32_MIIM_FTYPE)info->fType=it->flags&0x100u;if(info->fMask&U32_MIIM_DATA)info->dwItemData=it->id;if(info->fMask&U32_MIIM_STRING){unsigned int n=0;while(it->text[n])n++;if(info->dwTypeData&&info->cch){unsigned int j=0;while(it->text[j]&&j+1<info->cch){info->dwTypeData[j]=it->text[j];j++;}info->dwTypeData[j]=0;}info->cch=n;}return 1;}
+__attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOA *info) {
+    U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);
+    if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;
+    U32_MENUITEM *it=&m->items[i];
+    if(info->fMask&U32_MIIM_ID)it->id=info->wID;
+    if(info->fMask&U32_MIIM_SUBMENU){it->submenu=info->hSubMenu;if(it->submenu)it->flags|=0x0010u;else it->flags&=~0x0010u;}
+    if(info->fMask&U32_MIIM_STATE)it->flags=(it->flags&~U32_MFS_STATE_MASK)|(info->fState&U32_MFS_STATE_MASK);
+    if(info->fMask&U32_MIIM_FTYPE)it->flags=(it->flags&~0x0000FF70u)|(info->fType&0x0000FF70u);
+    if(info->fMask&U32_MIIM_DATA)it->data=info->dwItemData;
+    if(info->fMask&U32_MIIM_CHECKMARKS){it->bmp_checked=info->hbmpChecked;it->bmp_unchecked=info->hbmpUnchecked;}
+    if(info->fMask&U32_MIIM_BITMAP)it->bmp_item=info->hbmpItem;
+    if((info->fMask&U32_MIIM_STRING)&&info->dwTypeData)u32_menu_text(it->text,sizeof(it->text),info->dwTypeData);
+    return 1;
+}
+__attribute__((dllexport)) BOOL GetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,U32_MENUITEMINFOA *info) {
+    U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);
+    if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;
+    U32_MENUITEM *it=&m->items[i];
+    if(info->fMask&U32_MIIM_ID)info->wID=(unsigned int)it->id;
+    if(info->fMask&U32_MIIM_SUBMENU)info->hSubMenu=it->submenu;
+    if(info->fMask&U32_MIIM_STATE)info->fState=it->flags&U32_MFS_STATE_MASK;
+    if(info->fMask&U32_MIIM_FTYPE)info->fType=it->flags&0x0000FF70u;
+    if(info->fMask&U32_MIIM_DATA)info->dwItemData=it->data;
+    if(info->fMask&U32_MIIM_CHECKMARKS){info->hbmpChecked=it->bmp_checked;info->hbmpUnchecked=it->bmp_unchecked;}
+    if(info->fMask&U32_MIIM_BITMAP)info->hbmpItem=it->bmp_item;
+    if(info->fMask&U32_MIIM_STRING){unsigned int n=0;while(it->text[n])n++;if(info->dwTypeData&&info->cch){unsigned int j=0;while(it->text[j]&&j+1<info->cch){info->dwTypeData[j]=it->text[j];j++;}info->dwTypeData[j]=0;}info->cch=n;}
+    return 1;
+}
 __attribute__((dllexport)) int GetMenuStringA(void *menu, unsigned int item, char *out, int cap, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0 || !out || cap<=0) return 0; int n=0; while (m->items[i].text[n] && n+1<cap) { out[n]=m->items[i].text[n]; n++; } out[n]=0; return n; }
 __attribute__((dllexport)) BOOL SetMenuDefaultItem(void *menu, unsigned int item, unsigned int by_position) { U32_MENUDATA *m=u32_menu_data(menu); if (!m) return 0; int i=u32_menu_index(m,item,by_position!=0); if (i<0) return 0; m->default_pos=i; return 1; }
 __attribute__((dllexport)) unsigned int GetMenuDefaultItem(void *menu, unsigned int by_position, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); (void)flags; if (!m || m->default_pos<0 || m->default_pos>=m->count) return 0xFFFFFFFFu; return by_position ? (unsigned int)m->default_pos : (unsigned int)m->items[m->default_pos].id; }
@@ -1760,7 +1789,7 @@ typedef struct { unsigned int cbSize,fMask,dwStyle,dwMaxHeight; void *hbrBack; u
 __attribute__((dllexport)) BOOL GetMenuInfo(void *menu,U32_MENUINFO *info){U32_MENUDATA *m=u32_menu_data(menu);if(!m||!info||info->cbSize<sizeof(U32_MENUINFO))return 0;if(info->fMask&1u)info->dwMaxHeight=m->max_height;if(info->fMask&2u)info->hbrBack=m->background;if(info->fMask&4u)info->dwContextHelpID=m->help_id;if(info->fMask&8u)info->dwMenuData=m->menu_data;if(info->fMask&0x10u)info->dwStyle=m->style;return 1;}
 __attribute__((dllexport)) BOOL SetMenuInfo(void *menu,const U32_MENUINFO *info){U32_MENUDATA *m=u32_menu_data(menu);if(!m||!info||info->cbSize<sizeof(U32_MENUINFO))return 0;if(info->fMask&1u)m->max_height=info->dwMaxHeight;if(info->fMask&2u)m->background=info->hbrBack;if(info->fMask&4u)m->help_id=info->dwContextHelpID;if(info->fMask&8u)m->menu_data=info->dwMenuData;if(info->fMask&0x10u)m->style=info->dwStyle;return 1;}
 __attribute__((dllexport)) BOOL GetMenuItemRect(void *hwnd,void *menu,unsigned int item,U32_RECT *rect){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,1);if(!IsWindow(hwnd)||i<0||!rect)return 0;rect->left=g_wnd.x+i*80;rect->top=g_wnd.y+24;rect->right=rect->left+80;rect->bottom=rect->top+24;return 1;}
-__attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){U32_MENUDATA *m=u32_menu_data(menu);if(!m||count>16)return 0;while(m->count<(int)count){U32_MENUITEM *it=&m->items[m->count++];it->flags=0;it->id=0;it->submenu=0;it->text[0]=0;}m->count=(int)count;if(m->default_pos>=m->count)m->default_pos=-1;return 1;}
+__attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){U32_MENUDATA *m=u32_menu_data(menu);if(!m||count>16)return 0;while(m->count<(int)count){U32_MENUITEM *it=&m->items[m->count++];it->flags=0;it->id=0;it->data=0;it->submenu=0;it->bmp_checked=it->bmp_unchecked=it->bmp_item=0;it->text[0]=0;}m->count=(int)count;if(m->default_pos>=m->count)m->default_pos=-1;return 1;}
 __attribute__((dllexport)) BOOL IsZoomed(void *hwnd){return IsWindow(hwnd)&&g_wnd.x<=0&&g_wnd.y<=0&&g_wnd.w>=(int)g_fw&&g_wnd.h>=(int)g_fh;}
 __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
 __attribute__((dllexport)) BOOL UnregisterClassW(const U32_WCHAR *name,void *instance){char n[128];u32_wide_to_ansi(n,sizeof(n),name);return UnregisterClassA(n,instance);}

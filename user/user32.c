@@ -53,6 +53,11 @@ typedef struct {
 static FBInfo g_fb;
 static u32 *g_front, g_pitch, g_fw, g_fh;
 static int g_mx = 640, g_my = 400;
+typedef struct { int x,y; unsigned int time; unsigned long long extra; } U32_MOUSEMOVEPOINT;
+static U32_MOUSEMOVEPOINT u32_mouse_history[32];
+static unsigned int u32_mouse_history_head,u32_mouse_history_count,u32_mouse_time;
+static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
+
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
 static int g_search_focus;
 static char g_search_text[32];
@@ -773,6 +778,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
             if (ev.type == 2 || ev.type == 3) {
                 g_mx = ev.x;
                 g_my = ev.y;
+                u32_mouse_record();
 
                 msg->message = (ev.type == 3) ? 0x0201 : 0x0200;
                 msg->pt_x = ev.x;
@@ -1048,7 +1054,7 @@ __attribute__((dllexport)) BOOL GetCursorPos(U32_POINT *p) {
     if (!p) return 0; p->x=g_mx; p->y=g_my; return 1;
 }
 __attribute__((dllexport)) BOOL SetCursorPos(int x, int y) {
-    g_mx=x; g_my=y; compose(); return 1;
+    g_mx=x; g_my=y; u32_mouse_record(); compose(); return 1;
 }
 __attribute__((dllexport)) int ShowCursor(BOOL show) {
     if (show) u32_show_cursor_count++; else u32_show_cursor_count--;
@@ -1563,7 +1569,15 @@ __attribute__((dllexport)) void *GetCursor(void){return (void *)1;}
 typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos; } U32_CURSORINFO;
 __attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=(void *)1;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
 __attribute__((dllexport)) void *SetCursor(void *cursor){static void *current=(void *)1;void *old=current;current=cursor;return old;}
-__attribute__((dllexport)) unsigned long long GetMouseMovePointsEx(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int GetMouseMovePointsEx(unsigned int cbSize,const U32_MOUSEMOVEPOINT *point,U32_MOUSEMOVEPOINT *out,int count,unsigned int resolution){
+    (void)resolution;
+    if(cbSize!=sizeof(U32_MOUSEMOVEPOINT)||!point||!out||count<=0)return -1;
+    int found=-1;
+    for(unsigned int n=0;n<u32_mouse_history_count;n++){unsigned int i=(u32_mouse_history_head+n)%32;U32_MOUSEMOVEPOINT *p=&u32_mouse_history[i];if(p->x==point->x&&p->y==point->y&&(!point->time||p->time==point->time)){found=(int)n;break;}}
+    if(found<0)return -1;
+    int copied=0;for(int n=found;n>=0&&copied<count;n--){unsigned int i=(u32_mouse_history_head+(unsigned int)n)%32;out[copied++]=u32_mouse_history[i];}
+    return copied;
+}
 __attribute__((dllexport)) BOOL GetKeyboardState(unsigned char *state){if(!state)return 0;for(int i=0;i<256;i++)state[i]=u32_key_state[i];return 1;}
 __attribute__((dllexport)) BOOL SetKeyboardState(const unsigned char *state){if(!state)return 0;for(int i=0;i<256;i++)u32_key_state[i]=state[i];return 1;}
 __attribute__((dllexport)) void *GetKeyboardLayout(unsigned int thread){(void)thread;return (void *)0x04090409;}

@@ -1071,11 +1071,16 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtCreateProcess: {
         char name[64];
+        char child_arg[64];
+        child_arg[0] = 0;
+        int has_child_arg = 0;
 
         if (copy_user_str(f->rdi, name, sizeof name) != 0) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
+        if (f->rsi && copy_user_str(f->rsi, child_arg, sizeof child_arg) == 0)
+            has_child_arg = 1;
 
         KPROCESS *caller = MmCurrentProcess;
 
@@ -1135,6 +1140,19 @@ static Frame *syscall_handler(Frame *f) {
 
                 map_4k_in(proc->Pml4,
                           stack_lo + off, pa, PTE_U | PTE_RW | PTE_OWNED);
+            }
+        }
+
+        /* Optional single command-line argument at a stable user VA. */
+        if (has_child_arg && MmUserRangeUnmapped(proc, 0x6FF00000ULL, USER_IMAGE_PAGE)) {
+            uint64_t arg_pa = pmm_alloc_zeroed();
+            if (arg_pa) {
+                map_4k_in(proc->Pml4, 0x6FF00000ULL, arg_pa,
+                          PTE_U | PTE_RW | PTE_OWNED);
+                char *arg_dst = (char *)(uintptr_t)arg_pa;
+                for (int ai = 0; ai < 63 && child_arg[ai]; ai++)
+                    arg_dst[ai] = child_arg[ai];
+                arg_dst[63] = 0;
             }
         }
 

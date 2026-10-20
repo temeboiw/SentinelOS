@@ -187,15 +187,19 @@ void mainCRTStartup(void) {
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;
     for (u32 off=0;off<MAX_FILE;off+=chunk_size) {
+        out("msiexec: allocating buffer chunk at offset ");
+        out_u32(off);
+        out("\n");
         u64 p=sy3(SYS_Alloc,buffer_base+off,chunk_size,0);
         if (p!=(buffer_base+off)) {
             out("msiexec: could not allocate MSI buffer chunk at offset ");
             out_u32(off);
-            out("\\n");
+            out("\n");
             (void)sy3(SYS_CloseFile,h,0,0);
             show_and_exit("MSI Reader",
                 "Not enough user memory to inspect this MSI. No files were changed.",1);
         }
+        out("msiexec: buffer chunk ready\n");
     }
     u32 total=0;
     while(total<MAX_FILE) {
@@ -208,7 +212,7 @@ void mainCRTStartup(void) {
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     file_bytes=buf; file_size=total;
-    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 128 MiB\\n");
+    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 128 MiB\n");
     inspect_msi();
     if (msi_ok)
         show_and_exit("MSI Reader",

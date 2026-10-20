@@ -6,6 +6,7 @@ typedef void *HANDLE;
 typedef unsigned short WORD;
 typedef unsigned long long u64;
 typedef int BOOL;
+typedef char *LPSTR;
 typedef const char *LPCSTR;
 typedef long long i64;
 
@@ -239,8 +240,6 @@ static void submit_search(void) {
 
         g_menu = 0;
         g_search_focus = 0;
-        compose:
-        ;
         /*
          * SYS_CreateProcess is syscall 4 in this OS.
          * The process must also be loaded by the bootloader.
@@ -884,7 +883,7 @@ static int u32_menu_remove(void *handle, unsigned int item, unsigned int flags, 
     return 1;
 }
 typedef struct { void *hdc; int erase; U32_RECT paint; int restore, inc_update; unsigned char reserved[32]; } U32_PAINTSTRUCT;
-typedef struct { unsigned int style; void *proc; int cls_extra, wnd_extra; void *instance, icon, cursor, background; LPCSTR menu_name, class_name; } U32_WNDCLASSA;
+typedef struct { unsigned int style; void *proc; int cls_extra, wnd_extra; void *instance, *icon, *cursor, *background; LPCSTR menu_name, class_name; } U32_WNDCLASSA;
 static int u32_show_cursor_count;
 static void *u32_capture;
 static void *u32_focus;
@@ -1067,7 +1066,7 @@ typedef struct {
     unsigned int style;
     void *proc;
     int cls_extra, wnd_extra;
-    void *instance, icon, cursor, background;
+    void *instance, *icon, *cursor, *background;
     U32_LPCWSTR menu_name, class_name;
 } U32_WNDCLASSW;
 
@@ -1309,14 +1308,14 @@ __attribute__((dllexport)) BOOL DeleteMenu(void *menu, unsigned int item, unsign
 __attribute__((dllexport)) BOOL RemoveMenu(void *menu, unsigned int item, unsigned int flags) { return u32_menu_remove(menu,item,flags,0); }
 __attribute__((dllexport)) BOOL InsertMenuA(void *menu, unsigned int position, unsigned int flags, unsigned long long id, LPCSTR text) { return u32_menu_insert(menu,position,flags,id,text); }
 __attribute__((dllexport)) BOOL ModifyMenuA(void *menu, unsigned int item, unsigned int flags, unsigned long long id, LPCSTR text) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0) return 0; m->items[i].flags=flags; m->items[i].id=id; m->items[i].submenu=(flags&0x0010u)?(void *)id:0; u32_menu_text(m->items[i].text,sizeof(m->items[i].text),text); return 1; }
-typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,hbmpChecked,hbmpUnchecked; unsigned long long dwItemData; char *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOA;
+typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; char *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOA;
 #define U32_MIIM_STATE 0x00000001u
 #define U32_MIIM_ID 0x00000002u
 #define U32_MIIM_SUBMENU 0x00000004u
 #define U32_MIIM_DATA 0x00000020u
 #define U32_MIIM_STRING 0x00000040u
 #define U32_MIIM_FTYPE 0x00000100u
-typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,hbmpChecked,hbmpUnchecked; unsigned long long dwItemData; U32_WCHAR *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOW;
+typedef struct { unsigned int cbSize,fMask,fType,fState,wID; void *hSubMenu,*hbmpChecked,*hbmpUnchecked; unsigned long long dwItemData; U32_WCHAR *dwTypeData; unsigned int cch; void *hbmpItem; } U32_MENUITEMINFOW;
 __attribute__((dllexport)) BOOL SetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,const U32_MENUITEMINFOA *info){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;U32_MENUITEM *it=&m->items[i];if(info->fMask&U32_MIIM_ID)it->id=info->wID;if(info->fMask&U32_MIIM_SUBMENU)it->submenu=info->hSubMenu;if(info->fMask&U32_MIIM_STATE)it->flags=(it->flags&~0x103u)|(info->fState&0x103u);if(info->fMask&U32_MIIM_FTYPE)it->flags=(it->flags&~0x100u)|(info->fType&0x100u);if(info->fMask&U32_MIIM_DATA)it->id=info->dwItemData;if((info->fMask&U32_MIIM_STRING)&&info->dwTypeData)u32_menu_text(it->text,sizeof(it->text),info->dwTypeData);return 1;}
 __attribute__((dllexport)) BOOL GetMenuItemInfoA(void *menu,unsigned int item,BOOL bypos,U32_MENUITEMINFOA *info){U32_MENUDATA *m=u32_menu_data(menu);int i=u32_menu_index(m,item,bypos!=0);if(i<0||!info||info->cbSize<sizeof(U32_MENUITEMINFOA))return 0;U32_MENUITEM *it=&m->items[i];if(info->fMask&U32_MIIM_ID)info->wID=(unsigned int)it->id;if(info->fMask&U32_MIIM_SUBMENU)info->hSubMenu=it->submenu;if(info->fMask&U32_MIIM_STATE)info->fState=it->flags&0x103u;if(info->fMask&U32_MIIM_FTYPE)info->fType=it->flags&0x100u;if(info->fMask&U32_MIIM_DATA)info->dwItemData=it->id;if(info->fMask&U32_MIIM_STRING){unsigned int n=0;while(it->text[n])n++;if(info->dwTypeData&&info->cch){unsigned int j=0;while(it->text[j]&&j+1<info->cch){info->dwTypeData[j]=it->text[j];j++;}info->dwTypeData[j]=0;}info->cch=n;}return 1;}
 __attribute__((dllexport)) int GetMenuStringA(void *menu, unsigned int item, char *out, int cap, unsigned int flags) { U32_MENUDATA *m=u32_menu_data(menu); int i=u32_menu_index(m,item,(flags&0x0400u)!=0); if (i<0 || !out || cap<=0) return 0; int n=0; while (m->items[i].text[n] && n+1<cap) { out[n]=m->items[i].text[n]; n++; } out[n]=0; return n; }

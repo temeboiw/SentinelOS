@@ -289,7 +289,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             "kernel32.dll",
             "user32.dll",
             "hello.exe",
-            "cmd.exe"
+            "cmd.exe",
+            "msiexec.exe"
         };
         int nusers = sizeof(users) / sizeof(users[0]);
         

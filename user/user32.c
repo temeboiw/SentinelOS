@@ -1142,7 +1142,15 @@ __attribute__((dllexport)) BOOL DestroyMenu(void *menu) {
     m->used=0; m->count=0; return 1;
 }
 __attribute__((dllexport)) BOOL TrackPopupMenu(void *menu, unsigned int flags, int x, int y, int reserved, void *hwnd, const U32_RECT *rect) {
-    (void)menu; (void)flags; (void)x; (void)y; (void)reserved; (void)hwnd; (void)rect; return 0;
+    (void)reserved;(void)rect;
+    U32_MENUDATA *m=u32_menu_data(menu);if(!m||!IsWindow(hwnd))return 0;
+    /* SentinelOS has no popup-menu renderer yet. Preserve a real, deterministic
+       keyboard/default-item path instead of claiming an interactive popup exists. */
+    if(m->default_pos<0||m->default_pos>=m->count)return 0;
+    U32_MENUITEM *it=&m->items[m->default_pos];
+    if((it->flags&0x3u)!=0)return 0;
+    if(!(flags&0x0100u))SendMessageA(hwnd,0x0111u,(unsigned long long)it->id,0);
+    (void)x;(void)y;return 1;
 }
 __attribute__((dllexport)) void *LoadCursorA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }
 __attribute__((dllexport)) void *LoadIconA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }

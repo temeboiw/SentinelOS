@@ -1162,6 +1162,10 @@ void DrawTaskbar(void) {
     compose();
 }
 
+/* Batch startup UI mutations into one final framebuffer composition. */
+__attribute__((dllexport)) void BeginRedrawBatch(void) { u32_redraw_enabled=0; }
+__attribute__((dllexport)) void EndRedrawBatch(void) { u32_redraw_enabled=1; compose(); }
+
 /* -------------------------------------------------------------------------
  * Additional USER32-compatible exports.
  * Unsupported features return conservative defaults. This is an API surface

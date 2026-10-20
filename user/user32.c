@@ -1010,8 +1010,8 @@ __attribute__((dllexport)) BOOL PeekMessageA(MSG *msg, void *hwnd, U32_UINT min,
     if (remove & 1u) u32_msg_peek(msg, 1);
     return 1;
 }
-__attribute__((dllexport)) short GetKeyState(int key) { (void)key; return 0; }
-__attribute__((dllexport)) short GetAsyncKeyState(int key) { (void)key; return 0; }
+__attribute__((dllexport)) short GetKeyState(int key){if(key<0||key>255)return 0;return (short)u32_key_state[key];}
+__attribute__((dllexport)) short GetAsyncKeyState(int key){if(key<0||key>255)return 0;return (short)u32_key_state[key];}
 __attribute__((dllexport)) BOOL GetCursorPos(U32_POINT *p) {
     if (!p) return 0; p->x=g_mx; p->y=g_my; return 1;
 }
@@ -1845,9 +1845,9 @@ __attribute__((dllexport)) void *GetOpenClipboardWindow(void){return u32_clipboa
 
 __attribute__((dllexport)) DWORD GetClipboardSequenceNumber(void){return u32_clipboard_seq;}
 
-__attribute__((dllexport)) int GetClipboardFormatNameA(unsigned int format,char *name,int cap){(void)format;if(name&&cap>0)name[0]=0;return 0;}
+__attribute__((dllexport)) int GetClipboardFormatNameA(unsigned int format,char *name,int cap){const char *s=u32_clip_lookup(format);if(!name||cap<=0||!s)return 0;int i=0;while(s[i]&&i+1<cap){name[i]=s[i];i++;}name[i]=0;return i;}
 
-__attribute__((dllexport)) int GetClipboardFormatNameW(unsigned int format,unsigned short *name,int cap){(void)format;if(name&&cap>0)name[0]=0;return 0;}
+__attribute__((dllexport)) int GetClipboardFormatNameW(unsigned int format,unsigned short *name,int cap){const char *s=u32_clip_lookup(format);if(!name||cap<=0||!s)return 0;int i=0;while(s[i]&&i+1<cap){name[i]=(unsigned char)s[i];i++;}name[i]=0;return i;}
 
 __attribute__((dllexport)) DWORD GetFocusThread(void){return GetCurrentThreadId();}
 

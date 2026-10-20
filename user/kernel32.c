@@ -27,7 +27,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 #define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 
 enum {
-    SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
+    SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
     SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22
 };
 
@@ -358,7 +358,13 @@ __attribute__((dllexport)) unsigned long long PeekNamedPipe(void) { return 0; }
 __attribute__((dllexport)) BOOL SetHandleInformation(HANDLE h,DWORD mask,DWORD flags){if(!h||h==INVALID_HANDLE_VALUE)return 0;for(int i=0;i<32;i++){if(k32_handle_flags[i].handle==h){k32_handle_flags[i].flags=(k32_handle_flags[i].flags&~mask)|(flags&mask);return 1;}}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=flags&mask;return 1;}return 0;}
 __attribute__((dllexport)) BOOL GetHandleInformation(HANDLE h,DWORD *flags){if(!h||h==INVALID_HANDLE_VALUE||!flags)return 0;for(int i=0;i<32;i++)if(k32_handle_flags[i].handle==h){*flags=k32_handle_flags[i].flags;return 1;}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=0;*flags=0;return 1;}return 0;}
 __attribute__((dllexport)) BOOL DuplicateHandle(HANDLE source_process,HANDLE source,HANDLE target_process,HANDLE *target,DWORD access,BOOL inherit,DWORD options){(void)access;(void)inherit;(void)options;if((source_process==GetCurrentProcess()||source_process==(HANDLE)1)&&(target_process==GetCurrentProcess()||target_process==(HANDLE)1)&&source&&target){*target=source;return 1;}k32_last_error=50;return 0;}
-__attribute__((dllexport)) unsigned long long CreateProcessA(void) { return 0; }
+typedef struct {HANDLE hProcess;HANDLE hThread;DWORD dwProcessId;DWORD dwThreadId;} K32_PROCESS_INFORMATION;
+static const char *k32_module_basename(const char *s){const char *base=s;if(!s)return 0;for(;*s;s++)if(*s=='\\'||*s=='/')base=s+1;return base;}
+static BOOL k32_create_process_name(const char *name,K32_PROCESS_INFORMATION *pi){if(!name||!*name){k32_last_error=87;return 0;}const char *base=k32_module_basename(name);i64 pid=(i64)sy3(SYS_CreateProcess,(u64)base,0,0);if(pid<0){k32_last_error=2;return 0;}if(pi){pi->hProcess=(HANDLE)(unsigned long long)pid;pi->hThread=0;pi->dwProcessId=(DWORD)pid;pi->dwThreadId=0;}k32_last_error=0;return 1;}
+__attribute__((dllexport)) BOOL CreateProcessA(LPCSTR app,LPSTR cmd,void *process_security,void *thread_security,BOOL inherit,DWORD flags,void *environment,LPCSTR cwd,void *startup,void *process_info){
+ (void)process_security;(void)thread_security;(void)inherit;(void)flags;(void)environment;(void)cwd;(void)startup;char name[256];const char *src=app;
+ if(!src||!*src){if(!cmd||!*cmd){k32_last_error=87;return 0;}src=cmd;while(*src==' '||*src=='\\t')src++;int i=0;while(src[i]&&src[i]!=' '&&src[i]!='\\t'&&i<255){name[i]=src[i];i++;}name[i]=0;src=name;}return k32_create_process_name(src,(K32_PROCESS_INFORMATION*)process_info);
+}
 typedef struct { DWORD cb; char *lpReserved,*lpDesktop,*lpTitle; DWORD dwX,dwY,dwXSize,dwYSize,dwXCountChars,dwYCountChars,dwFillAttribute,dwFlags; unsigned short wShowWindow,cbReserved2; unsigned char *lpReserved2; HANDLE hStdInput,hStdOutput,hStdError; } K32_STARTUPINFOA;
 __attribute__((dllexport)) void GetStartupInfoA(K32_STARTUPINFOA *si){if(!si)return;si->cb=sizeof(*si);si->lpReserved=si->lpDesktop=si->lpTitle=0;si->dwX=si->dwY=si->dwXSize=si->dwYSize=0;si->dwXCountChars=80;si->dwYCountChars=25;si->dwFillAttribute=7;si->dwFlags=0;si->wShowWindow=1;si->cbReserved2=0;si->lpReserved2=0;si->hStdInput=(HANDLE)0;si->hStdOutput=(HANDLE)1;si->hStdError=(HANDLE)2;}
 static char k32_env_block_a[16*162]; static K32_WCHAR k32_env_block_w[16*162];
@@ -860,7 +866,7 @@ __attribute__((dllexport)) DWORD GetSystemWow64Directory2A(LPSTR out,DWORD cap,W
 
 __attribute__((dllexport)) DWORD GetSystemWow64Directory2W(K32_LPWSTR out,DWORD cap,WORD machine){(void)machine;return GetSystemWow64DirectoryW(out,cap);}
 
-__attribute__((dllexport)) BOOL CreateProcessW(K32_LPCWSTR app,K32_LPWSTR cmd,void *pa,void *ta,BOOL inherit,DWORD flags,void *env,K32_LPCWSTR cwd,void *startup,void *process_info){(void)app;(void)cmd;(void)pa;(void)ta;(void)inherit;(void)flags;(void)env;(void)cwd;(void)startup;(void)process_info;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL CreateProcessW(K32_LPCWSTR app,K32_LPWSTR cmd,void *pa,void *ta,BOOL inherit,DWORD flags,void *env,K32_LPCWSTR cwd,void *startup,void *process_info){char a[256],c[512];if(app)k32_wide_to_ansi(a,sizeof(a),app);else a[0]=0;if(cmd)k32_wide_to_ansi(c,sizeof(c),cmd);else c[0]=0;return CreateProcessA(app?a:0,cmd?c:0,pa,ta,inherit,flags,env,0,startup,process_info);}
 
 __attribute__((dllexport)) unsigned int WinExec(LPCSTR command,unsigned int show){(void)command;(void)show;k32_last_error=50;return 31;}
 

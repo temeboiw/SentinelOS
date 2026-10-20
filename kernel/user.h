@@ -738,7 +738,8 @@ static int vfs_open_user_file(const char *name) {
 
 static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
     if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
-        !len || len > 1024 * 1024) return -1;
+        len > 1024 * 1024) return -1;
+    if (!len) return 0;
     VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
     KPROCESS *proc = MmCurrentProcess;
     if (!h->used || !proc ||

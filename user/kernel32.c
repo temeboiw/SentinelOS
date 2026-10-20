@@ -312,7 +312,6 @@ __attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR 
         while(k32_current_dir[c]&&c+2<sizeof(combined)){combined[c]=k32_current_dir[c];c++;}
         if(c>3&&combined[c-1]!='\\')combined[c++]='\\';
         for(DWORD j=0;input[j]&&c+1<sizeof(combined);j++)combined[c++]=input[j];
-        if(input[0]&&combined[c-1]!=input[n]){} /* preserve the original relative input length below */
         combined[c]=0;DWORD j=0;while(combined[j]&&j+1<sizeof(input)){input[j]=combined[j];j++;}input[j]=0;n=j;
         has_drive=((input[0]>='A'&&input[0]<='Z')||(input[0]>='a'&&input[0]<='z'))&&input[1]==':';
     }

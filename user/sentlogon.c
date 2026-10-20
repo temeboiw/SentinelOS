@@ -75,34 +75,65 @@ static void paint(u32 *fb,LogonFB *f) {
     text(fb,f->pitch,f->w,f->h,x+158,y+185,"SIGN IN",0xFFFFFFFF,1);
     text(fb,f->pitch,f->w,f->h,x+20,y+ph-22,"SENTLOGON SESSION MANAGER",0xFF5D8295,1);
 }
-static const unsigned char cursor_bits[18]={
- 0x01,0x03,0x07,0x0F,0x1F,0x3F,0x7F,0xFF,0x7F,0x3F,0x1F,0x1F,0x33,0x63,0xC3,0x83,0x03,0x03
+static const char cursor_shape[16][17] = {
+ "#...............",
+ "##..............",
+ "#w+#............",
+ "#ww#............",
+ "#www#...........",
+ "#wwww#..........",
+ "#wwwww#.........",
+ "#wwwwww#........",
+ "#wwwwwww#.......",
+ "#wwwwwwww#......",
+ "#wwww#####......",
+ "#ww#ww#.........",
+ "#w#.#ww#........",
+ "##...#ww#.......",
+ "#.....#ww#......",
+ "......##........"
 };
-static u32 cursor_save[18*8];
+static u32 cursor_save[16*16];
 static int cursor_x,cursor_y,cursor_saved;
 static void cursor_restore(u32 *fb,u32 pitch,u32 w,u32 h) {
     if(!cursor_saved)return;
-    for(int y=0;y<18;y++)for(int x=0;x<8;x++) {
+    for(int y=0;y<16;y++)for(int x=0;x<16;x++) {
         int px=cursor_x+x,py=cursor_y+y;
-        if(px>=0&&py>=0&&px<(int)w&&py<(int)h)fb[(u64)py*pitch+(u32)px]=cursor_save[y*8+x];
+        if(px>=0&&py>=0&&px<(int)w&&py<(int)h)fb[(u64)py*pitch+(u32)px]=cursor_save[y*16+x];
     }
     cursor_saved=0;
 }
 static void cursor_draw(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y) {
     cursor_x=x;cursor_y=y;
-    for(int yy=0;yy<18;yy++)for(int xx=0;xx<8;xx++) {
+    for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++) {
         int px=x+xx,py=y+yy;
-        if(px>=0&&py>=0&&px<(int)w&&py<(int)h)cursor_save[yy*8+xx]=fb[(u64)py*pitch+(u32)px];
-        else cursor_save[yy*8+xx]=0;
+        if(px>=0&&py>=0&&px<(int)w&&py<(int)h)cursor_save[yy*16+xx]=fb[(u64)py*pitch+(u32)px];
+        else cursor_save[yy*16+xx]=0;
     }
     cursor_saved=1;
-    for(int yy=0;yy<18;yy++)for(int xx=0;xx<8;xx++)if(cursor_bits[yy]&(1u<<xx)) {
-        int px=x+xx,py=y+yy;
-        if(px>=0&&py>=0&&px<(int)w&&py<(int)h) {
-            fb[(u64)py*pitch+(u32)px]=0xFF101820;
-            if(xx>0&&yy>0&&!(cursor_bits[yy-1]&(1u<<(xx-1))))
-                fb[(u64)py*pitch+(u32)px]=0xFFFFFFFF;
+    for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++) {
+        int px=x+xx,py=y+yy; char p=cursor_shape[yy][xx];
+        if(px<0||py<0||px>=(int)w||py>=(int)h)continue;
+        if(p=='#')fb[(u64)py*pitch+(u32)px]=0xFF000000;
+        else if(p=='w')fb[(u64)py*pitch+(u32)px]=0xFFFFFFFF;
+        else if(p=='+')fb[(u64)py*pitch+(u32)px]=0xFF8DEBFA;
+    }
+}
+static void login_fade_in(u32 *fb,LogonFB *f) {
+    static u32 original[1920u*1080u];
+    u64 count=(u64)f->pitch*f->h;
+    if(f->w>1920||f->h>1080||count>1920ULL*1080ULL)return;
+    for(u64 i=0;i<count;i++)original[i]=fb[i];
+    for(u32 step=0;step<=16;step++) {
+        u32 a=step*255/16;
+        for(u32 y=0;y<f->h;y++)for(u32 x=0;x<f->w;x++) {
+            u64 i=(u64)y*f->pitch+x;u32 c=original[i];
+            u32 r=((c>>16)&255)*a/255,g=((c>>8)&255)*a/255,b=(c&255)*a/255;
+            fb[i]=0xFF000000|(r<<16)|(g<<8)|b;
         }
+        u64 begin=sy3(24,0,0,0);
+        if(begin!=(u64)-1)while(sy3(24,0,0,0)-begin<18)(void)sy3(SYS_Yield,0,0,0);
+        else for(volatile u32 spin=0;spin<250000;spin++){}
     }
 }
 /* Graphical session-start screen. This runs in framebuffer mode (not UEFI text).
@@ -156,6 +187,7 @@ void sentlogon_main(void) {
         fbinfo.pitch/=4;
         u32 *pixels=(u32 *)(u64)fbinfo.va;
         paint(pixels,&fbinfo);
+        login_fade_in(pixels,&fbinfo);
         int mx=(int)fbinfo.w/2,my=(int)fbinfo.h/2;
         cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);
         for(;;) {

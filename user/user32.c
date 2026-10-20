@@ -71,6 +71,7 @@ static long u32_class_extra[2];
 static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
 static unsigned int u32_double_click_time=500;
 static unsigned int u32_text_align;
+static int u32_in_send_message;
 static void *u32_wnd_region;
 typedef struct { void *hwnd; int id; unsigned int mod,key; int used; } U32_HOTKEY;
 static U32_HOTKEY u32_hotkeys[16];
@@ -1014,6 +1015,14 @@ __attribute__((dllexport)) U32_LRESULT DefWindowProcA(void *hwnd, U32_UINT msg, 
     }
 }
 __attribute__((dllexport)) U32_LRESULT SendMessageA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
+    if(!IsWindow(hwnd))return 0;
+    if(u32_wnd_proc){
+        U32_LRESULT (*proc)(void *,U32_UINT,U32_WPARAM,U32_LPARAM)=(U32_LRESULT (*)(void *,U32_UINT,U32_WPARAM,U32_LPARAM))u32_wnd_proc;
+        int was=u32_in_send_message;u32_in_send_message=1;
+        U32_LRESULT result=proc(hwnd,msg,wp,lp);
+        u32_in_send_message=was;
+        return result;
+    }
     if (msg==0x000Cu) return SetWindowTextA(hwnd,(LPCSTR)lp);
     if (msg==0x000Du) return GetWindowTextA(hwnd,(LPSTR)lp,(int)wp);
     if (msg==0x0010u) { g_wnd.visible=0; sy3(SYS_WmUnreg,0,0,0); compose(); return 1; }
@@ -1117,9 +1126,7 @@ __attribute__((dllexport)) BOOL TrackPopupMenu(void *menu, unsigned int flags, i
 }
 __attribute__((dllexport)) void *LoadCursorA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }
 __attribute__((dllexport)) void *LoadIconA(void *instance, LPCSTR name) { (void)instance; (void)name; return (void *)1; }
-__attribute__((dllexport)) void *LoadImageA(void *instance, LPCSTR name, unsigned int type, int cx, int cy, unsigned int flags) {
-    (void)instance; (void)name; (void)type; (void)cx; (void)cy; (void)flags; return (void *)0;
-}
+__attribute__((dllexport)) void *LoadImageA(void *instance,LPCSTR name,unsigned int type,int cx,int cy,unsigned int flags){(void)cx;(void)cy;(void)flags;if(type==1u)return LoadIconA(instance,name);if(type==2u)return LoadCursorA(instance,name);return 0;}
 __attribute__((dllexport)) BOOL DrawMenuBar(void *hwnd) { (void)hwnd; compose(); return 1; }
 __attribute__((dllexport)) unsigned long GetMessagePos(void) { return ((unsigned long)(g_my & 0xFFFF)<<16) | (unsigned long)(g_mx & 0xFFFF); }
 __attribute__((dllexport)) long GetMessageTime(void) { return (long)u32_last_msg_time; }
@@ -1623,9 +1630,9 @@ __attribute__((dllexport)) BOOL WaitMessage(void){InputEvent e;return (BOOL)sy3(
 
 __attribute__((dllexport)) BOOL ReplyMessage(long long result){(void)result;return 1;}
 
-__attribute__((dllexport)) BOOL InSendMessage(void){return 0;}
+__attribute__((dllexport)) BOOL InSendMessage(void){return u32_in_send_message!=0;}
 
-__attribute__((dllexport)) DWORD InSendMessageEx(void *reserved){(void)reserved;return 0;}
+__attribute__((dllexport)) DWORD InSendMessageEx(void *reserved){(void)reserved;return u32_in_send_message?1u:0u;}
 
 __attribute__((dllexport)) void *GetWindowDC(void *hwnd){return IsWindow(hwnd)?(void *)1:0;}
 

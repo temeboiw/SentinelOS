@@ -56,6 +56,10 @@ static int g_mx = 640, g_my = 400;
 typedef struct { int x,y; unsigned int time; unsigned long long extra; } U32_MOUSEMOVEPOINT;
 static U32_MOUSEMOVEPOINT u32_mouse_history[32];
 static unsigned int u32_mouse_history_head,u32_mouse_history_count,u32_mouse_time;
+typedef struct { unsigned short usagePage,usage; DWORD flags; void *hwndTarget; } U32_RAWINPUTDEVICE;
+static U32_RAWINPUTDEVICE u32_raw_devices[16];
+typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceDevice,*hwndTarget; U32_POINT ptPixelLocation,ptHimetricLocation,ptPixelLocationRaw,ptHimetricLocationRaw; DWORD dwTime,historyCount; int InputData; DWORD dwKeyStates; unsigned long long PerformanceCount; DWORD ButtonChangeType; } U32_POINTER_INFO;
+
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
@@ -2249,13 +2253,32 @@ __attribute__((dllexport)) unsigned int GetRawInputDeviceInfoW(void *device,unsi
 
 __attribute__((dllexport)) unsigned int GetRawInputDeviceList(void *list,unsigned int *count,unsigned int size){(void)list;(void)size;if(count)*count=0;return 0;}
 
-__attribute__((dllexport)) BOOL RegisterRawInputDevices(const void *devices,unsigned int count,unsigned int size){(void)devices;(void)count;(void)size;return 0;}
+__attribute__((dllexport)) BOOL RegisterRawInputDevices(const void *devices,unsigned int count,unsigned int size){
+    if(!devices||!count||count>16||size!=sizeof(U32_RAWINPUTDEVICE))return 0;
+    const U32_RAWINPUTDEVICE *input=(const U32_RAWINPUTDEVICE*)devices;
+    for(unsigned int n=0;n<count;n++){
+        int found=-1,freeSlot=-1;
+        for(int i=0;i<16;i++){if(u32_raw_devices[i].usagePage==input[n].usagePage&&u32_raw_devices[i].usage==input[n].usage&&u32_raw_devices[i].usagePage)found=i;if(!u32_raw_devices[i].usagePage&&freeSlot<0)freeSlot=i;}
+        if(input[n].flags&1u){if(input[n].hwndTarget)return 0;if(found>=0)u32_raw_devices[found].usagePage=0;continue;}
+        int at=found>=0?found:freeSlot;if(at<0)return 0;u32_raw_devices[at]=input[n];
+    }
+    return 1;
+}
 
-__attribute__((dllexport)) long long DefRawInputProc(void **packets,int count,unsigned int size){(void)packets;(void)count;(void)size;return 0;}
+__attribute__((dllexport)) long long DefRawInputProc(void **packets,int count,unsigned int size){if(count<0||(!packets&&count)||size==0)return -1;return 0;}
 
 __attribute__((dllexport)) BOOL GetPointerType(unsigned int id,unsigned int *type){(void)id;if(!type)return 0;*type=2;return 1;}
 
-__attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){(void)id;(void)info;return 0;}
+__attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){
+    if(id!=1||!info)return 0;
+    U32_POINTER_INFO *p=(U32_POINTER_INFO*)info;
+    p->pointerType=4;p->pointerId=1;p->frameId=u32_mouse_time;p->pointerFlags=0x2002u;
+    p->sourceDevice=(void*)1;p->hwndTarget=g_wnd.visible?(void*)1:(void*)2;
+    p->ptPixelLocation.x=g_mx;p->ptPixelLocation.y=g_my;
+    p->ptHimetricLocation.x=(g_mx*2540)/96;p->ptHimetricLocation.y=(g_my*2540)/96;
+    p->ptPixelLocationRaw=p->ptPixelLocation;p->ptHimetricLocationRaw=p->ptHimetricLocation;
+    p->dwTime=u32_mouse_time;p->historyCount=1;p->InputData=0;p->dwKeyStates=u32_key_state[1]?1u:0u;p->PerformanceCount=0;p->ButtonChangeType=0;return 1;
+}
 
 __attribute__((dllexport)) BOOL GetPointerInfoHistory(unsigned int id,unsigned int *count,void *info){(void)id;(void)info;if(count)*count=0;return 0;}
 

@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=22 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_FILE (4u * 1024u * 1024u)
 #define MAX_FAT 16384
@@ -21,7 +21,7 @@ enum { SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=2
 #define FAT_SECTOR 0xFFFFFFFDu
 #define DIFAT_SECTOR 0xFFFFFFFCu
 
-static u32 fat[MAX_FAT];
+static int msi_ok;\nstatic u32 fat[MAX_FAT];
 static u8 dir_buffer[MAX_DIR];
 static u32 fat_count, sector_size, sector_count;
 static const u8 *file_bytes;
@@ -38,6 +38,16 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
 static void out(const char *s) {
     u64 n=0; while(s[n]) n++;
     (void)sy3(SYS_Write,1,(u64)s,n);
+}
+typedef int (*MessageBoxA_t)(void *, const char *, const char *, u32);
+static void show_and_exit(const char *title, const char *message, u64 code) {
+    out(message);
+    out("\\n");
+    MessageBoxA_t box=(MessageBoxA_t)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"MessageBoxA",0);
+    if (box) (void)box(0,message,title,0);
+    (void)sy3(SYS_Exit,code,0,0);
+    for (;;) __asm__ volatile("pause");
 }
 static void out_u32(u32 v) {
     char b[12]; int n=0;
@@ -181,5 +191,9 @@ void mainCRTStartup(void) {
     file_bytes=buf; file_size=total;
     if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 4 MiB\n");
     inspect_msi();
-    for (;;) __asm__ volatile("pause");
+    if (msi_ok)
+        show_and_exit("MSI Reader",
+            "MSI container is readable. Table decoding and installation are not implemented; no files were changed.",0);
+    show_and_exit("MSI Reader",
+        "This file is not a supported MSI compound database. No files were changed.",1);
 }

@@ -1,0 +1,19 @@
+name: SentinelOS build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/msi-install-engine]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-utils util-linux dosfstools e2fsprogs mtools gnu-efi
+      - name: Build SentinelOS disk image
+        run: bash scripts/build.sh

@@ -903,7 +903,7 @@ static uint32_t vfs_create_empty_regular(const char *path) {
     E16(fresh, 42) = 0;
     E16(fresh, 44) = (uint16_t)((60 - 12) / 12);
     E16(fresh, 46) = 0;
-    if (g_ext4.isize >= 132) E16(fresh, 128) = (uint16_t)(g_ext4.isize - 128);
+    if (g_ext4.isize >= 160) E16(fresh, 128) = 32;
     if (e4_write_inode(&g_ext4, ino, fresh) < 0) return 0;
     if (e4_insert_regular_dirent(parent_ino, base, ino) < 0) {
         /* Do not clear the inode bit after a possibly partial directory write:
@@ -996,7 +996,9 @@ static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
     uint32_t missing = 0;
     for (uint32_t lb = 0; lb <= last_lb; ++lb)
         if (!e4_map(&g_ext4, inode, lb)) missing++;
-    if (missing && missing > (uint32_t)(em - en)) return -1;
+    /* Blocks may coalesce into a single extent; only refuse up front when the
+       inline root is already full. Fragmentation can still exhaust it safely. */
+    if (missing && en >= em) return -1;
     for (uint32_t lb = 0; lb <= last_lb; ++lb) {
         if (e4_map(&g_ext4, inode, lb)) continue;
         uint64_t pb = e4_alloc_block(&g_ext4);

@@ -2337,7 +2337,7 @@ __attribute__((dllexport)) BOOL GetPointerInfo(unsigned int id,void *info){
     if(id!=1||!info)return 0;
     U32_POINTER_INFO *p=(U32_POINTER_INFO*)info;
     p->pointerType=4;p->pointerId=1;p->frameId=u32_mouse_time;p->pointerFlags=0x2002u;
-    p->sourceDevice=(void*)1;p->hwndTarget=g_wnd.visible?(void*)1:(void*)2;
+    p->sourceDevice=(void*)0x200;p->hwndTarget=g_wnd.visible?(void*)1:(void*)2;
     p->ptPixelLocation.x=g_mx;p->ptPixelLocation.y=g_my;
     p->ptHimetricLocation.x=(g_mx*2540)/96;p->ptHimetricLocation.y=(g_my*2540)/96;
     p->ptPixelLocationRaw=p->ptPixelLocation;p->ptHimetricLocationRaw=p->ptHimetricLocation;

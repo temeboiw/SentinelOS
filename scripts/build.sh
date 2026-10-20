@@ -428,6 +428,66 @@ lld -flavor link \
   /export:GetSystemDefaultLangID \
   /export:GetSystemDefaultLCID \
   /export:GetConsoleTitleA \
+  /export:GetConsoleTitleW \
+  /export:SetConsoleTitleW \
+  /export:GetConsoleScreenBufferInfo \
+  /export:GetConsoleScreenBufferInfoEx \
+  /export:SetConsoleScreenBufferInfoEx \
+  /export:GetConsoleCursorInfo \
+  /export:SetConsoleCursorInfo \
+  /export:GetConsoleWindow \
+  /export:GetConsoleProcessList \
+  /export:GetNumberOfConsoleInputEvents \
+  /export:GetNumberOfConsoleMouseButtons \
+  /export:GetLargestConsoleWindowSize \
+  /export:GetConsoleFontSize \
+  /export:GetCurrentConsoleFont \
+  /export:GetCurrentConsoleFontEx \
+  /export:SetCurrentConsoleFontEx \
+  /export:GetConsoleHistoryInfo \
+  /export:SetConsoleHistoryInfo \
+  /export:GetConsoleCommandHistoryA \
+  /export:GetConsoleCommandHistoryW \
+  /export:GetConsoleAliasesA \
+  /export:GetConsoleAliasesW \
+  /export:GetConsoleAliasesLengthA \
+  /export:GetConsoleAliasesLengthW \
+  /export:GetConsoleAliasA \
+  /export:GetConsoleAliasW \
+  /export:GetConsoleAliasExesA \
+  /export:GetConsoleAliasExesW \
+  /export:GetConsoleAliasExesLengthA \
+  /export:GetConsoleAliasExesLengthW \
+  /export:GetConsoleInputExeNameA \
+  /export:GetConsoleInputExeNameW \
+  /export:GetConsoleOutputExeNameA \
+  /export:GetConsoleOutputExeNameW \
+  /export:CreateHardLinkA \
+  /export:CreateHardLinkW \
+  /export:CreateSymbolicLinkA \
+  /export:CreateSymbolicLinkW \
+  /export:SetFileValidData \
+  /export:LockFile \
+  /export:UnlockFile \
+  /export:LockFileEx \
+  /export:UnlockFileEx \
+  /export:GetCompressedFileSizeA \
+  /export:GetCompressedFileSizeW \
+  /export:SearchPathA \
+  /export:SearchPathW \
+  /export:GetModuleFileNameExA \
+  /export:GetModuleFileNameExW \
+  /export:HeapValidate \
+  /export:HeapCompact \
+  /export:GetProcessHeaps \
+  /export:LocalReAlloc \
+  /export:LocalSize \
+  /export:GlobalReAlloc \
+  /export:GlobalSize \
+  /export:GlobalLock \
+  /export:GlobalUnlock \
+  /export:GlobalHandle \
+  /export:GetBinaryTypeA \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 
@@ -634,6 +694,66 @@ lld -flavor link \
   /export:GetShellWindow \
   /export:ClipCursor \
   /export:GetClipCursor \
+  /export:GetTitleBarInfo \
+  /export:GetMenuBarInfo \
+  /export:GetGUIThreadInfo \
+  /export:GetLastInputInfo \
+  /export:GetCursor \
+  /export:GetCursorInfo \
+  /export:SetCursor \
+  /export:GetMouseMovePointsEx \
+  /export:GetKeyboardState \
+  /export:SetKeyboardState \
+  /export:GetKeyboardLayout \
+  /export:GetKeyboardLayoutList \
+  /export:GetKeyboardLayoutNameA \
+  /export:GetKeyboardLayoutNameW \
+  /export:ActivateKeyboardLayout \
+  /export:LoadKeyboardLayoutA \
+  /export:LoadKeyboardLayoutW \
+  /export:UnloadKeyboardLayout \
+  /export:GetKeyNameTextA \
+  /export:GetKeyNameTextW \
+  /export:MapVirtualKeyA \
+  /export:MapVirtualKeyW \
+  /export:MapVirtualKeyExA \
+  /export:MapVirtualKeyExW \
+  /export:ToUnicode \
+  /export:ToUnicodeEx \
+  /export:VkKeyScanA \
+  /export:VkKeyScanW \
+  /export:VkKeyScanExA \
+  /export:VkKeyScanExW \
+  /export:GetKeyboardType \
+  /export:GetCaretBlinkTime \
+  /export:SetCaretBlinkTime \
+  /export:GetCaretPos \
+  /export:SetCaretPos \
+  /export:CreateCaret \
+  /export:DestroyCaret \
+  /export:HideCaret \
+  /export:ShowCaret \
+  /export:GetMenuStringW \
+  /export:SetMenuItemBitmaps \
+  /export:GetMenuCheckMarkDimensions \
+  /export:HiliteMenuItem \
+  /export:InsertMenuW \
+  /export:AppendMenuW \
+  /export:ModifyMenuW \
+  /export:SetMenuItemInfoW \
+  /export:GetMenuItemInfoW \
+  /export:TrackPopupMenuEx \
+  /export:EndMenu \
+  /export:GetMenuContextHelpId \
+  /export:SetMenuContextHelpId \
+  /export:GetMenuInfo \
+  /export:SetMenuInfo \
+  /export:GetMenuItemRect \
+  /export:SetMenuItemCount \
+  /export:IsZoomed \
+  /export:GetWindowPos \
+  /export:UnregisterClassW \
+  /export:ValidateRect \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"
 

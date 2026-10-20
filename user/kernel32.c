@@ -546,17 +546,17 @@ __attribute__((dllexport)) LPSTR lstrcpynA(LPSTR d,LPCSTR s,int n){if(!d||n<=0)r
 
 __attribute__((dllexport)) LPSTR lstrcatA(LPSTR d,LPCSTR s){if(!d)return d;int i=0;while(d[i])i++;if(s)for(int j=0;s[j];j++)d[i++]=s[j];d[i]=0;return d;}
 
-__attribute__((dllexport)) LPSTR CharLowerA(LPSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
+__attribute__((dllexport)) LPSTR CharLowerA(LPSTR s){unsigned long long v=(unsigned long long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
 
-__attribute__((dllexport)) LPSTR CharUpperA(LPSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
+__attribute__((dllexport)) LPSTR CharUpperA(LPSTR s){unsigned long long v=(unsigned long long)s;if(v<=255){unsigned char c=(unsigned char)v;return (LPSTR)(unsigned long long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
 
 __attribute__((dllexport)) DWORD CharLowerBuffA(LPSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return n;}
 
 __attribute__((dllexport)) DWORD CharUpperBuffA(LPSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return n;}
 
-__attribute__((dllexport)) K32_LPWSTR CharLowerW(K32_LPWSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
+__attribute__((dllexport)) K32_LPWSTR CharLowerW(K32_LPWSTR s){unsigned long long v=(unsigned long long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long long)(c>='A'&&c<='Z'?c+32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return s;}
 
-__attribute__((dllexport)) K32_LPWSTR CharUpperW(K32_LPWSTR s){unsigned long v=(unsigned long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
+__attribute__((dllexport)) K32_LPWSTR CharUpperW(K32_LPWSTR s){unsigned long long v=(unsigned long long)s;if(v<=255){unsigned short c=(unsigned short)v;return (K32_LPWSTR)(unsigned long long)(c>='a'&&c<='z'?c-32:c);}if(s)for(int i=0;s[i];i++)if(s[i]>='a'&&s[i]<='z')s[i]-=32;return s;}
 
 __attribute__((dllexport)) DWORD CharLowerBuffW(K32_LPWSTR s,DWORD n){if(!s)return 0;for(DWORD i=0;i<n&&s[i];i++)if(s[i]>='A'&&s[i]<='Z')s[i]+=32;return n;}
 
@@ -709,7 +709,7 @@ __attribute__((dllexport)) BOOL SetProcessMitigationPolicy(int policy,const void
 
 __attribute__((dllexport)) BOOL GetThreadLocaleName(K32_LPWSTR name,int cap){if(!name||cap<9)return 0;const char *s="en-US";int i=0;while(s[i]){name[i]=(unsigned char)s[i];i++;}name[i]=0;return 1;}
 
-__attribute__((dllexport)) int GetUserDefaultGeoName(K32_LPWSTR name,int cap){const char *s="FI";if(!name||cap<3)return 3;name[0]='F';name[1]='I';name[2]=0;return 3;}
+__attribute__((dllexport)) int GetUserDefaultGeoName(K32_LPWSTR name,int cap){if(!name||cap<3)return 3;name[0]='F';name[1]='I';name[2]=0;return 3;}
 
 __attribute__((dllexport)) int GetGeoInfoA(int geo,int type,LPSTR out,int cap,DWORD lang){(void)geo;(void)type;(void)lang;const char *s="Finland";if(!out||cap<8)return 8;for(int i=0;i<=7;i++)out[i]=s[i];return 8;}
 

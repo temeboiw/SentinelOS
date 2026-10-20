@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25, SYS_DeleteFile=26, SYS_RemoveDirectory=27
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -186,8 +186,12 @@ __attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path, void *security) {
     if (!path) return 0;
     return sy3(SYS_CreateDirectory, (u64)path, 0, 0) != 0;
 }
-__attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) { (void)path; return 0; }
-__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { (void)path; return 0; }
+__attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) {
+    return path && sy3(SYS_RemoveDirectory,(u64)path,0,0)!=0;
+}
+__attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) {
+    return path && sy3(SYS_DeleteFile,(u64)path,0,0)!=0;
+}
 __attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { (void)from; (void)to; return 0; }
 __attribute__((dllexport)) BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
     (void)from; (void)to; (void)fail_if_exists; return 0;

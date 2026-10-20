@@ -94,7 +94,7 @@ typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
 static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
-static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity; static DWORD u32_display_affinity,u32_layered_color,u32_layered_flags; static unsigned char u32_layered_alpha; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
+static unsigned char u32_key_state[256]; static DWORD u32_display_affinity,u32_layered_color,u32_layered_flags; static unsigned char u32_layered_alpha; static void *u32_current_cursor=(void *)0x337F00u; static DWORD u32_last_input_time; static int u32_redraw_enabled=1; static unsigned char u32_composition_values[16][64]; static unsigned int u32_composition_sizes[16];
 typedef struct { void *hwnd; int setting; DWORD flags,size; unsigned char data[64]; int used; } U32_FEEDBACK_SETTING;
 static U32_FEEDBACK_SETTING u32_feedback_settings[16];
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;

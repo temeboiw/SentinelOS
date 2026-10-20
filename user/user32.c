@@ -1212,13 +1212,25 @@ __attribute__((dllexport)) BOOL PeekMessageW(MSG *msg, void *hwnd, U32_UINT min,
 __attribute__((dllexport)) BOOL GetMessageW(MSG *msg, void *hwnd, U32_UINT min, U32_UINT max) {
     return GetMessageA(msg,hwnd,min,max);
 }
-__attribute__((dllexport)) unsigned long long CreateDialogParamA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long CreateDialogParamW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long DialogBoxParamA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long DialogBoxParamW(void) { return 0; }
-__attribute__((dllexport)) unsigned long long EndDialog(void) { return 0; }
-__attribute__((dllexport)) unsigned long long IsDialogMessageA(void) { return 0; }
-__attribute__((dllexport)) unsigned long long IsDialogMessageW(void) { return 0; }
+static void *u32_dialog_hwnd; static int u32_dialog_active; static long long u32_dialog_result;
+typedef long long (*U32_DIALOGPROC)(void *,unsigned int,unsigned long long,long long);
+__attribute__((dllexport)) void *CreateDialogParamA(void *instance,const char *templ,void *parent,void *proc,long long param){
+ (void)param;const char *title="Dialog";if(templ&&(unsigned long long)templ>0x10000ULL)title=templ;
+ void *hwnd=CreateWindowExA(0,"#32770",title,0x00CF0000u,80,80,320,200,parent,0,instance,0);
+ if(!hwnd)return 0;u32_wnd_proc=proc;u32_dialog_hwnd=hwnd;u32_dialog_active=0;return hwnd;
+}
+__attribute__((dllexport)) void *CreateDialogParamW(void *instance,const unsigned short *templ,void *parent,void *proc,long long param){
+ char title[128];const char *p="Dialog";if(templ&&(unsigned long long)templ>0x10000ULL){u32_wide_to_ansi(title,sizeof(title),templ);p=title;}return CreateDialogParamA(instance,p,parent,proc,param);
+}
+__attribute__((dllexport)) int DialogBoxParamA(void *instance,const char *templ,void *parent,void *proc,long long param){
+ void *hwnd=CreateDialogParamA(instance,templ,parent,proc,param);if(!hwnd)return -1;u32_dialog_hwnd=hwnd;u32_dialog_active=1;u32_dialog_result=-1;
+ while(u32_dialog_active){MSG msg;if(!GetMessageA(&msg,0,0,0)){u32_dialog_active=0;break;}DispatchMessageA(&msg);}
+ return (int)u32_dialog_result;
+}
+__attribute__((dllexport)) int DialogBoxParamW(void *instance,const unsigned short *templ,void *parent,void *proc,long long param){char title[128];const char *p="Dialog";if(templ&&(unsigned long long)templ>0x10000ULL){u32_wide_to_ansi(title,sizeof(title),templ);p=title;}return DialogBoxParamA(instance,p,parent,proc,param);}
+__attribute__((dllexport)) BOOL EndDialog(void *hwnd,int result){if(!hwnd||hwnd!=u32_dialog_hwnd||!u32_dialog_active)return 0;u32_dialog_result=result;u32_dialog_active=0;DestroyWindow(hwnd);return 1;}
+__attribute__((dllexport)) BOOL IsDialogMessageA(void *dlg,MSG *msg){if(!IsWindow(dlg)||!msg)return 0;if(msg->message==0x0100u&&msg->wParam==9u){void *next=GetNextDlgTabItem(dlg,(void *)(unsigned long long)msg->hwnd,0);if(next)SetFocus(next);return 1;}if(msg->message==0x0100u&&msg->wParam==13u){SendMessageA(dlg,0x0111u,1,0);return 1;}if(msg->message==0x0100u&&msg->wParam==27u){SendMessageA(dlg,0x0010u,0,0);return 1;}return 0;}
+__attribute__((dllexport)) BOOL IsDialogMessageW(void *dlg,MSG *msg){return IsDialogMessageA(dlg,msg);}
 __attribute__((dllexport)) int GetWindowTextW(void *hwnd, U32_LPWSTR out, int cap) {
     char text[256];
     int n=GetWindowTextA(hwnd,text,sizeof(text));
@@ -1438,8 +1450,12 @@ __attribute__((dllexport)) BOOL SetDlgItemInt(void *dlg,int id,unsigned int valu
 __attribute__((dllexport)) BOOL CheckDlgButton(void *dlg,int id,unsigned int check){if(!IsWindow(dlg)||check>2)return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(int)check;return 1;}
 __attribute__((dllexport)) unsigned int IsDlgButtonChecked(void *dlg,int id){if(!IsWindow(dlg))return 0;U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,0);return c?(unsigned int)c->checked:0;}
 __attribute__((dllexport)) BOOL CheckRadioButton(void *dlg,int first,int last,int check){if(!IsWindow(dlg)||first>last||last-first>128||check<first||check>last)return 0;for(int id=first;id<=last;id++){U32_DLGCTRL *c=u32_dlgctrl_get(dlg,(unsigned int)id,1);if(!c)return 0;c->checked=(id==check)?1:0;}return 1;}
-__attribute__((dllexport)) void *GetNextDlgTabItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return (void *)0;}
-__attribute__((dllexport)) void *GetNextDlgGroupItem(void *dlg,void *control,BOOL previous){(void)control;(void)previous;return (void *)0;}
+__attribute__((dllexport)) void *GetNextDlgTabItem(void *dlg,void *control,BOOL previous){
+ if(!IsWindow(dlg))return 0;int ids[32],n=0;for(int i=0;i<32;i++)if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==dlg)ids[n++]=(int)u32_dlgctrl[i].id;if(!n)return 0;
+ for(int i=0;i<n;i++)for(int j=i+1;j<n;j++)if(ids[j]<ids[i]){int t=ids[i];ids[i]=ids[j];ids[j]=t;}
+ int cur=-1;for(int i=0;i<n;i++)if((void *)(unsigned long long)ids[i]==control){cur=i;break;}int next=cur<0?(previous?n-1:0):(previous?(cur+n-1)%n:(cur+1)%n);return (void *)(unsigned long long)ids[next];
+}
+__attribute__((dllexport)) void *GetNextDlgGroupItem(void *dlg,void *control,BOOL previous){return GetNextDlgTabItem(dlg,control,previous);}
 __attribute__((dllexport)) long GetDialogBaseUnits(void) { return (long)0x00100008u; }
 __attribute__((dllexport)) BOOL MapDialogRect(void *dlg,U32_RECT *r){if(!IsWindow(dlg)||!r)return 0;r->left=(r->left*8)/4;r->right=(r->right*8)/4;r->top=(r->top*16)/8;r->bottom=(r->bottom*16)/8;return 1;}
 static BOOL u32_adjust_window_rect(U32_RECT *r, u32 style, BOOL menu) {

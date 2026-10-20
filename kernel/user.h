@@ -76,7 +76,18 @@ typedef struct {
     int resolved;
 } UserImage;
 
+
 static UserImage user_images[USER_IMAGE_MAX];
+
+typedef struct {
+    BootModule module;
+    KPROCESS *owner;
+    uint64_t source_phys;
+    uint64_t source_pages;
+    int used;
+} UserDiskModule;
+static UserDiskModule user_disk_modules[UP_MAX];
+
 
 static uint64_t user_fb_base;
 static uint32_t user_fb_w, user_fb_h, user_fb_pitch;
@@ -759,6 +770,148 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
 static void vfs_close_user_file(uint64_t handle) {
     if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES)
         vfs_user_handles[handle - 0x100].used = 0;
+}
+
+
+/* Read a file from the current ext4 directory into a kernel buffer. */
+static int vfs_find_regular_file(const char *name, uint32_t *ino_out,
+                                 uint64_t *size_out) {
+    if (!g_ext4_ok || !name || !name[0]) return -1;
+    for (int i=0;i<vfs_nent;i++) {
+        const char *a=vfs_ents[i].name,*b=name;
+        int same=1;
+        while (*a || *b) {
+            char ca=*a++,cb=*b++;
+            if(ca>='A'&&ca<='Z')ca=(char)(ca+32);
+            if(cb>='A'&&cb<='Z')cb=(char)(cb+32);
+            if(ca!=cb){same=0;break;}
+        }
+        if(!same || vfs_ents[i].is_dir) continue;
+        uint8_t inode[256];
+        if(e4_inode(&g_ext4,vfs_ents[i].ino,inode)<0 ||
+           (E16(inode,0)&0xF000)!=0x8000) return -1;
+        if(ino_out)*ino_out=vfs_ents[i].ino;
+        if(size_out)*size_out=e4_size(inode);
+        return 0;
+    }
+    return -1;
+}
+static int vfs_read_inode_at(uint32_t ino,uint64_t pos,void *dst,uint64_t len) {
+    uint8_t inode[256];
+    if(!dst || e4_inode(&g_ext4,ino,inode)<0) return -1;
+    uint64_t size=e4_size(inode);
+    if(pos>=size || !len) return 0;
+    if(len>size-pos)len=size-pos;
+    uint64_t done=0;
+    while(done<len) {
+        uint64_t off=pos+done;
+        uint32_t inblock=(uint32_t)(off%g_ext4.blksz);
+        uint64_t chunk=g_ext4.blksz-inblock;
+        if(chunk>len-done)chunk=len-done;
+        uint64_t pb=e4_map(&g_ext4,inode,(uint32_t)(off/g_ext4.blksz));
+        if(!pb) {
+            uint8_t *d=(uint8_t *)dst;
+            for(uint64_t j=0;j<chunk;j++)d[done+j]=0;
+        } else if(e4_read(&g_ext4,pb*g_ext4.blksz+inblock,
+                           (uint8_t *)dst+done,chunk)<0) {
+            return done?(int)done:-1;
+        }
+        done+=chunk;
+    }
+    return (int)done;
+}
+static void PspFreeDiskModule(UserDiskModule *d) {
+    if(!d || !d->used)return;
+    for(uint64_t i=0;i<d->source_pages;i++)
+        pmm_free(d->source_phys+i*USER_IMAGE_PAGE);
+    d->module.phys=0; d->module.size=0; d->module.entry=0;
+    d->module.base=0; d->owner=0; d->source_phys=0;
+    d->source_pages=0; d->used=0;
+}
+static void PspForgetDiskModule(KPROCESS *owner) {
+    if(!owner)return;
+    for(int i=0;i<UP_MAX;i++)
+        if(user_disk_modules[i].used && user_disk_modules[i].owner==owner)
+            PspFreeDiskModule(&user_disk_modules[i]);
+}
+/*
+ * Load an on-disk x64 PE32+ file into image layout. This handles PE headers
+ * and section copies; imports still resolve only against boot-loaded DLLs.
+ */
+static UserDiskModule *PspLoadDiskModule(const char *name) {
+    uint32_t ino=0;
+    uint64_t raw_size=0;
+    if(vfs_find_regular_file(name,&ino,&raw_size)<0 ||
+       raw_size<0x100 || raw_size>16ull*1024*1024) return 0;
+    uint64_t raw_pages=(raw_size+0xFFFULL)>>12;
+    uint64_t raw_pa=pmm_alloc_n(raw_pages);
+    if(!raw_pa)return 0;
+    uint8_t *raw=(uint8_t *)(HHDM_BASE+raw_pa);
+    for(uint64_t i=0;i<raw_pages*USER_IMAGE_PAGE;i++)raw[i]=0;
+    if(vfs_read_inode_at(ino,0,raw,raw_size)!=(int)raw_size) {
+        for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+        return 0;
+    }
+    if(raw[0]!='M'||raw[1]!='Z')goto bad_raw;
+    int32_t lfanew=*(int32_t *)(raw+0x3C);
+    if(lfanew<0 || (uint64_t)lfanew+24>raw_size ||
+       *(uint32_t *)(raw+lfanew)!=0x00004550)goto bad_raw;
+    uint8_t *fh=raw+lfanew+4;
+    uint16_t machine=*(uint16_t *)fh;
+    uint16_t sections=*(uint16_t *)(fh+2);
+    uint16_t opt_size=*(uint16_t *)(fh+16);
+    uint64_t opt_off=(uint64_t)lfanew+24;
+    if(machine!=0x8664 || opt_size<112 || opt_off+opt_size>raw_size ||
+       *(uint16_t *)(raw+opt_off)!=0x20B || !sections || sections>96)goto bad_raw;
+    uint8_t *opt=raw+opt_off;
+    uint32_t entry_rva=*(uint32_t *)(opt+16);
+    uint64_t preferred=*(uint64_t *)(opt+24);
+    uint32_t image_size=*(uint32_t *)(opt+56);
+    uint32_t headers_size=*(uint32_t *)(opt+60);
+    uint64_t sect_off=opt_off+opt_size;
+    if(!image_size || image_size>16u*1024*1024 ||
+       !headers_size || headers_size>raw_size || headers_size>image_size ||
+       entry_rva>=image_size ||
+       sect_off+(uint64_t)sections*40>raw_size)goto bad_raw;
+    uint64_t image_pages=((uint64_t)image_size+0xFFFULL)>>12;
+    uint64_t image_pa=pmm_alloc_n(image_pages);
+    if(!image_pa)goto bad_raw;
+    uint8_t *image=(uint8_t *)(HHDM_BASE+image_pa);
+    for(uint64_t i=0;i<image_pages*USER_IMAGE_PAGE;i++)image[i]=0;
+    for(uint32_t i=0;i<headers_size;i++)image[i]=raw[i];
+    for(uint16_t i=0;i<sections;i++) {
+        uint8_t *sh=raw+sect_off+(uint64_t)i*40;
+        uint32_t vsize=*(uint32_t *)(sh+8);
+        uint32_t va=*(uint32_t *)(sh+12);
+        uint32_t rawsz=*(uint32_t *)(sh+16);
+        uint32_t rawoff=*(uint32_t *)(sh+20);
+        uint32_t copy=rawsz;
+        if(vsize && copy>vsize)copy=vsize;
+        if(va>image_size || copy>image_size-va ||
+           rawoff>raw_size || copy>raw_size-rawoff) {
+            for(uint64_t j=0;j<image_pages;j++)pmm_free(image_pa+j*USER_IMAGE_PAGE);
+            goto bad_raw;
+        }
+        for(uint32_t j=0;j<copy;j++)image[va+j]=raw[rawoff+j];
+    }
+    for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+    for(int i=0;i<UP_MAX;i++)if(!user_disk_modules[i].used) {
+        UserDiskModule *d=&user_disk_modules[i];
+        d->used=1; d->owner=0; d->source_phys=image_pa;
+        d->source_pages=image_pages;
+        d->module.phys=image_pa; d->module.size=image_size;
+        d->module.base=preferred?preferred:0x42000000ULL;
+        d->module.entry=d->module.base+entry_rva;
+        int n=0; for(;name[n]&&n<31;n++)d->module.name[n]=name[n];
+        d->module.name[n]=0;
+        for(n++;n<32;n++)d->module.name[n]=0;
+        return d;
+    }
+    for(uint64_t i=0;i<image_pages;i++)pmm_free(image_pa+i*USER_IMAGE_PAGE);
+    return 0;
+bad_raw:
+    for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+    return 0;
 }
 
 static Frame *syscall_handler(Frame *f) {

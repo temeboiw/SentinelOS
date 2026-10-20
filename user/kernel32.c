@@ -14,6 +14,8 @@ typedef long LONG;
 typedef unsigned short K32_WCHAR;
 typedef const K32_WCHAR *K32_LPCWSTR;
 typedef K32_WCHAR *K32_LPWSTR;
+
+#define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 static DWORD k32_last_error;
 static char k32_current_dir[260]="C:\\";
 static char k32_dll_directory[260];
@@ -63,7 +65,6 @@ static void k32_untrack_path(HANDLE h) {
     K32_OPEN_PATH *p=k32_find_path(h);if(p){p->used=0;p->path[0]=0;p->handle=0;}
 }
 
-#define INVALID_HANDLE_VALUE ((HANDLE)(i64)-1)
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,

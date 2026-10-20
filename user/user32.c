@@ -1220,7 +1220,6 @@ static unsigned int u32_stock_resource_id(LPCSTR name,int icon) {
         {"IDI_APPLICATION",32512},{"IDI_HAND",32513},{"IDI_QUESTION",32514},
         {"IDI_EXCLAMATION",32515},{"IDI_ASTERISK",32516},{"IDI_WINLOGO",32517},{"IDI_SHIELD",32518}
     };
-    const char *p=icon?0:0;(void)p;
     const char *key=name;
     for(unsigned int i=0;i< (icon?sizeof(icons)/sizeof(icons[0]):sizeof(cursors)/sizeof(cursors[0]));i++) {
         const char *candidate=icon?icons[i].name:cursors[i].name;

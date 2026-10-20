@@ -1453,23 +1453,30 @@ ls -lh \
   "$SYS32/cmd.exe" \
   "$SYS32/msiexec.exe"
 
-echo "==> GPT disk image (FAT32 ESP + ext4)"
+echo "==> GPT disk image (FAT32 ESP + ext4, 20 GiB)"
+
+# 20 GiB raw disk: 41,943,040 sectors at 512 bytes each.
+# Keep a 128 MiB EFI System Partition and use the remaining space for ext4.
+DISK_SECTORS=$((20 * 1024 * 1024 * 1024 / 512))
+ESP_SECTORS=262144
+EXT_START=264192
+EXT_SECTORS=$((DISK_SECTORS - EXT_START))
 
 rm -f "$DISKIMG"
-qemu-img create -f raw "$DISKIMG" 256M >/dev/null
+qemu-img create -f raw "$DISKIMG" 20G >/dev/null
 
 sfdisk "$DISKIMG" <<SFDISK
 label: gpt
 unit: sectors
 first-lba: 2048
 
-start=2048, size=262144, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
-start=264192, size=196608, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
+start=2048, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
+start=$EXT_START, size=$EXT_SECTORS, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
 SFDISK
 
 ESP_OFF=$((2048 * 512))
-EXT_OFF=$((264192 * 512))
-EXT_SZ=$((196608 * 512))
+EXT_OFF=$((EXT_START * 512))
+EXT_SZ=$((EXT_SECTORS * 512))
 EXT_BLOCKS=$((EXT_SZ / 4096))
 
 dd if=/dev/zero \

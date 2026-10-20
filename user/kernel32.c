@@ -739,9 +739,10 @@ __attribute__((dllexport)) BOOL GetFileInformationByHandleEx(HANDLE file,int inf
     }
     if(infoClass==2) {
         K32_OPEN_PATH *path=k32_find_path(file);if(!path){k32_last_error=50;return 0;}
-        DWORD n=0;while(path->path[n])n++;DWORD required=sizeof(DWORD)+n*sizeof(K32_WCHAR);if(size<required){k32_last_error=122;return 0;}
+        char full[768];DWORD n=GetFullPathNameA(path->path,sizeof(full),full,0);if(!n||n>=sizeof(full)){k32_last_error=206;return 0;}
+        DWORD required=sizeof(DWORD)+n*sizeof(K32_WCHAR);if(size<required){k32_last_error=122;return 0;}
         struct { DWORD FileNameLength; K32_WCHAR FileName[1]; } *p=info;p->FileNameLength=n*sizeof(K32_WCHAR);
-        for(DWORD i=0;i<n;i++)p->FileName[i]=(unsigned char)path->path[i];
+        for(DWORD i=0;i<n;i++)p->FileName[i]=(unsigned char)full[i];
         if(size>=required+sizeof(K32_WCHAR))p->FileName[n]=0;k32_last_error=0;return 1;
     }
     k32_last_error=50;return 0;

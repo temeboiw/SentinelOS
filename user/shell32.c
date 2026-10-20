@@ -109,19 +109,18 @@ E HRESULT SHGetFolderPathA(HWND hwnd,int csidl,HANDLE token,DWORD flags,LPSTR ou
         case 20: p="C:\\Windows\\Fonts"; break;
         case 26: p="C:\\Users\\Public\\AppData\\Roaming"; break;
         case 28: p="C:\\Users\\Public\\AppData\\Local"; break;
-        case 35: p="C:\\Users\\Public"; break;                        /* Profile */
-        case 36: p="C:\\Windows\\System32"; break;
-        case 37: p="C:\\Program Files"; break;
-        case 38: p="C:\\Users\\Public\\Pictures"; break;
-        case 39: p="C:\\Program Files\\Common Files"; break;
-        case 40: p="C:\\ProgramData"; break;
-        case 41: p="C:\\Windows"; break;
-        case 42: p="C:\\Windows\\System32"; break;
-        case 43: p="C:\\Program Files (x86)"; break;
+        case 35: p="C:\\ProgramData"; break;                          /* CommonAppData */
+        case 36: p="C:\\Windows"; break;
+        case 37: p="C:\\Windows\\System32"; break;
+        case 38: p="C:\\Program Files"; break;
+        case 39: p="C:\\Users\\Public\\Pictures"; break;
+        case 40: p="C:\\Users\\Public"; break;                        /* Profile */
+        case 41: p="C:\\Windows\\System32"; break;                   /* SystemX86 */
+        case 42: p="C:\\Program Files (x86)"; break;
+        case 43: p="C:\\Program Files\\Common Files"; break;
         case 44: p="C:\\Program Files (x86)\\Common Files"; break;
-        case 48: p="C:\\Users\\Public"; break;
-        case 50: p="C:\\Users\\Public\\Documents"; break;
-        case 26+0x1000: p="C:\\Users\\Public\\AppData\\Roaming"; break;
+        case 46: p="C:\\Users\\Public\\Documents"; break;
+        case 62: p="C:\\Users\\Public"; break;                        /* Public profile */
         default: out[0]=0; return (HRESULT)0x80070002L;
     }
     shell_copy(out,p,260);

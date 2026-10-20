@@ -11,6 +11,14 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
+/* Freestanding replacement required for compiler-emitted structure copies. */
+void *memcpy(void *dst, const void *src, u64 n) {
+    volatile u8 *d=(volatile u8 *)dst;
+    const volatile u8 *s=(const volatile u8 *)src;
+    for(u64 i=0;i<n;i++) d[i]=s[i];
+    return dst;
+}
+
 enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24, SYS_CreateDirectory=25, SYS_DeleteFile=26, SYS_RemoveDirectory=27, SYS_PathType=28 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */

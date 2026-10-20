@@ -203,7 +203,7 @@ __attribute__((dllexport)) DWORD GetFileSize(HANDLE file, DWORD *high) {
 __attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG *high, DWORD method) {
     if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0xFFFFFFFFu;}
     long long offset;
-    if(high)offset=((long long)(int)*high<<32)|(unsigned int)distance;else offset=(int)distance;
+    if(high)offset=(long long)(((unsigned long long)(unsigned int)*high<<32)|(unsigned int)distance);else offset=(int)distance;
     u64 pos=sy3(SYS_SetFilePosition,(u64)file,(u64)offset,method);
     if((i64)pos<0){k32_last_error=87;return 0xFFFFFFFFu;}
     if(high)*high=(LONG)(pos>>32);k32_last_error=0;return (DWORD)pos;

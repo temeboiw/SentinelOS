@@ -562,19 +562,20 @@ static u32 cab_checksum(const u8 *p, u32 n, u16 unpacked) {
     return sum;
 }
 static int cab_read_folder_payload(u32 folder_start, u16 blocks, u16 compression,
-                                   u8 reserve_data, u32 *total_out) {
+                                   u8 reserve_data, u32 sectors, u64 cab_size,
+                                   u32 *total_out) {
     u64 pos=folder_start; *total_out=0;
     cab_wpos=cab_wcount=0;
     u32 method=compression&0x000Fu;
     if(method>1) return 0; /* none and MSZIP only */
     for(u32 i=0;i<blocks;i++) {
         u8 hdr[8];
-        if(!cfb_stream_read_list(cab_sector_ids,sector_count /* replaced below */,file_size,pos,hdr,8)) return 0;
+        if(!cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,hdr,8)) return 0;
         u32 checksum=rd32(hdr); u16 cbdata=rd16(hdr+4), cbuncomp=rd16(hdr+6);
         pos+=8u+reserve_data;
         if(!cbuncomp || cbuncomp>32768 || cbdata>sizeof cab_comp ||
-           pos>file_size || cbdata>file_size-pos) return 0;
-        if(!cfb_stream_read_list(cab_sector_ids,sector_count,file_size,pos,cab_comp,cbdata)) return 0;
+           pos>cab_size || cbdata>cab_size-pos) return 0;
+        if(!cfb_stream_read_list(cab_sector_ids,sectors,cab_size,pos,cab_comp,cbdata)) return 0;
         if(checksum && cab_checksum(cab_comp,cbdata,cbuncomp)!=checksum) return 0;
         if(method==0) {
             if(cbdata!=cbuncomp) return 0;

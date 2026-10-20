@@ -28,7 +28,7 @@ static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static 
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23
+    SYS_QueryDir=7, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_WriteFileHandle=23, SYS_SeekFile=24
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -60,7 +60,8 @@ __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a, u64 sz, DWORD t, DWORD 
 }
 __attribute__((dllexport)) HANDLE CreateFileA(LPCSTR name, DWORD a, DWORD s, void *sec, DWORD d, DWORD f, HANDLE t) {
     (void)s;(void)sec;(void)f;(void)t;
-    i64 h = (i64)sy3(SYS_OpenFile, (u64)name, (u64)a, (u64)d);
+    u64 disposition = d == 0 ? 3 : d; /* legacy callers used zero for OPEN_EXISTING */
+    i64 h = (i64)sy3(SYS_OpenFile, (u64)name, (u64)a, disposition);
     return h < 0 ? INVALID_HANDLE_VALUE : (HANDLE)h;
 }
 __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD *rd, void *ov) {
@@ -68,6 +69,20 @@ __attribute__((dllexport)) BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, DWORD 
     i64 n = (i64)sy3(SYS_ReadFile, (u64)h, (u64)buf, len);
     if (n < 0) return 0;
     if (rd) *rd = (DWORD)n;
+    return 1;
+}
+__attribute__((dllexport)) DWORD SetFilePointer(HANDLE h, LONG low, LONG *high, DWORD method) {
+    i64 offset = (i64)low;
+    if (high) offset |= ((i64)(*high) << 32);
+    i64 p = (i64)sy3(SYS_SeekFile, (u64)h, (u64)offset, (u64)method);
+    if (p < 0) { k32_last_error = 87; return 0xFFFFFFFFu; }
+    if (high) *high = (LONG)((u64)p >> 32);
+    return (DWORD)p;
+}
+__attribute__((dllexport)) BOOL SetFilePointerEx(HANDLE h, i64 distance, i64 *newpos, DWORD method) {
+    i64 p = (i64)sy3(SYS_SeekFile, (u64)h, (u64)distance, (u64)method);
+    if (p < 0) { k32_last_error = 87; return 0; }
+    if (newpos) *newpos = p;
     return 1;
 }
 __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) { return sy3(SYS_CloseFile, (u64)h, 0, 0) != 0; }

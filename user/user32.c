@@ -1325,13 +1325,13 @@ __attribute__((dllexport)) BOOL SetScrollRange(void *hwnd,int bar,int min,int ma
 __attribute__((dllexport)) BOOL GetScrollRange(void *hwnd,int bar,int *min,int *max){if(!IsWindow(hwnd)||bar<0||bar>1||!min||!max)return 0;*min=u32_scroll_min[bar];*max=u32_scroll_max[bar];return 1;}
 __attribute__((dllexport)) int GetScrollPos(void *hwnd,int bar){if(!IsWindow(hwnd)||bar<0||bar>1)return 0;return u32_scroll_pos[bar];}
 __attribute__((dllexport)) int SetScrollPos(void *hwnd,int bar,int pos,BOOL redraw){(void)redraw;if(!IsWindow(hwnd)||bar<0||bar>1)return 0;int old=u32_scroll_pos[bar];if(pos<u32_scroll_min[bar])pos=u32_scroll_min[bar];if(pos>u32_scroll_max[bar])pos=u32_scroll_max[bar];u32_scroll_pos[bar]=pos;return old;}
-__attribute__((dllexport)) unsigned long long SetWindowRgn(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetWindowRgn(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long MapWindowPoints(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int SetWindowRgn(void *hwnd,void *region,BOOL redraw){(void)hwnd;(void)region;(void)redraw;return 0;}
+__attribute__((dllexport)) int GetWindowRgn(void *hwnd,void *region){(void)hwnd;(void)region;return 0;}
+__attribute__((dllexport)) int MapWindowPoints(void *from,void *to,U32_POINT *pts,unsigned int count){if(!pts||count>256)return 0;int dx=0,dy=0;if(IsWindow(from)){dx+=g_wnd.x;dy+=g_wnd.y+24;}if(IsWindow(to)){dx-=g_wnd.x;dy-=g_wnd.y+24;}for(unsigned int i=0;i<count;i++){pts[i].x+=dx;pts[i].y+=dy;}return (int)(((unsigned short)dx)|((unsigned int)(unsigned short)dy<<16));}
 __attribute__((dllexport)) BOOL ClientToScreen(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x+=g_wnd.x;pt->y+=g_wnd.y+24;return 1;}
 __attribute__((dllexport)) BOOL ScreenToClient(void *hwnd,U32_POINT *pt){if(!IsWindow(hwnd)||!pt)return 0;pt->x-=g_wnd.x;pt->y-=g_wnd.y+24;return 1;}
 __attribute__((dllexport)) void *WindowFromPoint(U32_POINT pt){return IsWindow((void *)1)&&hit(pt.x,pt.y,g_wnd.x,g_wnd.y,g_wnd.x+g_wnd.w,g_wnd.y+g_wnd.h)?(void *)1:0;}
-__attribute__((dllexport)) unsigned long long ChildWindowFromPoint(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) void *ChildWindowFromPoint(void *parent,U32_POINT pt){if(!IsWindow(parent))return 0;return hit(pt.x,pt.y,0,0,g_wnd.w,g_wnd.h-32)?(void *)1:0;}
 __attribute__((dllexport)) BOOL SetDoubleClickTime(unsigned int ms){if(ms==0)ms=500;if(ms<1||ms>5000)return 0;u32_double_click_time=ms;return 1;}
 __attribute__((dllexport)) void *GetLastActivePopup(void *hwnd){return IsWindow(hwnd)?hwnd:0;}
 __attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd) { if (!IsWindow(hwnd)) return 0; int n=0; while (g_wnd.title[n]) n++; return n; }
@@ -1354,7 +1354,7 @@ __attribute__((dllexport)) u32 GetWindowModuleFileNameW(void *hwnd, U32_LPWSTR o
     int copied=u32_ansi_to_wide(out,(int)cap,narrow);
     return (u32)copied+1<n ? cap : (u32)copied;
 }
-__attribute__((dllexport)) unsigned long long GetWindowRgnBox(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int GetWindowRgnBox(void *hwnd,U32_RECT *rect){(void)hwnd;if(rect){rect->left=rect->top=rect->right=rect->bottom=0;}return 0;}
 __attribute__((dllexport)) BOOL GetWindowDisplayAffinity(void *hwnd,unsigned int *affinity){if(!IsWindow(hwnd)||!affinity)return 0;*affinity=u32_window_affinity;return 1;}
 __attribute__((dllexport)) BOOL SetWindowDisplayAffinity(void *hwnd,unsigned int affinity){if(!IsWindow(hwnd)||(affinity!=0&&affinity!=1&&affinity!=0x11u))return 0;u32_window_affinity=affinity;return 1;}
 __attribute__((dllexport)) BOOL IsChild(void *parent,void *child){return IsWindow(parent)&&IsWindow(child)&&u32_wnd_parent==parent&&child!=parent;}
@@ -1410,10 +1410,14 @@ __attribute__((dllexport)) int GetSystemMetricsForDpi(int index, u32 dpi) {
 __attribute__((dllexport)) void *GetShellWindow(void){return GetForegroundWindow();}
 __attribute__((dllexport)) BOOL ClipCursor(const U32_RECT *r){if(!r){u32_clip_active=0;return 1;}if(r->right<r->left||r->bottom<r->top)return 0;u32_clip_left=r->left;u32_clip_top=r->top;u32_clip_right=r->right;u32_clip_bottom=r->bottom;u32_clip_active=1;if(g_mx<r->left)g_mx=r->left;if(g_mx>=r->right)g_mx=r->right-1;if(g_my<r->top)g_my=r->top;if(g_my>=r->bottom)g_my=r->bottom-1;return 1;}
 __attribute__((dllexport)) BOOL GetClipCursor(U32_RECT *r){if(!r)return 0;if(u32_clip_active){r->left=u32_clip_left;r->top=u32_clip_top;r->right=u32_clip_right;r->bottom=u32_clip_bottom;}else{ensure_fb();r->left=0;r->top=0;r->right=(int)g_fw;r->bottom=(int)g_fh;}return 1;}
-__attribute__((dllexport)) unsigned long long GetTitleBarInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetMenuBarInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetGUIThreadInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetLastInputInfo(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+typedef struct { unsigned int cbSize; U32_RECT rcTitleBar; unsigned int rgstate[6]; } U32_TITLEBARINFO;
+__attribute__((dllexport)) BOOL GetTitleBarInfo(void *hwnd,U32_TITLEBARINFO *info){if(!IsWindow(hwnd)||!info||info->cbSize<sizeof(*info))return 0;info->rcTitleBar.left=g_wnd.x;info->rcTitleBar.top=g_wnd.y;info->rcTitleBar.right=g_wnd.x+g_wnd.w;info->rcTitleBar.bottom=g_wnd.y+24;for(int i=0;i<6;i++)info->rgstate[i]=0;return 1;}
+typedef struct { unsigned int cbSize; U32_RECT rcBar; void *hMenu,*hwndMenu; BOOL fBarFocused,fFocused; } U32_MENUBARINFO;
+__attribute__((dllexport)) BOOL GetMenuBarInfo(void *hwnd,long object,unsigned long item,U32_MENUBARINFO *info){(void)object;(void)item;if(!IsWindow(hwnd)||!info||info->cbSize<sizeof(*info))return 0;info->rcBar.left=g_wnd.x;info->rcBar.top=g_wnd.y+24;info->rcBar.right=g_wnd.x+g_wnd.w;info->rcBar.bottom=g_wnd.y+48;info->hMenu=u32_wnd_menu;info->hwndMenu=hwnd;info->fBarFocused=0;info->fFocused=0;return 1;}
+typedef struct { unsigned int cbSize,flags; void *hwndActive,*hwndFocus,*hwndCapture,*hwndMenuOwner,*hwndMoveSize,*hwndCaret; U32_RECT rcCaret; } U32_GUITHREADINFO;
+__attribute__((dllexport)) BOOL GetGUIThreadInfo(unsigned int thread,U32_GUITHREADINFO *info){(void)thread;if(!info||info->cbSize<sizeof(*info))return 0;info->flags=0;info->hwndActive=GetActiveWindow();info->hwndFocus=info->hwndActive;info->hwndCapture=0;info->hwndMenuOwner=0;info->hwndMoveSize=0;info->hwndCaret=u32_caret_created?info->hwndFocus:0;info->rcCaret.left=u32_caret_x;info->rcCaret.top=u32_caret_y;info->rcCaret.right=u32_caret_x+u32_caret_w;info->rcCaret.bottom=u32_caret_y+u32_caret_h;return 1;}
+typedef struct { unsigned int cbSize,dwTime; } U32_LASTINPUTINFO;
+__attribute__((dllexport)) BOOL GetLastInputInfo(U32_LASTINPUTINFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->dwTime=0;return 1;}
 __attribute__((dllexport)) void *GetCursor(void){return (void *)1;}
 typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos; } U32_CURSORINFO;
 __attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=(void *)1;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
@@ -1429,8 +1433,8 @@ __attribute__((dllexport)) void *ActivateKeyboardLayout(void *layout,unsigned in
 __attribute__((dllexport)) void *LoadKeyboardLayoutA(const char *name,unsigned int flags){(void)flags;if(!name)return 0;return name[0]=='0'?(void *)0x04090409:0;}
 __attribute__((dllexport)) void *LoadKeyboardLayoutW(const U32_WCHAR *name,unsigned int flags){(void)flags;if(!name)return 0;return name[0]=='0'?(void *)0x04090409:0;}
 __attribute__((dllexport)) BOOL UnloadKeyboardLayout(void *layout){return layout!=(void *)0x04090409;}
-__attribute__((dllexport)) unsigned long long GetKeyNameTextA(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetKeyNameTextW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) int GetKeyNameTextA(long param,char *out,int cap){if(!out||cap<=0)return 0;unsigned int sc=((unsigned long)param>>16)&0xFF;const char *name="Unknown";switch(sc){case 0x1E:name="A";break;case 0x30:name="B";break;case 0x2E:name="C";break;case 0x20:name="D";break;case 0x12:name="E";break;case 0x39:name="Space";break;case 0x1C:name="Enter";break;case 0x01:name="Esc";break;case 0x0E:name="Backspace";break;case 0x0F:name="Tab";break;case 0x48:name="Up";break;case 0x50:name="Down";break;case 0x4B:name="Left";break;case 0x4D:name="Right";break;}int i=0;while(name[i]&&i+1<cap){out[i]=name[i];i++;}out[i]=0;return i;}
+__attribute__((dllexport)) int GetKeyNameTextW(long param,U32_WCHAR *out,int cap){char b[32];int n=GetKeyNameTextA(param,b,sizeof(b));if(!out||cap<=0)return 0;int i=0;while(b[i]&&i+1<cap){out[i]=(unsigned char)b[i];i++;}out[i]=0;return n;}
 __attribute__((dllexport)) unsigned int MapVirtualKeyA(unsigned int code,unsigned int type){if(type==0)return code>='a'&&code<='z'?code-32:code;if(type==1)return code; if(type==2)return code>=32&&code<127?code:0;return 0;}
 __attribute__((dllexport)) unsigned int MapVirtualKeyW(unsigned int code,unsigned int type){return MapVirtualKeyA(code,type);}
 __attribute__((dllexport)) unsigned int MapVirtualKeyExA(unsigned int code,unsigned int type,void *layout){(void)layout;return MapVirtualKeyA(code,type);}

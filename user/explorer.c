@@ -106,7 +106,8 @@ static void draw_search(void *hwnd) {
         EXPLORER_RECT dirty = { 132, 171, 522, 210 };
         pInv(hwnd, &dirty, 0);
     }
-    if (pUpd) pUpd(hwnd);
+    /* InvalidateRect already paints immediately in this USER32; UpdateWindow
+       here would redundantly repaint the whole desktop card/taskbar. */
 }
 
 static void launch_app(const char *name, void **hwnd) {

@@ -2064,18 +2064,48 @@ __attribute__((dllexport)) unsigned int GetDpiFromDpiAwarenessContext(void *cont
 
 __attribute__((dllexport)) BOOL SetProcessDpiAwarenessContext(void *context){return context!=0;}
 
-__attribute__((dllexport)) void *GetProcessWindowStation(void){return (void *)1;}
+static int u32_station_inherit,u32_desktop_inherit;
+#define U32_WINSTA_HANDLE ((void *)0x1100)
+#define U32_DESKTOP_HANDLE ((void *)0x1101)
+__attribute__((dllexport)) void *GetProcessWindowStation(void){return U32_WINSTA_HANDLE;}
 
-__attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?(void *)1:0;}
+__attribute__((dllexport)) void *GetThreadDesktop(DWORD thread){return thread==GetCurrentThreadId()?U32_DESKTOP_HANDLE:0;}
 
-__attribute__((dllexport)) BOOL GetUserObjectInformationA(void *object,int index,void *info,DWORD len,DWORD *needed){(void)object;(void)index;if(needed)*needed=0;if(info&&len)((char*)info)[0]=0;return 0;}
-
-__attribute__((dllexport)) BOOL GetUserObjectInformationW(void *object,int index,void *info,DWORD len,DWORD *needed){return GetUserObjectInformationA(object,index,info,len,needed);}
-
+static int u32_user_object_name(void *object,const char **name,const char **type) {
+    if(object==U32_WINSTA_HANDLE){if(name)*name="WinSta0";if(type)*type="WindowStation";return 1;}
+    if(object==U32_DESKTOP_HANDLE){if(name)*name="Default";if(type)*type="Desktop";return 1;}
+    return 0;
+}
+__attribute__((dllexport)) BOOL GetUserObjectInformationA(void *object,int index,void *info,DWORD len,DWORD *needed) {
+    const char *name=0,*type=0;if(!u32_user_object_name(object,&name,&type)){if(needed)*needed=0;return 0;}
+    if(index==1) {
+        typedef struct { int fInherit; int fReserved; } U32_USEROBJECTFLAGS;
+        if(needed)*needed=sizeof(U32_USEROBJECTFLAGS);
+        if(!info||len<sizeof(U32_USEROBJECTFLAGS))return 0;
+        U32_USEROBJECTFLAGS *f=(U32_USEROBJECTFLAGS*)info;f->fInherit=object==U32_WINSTA_HANDLE?u32_station_inherit:u32_desktop_inherit;f->fReserved=0;return 1;
+    }
+    if(index==2||index==3) {
+        const char *text=index==2?name:type;DWORD n=0;while(text[n])n++;DWORD required=n+1;
+        if(needed)*needed=required;
+        if(!info||len<required){if(info&&len){DWORD i=0;while(i+1<len&&i<n){((char*)info)[i]=text[i];i++;}((char*)info)[i]=0;}return 0;}
+        for(DWORD i=0;i<required;i++)((char*)info)[i]=text[i];return 1;
+    }
+    if(needed)*needed=0;return 0;
+}
+__attribute__((dllexport)) BOOL GetUserObjectInformationW(void *object,int index,void *info,DWORD len,DWORD *needed) {
+    if(index==1)return GetUserObjectInformationA(object,index,info,len,needed);
+    const char *name=0,*type=0;if(!u32_user_object_name(object,&name,&type)){if(needed)*needed=0;return 0;}
+    if(index!=2&&index!=3){if(needed)*needed=0;return 0;}
+    const char *text=index==2?name:type;DWORD n=0;while(text[n])n++;DWORD required=(n+1)*sizeof(U32_WCHAR);
+    if(needed)*needed=required;
+    if(!info||len<required){if(info&&len>=sizeof(U32_WCHAR)){U32_WCHAR *w=(U32_WCHAR*)info;DWORD max=len/sizeof(U32_WCHAR),i=0;while(i+1<max&&i<n){w[i]=(unsigned char)text[i];i++;}w[i]=0;}return 0;}
+    U32_WCHAR *w=(U32_WCHAR*)info;for(DWORD i=0;i<=n;i++)w[i]=(unsigned char)text[i];return 1;
+}
 __attribute__((dllexport)) BOOL GetUserObjectSecurity(void *object,void *required,void *descriptor,DWORD len,DWORD *needed){(void)object;(void)required;(void)descriptor;(void)len;if(needed)*needed=0;return 0;}
-
-__attribute__((dllexport)) BOOL SetUserObjectInformationA(void *object,int index,void *info,DWORD len){(void)object;(void)index;(void)info;(void)len;return 0;}
-
+__attribute__((dllexport)) BOOL SetUserObjectInformationA(void *object,int index,void *info,DWORD len) {
+    if(!u32_user_object_name(object,0,0)||index!=1||!info||len<8)return 0;
+    int inherit=*(int*)info;if(object==U32_WINSTA_HANDLE)u32_station_inherit=inherit!=0;else u32_desktop_inherit=inherit!=0;return 1;
+}
 __attribute__((dllexport)) BOOL SetUserObjectInformationW(void *object,int index,void *info,DWORD len){return SetUserObjectInformationA(object,index,info,len);}
 
 __attribute__((dllexport)) BOOL EnumDisplayMonitors(void *dc,const U32_RECT *clip,void *callback,long long data){(void)dc;(void)clip;if(!callback)return 0;typedef BOOL(*CB)(void*,void*,U32_RECT*,long long);U32_RECT r={0,0,(int)g_fw,(int)g_fh};return ((CB)callback)(0,(void*)1,&r,data);}
@@ -2168,9 +2198,9 @@ __attribute__((dllexport)) BOOL IsProcessDPIAware(void){return 1;}
 
 __attribute__((dllexport)) BOOL SetThreadDesktop(void *desktop){return desktop!=0;}
 
-__attribute__((dllexport)) void *OpenWindowStationA(const char *name,BOOL inherit,DWORD access){(void)inherit;(void)access;return name?(void *)1:0;}
+__attribute__((dllexport)) void *OpenWindowStationA(const char *name,BOOL inherit,DWORD access){(void)access;if(!name||!u32_class_name_equal(name,"WinSta0"))return 0;u32_station_inherit=inherit!=0;return U32_WINSTA_HANDLE;}
 
-__attribute__((dllexport)) void *OpenWindowStationW(const unsigned short *name,BOOL inherit,DWORD access){(void)inherit;(void)access;return name?(void *)1:0;}
+__attribute__((dllexport)) void *OpenWindowStationW(const unsigned short *name,BOOL inherit,DWORD access){char a[64];if(!name)return 0;u32_wide_to_ansi(a,sizeof(a),name);return OpenWindowStationA(a,inherit,access);}
 
 __attribute__((dllexport)) BOOL CloseWindowStation(void *station){return station!=0;}
 
@@ -2184,9 +2214,9 @@ __attribute__((dllexport)) BOOL EnumDesktopsA(void *station,void *callback,long 
 
 __attribute__((dllexport)) BOOL EnumDesktopsW(void *station,void *callback,long long data){(void)station;if(!callback)return 0;typedef BOOL(*CB)(unsigned short*,long long);unsigned short n[]={'D','e','f','a','u','l','t',0};return ((CB)callback)(n,data);}
 
-__attribute__((dllexport)) void *OpenDesktopA(const char *name,DWORD flags,BOOL inherit,DWORD access){(void)flags;(void)inherit;(void)access;return name?(void *)1:0;}
+__attribute__((dllexport)) void *OpenDesktopA(const char *name,DWORD flags,BOOL inherit,DWORD access){(void)flags;(void)access;if(!name||!u32_class_name_equal(name,"Default"))return 0;u32_desktop_inherit=inherit!=0;return U32_DESKTOP_HANDLE;}
 
-__attribute__((dllexport)) void *OpenDesktopW(const unsigned short *name,DWORD flags,BOOL inherit,DWORD access){(void)flags;(void)inherit;(void)access;return name?(void *)1:0;}
+__attribute__((dllexport)) void *OpenDesktopW(const unsigned short *name,DWORD flags,BOOL inherit,DWORD access){char a[64];if(!name)return 0;u32_wide_to_ansi(a,sizeof(a),name);return OpenDesktopA(a,flags,inherit,access);}
 
 __attribute__((dllexport)) BOOL CloseDesktop(void *desktop){return desktop!=0;}
 

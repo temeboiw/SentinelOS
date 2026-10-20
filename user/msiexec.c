@@ -178,11 +178,24 @@ void mainCRTStartup(void) {
         out("msiexec: cannot open package in the current directory\n");
         for (;;) __asm__ volatile("pause");
     }
-    u8 *buf=(u8 *)sy3(SYS_Alloc,0,MAX_FILE,0);
-    if (!buf) {
-        out("msiexec: allocation failed\n");
-        (void)sy3(SYS_CloseFile,h,0,0);
-        for (;;) __asm__ volatile("pause");
+    /*
+     * NtAllocateVirtualMemory currently caps each request at 16 MiB.
+     * Reserve the file buffer as adjacent 16 MiB chunks so the reader's
+     * virtual address range remains contiguous without one oversized request.
+     */
+    const u32 chunk_size=16u*1024u*1024u;
+    const u64 buffer_base=0x50000000ULL;
+    u8 *buf=(u8 *)buffer_base;
+    for (u32 off=0;off<MAX_FILE;off+=chunk_size) {
+        u64 p=sy3(SYS_Alloc,buffer_base+off,chunk_size,0);
+        if (p!=(buffer_base+off)) {
+            out("msiexec: could not allocate MSI buffer chunk at offset ");
+            out_u32(off);
+            out("\\n");
+            (void)sy3(SYS_CloseFile,h,0,0);
+            show_and_exit("MSI Reader",
+                "Not enough user memory to inspect this MSI. No files were changed.",1);
+        }
     }
     u32 total=0;
     while(total<MAX_FILE) {
@@ -195,7 +208,7 @@ void mainCRTStartup(void) {
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     file_bytes=buf; file_size=total;
-    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 16 MiB\n");
+    if (total==MAX_FILE) out("msiexec: note: package inspection is capped at 128 MiB\\n");
     inspect_msi();
     if (msi_ok)
         show_and_exit("MSI Reader",

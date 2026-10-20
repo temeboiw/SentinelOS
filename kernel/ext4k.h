@@ -243,7 +243,7 @@ static int e4_free_block(Ext4k *fs, uint64_t blockno) {
     return e4_write(fs,1024,sb,sizeof sb);
 }
 
-static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
+static int e4_free_inode_bit(Ext4k *fs, uint32_t ino, int is_dir) {
     if (!e4_can_mutate(fs) || !ino || ino > fs->inode_count) return -1;
     uint32_t g = (ino - 1) / fs->ipg, b = (ino - 1) % fs->ipg;
     uint8_t sb[1024], gd[32], bitmap[4096];
@@ -257,6 +257,10 @@ static int e4_free_inode_bit(Ext4k *fs, uint32_t ino) {
     bitmap[b >> 3] &= (uint8_t)~(1u << (b & 7));
     if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
     E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);
+    if (is_dir) {
+        if (!E16(gd,16)) return -1;
+        E16(gd,16) = (uint16_t)(E16(gd,16)-1);
+    }
     if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return -1;
     E32(sb, 16) = E32(sb, 16) + 1;
     return e4_write(fs, 1024, sb, sizeof sb);

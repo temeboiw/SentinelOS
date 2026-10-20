@@ -1123,6 +1123,10 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
             }
 
             if (ev.type == 2 || ev.type == 3) {
+                /* Keep the previous cursor origin so its pixels can be
+                 * repainted from the scene, rather than restoring a stale
+                 * saved-under buffer over content that changed meanwhile. */
+                int prev_mx = g_mx, prev_my = g_my;
                 g_mx = ev.x;
                 g_my = ev.y;
                 u32_mouse_record();
@@ -1166,7 +1170,32 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     g_drag = 0;
                     on_click(ev.x, ev.y);
                 } else {
-                    present_cursor_only();
+                    /*
+                     * Recompose the union of the old and new cursor bounds.
+                     * The old save-under pixels may already be stale after a
+                     * window repaint; restoring them directly creates trails
+                     * whose length grows with mouse speed.
+                     */
+                    int x0 = prev_mx < g_mx ? prev_mx : g_mx;
+                    int y0 = prev_my < g_my ? prev_my : g_my;
+                    int x1 = (prev_mx > g_mx ? prev_mx : g_mx) + 16;
+                    int y1 = (prev_my > g_my ? prev_my : g_my) + 16;
+                    int was_clipped = u32_render_clip;
+                    int old_x0=u32_clip_x0, old_y0=u32_clip_y0;
+                    int old_x1=u32_clip_x1, old_y1=u32_clip_y1;
+                    if (was_clipped) {
+                        if (old_x0 < x0) x0=old_x0;
+                        if (old_y0 < y0) y0=old_y0;
+                        if (old_x1 > x1) x1=old_x1;
+                        if (old_y1 > y1) y1=old_y1;
+                    }
+                    u32_render_clip=1;
+                    u32_clip_x0=x0; u32_clip_y0=y0;
+                    u32_clip_x1=x1; u32_clip_y1=y1;
+                    compose();
+                    u32_render_clip=was_clipped;
+                    u32_clip_x0=old_x0; u32_clip_y0=old_y0;
+                    u32_clip_x1=old_x1; u32_clip_y1=old_y1;
                 }
 
                 (void)u32_msg_push(msg);

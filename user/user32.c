@@ -73,6 +73,9 @@ static unsigned int u32_text_align;
 static void *u32_wnd_region;
 typedef struct { void *hwnd; int id; unsigned int mod,key; int used; } U32_HOTKEY;
 static U32_HOTKEY u32_hotkeys[16];
+typedef struct { unsigned char fVirt; unsigned short key,cmd; } U32_ACCEL;
+typedef struct { const U32_ACCEL *entries; int count,used; } U32_ACCELTABLE;
+static U32_ACCELTABLE u32_accel_tables[16];
 static long long u32_message_extra_info;
 static int u32_caret_x,u32_caret_y,u32_caret_w=1,u32_caret_h=16,u32_caret_created,u32_caret_visible=1;
 static unsigned char u32_key_state[256]; static unsigned int u32_window_affinity;
@@ -994,7 +997,20 @@ __attribute__((dllexport)) BOOL UnregisterClassA(LPCSTR name, void *instance) {
     (void)name; (void)instance; return 1;
 }
 __attribute__((dllexport)) U32_LRESULT DefWindowProcA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
-    (void)hwnd; (void)msg; (void)wp; (void)lp; return 0;
+    switch(msg){
+        case 0x000Cu: return SetWindowTextA(hwnd,(LPCSTR)lp);
+        case 0x000Du: return GetWindowTextA(hwnd,(LPSTR)lp,(int)wp);
+        case 0x000Eu: return GetWindowTextLengthA(hwnd);
+        case 0x0010u: return DestroyWindow(hwnd);
+        case 0x0014u: return 1;
+        case 0x001Fu: return 1;
+        case 0x0084u: return 1;
+        case 0x0085u: compose(); return 0;
+        case 0x0018u: return IsWindow(hwnd);
+        case 0x0020u: return 1;
+        case 0x0319u: return 0;
+        default: return 0;
+    }
 }
 __attribute__((dllexport)) U32_LRESULT SendMessageA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
     if (msg==0x000Cu) return SetWindowTextA(hwnd,(LPCSTR)lp);
@@ -1591,7 +1607,7 @@ __attribute__((dllexport)) BOOL GetMenuItemRect(void *hwnd,void *menu,unsigned i
 __attribute__((dllexport)) BOOL SetMenuItemCount(void *menu,unsigned int count){U32_MENUDATA *m=u32_menu_data(menu);if(!m||count>16)return 0;while(m->count<(int)count){U32_MENUITEM *it=&m->items[m->count++];it->flags=0;it->id=0;it->submenu=0;it->text[0]=0;}m->count=(int)count;if(m->default_pos>=m->count)m->default_pos=-1;return 1;}
 __attribute__((dllexport)) BOOL IsZoomed(void *hwnd){return IsWindow(hwnd)&&g_wnd.x<=0&&g_wnd.y<=0&&g_wnd.w>=(int)g_fw&&g_wnd.h>=(int)g_fh;}
 __attribute__((dllexport)) BOOL GetWindowPos(void *hwnd,U32_RECT *rect){return GetWindowRect(hwnd,rect);}
-__attribute__((dllexport)) unsigned long long UnregisterClassW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL UnregisterClassW(const U32_WCHAR *name,void *instance){char n[128];u32_wide_to_ansi(n,sizeof(n),name);return UnregisterClassA(n,instance);}
 __attribute__((dllexport)) BOOL ValidateRect(void *hwnd,const U32_RECT *rect){(void)rect;return IsWindow(hwnd);}
 
 __attribute__((dllexport)) long long GetMessageExtraInfo(void){return u32_message_extra_info;}
@@ -1941,13 +1957,13 @@ __attribute__((dllexport)) void *LoadAcceleratorsA(void *instance,const char *na
 
 __attribute__((dllexport)) void *LoadAcceleratorsW(void *instance,const unsigned short *name){(void)instance;return name?(void *)1:0;}
 
-__attribute__((dllexport)) void *CreateAcceleratorTableA(const void *entries,int count){if(!entries||count<=0)return 0;return (void *)entries;}
+__attribute__((dllexport)) void *CreateAcceleratorTableA(const void *entries,int count){if(!entries||count<=0||count>256)return 0;for(int i=0;i<16;i++)if(!u32_accel_tables[i].used){u32_accel_tables[i].entries=(const U32_ACCEL*)entries;u32_accel_tables[i].count=count;u32_accel_tables[i].used=1;return &u32_accel_tables[i];}return 0;}
 
 __attribute__((dllexport)) void *CreateAcceleratorTableW(const void *entries,int count){return CreateAcceleratorTableA(entries,count);}
 
-__attribute__((dllexport)) BOOL DestroyAcceleratorTable(void *table){return table!=0;}
+__attribute__((dllexport)) BOOL DestroyAcceleratorTable(void *table){for(int i=0;i<16;i++)if(table==&u32_accel_tables[i]&&u32_accel_tables[i].used){u32_accel_tables[i].used=0;u32_accel_tables[i].entries=0;u32_accel_tables[i].count=0;return 1;}return 0;}
 
-__attribute__((dllexport)) int CopyAcceleratorTableA(void *table,void *entries,int count){(void)table;(void)entries;(void)count;return 0;}
+__attribute__((dllexport)) int CopyAcceleratorTableA(void *table,void *entries,int count){U32_ACCELTABLE *t=0;for(int i=0;i<16;i++)if(table==&u32_accel_tables[i]&&u32_accel_tables[i].used){t=&u32_accel_tables[i];break;}if(!t)return 0;if(!entries||count<=0)return t->count;int n=count<t->count?count:t->count;U32_ACCEL *dst=(U32_ACCEL*)entries;for(int i=0;i<n;i++)dst[i]=t->entries[i];return n;}
 
 __attribute__((dllexport)) int CopyAcceleratorTableW(void *table,void *entries,int count){return CopyAcceleratorTableA(table,entries,count);}
 

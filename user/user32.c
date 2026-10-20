@@ -539,6 +539,23 @@ static void compose(void) {
         draw_text(ix-1, iy+s+10, "Explorer", 0xFF164B68);
     }
 
+    /* Desktop welcome/search card, populated by explorer.exe through TextOutA. */
+    if (!g_wnd.visible) {
+        int cx=112, cy=72, cw=390, ch=158;
+        round_fill(cx+4,cy+7,cw,ch,13,0x55314F62);
+        round_fill(cx,cy,cw,ch,13,0xBFFFFFFF);
+        round_fill(cx+2,cy+2,cw-4,ch-4,11,0xEAF9FDFF);
+        gradient_v(cx+3,cy+3,cw-6,35,0xFFFFFFFF,0xFFC4F1FA);
+        fill(cx+8,cy+3,cw-16,1,0xFFFFFFFF);
+        draw_text(cx+18,cy+11,g_lines[4][0]?g_lines[4]:"Welcome to SentinelOS",0xFF145777);
+        draw_text(cx+18,cy+35,g_lines[5][0]?g_lines[5]:"A fresh breeze for your desktop",0xFF4E8297);
+        draw_text(cx+18,cy+68,g_lines[7][0]?g_lines[7]:"Search apps below: type cmd and press Enter",0xFF245E78);
+        round_fill(cx+14,cy+99,cw-28,38,8,0xFFB2DDE9);
+        round_fill(cx+16,cy+101,cw-32,34,7,0xFFF9FEFF);
+        fill(cx+18,cy+102,cw-36,1,0xFFFFFFFF);
+        draw_text(cx+27,cy+111,g_lines[8][0]?g_lines[8]:"Search: ",0xFF276A84);
+    }
+
     if (g_wnd.visible && !g_wnd.minimized) {
         int x = g_wnd.x, y = g_wnd.y;
         int w = g_wnd.w, h = g_wnd.h;

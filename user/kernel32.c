@@ -279,7 +279,24 @@ __attribute__((dllexport)) LPVOID GlobalAlloc(DWORD flags,K32_SIZE_T size){if(!s
 __attribute__((dllexport)) BOOL GetConsoleMode(HANDLE h,DWORD *mode){if(!h||!mode){k32_last_error=6;return 0;}*mode=k32_console_mode;return 1;}
 __attribute__((dllexport)) BOOL SetConsoleMode(HANDLE h,DWORD mode){if(!h){k32_last_error=6;return 0;}k32_console_mode=mode;return 1;}
 __attribute__((dllexport)) BOOL ReadConsoleA(HANDLE h, LPVOID buf, DWORD len, DWORD *read, void *reserved) {
-    (void)h; (void)buf; (void)len; (void)reserved; if (read) *read=0; return 0;
+    (void)reserved;if(read)*read=0;
+    if((h!=(HANDLE)1&&h!=(HANDLE)2)||(!buf&&len)){k32_last_error=6;return 0;}
+    if(!len){k32_last_error=0;return 1;}
+    typedef struct { int type,x,y,btn; char key; } K32_INPUT_EVENT;
+    char *out=(char*)buf;DWORD n=0;
+    while(n<len){
+        K32_INPUT_EVENT ev={0};
+        if(!sy3(SYS_GetInput,(u64)&ev,0,0)){sy3(21,0,0,0);continue;}
+        if(ev.type!=1||!ev.key)continue;
+        if(ev.key=='\r'||ev.key=='\n'){
+            if(n<len)out[n++]='\r';
+            if(n<len)out[n++]='\n';
+            const char newline[]="\r\n";DWORD ignored=0;WriteFile((HANDLE)1,newline,2,&ignored,0);break;
+        }
+        if(ev.key=='\b'||ev.key==127){if(n){n--;const char erase[]="\b \b";DWORD ignored=0;WriteFile((HANDLE)1,erase,3,&ignored,0);}continue;}
+        out[n++]=ev.key;DWORD ignored=0;WriteFile((HANDLE)1,&ev.key,1,&ignored,0);
+    }
+    if(read)*read=n;k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) BOOL WriteConsoleA(HANDLE h, LPCVOID buf, DWORD len, DWORD *written, void *reserved) {
     (void)reserved; return WriteFile(h,buf,len,written,0);

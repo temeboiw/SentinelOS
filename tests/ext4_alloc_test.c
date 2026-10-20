@@ -74,6 +74,13 @@ int main(void) {
     fs.feature_ro_compat = 0x400u;
     ok &= check(!e4_can_mutate(&fs), "metadata checksum layout rejected");
     fs.feature_ro_compat = 0;
+    fs.feature_compat = 0x8u; /* ext_attr is harmless for inode allocation */
+    ok &= check(e4_can_mutate(&fs), "supported ext_attr compat feature accepted");
+    fs.feature_compat = 0x4u;
+    ok &= check(!e4_can_mutate(&fs), "journaled filesystem rejected");
+    fs.feature_compat = 0x400u;
+    ok &= check(!e4_can_mutate(&fs), "unknown compat feature rejected");
+    fs.feature_compat = 0;
 
     uint32_t ino = e4_alloc_inode(&fs, 0);
     ok &= check(ino == 11, "first free inode allocated");

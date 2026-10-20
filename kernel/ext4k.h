@@ -102,6 +102,7 @@ static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
     if (e4_read(fs, 1024, sb, sizeof sb) < 0) return 0;
     uint32_t groups = (fs->inode_count + fs->ipg - 1) / fs->ipg;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (!E32(sb,16)) return 0;
     uint32_t first_ino = E32(sb, 84);
     if (first_ino < 11) first_ino = 11;
     for (uint32_t g = 0; g < groups; ++g) {
@@ -122,9 +123,7 @@ static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
             E16(gd, 14) = (uint16_t)(E16(gd, 14) - 1);
             if (is_dir) E16(gd, 16) = (uint16_t)(E16(gd, 16) + 1);
             if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
-            uint32_t free_i = E32(sb, 16);
-            if (!free_i) return 0;
-            E32(sb, 16) = free_i - 1;
+            E32(sb, 16) = E32(sb, 16) - 1;
             if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
             return ino;
         }
@@ -135,7 +134,7 @@ static uint32_t e4_alloc_inode(Ext4k *fs, int is_dir) {
 static uint64_t e4_alloc_block(Ext4k *fs) {
     if (!e4_can_mutate(fs) || fs->blocks_count <= fs->first_data) return 0;
     uint8_t sb[1024], gd[32], bitmap[4096];
-    if (e4_read(fs, 1024, sb, sizeof sb) < 0) return 0;
+    if (e4_read(fs, 1024, sb, sizeof sb) < 0 || !E32(sb,12)) return 0;
     uint32_t groups = (fs->blocks_count - fs->first_data +
                        fs->blocks_per_group - 1) / fs->blocks_per_group;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
@@ -168,9 +167,7 @@ static uint64_t e4_alloc_block(Ext4k *fs) {
                 if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return 0;
                 E16(gd, 12) = (uint16_t)(E16(gd, 12) - 1);
                 if (e4_write(fs, gdt + (uint64_t)g * 32, gd, sizeof gd) < 0) return 0;
-                uint32_t freeb = E32(sb, 12);
-                if (!freeb) return 0;
-                E32(sb, 12) = freeb - 1;
+                E32(sb, 12) = E32(sb, 12) - 1;
                 if (e4_write(fs, 1024, sb, sizeof sb) < 0) return 0;
                 fs->alloc_hint = blockno + 1;
                 if (fs->alloc_hint >= fs->blocks_count) fs->alloc_hint = fs->first_data;

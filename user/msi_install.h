@@ -88,6 +88,12 @@ static int msi_condition_eval(const char *condition) {
         neg=1; for(u32 i=0;c[i+4];i++)c[i]=c[i+4]; c[n-4]=0; msi_trim(c);
         n=0; while(c[n]) n++;
     }
+    /* Parentheses and a single NOT may expose a literal only after the first
+       pass above, so evaluate those literals again before property lookup. */
+    if(!c[0]) return neg ? 0 : 1;
+    if(same_name(c,"1") || same_name(c,"TRUE")) return neg ? 0 : 1;
+    if(same_name(c,"0") || same_name(c,"FALSE") || same_name(c,"Installed"))
+        return neg ? 1 : 0;
     char *op=0; u32 oplen=0;
     for(u32 i=0;c[i];i++) {
         if(c[i]=='~'||c[i]=='&'||c[i]=='|'||c[i]=='!') return -1;

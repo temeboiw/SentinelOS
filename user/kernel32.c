@@ -242,3 +242,66 @@ __attribute__((dllexport)) DWORD WaitForMultipleObjects(DWORD count, const HANDL
     (void)count; (void)handles; (void)wait_all; (void)ms; return 0xFFFFFFFFu;
 }
 __attribute__((dllexport)) DWORD GetFileType(HANDLE file) { (void)file; return 0; }
+
+
+/* Compatibility export placeholders: signatures and semantics still need implementation. */
+__attribute__((dllexport)) unsigned long long GetCommandLineW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetModuleHandleW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetModuleFileNameW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateFileW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DeleteFileW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long MoveFileW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CopyFileW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateDirectoryW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long RemoveDirectoryW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetCurrentDirectoryW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetCurrentDirectoryW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetFullPathNameW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetTempPathW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetEnvironmentVariableW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetEnvironmentVariableW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetFileAttributesW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetFileAttributesW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetTempFileNameA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetTempFileNameW(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetShortPathNameA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetLongPathNameA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetDiskFreeSpaceA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetDiskFreeSpaceExA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetDriveTypeA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetLogicalDrives(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetLogicalDriveStringsA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetVolumeInformationA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetFileTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetFileTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetSystemTimeAsFileTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SystemTimeToFileTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FileTimeToSystemTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CompareFileTime(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetFileAttributesExA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetFileInformationByHandle(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetEndOfFile(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetOverlappedResult(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CancelIo(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreatePipe(void) { return 0; }
+__attribute__((dllexport)) unsigned long long PeekNamedPipe(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetHandleInformation(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetHandleInformation(void) { return 0; }
+__attribute__((dllexport)) unsigned long long DuplicateHandle(void) { return 0; }
+__attribute__((dllexport)) unsigned long long CreateProcessA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetStartupInfoA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetEnvironmentStringsA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long FreeEnvironmentStringsA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetProcessTimes(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetThreadTimes(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetPriorityClass(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetPriorityClass(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetThreadPriority(void) { return 0; }
+__attribute__((dllexport)) unsigned long long SetThreadPriority(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetCurrentProcessorNumber(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetNativeSystemInfo(void) { return 0; }
+__attribute__((dllexport)) unsigned long long IsProcessorFeaturePresent(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetSystemDirectoryA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetWindowsDirectoryA(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetUserDefaultLCID(void) { return 0; }
+__attribute__((dllexport)) unsigned long long GetACP(void) { return 0; }

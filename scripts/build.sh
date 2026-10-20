@@ -301,6 +301,7 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:GdiFillRect /export:GdiLine /export:GdiTextOut \
   "/implib:$B/obj/user32.lib" \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o"

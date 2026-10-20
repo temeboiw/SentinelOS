@@ -24,6 +24,7 @@
 #define SYS_NtCreateDirectory        25
 #define SYS_NtDeleteFile             26
 #define SYS_NtRemoveDirectory        27
+#define SYS_NtPathType                28
 #define SYS_NtReadFile              6
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
@@ -1875,6 +1876,18 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    case SYS_NtPathType: {
+        char name[256];
+        if (copy_user_str(f->rdi,name,sizeof name)!=0) { f->rax=0; return f; }
+        uint32_t ino=vfs_resolve_user_path(name);
+        uint8_t inode[256];
+        if (!ino || e4_inode(&g_ext4,ino,inode)<0) f->rax=0;
+        else {
+            uint16_t mode=E16(inode,0)&0xF000;
+            f->rax=mode==0x4000?2:(mode==0x8000?1:0);
+        }
+        return f;
+    }
     case SYS_NtDeleteFile: {
         char name[256];
         f->rax = copy_user_str(f->rdi,name,sizeof name)==0 &&

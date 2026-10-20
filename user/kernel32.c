@@ -378,7 +378,24 @@ static int k32_leap(int y){return (y%4==0&&y%100!=0)||y%400==0;}
 __attribute__((dllexport)) BOOL SystemTimeToFileTime(const K32_SYSTEMTIME *st,K32_FILETIME *ft){static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};if(!st||!ft||st->wYear<1601||st->wMonth<1||st->wMonth>12||st->wHour>23||st->wMinute>59||st->wSecond>59||st->wMilliseconds>999)return 0;int max=mdays[st->wMonth-1]+(st->wMonth==2&&k32_leap(st->wYear));if(st->wDay<1||st->wDay>max)return 0;unsigned long long days=0;for(int y=1601;y<st->wYear;y++)days+=k32_leap(y)?366:365;for(int m=1;m<st->wMonth;m++)days+=mdays[m-1]+(m==2&&k32_leap(st->wYear));days+=st->wDay-1;unsigned long long ticks=days*864000000000ULL+((unsigned long long)st->wHour*3600+st->wMinute*60+st->wSecond)*10000000ULL+(unsigned long long)st->wMilliseconds*10000ULL;ft->dwLowDateTime=(DWORD)ticks;ft->dwHighDateTime=(DWORD)(ticks>>32);return 1;}
 __attribute__((dllexport)) BOOL FileTimeToSystemTime(const K32_FILETIME *ft,K32_SYSTEMTIME *st){if(!ft||!st)return 0;unsigned long long ticks=((unsigned long long)ft->dwHighDateTime<<32)|ft->dwLowDateTime;unsigned long long days=ticks/864000000000ULL,rem=ticks%864000000000ULL;int year=1601;while(days>=(unsigned long long)(k32_leap(year)?366:365)){days-=k32_leap(year)?366:365;if(++year>9999)return 0;}static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};int month=1;while(month<=12){int d=mdays[month-1]+(month==2&&k32_leap(year));if(days<(unsigned long long)d)break;days-=d;month++;}st->wYear=year;st->wMonth=month;st->wDay=(unsigned short)days+1;st->wDayOfWeek=(unsigned short)((((ticks/864000000000ULL)+1)%7));st->wHour=rem/36000000000ULL;rem%=36000000000ULL;st->wMinute=rem/600000000ULL;rem%=600000000ULL;st->wSecond=rem/10000000ULL;st->wMilliseconds=(rem%10000000ULL)/10000ULL;return 1;}
 __attribute__((dllexport)) LONG CompareFileTime(const K32_FILETIME *a,const K32_FILETIME *b){if(!a||!b)return 0;if(a->dwHighDateTime<b->dwHighDateTime)return -1;if(a->dwHighDateTime>b->dwHighDateTime)return 1;if(a->dwLowDateTime<b->dwLowDateTime)return -1;if(a->dwLowDateTime>b->dwLowDateTime)return 1;return 0;}
-__attribute__((dllexport)) BOOL GetFileAttributesExA(LPCSTR path,int level,void *data) { (void)data;if(!path||!*path||level!=0){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
+typedef struct { K32_FILETIME ftCreationTime,ftLastAccessTime,ftLastWriteTime; DWORD dwFileAttributes,nFileSizeHigh,nFileSizeLow; } K32_FILE_ATTRIBUTE_DATA;
+__attribute__((dllexport)) BOOL GetFileAttributesExA(LPCSTR path,int level,void *out) {
+    if(!path||!*path||!out||level!=0){k32_last_error=87;return 0;}
+    K32_FILE_ATTRIBUTE_DATA *d=(K32_FILE_ATTRIBUTE_DATA*)out;
+    DWORD attr=GetFileAttributesA(path);if(attr==0xFFFFFFFFu)return 0;
+    d->ftCreationTime.dwLowDateTime=d->ftCreationTime.dwHighDateTime=0;
+    d->ftLastAccessTime.dwLowDateTime=d->ftLastAccessTime.dwHighDateTime=0;
+    d->ftLastWriteTime.dwLowDateTime=d->ftLastWriteTime.dwHighDateTime=0;
+    d->dwFileAttributes=attr;d->nFileSizeHigh=d->nFileSizeLow=0;
+    if(!(attr&0x10u)){
+        HANDLE h=CreateFileA(path,0,0,0,3,0,0);
+        if(h==INVALID_HANDLE_VALUE){k32_last_error=2;return 0;}
+        unsigned char buf[512];DWORD got=0;unsigned long long total=0;
+        for(;;){got=0;if(!ReadFile(h,buf,sizeof(buf),&got,0)||!got)break;total+=got;}
+        CloseHandle(h);d->nFileSizeLow=(DWORD)total;d->nFileSizeHigh=(DWORD)(total>>32);
+    }
+    k32_last_error=0;return 1;
+}
 __attribute__((dllexport)) BOOL GetFileInformationByHandle(HANDLE file,void *info) { if(!file||file==INVALID_HANDLE_VALUE||!info){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL SetEndOfFile(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL GetOverlappedResult(HANDLE file, void *overlapped, DWORD *transferred, BOOL wait) { (void)file; (void)overlapped; (void)wait; if (transferred) *transferred=0; k32_last_error=997; return 0; }
@@ -449,7 +466,7 @@ __attribute__((dllexport)) DWORD GetLogicalDriveStringsW(DWORD cap, K32_LPWSTR o
 __attribute__((dllexport)) unsigned long long GetVolumeInformationW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
 __attribute__((dllexport)) unsigned long long GetDiskFreeSpaceExW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-__attribute__((dllexport)) unsigned long long GetFileAttributesExW(unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
+__attribute__((dllexport)) BOOL GetFileAttributesExW(K32_LPCWSTR path,int level,void *data) { char p[260];if(!path){k32_last_error=87;return 0;}k32_wide_to_ansi(p,sizeof(p),path);return GetFileAttributesExA(p,level,data); }
 __attribute__((dllexport)) DWORD GetTempPath2A(DWORD cap,LPSTR out){return GetTempPathA(cap,out);}
 __attribute__((dllexport)) DWORD GetTempPath2W(DWORD cap,K32_LPWSTR out){return GetTempPathW(cap,out);}
 __attribute__((dllexport)) DWORD GetShortPathNameW(K32_LPCWSTR path,K32_LPWSTR out,DWORD cap){char a[512],b[512];k32_wide_to_ansi(a,sizeof(a),path);DWORD n=GetShortPathNameA(a,b,sizeof(b));if(out&&cap)k32_ansi_to_wide(out,cap,b);return n;}

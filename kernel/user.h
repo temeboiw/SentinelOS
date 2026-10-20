@@ -19,6 +19,7 @@
 #define SYS_NtAllocateVirtualMemory 3
 #define SYS_NtCreateProcess         4
 #define SYS_NtOpenFile              5
+#define SYS_NtWriteExistingFile     23
 #define SYS_NtReadFile              6
 #define SYS_NtQueryDirectoryFile    7
 #define SYS_NtMapFramebuffer        8
@@ -703,11 +704,13 @@ typedef struct {
     uint32_t ino;
     uint64_t pos, size;
     int used;
+    int writable;
 } VfsUserHandle;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
 
-static int vfs_open_user_file(const char *name) {
-    if (!g_ext4_ok || !name || !name[0]) return -1;
+static int vfs_open_user_file(const char *name, uint64_t access, uint64_t disposition) {
+    /* Only OPEN_EXISTING is supported until ext4 create/truncate exists. */
+    if (!g_ext4_ok || !name || !name[0] || disposition != 3) return -1;
     uint32_t ino = 0;
     for (int i = 0; i < vfs_nent; i++) {
         const char *a = vfs_ents[i].name, *b = name;
@@ -729,6 +732,7 @@ static int vfs_open_user_file(const char *name) {
             vfs_user_handles[i].ino = ino;
             vfs_user_handles[i].pos = 0;
             vfs_user_handles[i].size = e4_size(inode);
+            vfs_user_handles[i].writable = (access & 0x40000000u) != 0;
             vfs_user_handles[i].used = 1;
             return 0x100 + i;
         }
@@ -762,6 +766,35 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
                            (void *)(dst + done), chunk) < 0) {
             return done ? (int)done : -1;
         }
+        done += chunk;
+    }
+    h->pos += done;
+    return (int)done;
+}
+
+static int vfs_write_user_file(uint64_t handle, uint64_t src, uint64_t len) {
+    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
+        !len || len > 1024 * 1024) return -1;
+    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+    KPROCESS *proc = MmCurrentProcess;
+    if (!h->used || !h->writable || !proc ||
+        !MmValidateUserRange(proc, src, len, 0)) return -1;
+    /* No extension/allocation yet: never write beyond the existing file. */
+    if (h->pos > h->size || len > h->size - h->pos) return -1;
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4, h->ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000) != 0x8000) return -1;
+    uint64_t done = 0;
+    while (done < len) {
+        uint64_t pos = h->pos + done;
+        uint32_t block_off = (uint32_t)(pos % g_ext4.blksz);
+        uint64_t chunk = g_ext4.blksz - block_off;
+        if (chunk > len - done) chunk = len - done;
+        uint64_t phys_block = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
+        if (!phys_block ||
+            e4_write(&g_ext4, phys_block * g_ext4.blksz + block_off,
+                     (const void *)(src + done), chunk) < 0)
+            return done ? (int)done : -1;
         done += chunk;
     }
     h->pos += done;
@@ -1381,12 +1414,16 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
-        f->rax = (uint64_t)(int64_t)vfs_open_user_file(name);
+        f->rax = (uint64_t)(int64_t)vfs_open_user_file(name, f->rsi, f->rdx);
         return f;
     }
 
     case SYS_NtReadFile:
         f->rax = (uint64_t)(int64_t)vfs_read_user_file(f->rdi, f->rsi, f->rdx);
+        return f;
+
+    case SYS_NtWriteExistingFile:
+        f->rax = (uint64_t)(int64_t)vfs_write_user_file(f->rdi, f->rsi, f->rdx);
         return f;
 
     case SYS_NtCloseFile:

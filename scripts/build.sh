@@ -847,7 +847,9 @@ lld -flavor link \
   /export:KillTimer \
   /export:GetDlgItem \
   /export:SetDlgItemTextA \
+  /export:SetDlgItemTextW \
   /export:GetDlgItemTextA \
+  /export:GetDlgItemTextW \
   /export:CreateMenu \
   /export:CreatePopupMenu \
   /export:AppendMenuA \

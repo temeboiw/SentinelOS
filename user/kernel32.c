@@ -1812,13 +1812,13 @@ __attribute__((dllexport)) short InterlockedCompareExchange16(volatile short *p,
 
 __attribute__((dllexport)) short InterlockedExchangeAdd16(volatile short *p,short v){return __atomic_fetch_add(p,v,__ATOMIC_SEQ_CST);}
 
-__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned LONG)bit&31u);unsigned int old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned int)bit&31u);unsigned int old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
 
-__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned LONG)bit&31u);unsigned int old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset(volatile unsigned int *p,LONG bit){ unsigned int mask=1u<<((unsigned int)bit&31u);unsigned int old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
 
-__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((unsigned i64)bit&63u);u64 old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndSet64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((u64)bit&63u);u64 old=__atomic_fetch_or(p,mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
 
-__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((unsigned i64)bit&63u);u64 old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
+__attribute__((dllexport)) unsigned char InterlockedBitTestAndReset64(volatile u64 *p,i64 bit){ u64 mask=1ULL<<((u64)bit&63u);u64 old=__atomic_fetch_and(p,~mask,__ATOMIC_SEQ_CST);return (unsigned char)((old&mask)!=0);}
 
 __attribute__((dllexport)) BOOL SetFilePointerEx(HANDLE file,K32_LARGE_INTEGER distance,K32_LARGE_INTEGER *newpos,DWORD method){if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}u64 pos=sy3(SYS_SetFilePosition,(u64)file,(u64)distance.QuadPart,method);if((i64)pos<0){k32_last_error=87;return 0;}if(newpos)newpos->QuadPart=(K32_SIZE_T)pos;k32_last_error=0;return 1;}
 

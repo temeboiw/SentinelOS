@@ -549,10 +549,11 @@ static void compose(void) {
     if (!explicit_clip) {
         cursor_restore();
     } else {
-        /* A dirty repaint that touches either the old cursor or its new
-         * position must repaint the complete 16x16 cursor footprint. Expand
-         * the dirty rectangle before painting, and discard the saved-under
-         * pixels: they are stale once the scene beneath them is repainted. */
+        /* Keep dirty paints local. Never expand one dirty rectangle to
+         * cover the entire path between the old and new cursor positions:
+         * that makes a fast mouse movement repaint a huge rectangle and
+         * produces speed-dependent blocks/streaks. The input path repaints
+         * the old and new 16x16 footprints independently. */
         int old_hit = cur_on &&
             cur_ox < u32_clip_x1 && cur_ox+16 > u32_clip_x0 &&
             cur_oy < u32_clip_y1 && cur_oy+16 > u32_clip_y0;
@@ -560,15 +561,6 @@ static void compose(void) {
             g_mx < u32_clip_x1 && g_mx+16 > u32_clip_x0 &&
             g_my < u32_clip_y1 && g_my+16 > u32_clip_y0;
         if (old_hit || new_hit) {
-            int cx0=cur_on?cur_ox:g_mx, cy0=cur_on?cur_oy:g_my;
-            int cx1=cx0+16, cy1=cy0+16;
-            if (g_mx<cx0)cx0=g_mx;if(g_my<cy0)cy0=g_my;
-            if (g_mx+16>cx1)cx1=g_mx+16;
-            if (g_my+16>cy1)cy1=g_my+16;
-            if(cx0<u32_clip_x0)u32_clip_x0=cx0;
-            if(cy0<u32_clip_y0)u32_clip_y0=cy0;
-            if(cx1>u32_clip_x1)u32_clip_x1=cx1;
-            if(cy1>u32_clip_y1)u32_clip_y1=cy1;
             cur_on=0;
             redraw_cursor_after_clip=1;
         }
@@ -1218,28 +1210,18 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     on_click(ev.x, ev.y);
                 } else {
                     /*
-                     * Recompose the union of the old and new cursor bounds.
-                     * The old save-under pixels may already be stale after a
-                     * window repaint; restoring them directly creates trails
-                     * whose length grows with mouse speed.
+                     * Repaint only the cursor's old and new 16x16 footprints.
+                     * A single bounding rectangle between them scales with the
+                     * distance moved and was the source of the growing blocks.
+                     * compose() restores the old scene pixels and then draws a
+                     * fresh cursor, without restoring stale save-under pixels.
                      */
-                    int x0 = prev_mx < g_mx ? prev_mx : g_mx;
-                    int y0 = prev_my < g_my ? prev_my : g_my;
-                    int x1 = (prev_mx > g_mx ? prev_mx : g_mx) + 16;
-                    int y1 = (prev_my > g_my ? prev_my : g_my) + 16;
                     int was_clipped = u32_render_clip;
                     int old_x0=u32_clip_x0, old_y0=u32_clip_y0;
                     int old_x1=u32_clip_x1, old_y1=u32_clip_y1;
-                    if (was_clipped) {
-                        if (old_x0 < x0) x0=old_x0;
-                        if (old_y0 < y0) y0=old_y0;
-                        if (old_x1 > x1) x1=old_x1;
-                        if (old_y1 > y1) y1=old_y1;
-                    }
-                    u32_render_clip=1;
-                    u32_clip_x0=x0; u32_clip_y0=y0;
-                    u32_clip_x1=x1; u32_clip_y1=y1;
-                    compose();
+                    u32_render_clip=0;
+                    compose_region(prev_mx,prev_my,prev_mx+16,prev_my+16);
+                    compose_region(g_mx,g_my,g_mx+16,g_my+16);
                     u32_render_clip=was_clipped;
                     u32_clip_x0=old_x0; u32_clip_y0=old_y0;
                     u32_clip_x1=old_x1; u32_clip_y1=old_y1;

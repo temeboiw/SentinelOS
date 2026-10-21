@@ -474,6 +474,10 @@ static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(w>gfx_width-x)w=gfx_width-x;if(h>gfx_height-y)h=gfx_height-y;
     GfxTransfer tr={0};tr.hdr.type=GFX_GPU_CMD_TRANSFER;
     tr.x=x;tr.y=y;tr.width=w;tr.height=h;
+    /* TRANSFER_TO_HOST_2D reads the rectangle from the guest backing starting
+     * at this byte offset. It must point at the rectangle's own top-left pixel;
+     * leaving it 0 copies the top-left of the screen into every damaged rect. */
+    tr.offset=(uint64_t)y*gfx_pitch+(uint64_t)x*4u;
     tr.resource_id=GFX_RESOURCE_ID;
     if(!gfx_command(&tr,sizeof tr))return 0;
     GfxFlush fl={0};fl.hdr.type=GFX_GPU_CMD_FLUSH;

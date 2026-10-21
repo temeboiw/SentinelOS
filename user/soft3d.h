@@ -2,7 +2,9 @@
 #include <stdint.h>
 
 /* Fixed-point 3D reference renderer for SentinelOS.
- * Vertex x/y/z and focal_length are signed 16.16 values; z must be positive.
+ * Vertex x/y/z and focal_length are signed 16.16 values. The software
+ * renderer expects positive camera-space z; the VirGL triangle API expects
+ * clip-space x/y/z in [-1,1].
  * The caller supplies a 32-bit ARGB target and a width*height depth buffer.
  * Clear depth to S3D_DEPTH_FAR; the z-buffer stores inverse depth.
  * This is a real software fallback; it does not claim hardware 3D acceleration.

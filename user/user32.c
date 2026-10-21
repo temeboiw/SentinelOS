@@ -20,6 +20,13 @@ void *memcpy(void *destination, const void *source, unsigned long long count) {
     return destination;
 }
 
+void *memset(void *destination, int value, unsigned long long count) {
+    volatile unsigned char *dst = (volatile unsigned char *)destination;
+    for (unsigned long long i = 0; i < count; ++i)
+        dst[i] = (unsigned char)value;
+    return destination;
+}
+
 __attribute__((dllexport)) i64 DefWindowProcA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
 __attribute__((dllexport)) i64 SendMessageA(void *hwnd, unsigned int message, u64 wParam, i64 lParam);
 __attribute__((dllexport)) BOOL DestroyWindow(void *hwnd);

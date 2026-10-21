@@ -133,8 +133,8 @@ void sentlogon_main(void) {
     GfxBootInfo gfx={0};
     u64 gfx_ok=NtInitializeGraphics(&gfx);
     LogonFB fbinfo={0};
-    if(NtMapFramebuffer((FBInfo *)&fbinfo) && gfx_ok &&
-       gfx.backend==2 && gfx.surface_va) {
+    (void)NtMapFramebuffer((FBInfo *)&fbinfo);
+    if(gfx_ok && gfx.backend==2 && gfx.surface_va) {
         fbinfo.va=gfx.surface_va;
         fbinfo.w=gfx.width;
         fbinfo.h=gfx.height;

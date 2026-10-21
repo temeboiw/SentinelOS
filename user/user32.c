@@ -1323,10 +1323,26 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     if (ny < 0) ny = 0;
                     if (nx != g_drag_pending_x || ny != g_drag_pending_y)
                         g_drag_moved = 1;
-                    /* Keep the rendered window and its controls stable while
-                     * the title bar is grabbed. Only remember the destination. */
-                    g_drag_pending_x = nx;
-                    g_drag_pending_y = ny;
+                    /* Commit both axes during the drag, then repaint only the
+                     * union of the old and new window bounds. Child HWNDs use
+                     * client-relative coordinates, so USER32 redraws them at
+                     * the new screen X and Y in the same frame as their parent. */
+                    if (nx != g_wnd.x || ny != g_wnd.y) {
+                        int old_x = g_wnd.x, old_y = g_wnd.y;
+                        g_wnd.x = nx;
+                        g_wnd.y = ny;
+                        g_drag_pending_x = nx;
+                        g_drag_pending_y = ny;
+                        int rect[4] = { nx, ny, g_wnd.w, g_wnd.h };
+                        sy3(SYS_WmRect, (u64)rect, 0, 0);
+                        int x0 = old_x < nx ? old_x : nx;
+                        int y0 = old_y < ny ? old_y : ny;
+                        int x1 = (old_x + g_wnd.w + 8) > (nx + g_wnd.w + 8)
+                            ? old_x + g_wnd.w + 8 : nx + g_wnd.w + 8;
+                        int y1 = (old_y + g_wnd.h + 12) > (ny + g_wnd.h + 12)
+                            ? old_y + g_wnd.h + 12 : ny + g_wnd.h + 12;
+                        compose_region(x0, y0, x1, y1);
+                    }
                 }
 
                 if (ev.type == 3) {

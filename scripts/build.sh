@@ -318,7 +318,13 @@ clang "${USER_CFLAGS[@]}" \
   -o "$B/obj/vulkan.o"
 
 echo "  -> CPU software rasterizer primitives"
-clang "${USER_CFLAGS[@]}" \
+# The kernel/user runtime is built with general registers only, but this
+# freestanding rasterizer intentionally uses x86-64 SSE2 floating point.
+SOFTPIPE_CFLAGS=()
+for flag in "${USER_CFLAGS[@]}"; do
+  [[ "$flag" == "-mgeneral-regs-only" ]] || SOFTPIPE_CFLAGS+=("$flag")
+done
+clang "${SOFTPIPE_CFLAGS[@]}" \
   -c "$ROOT/user/vk_softpipe.c" \
   -o "$B/obj/vk_softpipe.o"
 
@@ -377,6 +383,8 @@ lld -flavor link \
   /export:vkResetFences \
   /export:vkCreateSemaphore \
   /export:vkDestroySemaphore \
+  /export:vkCreateShaderModule \
+  /export:vkDestroyShaderModule \
   /export:vkGetDeviceProcAddr \
   /export:vkGetInstanceProcAddr \
   /export:SentinelVulkanLoaderStatus \

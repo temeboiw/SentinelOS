@@ -1148,11 +1148,11 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     uint64_t dbg_n=++wm_dbg_compose_calls;
     if(wm_dbg_sample(dbg_n)) {
-        DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\\n",
+        DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
                  (unsigned long long)dbg_n,x,y,w,h,count,pitch);
         for(int oi=0;oi<count;oi++) {
             WmEntry *e=&wm_tab[order[oi]];
-            DbgPrint("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\\n",
+            DbgPrint("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\n",
                      oi,e->pid,e->x,e->y,e->w,e->h,e->minimized);
         }
     }
@@ -1166,7 +1166,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     int flush_ok=gfx_flush(x,y,w,h);
     if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\\n",x,y,w,h,flush_ok);
+        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -1361,14 +1361,14 @@ static Frame *syscall_handler(Frame *f) {
            !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
            a.width!=gfx_width||a.height!=gfx_height) {
             if(wm_dbg_sample(dbg_n))
-                DbgPrint("[gfx] present #%llu REJECT layer=%u rect=(%u,%u %ux%u) surface=%ux%u gfx=%ux%u pixels=%p\\n",
+                DbgPrint("[gfx] present #%llu REJECT layer=%u rect=(%u,%u %ux%u) surface=%ux%u gfx=%ux%u pixels=%p\n",
                          (unsigned long long)dbg_n,a.layer,a.x,a.y,a.w,a.h,
                          a.width,a.height,gfx_width,gfx_height,(void*)a.pixels);
             f->rax=0;return f;
         }
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\\n",
+            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h,a.width,a.height);
         int slot=wm_shared_window_slot(pid);
         KPROCESS *caller=MmCurrentProcess;
@@ -1392,7 +1392,7 @@ static Frame *syscall_handler(Frame *f) {
         else if(slot>=0)dst=wm_shared_windows[slot];
         if(!dst){
             if(wm_dbg_sample(dbg_n))
-                DbgPrint("[gfx] present #%llu REJECT no destination pid=%d layer=%u slot=%d\\n",
+                DbgPrint("[gfx] present #%llu REJECT no destination pid=%d layer=%u slot=%d\n",
                          (unsigned long long)dbg_n,pid,a.layer,slot);
             f->rax=0;return f;
         }
@@ -1404,7 +1404,7 @@ static Frame *syscall_handler(Frame *f) {
         if(a.layer==WM_LAYER_TASKBAR||a.layer==WM_LAYER_WINDOW)
             wm_shared_compose(a.x,a.y,a.w,a.h);
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\\n",
+            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h);
         f->rax=1;
         return f;
@@ -2294,7 +2294,7 @@ static Frame *syscall_handler(Frame *f) {
         int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
         wm_register(pid, title);
         uint64_t dbg_n=++wm_dbg_window_registers;
-        DbgPrint("[wm] register #%llu pid=%d title='%s'\\n",
+        DbgPrint("[wm] register #%llu pid=%d title='%s'\n",
                  (unsigned long long)dbg_n,pid,title);
 
         f->rax = 0;
@@ -2313,7 +2313,7 @@ static Frame *syscall_handler(Frame *f) {
         int slot=wm_shared_window_slot(pid);
         uint64_t dbg_n=++wm_dbg_window_closes;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[wm] unregister #%llu pid=%d slot=%d\\n",
+            DbgPrint("[wm] unregister #%llu pid=%d slot=%d\n",
                      (unsigned long long)dbg_n,pid,slot);
         int x=0,y=0,w=(int)wm_shared_width,h=(int)wm_shared_height;
         if(slot>=0) { x=wm_tab[slot].x-12; y=wm_tab[slot].y-12; w=wm_tab[slot].w+24; h=wm_tab[slot].h+28; }
@@ -2387,7 +2387,7 @@ static Frame *syscall_handler(Frame *f) {
         wm_set_rect(pid,rect[0],rect[1],rect[2],rect[3]);
         uint64_t dbg_n=++wm_dbg_window_moves;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[wm] rect #%llu pid=%d old=(%d,%d %dx%d) new=(%d,%d %dx%d)\\n",
+            DbgPrint("[wm] rect #%llu pid=%d old=(%d,%d %dx%d) new=(%d,%d %dx%d)\n",
                      (unsigned long long)dbg_n,pid,ox+12,oy+12,ow-24,oh-28,
                      rect[0],rect[1],rect[2],rect[3]);
         int nx=rect[0]-12,ny=rect[1]-12,nw=rect[2]+24,nh=rect[3]+28;

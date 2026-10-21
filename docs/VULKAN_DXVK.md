@@ -23,6 +23,16 @@ The current graphics code in `kernel/gfx.h` is a custom VirtIO-GPU 2D path with 
 - Every advertised capability is backed by a real operation and a test; unsupported paths fail cleanly.
 - Build and boot tests run with both VirtIO-VGA and `SENTINELOS_GPU=none`.
 
+## VM experiment
+
+The run script now has an opt-in QEMU Venus device configuration:
+
+```sh
+SENTINELOS_VENUS=1 SENTINELOS_DISPLAY=window ./scripts/run.sh
+```
+
+This requires a QEMU build whose `virtio-vga-gl` device supports `venus`, `blob`, and `hostmem`, plus a host graphics stack that can initialize it. The option only configures the virtual device; it does **not** mean the SentinelOS guest has Vulkan yet. If QEMU rejects an option, use a QEMU build with Venus enabled rather than silently falling back and claiming Vulkan support.
+
 ## Immediate implementation order
 
 1. Audit and harden the existing VirtIO-GPU queue and PCI capability code.

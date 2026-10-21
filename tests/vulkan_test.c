@@ -1,5 +1,6 @@
 /* Host-side conformance smoke test for SentinelOS' implemented Vulkan subset. */
 #include "../user/vulkan.c"
+#include "../user/vk_softpipe.c"
 #include <stdio.h>
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (0)
@@ -521,6 +522,40 @@ int main(void) {
     vkUnmapMemory(device, rbmem);
     vkDestroyBuffer(device, readback, 0);
     vkFreeMemory(device, rbmem, 0);
+
+    /* Exercise CPU triangle rasterization through command-buffer submission. */
+    VkImageCreateInfo drawCi = {0};
+    drawCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    drawCi.imageType = 1; drawCi.format = VK_FORMAT_B8G8R8A8_UNORM;
+    drawCi.extent.width = 8; drawCi.extent.height = 8; drawCi.extent.depth = 1;
+    drawCi.mipLevels = 1; drawCi.arrayLayers = 1; drawCi.samples = 1;
+    drawCi.tiling = 0; drawCi.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    drawCi.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkImage drawImage = 0;
+    CHECK(vkCreateImage(device, &drawCi, 0, &drawImage) == VK_SUCCESS);
+    VkMemoryRequirements drawReq;
+    vkGetImageMemoryRequirements(device, drawImage, &drawReq);
+    VkMemoryAllocateInfo drawAi = {0};
+    drawAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; drawAi.allocationSize = drawReq.size;
+    VkDeviceMemory drawMem = 0;
+    CHECK(vkAllocateMemory(device, &drawAi, 0, &drawMem) == VK_SUCCESS);
+    CHECK(vkBindImageMemory(device, drawImage, drawMem, 0) == VK_SUCCESS);
+    VkSoftVertex va = {1,1,0.5f,1,1,0,0,1,0,0};
+    VkSoftVertex vb = {7,1,0.5f,1,1,0,0,1,0,0};
+    VkSoftVertex vc = {1,7,0.5f,1,1,0,0,1,0,0};
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    SentinelVulkanCmdDrawTriangle(cmd, drawImage, &va, &vb, &vc);
+    CHECK(((VkCmdObj *)cmd)->count == 1);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+2u] == 255);
+    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255);
+    CHECK(((uint8_t *)mapped)[(7u*8u+7u)*4u+3u] == 0);
+    vkUnmapMemory(device, drawMem);
+    vkDestroyImage(device, drawImage, 0);
+    vkFreeMemory(device, drawMem, 0);
 
     /* Whole-image Vulkan image-to-image copy stays inside transfer layouts. */
     VkImageCreateInfo dstci = imci;

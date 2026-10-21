@@ -9,6 +9,7 @@
  */
 #include <stdint.h>
 #include <stddef.h>
+#include "vk_softpipe.h"
 
 #define VKAPI_CALL __attribute__((ms_abi))
 #define VK_SUCCESS 0
@@ -87,6 +88,7 @@
 #define VK_FORMAT_B8G8R8A8_UNORM 44u
 #define VK_FORMAT_FEATURE_TRANSFER_SRC_BIT 0x4000u
 #define VK_FORMAT_FEATURE_TRANSFER_DST_BIT 0x8000u
+#define VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT 0x80u
 #define VK_COMMAND_BUFFER_LEVEL_PRIMARY 0u
 #define VK_COMMAND_BUFFER_LEVEL_SECONDARY 1u
 #define VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 1u
@@ -431,7 +433,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreat
 }
 __declspec(dllexport) void VKAPI_CALL vkDestroyInstance(VkInstance h,const void *alloc) { if(alloc||!inst_ok(h))return;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].parent==h){int used=0;for(unsigned d=0;d<VK_MAX_DEVICES;d++)if(g_devices[d].magic&&g_devices[d].physical==(VkPhysicalDevice)&g_phys[i])used=1;if(!used)g_phys[i].magic=0;}h->magic=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance h,uint32_t *count,VkPhysicalDevice *out) { if(!inst_ok(h)||!count)return VK_ERROR_INITIALIZATION_FAILED;uint32_t n=0;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)n++;if(!out){*count=n;return VK_SUCCESS;}uint32_t cap=*count,k=0;for(unsigned i=0;i<VK_MAX_DEVICES&&k<cap;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)out[k++]=(VkPhysicalDevice)&g_phys[i];*count=k;return k<n?VK_INCOMPLETE:VK_SUCCESS; }
-__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice p,uint32_t *count,VkQueueFamilyProperties *out) { if(!count)return;if(!phys_ok(p)){*count=0;return;}if(!out){*count=1;return;}if(*count){vk_zero(out,sizeof(*out));out->queueFlags=VK_QUEUE_TRANSFER_BIT;out->queueCount=1;out->timestampValidBits=64;out->minImageTransferGranularity.width=1;out->minImageTransferGranularity.height=1;out->minImageTransferGranularity.depth=1;*count=1;}else *count=0; }
+__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice p,uint32_t *count,VkQueueFamilyProperties *out) { if(!count)return;if(!phys_ok(p)){*count=0;return;}if(!out){*count=1;return;}if(*count){vk_zero(out,sizeof(*out));out->queueFlags=VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_TRANSFER_BIT;out->queueCount=1;out->timestampValidBits=64;out->minImageTransferGranularity.width=1;out->minImageTransferGranularity.height=1;out->minImageTransferGranularity.depth=1;*count=1;}else *count=0; }
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice p,void *out) {
  if(!out)return;
  /* Standard Vulkan 1.0 properties prefix; limits remain conservatively zero. */
@@ -452,8 +454,8 @@ __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(VkPhys
  uint32_t *f=(uint32_t*)out;f[0]=f[1]=f[2]=0;
  if(!phys_ok(p))return;
  if(format==VK_FORMAT_R8G8B8A8_UNORM||format==VK_FORMAT_B8G8R8A8_UNORM) {
-  f[0]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-  f[1]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+  f[0]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT|VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+  f[1]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT|VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
  }
 }
 __declspec(dllexport) VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(VkPhysicalDevice p,uint32_t format,uint32_t type,uint32_t tiling,uint32_t usage,uint32_t flags,VkImageFormatProperties *out) {
@@ -487,7 +489,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateImage(VkDevice d,const VkImage
  *out=0;
  if(alloc||ci->imageType!=1||!ci->extent.width||!ci->extent.height||ci->extent.depth!=1||ci->mipLevels!=1||ci->arrayLayers!=1||ci->samples!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
  if(ci->format!=VK_FORMAT_R8G8B8A8_UNORM&&ci->format!=VK_FORMAT_B8G8R8A8_UNORM)return VK_ERROR_FORMAT_NOT_SUPPORTED;
- if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
+ if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
  uint64_t bytes=(uint64_t)ci->extent.width*(uint64_t)ci->extent.height*4u;
  if(bytes>VK_MEMORY_BYTES||bytes/4u/(uint64_t)ci->extent.width!=ci->extent.height)return VK_ERROR_OUT_OF_DEVICE_MEMORY;
  for(unsigned i=0;i<32;i++)if(!g_images[i].magic){VkImageObj *im=&g_images[i];vk_zero(im,sizeof(*im));im->magic=VK_OBJECT_MAGIC;im->device=d;im->size=bytes;im->width=ci->extent.width;im->height=ci->extent.height;im->depth=1;im->format=ci->format;im->usage=ci->usage;im->tiling=ci->tiling;im->mipLevels=1;im->arrayLayers=1;im->samples=1;im->layout=ci->initialLayout;*out=(VkImage)im;return VK_SUCCESS;}
@@ -596,7 +598,19 @@ __declspec(dllexport) void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer c,VkI
  unsigned i=c->count++;c->ops[i].op=3;c->ops[i].image=im;c->ops[i].layout=layout;
  for(unsigned k=0;k<4;k++)c->ops[i].color[k]=color->float32[k];
 }
-static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t *bp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];uint8_t *ip=&((VkMemoryObj*)im->memory)->bytes[im->offset];if(c->ops[i].op==5)vk_copy(ip,bp,(size_t)c->ops[i].size);else vk_copy(bp,ip,(size_t)c->ops[i].size);}else if(c->ops[i].op==7){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory)||c->ops[i].offset>b->size||c->ops[i].size>b->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset],c->ops[i].data,(size_t)c->ops[i].size);}else if(c->ops[i].op==8){VkImageObj *src=(VkImageObj*)c->ops[i].image,*dst=(VkImageObj*)c->ops[i].b;if(!image_ok((VkImage)src)||!image_ok((VkImage)dst)||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->layout!=c->ops[i].layout||dst->layout!=c->ops[i].value)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)dst->memory)->bytes[dst->offset],&((VkMemoryObj*)src->memory)->bytes[src->offset],(size_t)c->ops[i].size);}}return VK_SUCCESS;}
+static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t *bp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];uint8_t *ip=&((VkMemoryObj*)im->memory)->bytes[im->offset];if(c->ops[i].op==5)vk_copy(ip,bp,(size_t)c->ops[i].size);else vk_copy(bp,ip,(size_t)c->ops[i].size);}else if(c->ops[i].op==7){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory)||c->ops[i].offset>b->size||c->ops[i].size>b->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset],c->ops[i].data,(size_t)c->ops[i].size);}else if(c->ops[i].op==8){VkImageObj *src=(VkImageObj*)c->ops[i].image,*dst=(VkImageObj*)c->ops[i].b;if(!image_ok((VkImage)src)||!image_ok((VkImage)dst)||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->layout!=c->ops[i].layout||dst->layout!=c->ops[i].value)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)dst->memory)->bytes[dst->offset],&((VkMemoryObj*)src->memory)->bytes[src->offset],(size_t)c->ops[i].size);}else if(c->ops[i].op==9){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_DEVICE_LOST;VkSoftVertex v[3];vk_copy(v,c->ops[i].data,sizeof(v));uint8_t *bytes=&((VkMemoryObj*)im->memory)->bytes[im->offset];VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1};int pixels=vksoft_triangle(&target,&v[0],&v[1],&v[2],0);if(pixels<0)return VK_ERROR_INITIALIZATION_FAILED;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}}return VK_SUCCESS;}
+
+/* Experimental SentinelOS-only draw bridge; not core Vulkan vkCmdDraw.
+ * Records a pre-transformed triangle for the CPU rasterizer in a color image. */
+__declspec(dllexport) void VKAPI_CALL SentinelVulkanCmdDrawTriangle(VkCommandBuffer c,VkImage image,const VkSoftVertex *a,const VkSoftVertex *b,const VkSoftVertex *d) {
+ if(!cmd_ok(c)||c->state!=1||!image_ok(image)||!a||!b||!d||c->count>=128)return;
+ if(image->device!=c->device||!(image->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||
+    (image->format!=VK_FORMAT_R8G8B8A8_UNORM&&image->format!=VK_FORMAT_B8G8R8A8_UNORM))return;
+ if(image->width>32768u||image->height>32768u||image->size!=(uint64_t)image->width*image->height*4u)return;
+ VkSoftVertex tri[3];tri[0]=*a;tri[1]=*b;tri[2]=*d;
+ vk_zero(&c->ops[c->count],sizeof(c->ops[c->count]));c->ops[c->count].op=9;c->ops[c->count].image=image;c->ops[c->count].layout=VK_IMAGE_LAYOUT_GENERAL;vk_copy(c->ops[c->count].data,tri,sizeof(tri));c->count++;
+}
+
 __declspec(dllexport) VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,const VkSubmitInfo *sub,VkFence fence) {
  VkDevice d=0;
  for(unsigned i=0;i<VK_MAX_QUEUES;i++)if(q==(VkQueue)&g_queues[i]&&g_queues[i].magic==VK_OBJECT_MAGIC)d=g_queues[i].device;

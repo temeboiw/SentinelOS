@@ -156,3 +156,10 @@ This is a targeted correctness improvement, not a large percentage jump in Vulka
 ### Buffer alias regression test ordering fix
 
 Moved the cross-region alias test after the original fill/update submission and readback. The test now verifies the invalid multi-region copy records no commands without resetting and discarding the command buffer used by the pre-existing fill/update assertions. The latest CI run exposed this test-ordering regression; the fix must be validated by a fresh run.
+
+
+### First command-buffer software triangle draw bridge
+
+Added an explicitly experimental SentinelOS-only `SentinelVulkanCmdDrawTriangle` command that records three pre-transformed vertices into a command buffer and executes them through the CPU triangle rasterizer on a bound color-attachment image. It validates command-buffer state, device ownership, image usage/format/size, memory binding, and rasterizer outcome. The queue advertises graphics capability and supported RGBA/BGRA formats advertise color-attachment support. CI now compiles the Vulkan smoke test with the rasterizer and checks a covered pixel plus an untouched pixel after queue submission.
+
+**Tracked implementation milestone: 75% (engineering estimate, not Vulkan conformance).** This is a small real rendering bridge, not core Vulkan graphics-pipeline support: standard `vkCmdDraw`, shader-driven vertex processing, pipeline state, descriptor sets, render passes/framebuffers, and presentation/swapchains remain unimplemented. DXVK compatibility remains unverified.

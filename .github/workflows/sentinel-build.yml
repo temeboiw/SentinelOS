@@ -20,7 +20,7 @@ jobs:
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Test CPU Vulkan runtime subset
         run: |
-          clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-ignored-attributes -fdeclspec tests/vulkan_test.c -o "$RUNNER_TEMP/vulkan-test"
+          clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-ignored-attributes -fdeclspec -Iuser tests/vulkan_test.c user/vk_softpipe.c -o "$RUNNER_TEMP/vulkan-test"
           "$RUNNER_TEMP/vulkan-test"
       - name: Test software 3D renderer
         run: |

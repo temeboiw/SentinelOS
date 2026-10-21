@@ -388,6 +388,7 @@ lld -flavor link \
   /export:vkGetDeviceProcAddr \
   /export:vkGetInstanceProcAddr \
   /export:SentinelVulkanLoaderStatus \
+  /export:SentinelVulkanCmdDrawTriangle \
   "/out:$SYS32/vulkan.dll" \
   "$B/obj/vulkan.o" \
   "$B/obj/vk_softpipe.o"

@@ -78,7 +78,8 @@ typedef struct {
 } WINDOW;
 
 static FBInfo g_fb;
-static u32 *g_front, *g_scanout, g_pitch, g_fw, g_fh, g_scan_pitch;\nstatic int g_gpu_surface;
+static u32 *g_front, *g_scanout, g_pitch, g_fw, g_fh, g_scan_pitch;
+static int g_gpu_surface;
 /* Z-ordered surfaces: cached background, desktop, window, taskbar, cursor. */
 enum { U32_LAYER_BACKGROUND=0, U32_LAYER_DESKTOP=10, U32_LAYER_WINDOW=20, U32_LAYER_TASKBAR=30, U32_LAYER_CURSOR=100 };
 #define U32_LAYER_MAX_PIXELS (1920u * 1080u)

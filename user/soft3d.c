@@ -49,13 +49,19 @@ static uint64_t s3d_syscall3(uint64_t n,uint64_t a,uint64_t b,uint64_t c);
 int S3DGetSurface(S3D_SURFACE *surface) {
     if(!surface)return 0;
     surface->pixels=0;surface->width=0;surface->height=0;
-    surface->pitch=0;surface->backend=0;surface->virgl_buffer=0;\n    surface->virgl_buffer_resource_id=0;surface->virgl_buffer_size=0;
+    surface->pitch=0;surface->backend=0;surface->virgl_buffer=0;
+    surface->virgl_buffer_resource_id=0;surface->virgl_buffer_size=0;
     S3D_GFX_INFO info={0};info.size=sizeof(info);info.version=1;
     if(s3d_syscall3(32,(uint64_t)&info,0,0) && info.backend==2 &&
        info.surface_va && info.width && info.height && info.pitch>=info.width*4u) {
         surface->pixels=(uint32_t*)(uintptr_t)info.surface_va;
         surface->width=info.width;surface->height=info.height;
         surface->pitch=info.pitch/4u;surface->backend=2;
+        if(info.capabilities&(1u<<4)) {
+            surface->virgl_buffer=(void*)(uintptr_t)info.virgl_buffer_va;
+            surface->virgl_buffer_resource_id=info.virgl_buffer_resource_id;
+            surface->virgl_buffer_size=info.virgl_buffer_size;
+        }
         return 1;
     }
     S3D_FB_INFO fb={0};

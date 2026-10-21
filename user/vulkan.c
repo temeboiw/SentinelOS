@@ -124,12 +124,12 @@ typedef struct { VkStructureType sType; const void *pNext; VkDeviceQueueCreateFl
 typedef struct { VkStructureType sType; const void *pNext; VkDeviceCreateFlags flags; uint32_t queueCreateInfoCount; const VkDeviceQueueCreateInfo *pQueueCreateInfos; uint32_t enabledLayerCount; const char *const *ppEnabledLayerNames; uint32_t enabledExtensionCount; const char *const *ppEnabledExtensionNames; const void *pEnabledFeatures; } VkDeviceCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkBufferCreateFlags flags; VkDeviceSize size; VkBufferUsageFlags usage; VkSharingMode sharingMode; uint32_t queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; } VkBufferCreateInfo;
 typedef struct { uint32_t width,height,depth; } VkExtent3D;
+typedef struct { int32_t x,y,z; } VkOffset3D;
 typedef struct { VkExtent3D maxExtent; uint32_t maxMipLevels,maxArrayLayers,sampleCounts; VkDeviceSize maxResourceSize; } VkImageFormatProperties;
 typedef struct { VkStructureType sType; const void *pNext; uint32_t flags,imageType,format; VkExtent3D extent; uint32_t mipLevels,arrayLayers,samples,tiling,usage,sharingMode,queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; uint32_t initialLayout; } VkImageCreateInfo;
 typedef struct { uint32_t aspectMask,baseMipLevel,levelCount,baseArrayLayer,layerCount; } VkImageSubresourceRange;
 typedef struct { uint32_t aspectMask,mipLevel,baseArrayLayer,layerCount; } VkImageSubresourceLayers;
 typedef struct { VkImageSubresourceLayers srcSubresource; VkOffset3D srcOffset; VkImageSubresourceLayers dstSubresource; VkOffset3D dstOffset; VkExtent3D extent; } VkImageCopy;
-typedef struct { int32_t x,y,z; } VkOffset3D;
 typedef struct { VkDeviceSize bufferOffset; uint32_t bufferRowLength,bufferImageHeight; VkImageSubresourceLayers imageSubresource; VkOffset3D imageOffset; VkExtent3D imageExtent; } VkBufferImageCopy;
 typedef union { float float32[4]; int32_t int32[4]; uint32_t uint32[4]; } VkClearColorValue;
 typedef struct { VkStructureType sType; const void *pNext; uint32_t srcAccessMask,dstAccessMask,oldLayout,newLayout,srcQueueFamilyIndex,dstQueueFamilyIndex; VkImage image; VkImageSubresourceRange subresourceRange; } VkImageMemoryBarrier;

@@ -55,6 +55,19 @@ case "$MODE" in
         ;;
 esac
 
+# The default is the broadly compatible 2D VirtIO-VGA device. Opt in to
+# VirGL only when QEMU and the host graphics stack support OpenGL.
+GPU_ARGS=(-vga none -device virtio-vga)
+if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
+    if [[ "$MODE" != "window" ]]; then
+        echo "Error: SENTINELOS_VIRGL=1 requires SENTINELOS_DISPLAY=window and host OpenGL." >&2
+        exit 1
+    fi
+    DISPLAY_ARGS=(-display gtk,gl=on)
+    GPU_ARGS=(-vga none -device virtio-vga-gl)
+    echo "SentinelOS: requesting VirGL-capable VirtIO-VGA (host OpenGL required)"
+fi
+
 # Find OVMF firmware.
 OVMF_CODE=""
 
@@ -97,8 +110,7 @@ exec qemu-system-x86_64 \
     -drive if=pflash,format=raw,file="$VARS" \
     -drive file="$DISKIMG",format=raw,if=none,id=d0 \
     -device virtio-blk-pci,drive=d0 \
-    -vga none \
-    -device virtio-vga \
+    "${GPU_ARGS[@]}" \
     -audiodev "wav,id=audio0,path=$B/sentinel-audio.wav" \
     -device ich9-intel-hda,id=hda,debug=0 \
     -device hda-duplex,bus=hda.0,audiodev=audio0 \

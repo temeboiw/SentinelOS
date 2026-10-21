@@ -432,18 +432,13 @@ static u32 cur_paint[16*16];
 static void ensure_fb(void);
 static void compose(void);
 static void u32_flush_graphics(int x, int y, int w, int h);
-/* Draw the pointer with the CPU on the real framebuffer, never in the GPU
- * composition surface. This keeps cursor pixels out of dirty-rectangle copies. */
-static u32 *cursor_target(void) {
-    if (g_fb.va && g_fb.pitch >= g_fb.w * 4u) return (u32 *)g_fb.va;
-    return g_scanout;
-}
-static u32 cursor_target_pitch(void) {
-    if (g_fb.va && g_fb.pitch >= g_fb.w * 4u) return g_fb.pitch / 4u;
-    return g_scan_pitch;
-}
-static u32 cursor_target_width(void) { return g_fb.w ? g_fb.w : g_fw; }
-static u32 cursor_target_height(void) { return g_fb.h ? g_fb.h : g_fh; }
+/* Cursor and scene must use the same render target. With VirtIO-GPU,
+ * g_scanout is the mapped backing surface; the firmware framebuffer is not
+ * the active scanout and writing the cursor there makes the pointer vanish. */
+static u32 *cursor_target(void) { return g_scanout; }
+static u32 cursor_target_pitch(void) { return g_scan_pitch; }
+static u32 cursor_target_width(void) { return g_fw; }
+static u32 cursor_target_height(void) { return g_fh; }
 
 static void cursor_restore_fast(void) {
     u32 *target=cursor_target();
@@ -512,37 +507,49 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
 }
 
 static void ensure_fb(void) {
+    if (g_scanout) return;
     if (!sy3(SYS_MapFb, (u64)&g_fb, 0, 0) || !g_fb.va) return;
-    /*
-     * Keep USER32 on the same CPU-rendered framebuffer path as sentlogon.exe.
-     * The optional GPU surface is a separate backing store presented through
-     * dirty-rectangle flushes. Mixing cursor save-under pixels from the mapped
-     * framebuffer with that surface causes the pointer to be overwritten and
-     * leaves trails when Explorer redraws windows or text.
-     *
-     * Deliberately do not call SYS_InitializeGraphics here: every USER32 draw,
-     * cursor save/restore, and scene update now targets the same framebuffer.
-     */
+
     g_scanout = (u32 *)g_fb.va;
     g_fw = g_fb.w; g_fh = g_fb.h;
     g_scan_pitch = g_fb.pitch / 4u;
     g_gpu_surface = 0;
-    g_front = g_scanout; g_pitch = g_scan_pitch;
+
+    /* Match sentlogon.exe: USER32 must render into the active GPU backing
+     * surface when VirtIO-GPU is selected, not the inactive firmware buffer. */
+    GfxBootInfo gfx = {0};
+    if (sy3(SYS_InitializeGraphics, (u64)&gfx, 0, 0) &&
+        gfx.backend == 2 && gfx.surface_va &&
+        gfx.width && gfx.height && gfx.pitch >= gfx.width * 4u) {
+        g_scanout = (u32 *)(u64)gfx.surface_va;
+        g_fw = gfx.width;
+        g_fh = gfx.height;
+        g_scan_pitch = gfx.pitch / 4u;
+        g_gpu_surface = 1;
+    }
+
+    g_front = g_scanout;
+    g_pitch = g_scan_pitch;
     u32_ttf_load();
 }
+
+/* Flush raw rectangles without re-entering cursor drawing. */
+static void u32_flush_raw(int x, int y, int w, int h) {
+    if (!g_gpu_surface || w <= 0 || h <= 0) return;
+    int x0=x<0?0:x, y0=y<0?0:y, x1=x+w, y1=y+h;
+    if (x1>(int)g_fw) x1=(int)g_fw;
+    if (y1>(int)g_fh) y1=(int)g_fh;
+    if (x1<=x0 || y1<=y0) return;
+    GfxRect rect={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
+    (void)sy3(SYS_FlushGraphics,(u64)&rect,0,0);
+}
+
 static void u32_flush_graphics(int x, int y, int w, int h) {
-    if (g_gpu_surface && w>0 && h>0) {
-        int x0=x<0?0:x, y0=y<0?0:y, x1=x+w, y1=y+h;
-        if(x1>(int)g_fw)x1=(int)g_fw;
-        if(y1>(int)g_fh)y1=(int)g_fh;
-        if(x1>x0&&y1>y0) {
-            GfxRect rect={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
-            (void)sy3(SYS_FlushGraphics,(u64)&rect,0,0);
-        }
-    }
-    /* Presentation can overwrite the cursor. Overlay it afterward on the
-     * CPU-mapped framebuffer, even after a move restored the old pointer. */
+    u32_flush_raw(x,y,w,h);
+    /* Scene composition can replace cursor pixels in the backing surface.
+     * Redraw and explicitly present the cursor footprint after every flush. */
     cursor_save_draw(cur_ox,cur_oy);
+    u32_flush_raw(cur_ox,cur_oy,16,16);
 }
 
 static void u32_clear_layer(u32 *layer) {

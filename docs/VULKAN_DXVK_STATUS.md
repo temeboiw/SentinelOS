@@ -53,3 +53,8 @@ The bounded scalar helper now follows `OpBranch`, `OpBranchConditional`, and 32-
 
 
 The scalar SPIR-V subset also executes `OpSNegate`, `OpLogicalNot`, and `OpNot` with unit coverage. These are scalar operations only; they do not imply support for full shader interfaces, pointers, floating-point shader math, or storage-resource access.
+
+
+## Additional command and memory validation batch
+
+The CPU backend now executes bounded `vkCmdUpdateBuffer` writes (up to 256 bytes per recorded update), supports whole-image `vkCmdCopyImage` for matching single-mip RGBA8/BGRA8 images already in transfer layouts, and implements `vkResetCommandPool` by resetting its command buffers. Flush/invalidate mapped-memory calls now validate range structures, memory ownership, mapping state, and bounds instead of unconditionally succeeding. These are bounded software-backend operations, not graphics-pipeline or full-conformance support.

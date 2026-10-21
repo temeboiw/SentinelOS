@@ -216,6 +216,8 @@ int main(void) {
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
     vkCmdFillBuffer(cmd, src, 0, 64, 0xA1B2C3D4u);
+    uint32_t update_words[2] = {0x11223344u, 0x55667788u};
+    vkCmdUpdateBuffer(cmd, src, 16, sizeof(update_words), update_words);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     VkFenceCreateInfo fci = {0};
     fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -230,6 +232,12 @@ int main(void) {
     void *mapped = 0;
     CHECK(vkMapMemory(device, smem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(*(uint32_t *)mapped == 0xA1B2C3D4u);
+    CHECK(((uint32_t *)mapped)[4] == 0x11223344u && ((uint32_t *)mapped)[5] == 0x55667788u);
+    VkMappedMemoryRange mappedRange = {0};
+    mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    mappedRange.memory = smem; mappedRange.offset = 0; mappedRange.size = 64;
+    CHECK(vkFlushMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
+    CHECK(vkInvalidateMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
     vkUnmapMemory(device, smem);
 
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
@@ -336,6 +344,8 @@ int main(void) {
     vkDestroyImage(device, image, 0);
     vkFreeMemory(device, imem, 0);
     CHECK(vkDeviceWaitIdle(device) == VK_SUCCESS);
+    CHECK(vkResetCommandPool(device, pool, 0) == VK_SUCCESS);
+    CHECK(cmd->state == 0 && cmd->count == 0);
 
     vkDestroyFence(device, fence, 0);
     vkDestroyCommandPool(device, pool, 0);

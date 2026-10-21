@@ -1063,6 +1063,96 @@ static int user_rtc_system_time(UserSystemTime *out) {
     return month>=1&&month<=12&&day>=1&&day<=31&&hour<24&&min<60&&sec<60;
 }
 
+
+/* Shared software window compositor. USER32 surfaces are copied into kernel-owned
+ * per-window backing stores; the shared GPU scanout is output-only. */
+#define SYS_NtPresentLayer 37
+#define WM_LAYER_BACKGROUND 0
+#define WM_LAYER_DESKTOP    1
+#define WM_LAYER_WINDOW     2
+#define WM_LAYER_TASKBAR    3
+#define WM_COMP_MAX_PIXELS (1920u * 1080u)
+typedef struct {
+    uint64_t pixels;
+    uint32_t layer, x, y, w, h, width, height;
+} WmPresentLayerArgs;
+static uint32_t *wm_shared_background;
+static uint32_t *wm_shared_desktop;
+static uint32_t *wm_shared_taskbar;
+static uint32_t *wm_shared_windows[WM_MAX];
+static uint32_t wm_shared_width, wm_shared_height;
+static uint32_t wm_shared_alpha(uint32_t dst, uint32_t src) {
+    uint32_t a=src>>24;
+    if(!a)return dst;
+    if(a==255u)return src;
+    uint32_t ia=255u-a;
+    uint32_t r=(((src>>16)&255u)*a+((dst>>16)&255u)*ia)/255u;
+    uint32_t g=(((src>>8)&255u)*a+((dst>>8)&255u)*ia)/255u;
+    uint32_t b=((src&255u)*a+(dst&255u)*ia)/255u;
+    return 0xFF000000u|(r<<16)|(g<<8)|b;
+}
+static int wm_shared_ensure(uint32_t width,uint32_t height) {
+    if(!width||!height||width>1920u||height>1080u||
+       (uint64_t)width*height>WM_COMP_MAX_PIXELS)return 0;
+    if(wm_shared_width==width&&wm_shared_height==height&&wm_shared_background&&
+       wm_shared_desktop&&wm_shared_taskbar)return 1;
+    uint64_t bytes=(uint64_t)width*height*sizeof(uint32_t);
+    if(wm_shared_background)kfree(wm_shared_background);
+    if(wm_shared_desktop)kfree(wm_shared_desktop);
+    if(wm_shared_taskbar)kfree(wm_shared_taskbar);
+    wm_shared_background=kzalloc((size_t)bytes);
+    wm_shared_desktop=kzalloc((size_t)bytes);
+    wm_shared_taskbar=kzalloc((size_t)bytes);
+    for(int i=0;i<WM_MAX;i++) {
+        if(wm_shared_windows[i])kfree(wm_shared_windows[i]);
+        wm_shared_windows[i]=0;
+    }
+    if(!wm_shared_background||!wm_shared_desktop||!wm_shared_taskbar) {
+        if(wm_shared_background)kfree(wm_shared_background);
+        if(wm_shared_desktop)kfree(wm_shared_desktop);
+        if(wm_shared_taskbar)kfree(wm_shared_taskbar);
+        wm_shared_background=wm_shared_desktop=wm_shared_taskbar=0;
+        wm_shared_width=wm_shared_height=0;
+        return 0;
+    }
+    wm_shared_width=width;wm_shared_height=height;
+    return 1;
+}
+static int wm_shared_window_slot(int pid) {
+    for(int i=0;i<WM_MAX;i++)
+        if(wm_tab[i].alive&&wm_tab[i].pid==pid)return i;
+    return -1;
+}
+static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
+    if(!wm_shared_background||!gfx_surface_pa||!gfx_width||!gfx_height)return;
+    uint32_t width=wm_shared_width,height=wm_shared_height;
+    if(width!=gfx_width||height!=gfx_height)return;
+    if(x>=width||y>=height||!w||!h)return;
+    if(w>width-x)w=width-x;if(h>height-y)h=height-y;
+    KPROCESS *old=MmCurrentProcess;
+    if(old!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+    uint32_t *out=(uint32_t*)PHYS_TO_VIRT(gfx_surface_pa);
+    uint32_t pitch=gfx_pitch/4u;
+    int order[WM_MAX],count=0;
+    for(int i=0;i<WM_MAX;i++) {
+        WmEntry *e=&wm_tab[i];
+        if(!e->alive||e->minimized||!wm_shared_windows[i])continue;
+        int j=count++;
+        while(j>0&&wm_tab[order[j-1]].z>e->z){order[j]=order[j-1];j--;}
+        order[j]=i;
+    }
+    for(uint32_t yy=y;yy<y+h;yy++)for(uint32_t xx=x;xx<x+w;xx++) {
+        uint32_t at=yy*width+xx;
+        uint32_t c=wm_shared_background[at];
+        c=wm_shared_alpha(c,wm_shared_desktop[at]);
+        for(int oi=0;oi<count;oi++)c=wm_shared_alpha(c,wm_shared_windows[order[oi]][at]);
+        c=wm_shared_alpha(c,wm_shared_taskbar[at]);
+        out[yy*pitch+xx]=c;
+    }
+    (void)gfx_flush(x,y,w,h);
+    if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
+}
+
 static Frame *syscall_handler(Frame *f) {
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
@@ -1236,6 +1326,54 @@ static Frame *syscall_handler(Frame *f) {
         *(NT_MEMORY_BASIC_INFORMATION *)f->rcx = info;
         if (f->r9) *(NT_ULONG *)f->r9 = sizeof info;
         f->rax = NtStatusResult(NT_STATUS_SUCCESS);
+        return f;
+    }
+
+
+    case SYS_NtPresentLayer: {
+        WmPresentLayerArgs a;
+        if(!f->rdi||!MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(a),0)) {
+            f->rax=0;return f;
+        }
+        a=*(WmPresentLayerArgs*)f->rdi;
+        uint64_t pixels=(uint64_t)a.width*a.height;
+        uint64_t bytes=pixels*sizeof(uint32_t);
+        if(!a.pixels||!a.width||!a.height||a.width>1920u||a.height>1080u||
+           pixels>WM_COMP_MAX_PIXELS||a.layer>WM_LAYER_TASKBAR||
+           !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
+           a.width!=gfx_width||a.height!=gfx_height) {
+            f->rax=0;return f;
+        }
+        int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
+        int slot=wm_shared_window_slot(pid);
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=wm_shared_ensure(a.width,a.height);
+        if(ok&&a.layer==WM_LAYER_WINDOW) {
+            if(slot<0)ok=0;
+            else if(!wm_shared_windows[slot])wm_shared_windows[slot]=kzalloc((size_t)bytes);
+            if(slot>=0&&!wm_shared_windows[slot])ok=0;
+        }
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        if(!ok){f->rax=0;return f;}
+        if(a.x>=a.width||a.y>=a.height||!a.w||!a.h){f->rax=1;return f;}
+        if(a.w>a.width-a.x)a.w=a.width-a.x;
+        if(a.h>a.height-a.y)a.h=a.height-a.y;
+        uint32_t *src=(uint32_t*)a.pixels;
+        uint32_t *dst=0;
+        if(a.layer==WM_LAYER_BACKGROUND)dst=wm_shared_background;
+        else if(a.layer==WM_LAYER_DESKTOP)dst=wm_shared_desktop;
+        else if(a.layer==WM_LAYER_TASKBAR)dst=wm_shared_taskbar;
+        else if(slot>=0)dst=wm_shared_windows[slot];
+        if(!dst){f->rax=0;return f;}
+        for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
+            for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
+                dst[yy*a.width+xx]=src[yy*a.width+xx];
+        /* Apps repaint their own dirty rectangle. The desktop publishes all
+         * three global layers in order and the taskbar submission commits the frame. */
+        if(a.layer==WM_LAYER_TASKBAR||a.layer==WM_LAYER_WINDOW)
+            wm_shared_compose(a.x,a.y,a.w,a.h);
+        f->rax=1;
         return f;
     }
 

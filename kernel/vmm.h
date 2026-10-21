@@ -134,7 +134,7 @@ static void MmSwitchToProcess(KPROCESS *p) {
     __asm__ volatile("cli" ::: "memory");
     __atomic_add_fetch(&p->ActiveCpus, 1, __ATOMIC_ACQ_REL);
     if (old) __atomic_sub_fetch(&old->ActiveCpus, 1, __ATOMIC_ACQ_REL);
-    MmCurrentProcess = p;
+    cpu_local_current()->current_process = p;
     __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
 }
 
@@ -149,7 +149,7 @@ static void MmInitSystemProcess(void) {
     sys.ImageName[0]='S'; sys.ImageName[1]='y'; sys.ImageName[2]='s';
     sys.ImageName[3]='t'; sys.ImageName[4]='e'; sys.ImageName[5]='m';
     PspSystemProcess = &sys;
-    MmCurrentProcess = &sys;
+    cpu_local_current()->current_process = &sys;
     DbgPrint("mm: System process cr3=%p pml4=%p\n",
              (void *)sys.DirectoryTableBase, (void *)pml4);
 }

@@ -283,7 +283,7 @@ static void smp_ap_entry(uint32_t cpu_index) {
     cpu_init_cpu(cpu_index);
     smp_enable_local_apic();
     cpu_locals[cpu_index].apic_id = smp_topology.cpus[cpu_index].apic_id;
-    MmCurrentProcess = PspSystemProcess;
+    cpu_locals[cpu_index].current_process = PspSystemProcess;
     __atomic_add_fetch(&PspSystemProcess->ActiveCpus, 1, __ATOMIC_ACQ_REL);
     if (!KiInitializeApScheduler(cpu_index)) {
         DbgPrint("smp: AP cpu%u scheduler initialization failed; parking\n", cpu_index);

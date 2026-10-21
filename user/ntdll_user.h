@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -51,6 +51,19 @@ static inline u64 NtSyscall6(u64 service, u64 a1, u64 a2, u64 a3,
 }
 
 typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
+typedef struct {
+    u32 size, version, backend, capabilities;
+    u32 width, height, pitch;
+    u32 pci_bus, pci_device, pci_function;
+    unsigned short vendor_id, device_id;
+    unsigned char pci_class, pci_subclass, pci_prog_if, initialized;
+} GfxBootInfo;
+
+#define GFX_CAP_FRAMEBUFFER (1u << 0)
+#define GFX_CAP_PCI_SCAN    (1u << 1)
+#define GFX_CAP_VIRTIO_GPU  (1u << 2)
+#define GFX_CAP_ACCEL_2D    (1u << 3)
+#define GFX_CAP_ACCEL_3D    (1u << 4)
 
 static inline void NtWriteConsole(const char *s) {
     u64 n = 0;
@@ -78,6 +91,12 @@ static inline NTSTATUS NtCreateProcess(const char *name) {
 }
 static inline NTSTATUS NtQueryDirectory(u64 index, char *name_out) {
     return (NTSTATUS)sy3(SYS_QueryDir, index, (u64)name_out, 0);
+}
+static inline u64 NtInitializeGraphics(GfxBootInfo *out) {
+    if (!out) return 0;
+    out->size = sizeof(*out);
+    out->version = 1;
+    return sy3(SYS_InitializeGraphics, (u64)out, 0, 0);
 }
 static inline u64 NtMapFramebuffer(FBInfo *out) {
     return sy3(SYS_MapFramebuffer, (u64)out, 0, 0);

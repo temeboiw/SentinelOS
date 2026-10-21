@@ -96,6 +96,7 @@ for src in \
   boot/loadufi.c \
   hal/hal.c \
   kernel/kernel.c \
+  kernel/gfx.h \
   user/smss.c \
   user/bootvid.c \
   user/sentlogon.c \

@@ -144,3 +144,10 @@ Added bounded 32-bit `OpFRem` and `OpFMod` support, including the distinct trunc
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 70% (engineering estimate, not Vulkan conformance).** This is a coarse internal project milestone for cumulative implementation effort, not a claim that 70% of Vulkan 1.0 or DXVK is implemented. Graphics/compute pipeline execution, descriptor/resource binding, render passes/framebuffers, full shader interfaces/resource access, presentation/swapchains, and broad DXVK compatibility remain unimplemented.
+
+
+### Cross-region buffer alias validation
+
+Hardened `vkCmdCopyBuffer` for distinct buffer handles that share one device-memory allocation. The runtime now validates every source region against every destination region before recording any operations, rejecting cross-region aliasing atomically. Regression coverage constructs two buffer objects bound to overlapping portions of one allocation and verifies the invalid batch records zero commands.
+
+This is a targeted correctness improvement, not a large percentage jump in Vulkan coverage. Graphics/compute pipelines, descriptor sets, render passes/framebuffers, shader resource access, presentation, and DXVK compatibility remain major missing areas.

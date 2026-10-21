@@ -526,7 +526,25 @@ __declspec(dllexport) VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer c) 
 __declspec(dllexport) VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c,VkFlags flags) { (void)flags;if(!cmd_ok(c))return VK_ERROR_INITIALIZATION_FAILED;c->count=0;c->state=0;return VK_SUCCESS; }
 __declspec(dllexport) void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,uint32_t value) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||c->count>=128||off>b->size||(off&3u))return;if(size==VK_WHOLE_SIZE)size=b->size-off;if(size>b->size-off||(size!=VK_WHOLE_SIZE&&(size&3u)))return;unsigned i=c->count++;c->ops[i].op=1;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;c->ops[i].value=value; }
 __declspec(dllexport) void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,const void *data) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||b->device!=c->device||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!data||!size||size>256u||(size&3u)||(off&3u)||off>b->size||size>b->size-off||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=7;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;vk_copy(c->ops[i].data,data,(size_t)size); }
-__declspec(dllexport) void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) { if(!cmd_ok(c)||c->state!=1||!buf_ok(src)||!buf_ok(dst)||src->device!=c->device||dst->device!=c->device||src==dst||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->memory->device!=c->device||dst->memory->device!=c->device||!(src->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!n||!regions||n>128u-c->count)return;const uint64_t *r=(const uint64_t*)regions;for(uint32_t j=0;j<n;j++){uint64_t so=r[j*3],doff=r[j*3+1],sz=r[j*3+2];if(!sz||(so&3u)||(doff&3u)||(sz&3u)||so>src->size||sz>src->size-so||doff>dst->size||sz>dst->size-doff)return;if(src->memory==dst->memory){uint64_t sb=src->offset+so,db=dst->offset+doff;if(sb<db+sz&&db<sb+sz)return;}}for(uint32_t j=0;j<n;j++){unsigned i=c->count++;c->ops[i].op=2;c->ops[i].a=src;c->ops[i].b=dst;c->ops[i].offset=r[j*3];c->ops[i].size=r[j*3+2];c->ops[i].offset2=r[j*3+1];} }
+__declspec(dllexport) void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) {
+ if(!cmd_ok(c)||c->state!=1||!buf_ok(src)||!buf_ok(dst)||src->device!=c->device||dst->device!=c->device||src==dst||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->memory->device!=c->device||dst->memory->device!=c->device||!(src->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!n||!regions||n>128u-c->count)return;
+ const uint64_t *r=(const uint64_t*)regions;
+ for(uint32_t j=0;j<n;j++){
+  uint64_t so=r[j*3],doff=r[j*3+1],sz=r[j*3+2];
+  if(!sz||(so&3u)||(doff&3u)||(sz&3u)||so>src->size||sz>src->size-so||doff>dst->size||sz>dst->size-doff)return;
+ }
+ /* Different buffer handles can still alias the same allocation. Validate
+  * every source region against every destination region before recording any
+  * commands, not merely each region against its own destination. */
+ if(src->memory==dst->memory){
+  for(uint32_t s=0;s<n;s++)for(uint32_t d=0;d<n;d++){
+   uint64_t sb=src->offset+r[s*3],se=sb+r[s*3+2];
+   uint64_t db=dst->offset+r[d*3+1],de=db+r[d*3+2];
+   if(sb<de&&db<se)return;
+  }
+ }
+ for(uint32_t j=0;j<n;j++){unsigned i=c->count++;c->ops[i].op=2;c->ops[i].a=src;c->ops[i].b=dst;c->ops[i].offset=r[j*3];c->ops[i].size=r[j*3+2];c->ops[i].offset2=r[j*3+1];}
+}
 
 
 

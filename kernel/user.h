@@ -83,6 +83,7 @@ typedef struct {
     int alive;
     int fresh;
     int parent;
+    int system_app;
     uint64_t gpr[14];
 } UserProc;
 
@@ -246,6 +247,32 @@ static int up_pick_next(void) {
 }
 
 /* ------------------------------------------------------------ PE helpers */
+
+/* System images are explicitly trusted session/boot components.
+ * Ordinary user applications cannot create these processes. */
+static int PspIsSystemAppName(const char *name) {
+    static const char *const names[] = {
+        "smss.exe", "bootvid.exe", "sentlogon.exe"
+    };
+    if (!name) return 0;
+    for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        const char *a = name;
+        const char *b = names[i];
+        while (*a && *b) {
+            char ca = *a++, cb = *b++;
+            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + ('a' - 'A'));
+            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
+            if (ca != cb) break;
+        }
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+
+static int PspIsSystemProcess(KPROCESS *proc) {
+    int idx = up_find_proc(proc);
+    return idx >= 0 && up_tab[idx].alive && up_tab[idx].system_app;
+}
 
 static int pe_is_image(const uint8_t *image, uint64_t size) {
     if (!image || size < 0x40) return 0;
@@ -1355,6 +1382,18 @@ static Frame *syscall_handler(Frame *f) {
 
         KPROCESS *caller = MmCurrentProcess;
 
+        /*
+         * System applications are a protected launch class. User applications
+         * may launch ordinary applications, but only a system application may
+         * launch smss.exe, bootvid.exe, or sentlogon.exe.
+         */
+        if (PspIsSystemAppName(name) && !PspIsSystemProcess(caller)) {
+            DbgPrint("user: denied system-app launch: caller=%s target=%s\\n",
+                     caller ? caller->Name : "<none>", name);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+
         /* Kernel allocation and page-table work under the system CR3. */
         MmSwitchToProcess(PspSystemProcess);
 
@@ -1463,6 +1502,7 @@ static Frame *syscall_handler(Frame *f) {
 
         if (up_n < UP_MAX) {
             up_tab[up_n].parent = up_find_proc(caller);
+            up_tab[up_n].system_app = PspIsSystemAppName(name);
             up_tab[up_n].proc = proc;
             up_tab[up_n].entry = entry;
             up_tab[up_n].alive = 1;
@@ -2167,6 +2207,7 @@ static void user_enter(BootInfo *bi) {
         ki_current->Process = proc;
 
     up_tab[0].parent = -1;
+    up_tab[0].system_app = 1; /* smss is the trusted system-process root */
     up_tab[0].proc = proc;
     up_tab[0].entry = entry;
     up_tab[0].alive = 1;

@@ -11,13 +11,14 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - device and queue creation;
 - fixed-size host-visible memory allocations, buffer creation/binding/mapping;
 - command pools and command-buffer allocation;
-- CPU execution of `vkCmdFillBuffer` and `vkCmdCopyBuffer` on queue submission;
+- CPU execution of `vkCmdFillBuffer`, `vkCmdCopyBuffer`, and `vkCmdClearColorImage` on queue submission;
+- bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory;
 - basic fence status/wait/reset and device/queue idle operations;
 - procedure lookup for implemented entry points.
 
 This is an **experimental, incomplete Vulkan software backend**, not a
 conformant full Vulkan 1.0 implementation. It does not implement graphics or
-compute pipelines, shader modules/SPIR-V execution, images, render passes,
+compute pipelines, shader modules/SPIR-V execution, image views, render passes,
 descriptor sets, full synchronization semantics, swapchains/surface
 presentation, or the broad feature/limit set expected by normal engines. It is
 not DXVK-ready.

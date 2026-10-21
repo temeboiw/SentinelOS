@@ -105,6 +105,37 @@ int main(void) {
     CHECK(vkMapMemory(device, dmem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(*(uint32_t *)mapped == 0xA1B2C3D4u);
     vkUnmapMemory(device, dmem);
+
+    VkImageCreateInfo imci = {0};
+    imci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imci.imageType = 1;
+    imci.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imci.extent.width = 4; imci.extent.height = 4; imci.extent.depth = 1;
+    imci.mipLevels = 1; imci.arrayLayers = 1; imci.samples = 1;
+    imci.tiling = 1; imci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkImage image = 0;
+    CHECK(vkCreateImage(device, &imci, 0, &image) == VK_SUCCESS);
+    VkMemoryRequirements imreq;
+    vkGetImageMemoryRequirements(device, image, &imreq);
+    VkMemoryAllocateInfo imai = {0};
+    imai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    imai.allocationSize = imreq.size; imai.memoryTypeIndex = 0;
+    VkDeviceMemory imem = 0;
+    CHECK(vkAllocateMemory(device, &imai, 0, &imem) == VK_SUCCESS);
+    CHECK(vkBindImageMemory(device, image, imem, 0) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    VkClearColorValue clear = {{1.0f, 0.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, imem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)mapped)[0] == 255 && ((uint8_t *)mapped)[1] == 0 &&
+          ((uint8_t *)mapped)[2] == 0 && ((uint8_t *)mapped)[3] == 255);
+    vkUnmapMemory(device, imem);
+    vkDestroyImage(device, image, 0);
+    vkFreeMemory(device, imem, 0);
     CHECK(vkDeviceWaitIdle(device) == VK_SUCCESS);
 
     vkDestroyFence(device, fence, 0);
@@ -115,6 +146,6 @@ int main(void) {
     vkFreeMemory(device, dmem, 0);
     vkDestroyDevice(device, 0);
     vkDestroyInstance(instance, 0);
-    puts("SentinelOS Vulkan CPU subset: PASS");
+    puts("SentinelOS Vulkan CPU buffer/image subset: PASS");
     return 0;
 }

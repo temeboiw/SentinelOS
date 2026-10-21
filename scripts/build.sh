@@ -337,6 +337,11 @@ lld -flavor link \
   /export:vkDeviceWaitIdle \
   /export:vkQueueWaitIdle \
   /export:vkCreateBuffer \
+  /export:vkCreateImage \
+  /export:vkDestroyImage \
+  /export:vkGetImageMemoryRequirements \
+  /export:vkBindImageMemory \
+  /export:vkCmdClearColorImage \
   /export:vkDestroyBuffer \
   /export:vkGetBufferMemoryRequirements \
   /export:vkAllocateMemory \

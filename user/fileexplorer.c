@@ -33,6 +33,7 @@ typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
 typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
+typedef BOOL (*GetWindowRect_t)(void *, void *);
 typedef void (*BeginRedrawBatch_t)(void);
 typedef void (*EndRedrawBatch_t)(void);
 typedef struct { int left, top, right, bottom; } FE_RECT;
@@ -168,6 +169,7 @@ void mainCRTStartup(void) {
     DispatchMessageA_t pDisp = (DispatchMessageA_t)gpa(u32, "DispatchMessageA");
     MessageBoxA_t pMsgBox = (MessageBoxA_t)gpa(u32, "MessageBoxA");
     InvalidateRect_t pInv = (InvalidateRect_t)gpa(u32, "InvalidateRect");
+    GetWindowRect_t pGetWindowRect = (GetWindowRect_t)gpa(u32, "GetWindowRect");
     BeginRedrawBatch_t pBeginBatch = (BeginRedrawBatch_t)gpa(u32, "BeginRedrawBatch");
     EndRedrawBatch_t pEndBatch = (EndRedrawBatch_t)gpa(u32, "EndRedrawBatch");
 
@@ -192,6 +194,13 @@ void mainCRTStartup(void) {
         if (!pGetMsg(&msg, 0, 0, 0)) continue;
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
+
+        /* Mouse coordinates are screen-space. Never keep using the startup Y
+         * after the user moves the window; ask USER32 for its live rectangle. */
+        if (pGetWindowRect) {
+            FE_RECT live_rect;
+            if (pGetWindowRect(g_window, &live_rect)) g_win_y = live_rect.top;
+        }
 
         /*
          * Mouse move: update a fixed-width hover marker. The marker occupies

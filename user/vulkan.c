@@ -215,7 +215,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
  size_t i=5; uint32_t active=0, found=0, steps=0;
  if(!w||!out_bits||!vk_spirv_validate(w,n)||!entry||
     output_id>=VK_SPIRV_MAX_IDS)return 0;
- vk_zero(ids,sizeof(ids));vk_zero(defined,sizeof(defined));
+ vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));
  /* Constants are module-scope declarations and are available to the entry. */
  while(i<n) {
   uint32_t wc=w[i]>>16,op=w[i]&0xffffu;

@@ -39,7 +39,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -1009,6 +1009,25 @@ static void compose(void) {
     draw_taskbar();
     if(u32_render_clip){layer_x0=u32_clip_x0;layer_y0=u32_clip_y0;layer_x1=u32_clip_x1;layer_y1=u32_clip_y1;}
     if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
+    if(layered&&g_gpu_surface) {
+        typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
+        int px0=layer_x0,py0=layer_y0,px1=layer_x1,py1=layer_y1;
+        if(px0<0)px0=0;if(py0<0)py0=0;
+        if(px1>(int)g_fw)px1=(int)g_fw;if(py1>(int)g_fh)py1=(int)g_fh;
+        if(px1>px0&&py1>py0) {
+            U32_PRESENT_LAYER a;
+            a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);a.width=g_fw;a.height=g_fh;
+            if(u32_is_desktop_window()) {
+                a.layer=0;a.pixels=(u64)u32_aero_bg_cache;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                a.layer=3;a.pixels=(u64)u32_taskbar_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+            } else {
+                a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+            }
+        }
+    }
+
     if (auto_clip) {
         u32_render_clip=0;
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;

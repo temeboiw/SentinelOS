@@ -43,6 +43,7 @@ typedef struct {
     void *current_process;
     uint32_t apic_id;
     volatile uint32_t scheduler_active;
+    void *scheduler_deferred_thread;
 } CpuLocal;
 static CpuLocal cpu_locals[CPU_MAX] __attribute__((aligned(64)));
 static IdtEntry idt[256];

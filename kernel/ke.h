@@ -54,28 +54,51 @@ static void rq_push_front(KTHREAD *t) {                        // wake-up boost:
     t->state = ThreadReady; t->next = rq_head; rq_head = t;
     if (!rq_tail) rq_tail = t;
 }
-static KTHREAD *rq_pop(void) {
+static KTHREAD *rq_pop_for_cpu(uint32_t cpu_index) {
+    KTHREAD *prev = NULL;
     KTHREAD *t = rq_head;
-    if (t) { rq_head = t->next; if (!rq_head) rq_tail = NULL; t->next = NULL; }
-    return t;
+    while (t) {
+        if (t->cpu_owner == UINT32_MAX || t->cpu_owner == cpu_index) {
+            if (prev) prev->next = t->next; else rq_head = t->next;
+            if (rq_tail == t) rq_tail = prev;
+            t->next = NULL;
+            return t;
+        }
+        prev = t;
+        t = t->next;
+    }
+    return NULL;
 }
 
 // pick the next thread; called from isr_handler with the interrupted thread's frame
 static Frame *KiSchedule(Frame *f) {
     KiSchedulerLock();
+    CpuLocal *cpu = cpu_local_current();
+    KTHREAD *deferred = (KTHREAD *)cpu->scheduler_deferred_thread;
+    if (deferred) {
+        deferred->cpu_owner = UINT32_MAX; /* it has been off this CPU's stack for one full interrupt */
+        cpu->scheduler_deferred_thread = NULL;
+    }
+
     KTHREAD *cur = ki_current;
     cur->frame = f;
-    cur->cpu_owner = UINT32_MAX;
     if (cur->state == ThreadParking) cur->state = ThreadWaiting;
     if (cur->state == ThreadRunning) {
-        if (cur != ki_idle) rq_push(cur); else cur->state = ThreadReady;     // the idle thread is never queued
+        if (cur != ki_idle) rq_push(cur); else cur->state = ThreadReady;
     }
-    KTHREAD *next = rq_pop();
+    KTHREAD *next = rq_pop_for_cpu(cpu->index);
     if (!next) next = ki_idle;
     next->state = ThreadRunning;
-    next->cpu_owner = cpu_local_current()->index;
+    next->cpu_owner = cpu->index;
     next->runs++;
-    if (next != cur) ki_switches++;
+    if (next != cur) {
+        ki_switches++;
+        /* Do not let another CPU resume/reap cur until this CPU has left its stack. */
+        cur->cpu_owner = cpu->index;
+        cpu->scheduler_deferred_thread = cur;
+    } else {
+        cur->cpu_owner = cpu->index;
+    }
     if (next->Process && next->Process != cur->Process)
         MmSwitchToProcess(next->Process);
     ki_current = next;
@@ -208,6 +231,7 @@ static void KiInitializeScheduler(void) {
 
     ki_idle = ki_make_thread("Idle", KiIdleThread, NULL);
     ki_idle->state = ThreadReady;
+    ki_idle->cpu_owner = cpu_local_current()->index;
     ki_threads[1] = ki_idle;
 
     ki_quantum_left = QUANTUM_TICKS;

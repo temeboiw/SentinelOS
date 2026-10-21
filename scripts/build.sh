@@ -103,6 +103,7 @@ for src in \
   user/taskbar.c \
   user/kernel32.c \
   user/user32.c \
+  user/soft3d.c \
   user/font_ttf.h \
   user/explorer.c \
   user/fileexplorer.c \
@@ -1452,7 +1453,8 @@ lld -flavor link \
   /export:SetGestureConfig \
   /export:GetTouchInputInfo \
   "/out:$SYS32/user32.dll" \
-  "$B/obj/user32.o"
+  "$B/obj/user32.o" \\
+  "$B/obj/soft3d.o"
 
 echo "  -> explorer.exe"
 

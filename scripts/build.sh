@@ -110,8 +110,11 @@ find_llvm_tool() {
 CLANG_BIN="$(find_llvm_tool CLANG_BIN)"
 CLANGXX_BIN="$(find_llvm_tool CLANGXX_BIN)"
 LLD_BIN="$(find_llvm_tool LLD_BIN)"
-clang()   { "$CLANG_BIN" "$@"; }
-clang++() { "$CLANGXX_BIN" "$@"; }
+# Termux/proot: keep Clang frontend execution in-process; otherwise its
+# /proc/self/exe re-exec can resolve to proot and reject the private -cc1 flag.
+unset CLANG_SPAWN_CC1
+clang()   { "$CLANG_BIN" -fintegrated-cc1 "$@"; }
+clang++() { "$CLANGXX_BIN" -fintegrated-cc1 "$@"; }
 lld()     { "$LLD_BIN" "$@"; }
 
 # Catch broken compiler wrappers before starting parallel EFI builds.

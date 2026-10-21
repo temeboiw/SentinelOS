@@ -328,6 +328,25 @@ static void draw_text(int x, int y, const char *s, u32 col) {
  * On a plain mouse move the old cursor is erased by restoring only pixels that
  * still contain the cursor's own colour, so content that another process
  * repainted underneath is never overwritten with stale pixels. */
+static const char u32_cursor_shape[16][17] = {
+    "#...............",
+    "##..............",
+    "#w+#............",
+    "#ww#............",
+    "#www#...........",
+    "#wwww#..........",
+    "#wwwww#.........",
+    "#wwwwww#........",
+    "#wwwwwww#.......",
+    "#wwwwwwww#......",
+    "#wwww#####......",
+    "#ww#ww#.........",
+    "#w#.#ww#........",
+    "##...#ww#.......",
+    "#.....#ww#......",
+    "......##........"
+};
+
 static u32 cur_under[16*16];
 static u32 cur_paint[16*16];
 
@@ -420,25 +439,6 @@ static u32 u32_alpha_over(u32 dst,u32 src) {
     u32 b=((src&255u)*a+(dst&255u)*ia)/255u;
     return 0xFF000000u|(r<<16)|(g<<8)|b;
 }
-
-static const char u32_cursor_shape[16][17] = {
-    "#...............",
-    "##..............",
-    "#w+#............",
-    "#ww#............",
-    "#www#...........",
-    "#wwww#..........",
-    "#wwwww#.........",
-    "#wwwwww#........",
-    "#wwwwwww#.......",
-    "#wwwwwwww#......",
-    "#wwww#####......",
-    "#ww#ww#.........",
-    "#w#.#ww#........",
-    "##...#ww#.......",
-    "#.....#ww#......",
-    "......##........"
-};
 
 /* BACKGROUND < DESKTOP < WINDOW < TASKBAR < CURSOR. */
 static void u32_composite_layers(int x0,int y0,int x1,int y1) {

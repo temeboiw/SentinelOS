@@ -47,6 +47,7 @@
 #define SYS_NtFlushGraphics              33
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35
+#define SYS_NtUploadVirGLBuffer            36
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1783,6 +1784,17 @@ static Frame *syscall_handler(Frame *f) {
         } else {
             f->rax = 0;
         }
+        return f;
+    }
+
+    case SYS_NtUploadVirGLBuffer: {
+        uint64_t bytes=f->rdi;
+        if(!gfx_3d_ready||!bytes||bytes>GFX_VIRGL_BUFFER_BYTES) { f->rax=0;return f; }
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=gfx_upload_virgl_buffer((uint32_t)bytes);
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=ok?1:0;
         return f;
     }
 

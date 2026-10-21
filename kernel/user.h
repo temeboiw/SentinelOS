@@ -1127,6 +1127,17 @@ static int wm_shared_window_slot(int pid) {
 static uint64_t wm_dbg_compose_calls, wm_dbg_present_calls;
 static uint64_t wm_dbg_window_moves, wm_dbg_window_registers, wm_dbg_window_closes;
 static int wm_dbg_sample(uint64_t n) { return n <= 48u || (n % 128u) == 0u; }
+static uint64_t wm_dbg_input_events;
+static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
+    uint64_t n=++wm_dbg_input_events;
+    if(!wm_dbg_sample(n))return;
+    if(type==1)
+        DbgPrint("[input] #%llu pid=%d key='%c' mouse=(%d,%d) buttons=%d\\n",
+                 (unsigned long long)n,pid,key,x,y,btn);
+    else
+        DbgPrint("[input] #%llu pid=%d %s mouse=(%d,%d) buttons=%d\\n",
+                 (unsigned long long)n,pid,type==3?"click":"move",x,y,btn);
+}
 
 static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(!wm_shared_background||!gfx_surface_pa||!gfx_width||!gfx_height)return;
@@ -2134,6 +2145,7 @@ static Frame *syscall_handler(Frame *f) {
             if (pending_click_pid == mepid) {
                 *out = pending_click;
                 pending_click_valid = 0;
+                wm_dbg_input(mepid,out->type,out->x,out->y,out->btn,out->key);
                 f->rax = 1;
                 return f;
             }
@@ -2178,6 +2190,7 @@ static Frame *syscall_handler(Frame *f) {
                 pending_click_valid = 0;
             }
 
+            wm_dbg_input(mepid,out->type,out->x,out->y,out->btn,out->key);
             f->rax = 1;
             return f;
         }
@@ -2190,6 +2203,7 @@ static Frame *syscall_handler(Frame *f) {
             out->x = mouse_x;
             out->y = mouse_y;
             out->btn = mouse_btn;
+            wm_dbg_input(mepid,out->type,out->x,out->y,out->btn,out->key);
             f->rax = 1;
             return f;
         }
@@ -2210,6 +2224,7 @@ static Frame *syscall_handler(Frame *f) {
                 ly = mouse_y;
                 lb = mouse_btn;
 
+                wm_dbg_input(mepid,out->type,out->x,out->y,out->btn,out->key);
                 if (out->type == 3) {
                     int target = wm_hit_test(out->x, out->y);
                     if (target <= 0) target = mepid;

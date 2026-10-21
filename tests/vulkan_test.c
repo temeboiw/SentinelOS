@@ -24,7 +24,7 @@ int main(void) {
     count = 1;
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, qprop);
     CHECK(count == 1 && qprop[0].queueCount == 1);
-    CHECK(qprop[0].queueFlags == VK_QUEUE_TRANSFER_BIT);
+    CHECK(qprop[0].queueFlags == (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT));
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(physical, &mp);
     CHECK(mp.memoryTypeCount == 1 && mp.memoryHeapCount == 1);

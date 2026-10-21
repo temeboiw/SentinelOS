@@ -45,6 +45,7 @@
 #define SYS_NtQueryVolumeMetadata       31
 #define SYS_NtInitializeGraphics        32
 #define SYS_NtFlushGraphics              33
+#define SYS_NtSubmit3D                    34
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1781,6 +1782,22 @@ static Frame *syscall_handler(Frame *f) {
         } else {
             f->rax = 0;
         }
+        return f;
+    }
+
+    case SYS_NtSubmit3D: {
+        uint64_t user_stream=f->rdi, length=f->rsi;
+        if(!length || length>4064 || !gfx_3d_ready ||
+           !MmValidateUserRange(MmCurrentProcess,user_stream,length,0)) {
+            f->rax=0;return f;
+        }
+        uint8_t stream[4064];
+        for(uint64_t i=0;i<length;i++)stream[i]=((const uint8_t*)user_stream)[i];
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=gfx_submit_virgl(stream,(uint32_t)length);
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=ok?1:0;
         return f;
     }
 

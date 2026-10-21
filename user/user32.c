@@ -976,6 +976,12 @@ static void on_click(int x, int y) {
             return;
         }
 
+        if(clicked_child) {
+            SendMessageA((void *)1,0x0111u,clicked_child->id,
+                (i64)(unsigned long long)(0x1000u+(unsigned int)(clicked_child-u32_child_windows)));
+            return;
+        }
+
         if (!clicked_child && hit(x, y, wx, wy, wx + ww - 60, wy + 32)) {
             g_drag = 1;
             g_drag_ox = x - wx;
@@ -1129,6 +1135,8 @@ void *CreateWindowExA(
 
 __attribute__((dllexport))
 BOOL ShowWindow(void *hwnd, int cmd) {
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){BOOL was=child->visible;child->visible=(cmd!=0);compose();return was;}
     (void)hwnd;
     (void)cmd;
 
@@ -1600,11 +1608,15 @@ static void *u32_focus;
 static void *u32_active;
 
 __attribute__((dllexport)) BOOL GetClientRect(void *hwnd, U32_RECT *r) {
-    (void)hwnd; if (!r || !g_wnd.visible) return 0;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){if(!r)return 0;r->left=0;r->top=0;r->right=child->w;r->bottom=child->h;return 1;}
+    if(hwnd!=(void *)1 || !r || !g_wnd.visible) return 0;
     r->left=0; r->top=0; r->right=g_wnd.w; r->bottom=g_wnd.h-32; return 1;
 }
 __attribute__((dllexport)) BOOL MoveWindow(void *hwnd, int x, int y, int w, int h, BOOL repaint) {
-    (void)hwnd; if (!g_wnd.visible || w<1 || h<1) return 0;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){if(w<1||h<1)return 0;child->x=x;child->y=y;child->w=w;child->h=h;if(repaint)compose();return 1;}
+    if(hwnd!=(void *)1 || !g_wnd.visible || w<1 || h<1) return 0;
     g_wnd.x=x; g_wnd.y=y; g_wnd.w=w; g_wnd.h=h;
     { int r[4]={x,y,w,h}; sy3(SYS_WmRect,(u64)r,0,0); }
     if (repaint) compose(); return 1;
@@ -1615,12 +1627,14 @@ __attribute__((dllexport)) BOOL SetWindowPos(void *hwnd, void *after, int x, int
     return MoveWindow(hwnd,x,y,cx,cy,!(flags&0x0008u));
 }
 __attribute__((dllexport)) BOOL GetWindowRect(void *hwnd, U32_RECT *r) {
-    (void)hwnd; if (!r || !g_wnd.visible) return 0;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){if(!r||child->parent!=(void *)1)return 0;r->left=g_wnd.x+child->x;r->top=g_wnd.y+child->y;r->right=r->left+child->w;r->bottom=r->top+child->h;return 1;}
+    if(hwnd!=(void *)1 || !r || !g_wnd.visible) return 0;
     r->left=g_wnd.x; r->top=g_wnd.y; r->right=g_wnd.x+g_wnd.w; r->bottom=g_wnd.y+g_wnd.h; return 1;
 }
 __attribute__((dllexport)) BOOL IsWindow(void *hwnd) { return (hwnd==(void *)1 && g_wnd.visible) || u32_child_from_hwnd(hwnd)!=0; }
 __attribute__((dllexport)) BOOL IsWindowVisible(void *hwnd) { return IsWindow(hwnd) && !g_wnd.minimized; }
-__attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) {if(!IsWindow(hwnd))return 0;BOOL was_disabled=(u32_wnd_style&0x08000000u)!=0;if(enable)u32_wnd_style&=~0x08000000u;else u32_wnd_style|=0x08000000u;if(was_disabled!=!enable)compose();return was_disabled;}
+__attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) {U32_CHILDWND *child=u32_child_from_hwnd(hwnd);if(child){BOOL was=child->enabled;child->enabled=enable;compose();return was;}if(!IsWindow(hwnd))return 0;BOOL was_disabled=(u32_wnd_style&0x08000000u)!=0;if(enable)u32_wnd_style&=~0x08000000u;else u32_wnd_style|=0x08000000u;if(was_disabled!=!enable)compose();return was_disabled;}
 __attribute__((dllexport)) BOOL IsIconic(void *hwnd) { (void)hwnd; return g_wnd.visible && g_wnd.minimized; }
 __attribute__((dllexport)) void *GetForegroundWindow(void) { return g_wnd.visible && !g_wnd.minimized ? (void *)1 : (void *)0; }
 __attribute__((dllexport)) BOOL SetForegroundWindow(void *hwnd) { if (!IsWindow(hwnd)) return 0; u32_active=hwnd; return 1; }
@@ -1634,7 +1648,9 @@ __attribute__((dllexport)) int GetWindowTextA(void *hwnd, LPSTR out, int cap) {
     while (g_wnd.title[i] && i+1<cap) { out[i]=g_wnd.title[i]; i++; } out[i]=0; return i;
 }
 __attribute__((dllexport)) BOOL SetWindowTextA(void *hwnd, LPCSTR title) {
-    int i=0; (void)hwnd; if (!title || !g_wnd.visible) return 0;
+    int i=0; U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){if(!title)return 0;while(title[i]&&i+1<sizeof(child->text)){child->text[i]=title[i];i++;}child->text[i]=0;compose();return 1;}
+    (void)hwnd; if (!title || !g_wnd.visible) return 0;
     while (title[i] && i<63) { g_wnd.title[i]=title[i]; i++; } g_wnd.title[i]=0; compose(); return 1;
 }
 __attribute__((dllexport)) int GetClassNameA(void *hwnd, LPSTR out, int cap) {

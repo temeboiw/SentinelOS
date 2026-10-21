@@ -182,8 +182,18 @@ static int gfx_queue_init(void) {
     for(unsigned int i=0;i<1000000 && c[20]!=0;i++) __asm__ volatile("pause");
     c[20]=1; /* ACKNOWLEDGE */
     c[20]=3; /* DRIVER */
-    *(volatile uint32_t*)(c+8)=0; /* driver feature selector */
-    *(volatile uint32_t*)(c+12)=0; /* negotiate no optional features */
+    /* Modern VirtIO devices require VIRTIO_F_VERSION_1 (feature bit 32).
+       Do not mark FEATURES_OK unless the device advertises it. */
+    *(volatile uint32_t*)(c+0)=1; /* device feature selector: high word */
+    uint32_t device_features_hi=*(volatile uint32_t*)(c+4);
+    if(!(device_features_hi&1u)) {
+        DbgPrint("gfx: device lacks VIRTIO_F_VERSION_1\n");
+        return 0;
+    }
+    *(volatile uint32_t*)(c+8)=0; /* driver feature selector: low word */
+    *(volatile uint32_t*)(c+12)=0; /* no optional low-word features */
+    *(volatile uint32_t*)(c+8)=1; /* driver feature selector: high word */
+    *(volatile uint32_t*)(c+12)=1; /* negotiate VIRTIO_F_VERSION_1 */
     c[20]=11; /* FEATURES_OK */
     if(!(c[20]&8u)) { DbgPrint("gfx: device rejected required feature set\n"); return 0; }
     *(volatile uint16_t*)(c+22)=0; /* control queue */

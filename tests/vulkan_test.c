@@ -183,6 +183,35 @@ int main(void) {
     CHECK(vk_spirv_execute_u32(bit_words, sizeof(bit_words)/4u, 3u, 9u, &executed));
     CHECK(executed == 3u);
 
+    /* SPIR-V bitfield insert and signed/unsigned extraction. */
+    const uint32_t bitfield_words[] = {
+        0x07230203u, 0x00010000u, 0u, 20u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 0x000000F0u,
+        (4u<<16)|43u, 2u, 6u, 0x00000005u,
+        (4u<<16)|43u, 2u, 7u, 4u,
+        (4u<<16)|43u, 2u, 8u, 4u,
+        (4u<<16)|43u, 2u, 9u, 0x00000080u,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 10u,
+        (7u<<16)|201u, 2u, 11u, 5u, 6u, 4u, 4u,
+        (6u<<16)|203u, 2u, 12u, 11u, 4u, 4u,
+        (6u<<16)|202u, 2u, 13u, 9u, 0u, 8u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(bitfield_words, sizeof(bitfield_words)/4u));
+    CHECK(vk_spirv_execute_u32(bitfield_words, sizeof(bitfield_words)/4u, 3u, 11u, &executed));
+    CHECK(executed == 0x00000050u);
+    CHECK(vk_spirv_execute_u32(bitfield_words, sizeof(bitfield_words)/4u, 3u, 12u, &executed));
+    CHECK(executed == 5u);
+    CHECK(vk_spirv_execute_u32(bitfield_words, sizeof(bitfield_words)/4u, 3u, 13u, &executed));
+    CHECK(executed == 0xFFFFFF80u);
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

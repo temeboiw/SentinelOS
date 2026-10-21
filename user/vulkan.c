@@ -299,6 +299,22 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     }
     ids[rid]=v;defined[rid]=1;
    }
+   else if((op==201u||op==202u||op==203u)&&(wc==(op==201u?7u:6u))) {
+    rid=w[i+2];a=w[i+3];
+    if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
+    uint32_t offset=w[i+(op==201u?5:4)],count=w[i+(op==201u?6:5)];
+    if(offset>=32u||count==0u||count>32u||offset+count>32u)return 0;
+    uint32_t mask=count==32u?0xFFFFFFFFu:((1u<<count)-1u);
+    if(op==201u) {
+     uint32_t insert_id=w[i+4];
+     if(insert_id>=VK_SPIRV_MAX_IDS||!defined[insert_id])return 0;
+     v=(ids[a]&~(mask<<offset))|((ids[insert_id]&mask)<<offset);
+    } else {
+     v=(ids[a]>>offset)&mask;
+     if(op==202u&&count<32u&&(v&(1u<<(count-1u))))v|=~mask;
+    }
+    ids[rid]=v;defined[rid]=1;
+   }
    else if((op==128u||op==130u||op==132u||op==134u||op==135u||
             op==137u||op==138u||op==139u||op==164u||op==165u||
             op==166u||op==167u||op==170u||op==171u||op==172u||

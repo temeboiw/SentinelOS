@@ -67,3 +67,8 @@ The CPU backend now executes bounded `vkCmdUpdateBuffer` writes (up to 256 bytes
 ### Additional scalar SPIR-V instructions
 
 The bounded scalar interpreter now handles `OpBitReverse` (204) and `OpBitCount` (205) for 32-bit scalar values, with tests. This does not make it a general shader runtime.
+
+
+### Additional scalar bitfield execution
+
+The interpreter now executes bounded 32-bit `OpBitFieldInsert`, `OpBitFieldSExtract`, and `OpBitFieldUExtract` operations, with checks for invalid offsets/counts and tests for insertion plus signed and unsigned extraction. This expands the scalar subset only; it is not a complete shader runtime.

@@ -127,6 +127,13 @@ int main(void) {
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
     VkClearColorValue clear = {{1.0f, 0.0f, 0.0f, 1.0f}};
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    VkImageMemoryBarrier imb = {0};
+    imb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imb.oldLayout = 0; imb.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imb.srcQueueFamilyIndex = 0xFFFFFFFFu; imb.dstQueueFamilyIndex = 0xFFFFFFFFu;
+    imb.image = image; imb.subresourceRange = range;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, 0, 0, 0, 1, &imb);
     vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);

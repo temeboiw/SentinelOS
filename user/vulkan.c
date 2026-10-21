@@ -36,6 +36,7 @@
 #define VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO 9
 #define VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO 12
 #define VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO 14
+#define VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER 45
 #define VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO 39
 #define VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO 40
 #define VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO 42
@@ -75,6 +76,9 @@
 #define VK_IMAGE_ASPECT_COLOR_BIT 1u
 #define VK_IMAGE_LAYOUT_GENERAL 1u
 #define VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL 7u
+#define VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL 6u
+#define VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT 1u
+#define VK_PIPELINE_STAGE_TRANSFER_BIT 0x1000u
 #define VK_FORMAT_R8G8B8A8_UNORM 37u
 #define VK_FORMAT_B8G8R8A8_UNORM 44u
 #define VK_COMMAND_BUFFER_LEVEL_PRIMARY 0u
@@ -117,6 +121,7 @@ typedef struct { uint32_t width,height,depth; } VkExtent3D;
 typedef struct { VkStructureType sType; const void *pNext; uint32_t flags,imageType,format; VkExtent3D extent; uint32_t mipLevels,arrayLayers,samples,tiling,usage,sharingMode,queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; uint32_t initialLayout; } VkImageCreateInfo;
 typedef struct { uint32_t aspectMask,baseMipLevel,levelCount,baseArrayLayer,layerCount; } VkImageSubresourceRange;
 typedef union { float float32[4]; int32_t int32[4]; uint32_t uint32[4]; } VkClearColorValue;
+typedef struct { VkStructureType sType; const void *pNext; uint32_t srcAccessMask,dstAccessMask,oldLayout,newLayout,srcQueueFamilyIndex,dstQueueFamilyIndex; VkImage image; VkImageSubresourceRange subresourceRange; } VkImageMemoryBarrier;
 typedef struct { VkStructureType sType; const void *pNext; VkDeviceSize allocationSize; uint32_t memoryTypeIndex; } VkMemoryAllocateInfo;
 typedef struct { VkDeviceSize size; VkDeviceSize alignment; uint32_t memoryTypeBits; } VkMemoryRequirements;
 typedef struct { uint32_t propertyFlags; uint32_t heapIndex; } VkMemoryType;
@@ -259,6 +264,19 @@ __declspec(dllexport) VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c
 __declspec(dllexport) void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,uint32_t value) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||c->count>=128||off>b->size||(off&3u))return;if(size==VK_WHOLE_SIZE)size=b->size-off;if(size>b->size-off||(size!=VK_WHOLE_SIZE&&(size&3u)))return;unsigned i=c->count++;c->ops[i].op=1;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;c->ops[i].value=value; }
 __declspec(dllexport) void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) { if(!cmd_ok(c)||c->state!=1||!buf_ok(src)||!buf_ok(dst)||!src->memory||!dst->memory||!(src->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!regions)return;const uint64_t *r=(const uint64_t*)regions;for(uint32_t j=0;j<n&&c->count<128;j++){uint64_t so=r[j*3],doff=r[j*3+1],sz=r[j*3+2];if(so>src->size||sz>src->size-so||doff>dst->size||sz>dst->size-doff)continue;unsigned i=c->count++;c->ops[i].op=2;c->ops[i].a=src;c->ops[i].b=dst;c->ops[i].offset=so;c->ops[i].size=sz;c->ops[i].offset2=doff;} }
 
+
+__declspec(dllexport) void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer c,uint32_t srcStage,uint32_t dstStage,uint32_t dep,uint32_t memCount,const void *memBarriers,uint32_t bufferCount,const void *bufferBarriers,uint32_t imageCount,const VkImageMemoryBarrier *images) {
+ (void)dep;(void)memBarriers;(void)bufferBarriers;
+ if(!cmd_ok(c)||c->state!=1||!srcStage||!dstStage||memCount||bufferCount||(!images&&imageCount))return;
+ for(uint32_t j=0;j<imageCount;j++){
+  const VkImageMemoryBarrier *b=&images[j];
+  if(b->sType!=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER||!image_ok(b->image)||b->image->device!=c->device||c->count>=128)return;
+  if(b->srcQueueFamilyIndex!=0xFFFFFFFFu||b->dstQueueFamilyIndex!=0xFFFFFFFFu)return;
+  if(b->subresourceRange.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||b->subresourceRange.baseMipLevel||b->subresourceRange.levelCount!=1||b->subresourceRange.baseArrayLayer||b->subresourceRange.layerCount!=1)return;
+  if((b->oldLayout!=0&&b->oldLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)||(b->newLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))return;
+  unsigned i=c->count++;c->ops[i].op=4;c->ops[i].image=b->image;c->ops[i].value=b->oldLayout;c->ops[i].layout=b->newLayout;
+ }
+}
 __declspec(dllexport) void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer c,VkImage im,uint32_t layout,const VkClearColorValue *color,uint32_t rangeCount,const VkImageSubresourceRange *ranges) {
  if(!cmd_ok(c)||c->state!=1||!image_ok(im)||!im->memory||!color||!ranges||!rangeCount||c->count>=128||!(im->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT))return;
  if(layout!=VK_IMAGE_LAYOUT_GENERAL&&layout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)return;
@@ -266,7 +284,7 @@ __declspec(dllexport) void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer c,VkI
  unsigned i=c->count++;c->ops[i].op=3;c->ops[i].image=im;c->ops[i].layout=layout;
  for(unsigned k=0;k<4;k++)c->ops[i].color[k]=color->float32[k];
 }
-static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory))return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}}return VK_SUCCESS;}
+static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}}return VK_SUCCESS;}
 __declspec(dllexport) VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,const VkSubmitInfo *sub,VkFence fence) { VkDevice d=0;for(unsigned i=0;i<VK_MAX_QUEUES;i++)if(q==(VkQueue)&g_queues[i]&&g_queues[i].magic==VK_OBJECT_MAGIC)d=g_queues[i].device;if(!d)return VK_ERROR_DEVICE_LOST;if(fence&&(!fence_ok(fence)||fence->device!=d))return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t i=0;i<n;i++){if(!sub||sub[i].sType!=VK_STRUCTURE_TYPE_SUBMIT_INFO)return VK_ERROR_INITIALIZATION_FAILED;if(sub[i].waitSemaphoreCount||sub[i].signalSemaphoreCount)return VK_ERROR_FEATURE_NOT_PRESENT;for(uint32_t j=0;j<sub[i].commandBufferCount;j++){VkCommandBuffer c=sub[i].pCommandBuffers[j];if(!cmd_ok(c)||c->device!=d)return VK_ERROR_INITIALIZATION_FAILED;VkResult r=execute_cmd(c);if(r)return r;}}if(fence)fence->signaled=1;return VK_SUCCESS; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateFence(VkDevice d,const VkFenceCreateInfo *ci,const void *alloc,VkFence *out) { if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_FENCES;i++)if(!g_fences[i].magic){g_fences[i].magic=VK_OBJECT_MAGIC;g_fences[i].device=d;g_fences[i].signaled=(ci->flags&VK_FENCE_CREATE_SIGNALED_BIT)!=0;*out=(VkFence)&g_fences[i];return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS; }
 __declspec(dllexport) void VKAPI_CALL vkDestroyFence(VkDevice d,VkFence f,const void *alloc) { if(!alloc&&dev_ok(d)&&fence_ok(f)&&f->device==d)f->magic=0; }
@@ -278,7 +296,7 @@ __declspec(dllexport) void VKAPI_CALL vkDestroySemaphore(VkDevice d,VkSemaphore 
 __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice d,const char *name) {
  if(!dev_ok(d)||!name)return (PFN_vkVoidFunction)0;
 #define DPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- DPROC(vkGetDeviceProcAddr);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);
+ DPROC(vkGetDeviceProcAddr);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);
 #undef DPROC
  return (PFN_vkVoidFunction)0;
 }

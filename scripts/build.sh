@@ -342,6 +342,7 @@ lld -flavor link \
   /export:vkGetImageMemoryRequirements \
   /export:vkBindImageMemory \
   /export:vkCmdClearColorImage \
+  /export:vkCmdPipelineBarrier \
   /export:vkDestroyBuffer \
   /export:vkGetBufferMemoryRequirements \
   /export:vkAllocateMemory \

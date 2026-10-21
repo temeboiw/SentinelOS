@@ -350,7 +350,44 @@ __declspec(dllexport) void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer c,VkI
  for(unsigned k=0;k<4;k++)c->ops[i].color[k]=color->float32[k];
 }
 static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t *bp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];uint8_t *ip=&((VkMemoryObj*)im->memory)->bytes[im->offset];if(c->ops[i].op==5)vk_copy(ip,bp,(size_t)c->ops[i].size);else vk_copy(bp,ip,(size_t)c->ops[i].size);}}return VK_SUCCESS;}
-__declspec(dllexport) VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,const VkSubmitInfo *sub,VkFence fence) { VkDevice d=0;for(unsigned i=0;i<VK_MAX_QUEUES;i++)if(q==(VkQueue)&g_queues[i]&&g_queues[i].magic==VK_OBJECT_MAGIC)d=g_queues[i].device;if(!d)return VK_ERROR_DEVICE_LOST;if(fence&&(!fence_ok(fence)||fence->device!=d))return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t i=0;i<n;i++){if(!sub||sub[i].sType!=VK_STRUCTURE_TYPE_SUBMIT_INFO)return VK_ERROR_INITIALIZATION_FAILED;if(sub[i].waitSemaphoreCount||sub[i].signalSemaphoreCount)return VK_ERROR_FEATURE_NOT_PRESENT;for(uint32_t j=0;j<sub[i].commandBufferCount;j++){VkCommandBuffer c=sub[i].pCommandBuffers[j];if(!cmd_ok(c)||c->device!=d)return VK_ERROR_INITIALIZATION_FAILED;VkResult r=execute_cmd(c);if(r)return r;}}if(fence)fence->signaled=1;return VK_SUCCESS; }
+__declspec(dllexport) VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,const VkSubmitInfo *sub,VkFence fence) {
+ VkDevice d=0;
+ for(unsigned i=0;i<VK_MAX_QUEUES;i++)if(q==(VkQueue)&g_queues[i]&&g_queues[i].magic==VK_OBJECT_MAGIC)d=g_queues[i].device;
+ if(!d)return VK_ERROR_DEVICE_LOST;
+ if(fence&&(!fence_ok(fence)||fence->device!=d||fence->signaled))return VK_ERROR_INITIALIZATION_FAILED;
+ if(n&&!sub)return VK_ERROR_INITIALIZATION_FAILED;
+ /* Validate the batch before consuming binary waits or executing work. */
+ for(uint32_t i=0;i<n;i++) {
+  if(sub[i].sType!=VK_STRUCTURE_TYPE_SUBMIT_INFO ||
+     (sub[i].waitSemaphoreCount&&(!sub[i].pWaitSemaphores||!sub[i].pWaitDstStageMask)) ||
+     (sub[i].signalSemaphoreCount&&!sub[i].pSignalSemaphores) ||
+     (sub[i].commandBufferCount&&!sub[i].pCommandBuffers))return VK_ERROR_INITIALIZATION_FAILED;
+  for(uint32_t j=0;j<sub[i].waitSemaphoreCount;j++) {
+   VkSemaphore w=sub[i].pWaitSemaphores[j];
+   if(!sem_ok(w)||w->device!=d)return VK_ERROR_INITIALIZATION_FAILED;
+   if(!w->signaled)return VK_NOT_READY;
+  }
+  for(uint32_t j=0;j<sub[i].signalSemaphoreCount;j++) {
+   VkSemaphore z=sub[i].pSignalSemaphores[j];
+   if(!sem_ok(z)||z->device!=d||z->signaled)return VK_ERROR_INITIALIZATION_FAILED;
+   for(uint32_t k=0;k<j;k++)if(sub[i].pSignalSemaphores[k]==z)return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  for(uint32_t j=0;j<sub[i].commandBufferCount;j++) {
+   VkCommandBuffer c=sub[i].pCommandBuffers[j];
+   if(!cmd_ok(c)||c->device!=d||c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;
+  }
+ }
+ for(uint32_t i=0;i<n;i++) {
+  for(uint32_t j=0;j<sub[i].waitSemaphoreCount;j++)sub[i].pWaitSemaphores[j]->signaled=0;
+  for(uint32_t j=0;j<sub[i].commandBufferCount;j++) {
+   VkResult r=execute_cmd(sub[i].pCommandBuffers[j]);
+   if(r)return r;
+  }
+  for(uint32_t j=0;j<sub[i].signalSemaphoreCount;j++)sub[i].pSignalSemaphores[j]->signaled=1;
+ }
+ if(fence)fence->signaled=1;
+ return VK_SUCCESS;
+}
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateFence(VkDevice d,const VkFenceCreateInfo *ci,const void *alloc,VkFence *out) { if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_FENCES;i++)if(!g_fences[i].magic){g_fences[i].magic=VK_OBJECT_MAGIC;g_fences[i].device=d;g_fences[i].signaled=(ci->flags&VK_FENCE_CREATE_SIGNALED_BIT)!=0;*out=(VkFence)&g_fences[i];return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS; }
 __declspec(dllexport) void VKAPI_CALL vkDestroyFence(VkDevice d,VkFence f,const void *alloc) { if(!alloc&&dev_ok(d)&&fence_ok(f)&&f->device==d)f->magic=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkGetFenceStatus(VkDevice d,VkFence f) { if(!dev_ok(d)||!fence_ok(f)||f->device!=d)return VK_ERROR_DEVICE_LOST;return f->signaled?VK_SUCCESS:VK_NOT_READY; }

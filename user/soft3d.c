@@ -32,13 +32,54 @@ static uint32_t s3d_lerp_channel(uint32_t a,uint32_t b,uint32_t c,
     uint64_t q=(uint64_t)(n/area);
     return q>255u?255u:(uint32_t)q;
 }
+typedef struct {
+    uint32_t size,version,backend,capabilities;
+    uint32_t width,height,pitch;
+    uint32_t pci_bus,pci_device,pci_function;
+    uint16_t vendor_id,device_id;
+    uint8_t pci_class,pci_subclass,pci_prog_if,initialized;
+    uint64_t surface_va;
+} S3D_GFX_INFO;
+typedef struct { uint64_t va; uint32_t w,h,pitch; } S3D_FB_INFO;
+
+static uint64_t s3d_syscall3(uint64_t n,uint64_t a,uint64_t b,uint64_t c);
+
+int S3DGetSurface(S3D_SURFACE *surface) {
+    if(!surface)return 0;
+    surface->pixels=0;surface->width=0;surface->height=0;
+    surface->pitch=0;surface->backend=0;
+    S3D_GFX_INFO info={0};info.size=sizeof(info);info.version=1;
+    if(s3d_syscall3(32,(uint64_t)&info,0,0) && info.backend==2 &&
+       info.surface_va && info.width && info.height && info.pitch>=info.width*4u) {
+        surface->pixels=(uint32_t*)(uintptr_t)info.surface_va;
+        surface->width=info.width;surface->height=info.height;
+        surface->pitch=info.pitch/4u;surface->backend=2;
+        return 1;
+    }
+    S3D_FB_INFO fb={0};
+    if(!s3d_syscall3(8,(uint64_t)&fb,0,0)||!fb.va||!fb.w||!fb.h||fb.pitch<fb.w*4u)
+        return 0;
+    surface->pixels=(uint32_t*)(uintptr_t)fb.va;
+    surface->width=fb.w;surface->height=fb.h;
+    surface->pitch=fb.pitch/4u;surface->backend=1;
+    return 1;
+}
+int S3DInitializeSurface(S3D_CONTEXT *ctx,const S3D_SURFACE *surface,
+                         uint32_t *depth,int32_t focal) {
+    if(!surface||!surface->pixels)return 0;
+    if(!S3DInitialize(ctx,surface->pixels,depth,surface->width,surface->height,
+                      surface->pitch,focal))return 0;
+    ctx->backend=surface->backend;
+    return 1;
+}
+
 int S3DInitialize(S3D_CONTEXT *ctx,uint32_t *color,uint32_t *depth,
                   uint32_t width,uint32_t height,uint32_t pitch,
                   int32_t focal) {
     if(!ctx||!color||!depth||width<1||height<1||width>1920||height>1080||
        pitch<width||focal<=0)return 0;
     ctx->color=color;ctx->depth=depth;ctx->width=width;ctx->height=height;
-    ctx->pitch=pitch;ctx->focal_length=focal;
+    ctx->pitch=pitch;ctx->focal_length=focal;ctx->backend=0;
     return 1;
 }
 void S3DClear(S3D_CONTEXT *ctx,uint32_t argb,uint32_t depth_value) {
@@ -105,5 +146,5 @@ static uint64_t s3d_syscall3(uint64_t n,uint64_t a,uint64_t b,uint64_t c) {
 int S3DPresent(S3D_CONTEXT *ctx) {
     if(!ctx||!ctx->color||!ctx->width||!ctx->height)return 0;
     struct {uint32_t x,y,w,h;} rect={0,0,ctx->width,ctx->height};
-    return s3d_syscall3(33,(uint64_t)&rect,0,0)!=0;
+    if(ctx->backend==1)return 1;\n    return s3d_syscall3(33,(uint64_t)&rect,0,0)!=0;
 }

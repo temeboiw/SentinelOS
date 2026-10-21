@@ -18,6 +18,10 @@
 #define GFX_GPU_MAX_H 1080u
 #define GFX_VQ_MAX 16u
 #define GFX_RESOURCE_ID 1u
+#define GFX_VIRGL_TARGET_ID 2u
+#define GFX_VIRGL_BUFFER_ID 3u
+#define GFX_VIRGL_BUFFER_BYTES (1024u*1024u)
+#define GFX_VIRGL_BUFFER_PAGES (GFX_VIRGL_BUFFER_BYTES/4096u)
 #define GFX_VIRTIO_VENDOR 0x1AF4u
 #define GFX_VIRTIO_GPU_ID 0x1050u
 #define GFX_VIRTIO_GPU_LEGACY_ID 0x1005u
@@ -45,6 +49,9 @@ typedef struct {
     uint16_t vendor_id, device_id;
     uint8_t pci_class, pci_subclass, pci_prog_if, initialized;
     uint64_t surface_va;
+    uint64_t virgl_buffer_va;
+    uint32_t virgl_buffer_resource_id;
+    uint32_t virgl_buffer_size;
 } GfxBootInfo;
 
 typedef struct { uint64_t addr; uint32_t len; uint16_t flags, next; } GfxDesc;
@@ -85,6 +92,7 @@ typedef struct { GfxCtrlHdr hdr; } GfxResponse;
 static uint8_t gfx_gpu_ready;
 static uint8_t gfx_gpu_failed;\nstatic uint8_t gfx_virgl_supported;\nstatic uint8_t gfx_3d_ready;
 static uint64_t gfx_surface_pa, gfx_surface_bytes, gfx_surface_pages;
+static uint64_t gfx_virgl_buffer_pa;
 static uint32_t gfx_width, gfx_height, gfx_pitch;
 static volatile uint8_t *gfx_common, *gfx_notify;
 static uint32_t gfx_notify_mult;
@@ -289,7 +297,7 @@ static int gfx_create_virgl_target(void) {
         uint32_t array_size,last_level,nr_samples,flags,padding;
     } cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_3D;
-    cr.resource_id=2;cr.target=2; /* PIPE_TEXTURE_2D */
+    cr.resource_id=GFX_VIRGL_TARGET_ID;cr.target=2; /* PIPE_TEXTURE_2D */
     cr.format=GFX_GPU_FORMAT_B8G8R8X8_UNORM;
     cr.bind=(1u<<1)|(1u<<3); /* render target + sampler view */
     cr.width=gfx_width;cr.height=gfx_height;cr.depth=1;cr.array_size=1;
@@ -298,15 +306,66 @@ static int gfx_create_virgl_target(void) {
 
     struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};
     attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;
-    attach.resource_id=2;attach.nr_entries=1;
+    attach.resource_id=GFX_VIRGL_TARGET_ID;attach.nr_entries=1;
     attach.entry.addr=gfx_surface_pa;attach.entry.length=(uint32_t)gfx_surface_bytes;
     if(!gfx_command(&attach,sizeof attach))return 0;
 
     struct { GfxCtrlHdr hdr;uint32_t resource_id,padding; } bind={0};
     bind.hdr.type=GFX_GPU_CMD_CTX_ATTACH_RESOURCE;bind.hdr.ctx_id=1;
-    bind.resource_id=2;
+    bind.resource_id=GFX_VIRGL_TARGET_ID;
     if(!gfx_command(&bind,sizeof bind))return 0;
     return 1;
+}
+static int gfx_create_virgl_buffer(void) {
+    gfx_virgl_buffer_pa=pmm_alloc_n(GFX_VIRGL_BUFFER_PAGES);
+    if(!gfx_virgl_buffer_pa)return 0;
+    for(uint64_t p=0;p<GFX_VIRGL_BUFFER_PAGES;p++) {
+        volatile uint64_t *page=(volatile uint64_t*)(gfx_virgl_buffer_pa+p*4096ULL);
+        for(unsigned int i=0;i<512;i++)page[i]=0;
+    }
+    struct {
+        GfxCtrlHdr hdr;
+        uint32_t resource_id,target,format,bind,width,height,depth;
+        uint32_t array_size,last_level,nr_samples,flags,padding;
+    } cr={0};
+    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.resource_id=GFX_VIRGL_BUFFER_ID;
+    cr.target=0; /* PIPE_BUFFER */
+    cr.format=14; /* PIPE_FORMAT_R8_UNORM */
+    cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
+    cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;
+    if(!gfx_command(&cr,sizeof cr))return 0;
+    struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};
+    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;
+    attach.resource_id=GFX_VIRGL_BUFFER_ID;attach.nr_entries=1;
+    attach.entry.addr=gfx_virgl_buffer_pa;attach.entry.length=GFX_VIRGL_BUFFER_BYTES;
+    if(!gfx_command(&attach,sizeof attach))return 0;
+    struct { GfxCtrlHdr hdr;uint32_t resource_id,padding; } bind={0};
+    bind.hdr.type=GFX_GPU_CMD_CTX_ATTACH_RESOURCE;bind.hdr.ctx_id=1;
+    bind.resource_id=GFX_VIRGL_BUFFER_ID;
+    return gfx_command(&bind,sizeof bind);
+}
+static int gfx_map_virgl_buffer_for_process(KPROCESS *proc,uint64_t *uva_out) {
+    if(!gfx_3d_ready||!gfx_virgl_buffer_pa||!proc||!uva_out)return 0;
+    uint64_t bytes=(uint64_t)GFX_VIRGL_BUFFER_PAGES*4096ULL;
+    for(uint64_t uva=0x72000000ULL;uva<0x7F000000ULL;uva+=0x01000000ULL) {
+        if(!MmUserRangeUnmapped(proc,uva,bytes)) {
+            uint64_t first=MmLookupUserPte(proc,uva,0);
+            uint64_t last=MmLookupUserPte(proc,uva+bytes-4096ULL,0);
+            if((first&PTE_ADDR)==gfx_virgl_buffer_pa &&
+               (last&PTE_ADDR)==gfx_virgl_buffer_pa+(GFX_VIRGL_BUFFER_PAGES-1)*4096ULL &&
+               (first&PTE_U)&&(last&PTE_U)) {
+                *uva_out=uva;return 1;
+            }
+            continue;
+        }
+        KPROCESS *old=MmCurrentProcess;
+        MmSwitchToProcess(PspSystemProcess);
+        for(uint64_t i=0;i<GFX_VIRGL_BUFFER_PAGES;i++)
+            map_4k_in(proc->Pml4,uva+i*4096ULL,gfx_virgl_buffer_pa+i*4096ULL,PTE_U|PTE_RW);
+        MmSwitchToProcess(old);
+        *uva_out=uva;return 1;
+    }
+    return 0;
 }
 static int gfx_present_virgl(void) {
     if(!gfx_3d_ready)return 0;
@@ -318,7 +377,7 @@ static int gfx_present_virgl(void) {
     } tr={0};
     tr.hdr.type=GFX_GPU_CMD_TRANSFER_FROM_3D;tr.hdr.ctx_id=1;
     tr.width=gfx_width;tr.height=gfx_height;tr.depth=1;
-    tr.resource_id=2;tr.level=0;tr.stride=gfx_pitch;
+    tr.resource_id=GFX_VIRGL_TARGET_ID;tr.level=0;tr.stride=gfx_pitch;
     tr.layer_stride=gfx_pitch*gfx_height;
     if(!gfx_command(&tr,sizeof tr))return 0;
     return gfx_flush(0,0,gfx_width,gfx_height);
@@ -370,7 +429,7 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     }
     gfx_gpu_ready=1;
     if(gfx_virgl_supported) {
-        if(gfx_create_virgl_context() && gfx_create_virgl_target()) {
+        if(gfx_create_virgl_context() && gfx_create_virgl_target() && gfx_create_virgl_buffer()) {
             gfx_3d_ready=1;
             DbgPrint("gfx: VirGL context and render target ready; raw command submission enabled\n");
         } else {
@@ -440,10 +499,18 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
         if(gfx_map_surface_for_process(caller,&out->surface_va)) {
             DbgPrint("gfx: mapped GPU surface into pid=%lu at %p\n",
                 (unsigned long)caller->Pid,(void*)out->surface_va);
+            if(gfx_3d_ready && gfx_map_virgl_buffer_for_process(caller,&out->virgl_buffer_va)) {
+                out->virgl_buffer_resource_id=GFX_VIRGL_BUFFER_ID;
+                out->virgl_buffer_size=GFX_VIRGL_BUFFER_BYTES;
+            } else {
+                out->capabilities&=~GFX_CAP_ACCEL_3D;
+                out->virgl_buffer_va=0;out->virgl_buffer_resource_id=0;out->virgl_buffer_size=0;
+            }
         } else {
             out->backend=GFX_BACKEND_FRAMEBUFFER;
-            out->capabilities&=~(GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D);
-            out->surface_va=0;
+            out->capabilities&=~(GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D|GFX_CAP_ACCEL_3D);
+            out->surface_va=0;out->virgl_buffer_va=0;
+            out->virgl_buffer_resource_id=0;out->virgl_buffer_size=0;
             DbgPrint("gfx: GPU is ready but user surface mapping failed; using framebuffer\n");
         }
     } else {

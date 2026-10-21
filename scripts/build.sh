@@ -1584,10 +1584,10 @@ EXT_SZ=$((EXT_SECTORS * SECTOR_SIZE))
 DISK_SECTORS=$((((EXT_START + EXT_SECTORS + 34 + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
 DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
 
-echo "  -> ESP: \${ESP_MIB} MiB; rootfs data: $((ROOTFS_BYTES / MIB)) MiB; disk: \${DISK_MIB} MiB"
+echo "  -> ESP: ${ESP_MIB} MiB; rootfs data: $((ROOTFS_BYTES / MIB)) MiB; disk: ${DISK_MIB} MiB"
 
 rm -f "$DISKIMG"
-qemu-img create -f raw "$DISKIMG" "\${DISK_MIB}M" >/dev/null
+qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
 
 sfdisk "$DISKIMG" <<SFDISK
 label: gpt

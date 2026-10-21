@@ -187,7 +187,7 @@ static void move_player(int dx, int dy) {
         finished = 1;
         won = 1;
     }
-    move_enemy();
+    if (!finished) move_enemy();
     draw_game();
 }
 

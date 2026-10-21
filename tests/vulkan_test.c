@@ -569,7 +569,62 @@ int main(void) {
     CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255);
     CHECK(((uint8_t *)mapped)[(7u*8u+7u)*4u+3u] == 0);
     vkUnmapMemory(device, drawMem);
+
+    /* End-to-end bounded graphics pipeline: shader modules execute during
+     * vkCmdDraw and their scalar fragment result shades the CPU rasterizer. */
+    smci.codeSize = sizeof(exec_words);
+    smci.pCode = exec_words;
+    VkShaderModule vertexShader = 0, fragmentShader = 0;
+    CHECK(vkCreateShaderModule(device, &smci, 0, &vertexShader) == VK_SUCCESS);
+    CHECK(vkCreateShaderModule(device, &smci, 0, &fragmentShader) == VK_SUCCESS);
+    VkPipelineShaderStageCreateInfo stages[2] = {{0}};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = 1u; stages[0].module = vertexShader; stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = 0x10u; stages[1].module = fragmentShader; stages[1].pName = "main";
+    VkGraphicsPipelineCreateInfo gpci = {0};
+    gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gpci.stageCount = 2; gpci.pStages = stages; gpci.basePipelineIndex = -1;
+    VkPipeline pipeline = 0;
+    CHECK(vkCreateGraphicsPipelines(device, 0, 1, &gpci, 0, &pipeline) == VK_SUCCESS);
+    VkBufferCreateInfo vertexCi = {0};
+    vertexCi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vertexCi.size = 3u * sizeof(VkSoftVertex);
+    vertexCi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    VkBuffer vertexBuffer = 0;
+    CHECK(vkCreateBuffer(device, &vertexCi, 0, &vertexBuffer) == VK_SUCCESS);
+    VkMemoryRequirements vertexReq;
+    vkGetBufferMemoryRequirements(device, vertexBuffer, &vertexReq);
+    VkMemoryAllocateInfo vertexAi = {0};
+    vertexAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    vertexAi.allocationSize = vertexReq.size;
+    VkDeviceMemory vertexMem = 0;
+    CHECK(vkAllocateMemory(device, &vertexAi, 0, &vertexMem) == VK_SUCCESS);
+    CHECK(vkBindBufferMemory(device, vertexBuffer, vertexMem, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, vertexMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    VkSoftVertex shaderTri[3] = {va, vb, vc};
+    vk_copy(mapped, shaderTri, sizeof(shaderTri));
+    vkUnmapMemory(device, vertexMem);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    VkDeviceSize vertexOffset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &vertexOffset);
+    SentinelVulkanCmdBindColorTarget(cmd, drawImage);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u] >= 40u);
+    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255u);
+    vkUnmapMemory(device, drawMem);
+    vkDestroyPipeline(device, pipeline, 0);
+    vkDestroyShaderModule(device, vertexShader, 0);
+    vkDestroyShaderModule(device, fragmentShader, 0);
+    vkDestroyBuffer(device, vertexBuffer, 0);
+    vkFreeMemory(device, vertexMem, 0);
     vkDestroyImage(device, drawImage, 0);
+    vkFreeMemory(device, drawMem, 0);
     vkFreeMemory(device, drawMem, 0);
 
     /* Whole-image Vulkan image-to-image copy stays inside transfer layouts. */

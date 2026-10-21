@@ -67,7 +67,28 @@ if [[ "${SENTINELOS_GPU:-virtio}" == "none" ]]; then
     GPU_ARGS=()
     echo "SentinelOS: using QEMU's default VGA device (GPU fallback test)"
 fi
+# Venus is the VirtIO-GPU Vulkan path. This only exposes the VM device;
+# SentinelOS must still negotiate the Venus capset and provide a Vulkan ICD
+# before applications can use Vulkan or DXVK.
+if [[ "${SENTINELOS_VENUS:-0}" == "1" ]]; then
+    if [[ "${SENTINELOS_VIRGL:-0}" == "1" || "${SENTINELOS_GPU:-virtio}" == "none" ]]; then
+        echo "Error: SENTINELOS_VENUS=1 conflicts with SENTINELOS_VIRGL=1 or SENTINELOS_GPU=none." >&2
+        exit 1
+    fi
+    if [[ "$MODE" != "window" ]]; then
+        echo "Error: SENTINELOS_VENUS=1 requires SENTINELOS_DISPLAY=window and a QEMU build with Venus support." >&2
+        exit 1
+    fi
+    DISPLAY_ARGS=(-display gtk,gl=on)
+    GPU_ARGS=(-vga none -device virtio-vga-gl,blob=true,hostmem=256M,venus=true)
+    echo "SentinelOS: exposing VirtIO-GPU Venus (host Vulkan path; guest Vulkan support is not implied)"
+fi
+
 if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
+    if [[ "${SENTINELOS_VENUS:-0}" == "1" ]]; then
+        echo "Error: SENTINELOS_VIRGL=1 and SENTINELOS_VENUS=1 are mutually exclusive." >&2
+        exit 1
+    fi
     if [[ "$MODE" != "window" ]]; then
         echo "Error: SENTINELOS_VIRGL=1 requires SENTINELOS_DISPLAY=window and host OpenGL." >&2
         exit 1

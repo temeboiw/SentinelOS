@@ -1388,8 +1388,7 @@ static Frame *syscall_handler(Frame *f) {
          * launch smss.exe, bootvid.exe, or sentlogon.exe.
          */
         if (PspIsSystemAppName(name) && !PspIsSystemProcess(caller)) {
-            DbgPrint("user: denied system-app launch: caller=%s target=%s\\n",
-                     caller ? caller->Name : "<none>", name);
+            DbgPrint("user: denied system-app launch: target=%s\\n", name);
             f->rax = (uint64_t)-1LL;
             return f;
         }

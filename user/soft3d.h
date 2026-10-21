@@ -8,6 +8,8 @@
  */
 #define S3D_VIRGL_RENDER_TARGET_ID 2u
 #define S3D_VIRGL_VERTEX_BUFFER_ID 3u
+#define S3D_VIRGL_VERTEX_BUFFER_BYTES (1024u*1024u)
+#define S3D_VIRGL_MAX_COMMAND_BYTES 4064u
 
 typedef struct {
     int32_t x, y, z;

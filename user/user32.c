@@ -148,6 +148,7 @@ static int g_search_len;
 static int cur_on, cur_ox=640, cur_oy=400;
 static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
+static int u32_is_desktop_window(void);
 static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
 /* USER32 child HWNDs. Coordinates are client-relative, so moving the parent
@@ -585,28 +586,36 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     if(x0>=x1||y0>=y1)return;
 
     u32_layers_rebuild();
+    int desktop_owner=u32_is_desktop_window();
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
+
+        /*
+         * The layer arrays belong to this USER32 process, but scanout is
+         * shared. Only the Desktop process may rebuild pixels from its
+         * wallpaper/desktop/taskbar layers. An ordinary app must preserve the
+         * already-composited desktop and blend only its own window surface.
+         * Never seed a private app buffer from scanout or replay its private
+         * copy of the desktop over other processes' pixels.
+         */
         u32 c;
-        if(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh) {
-            c=u32_aero_bg_cache[at];
+        if(desktop_owner) {
+            c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
+                ? u32_aero_bg_cache[at] : 0xFF000000u;
+            for(unsigned int li=0;li<u32_layer_stack_count;li++) {
+                U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
+                if(layer->visible&&layer->pixels)
+                    c=u32_alpha_over(c,layer->pixels[at]);
+            }
         } else {
             c=*dst;
-            /* Cursor pixels are kept out of this scene surface. */
+            /* Window layer is this process's private surface. Do not composite
+             * its private desktop or taskbar layers onto the shared scanout. */
+            c=u32_alpha_over(c,u32_window_layer[at]);
         }
-
-        /* Blend every visible surface in ascending Z order. The stack is
-         * rebuilt automatically so future layers only need a descriptor. */
-        for(unsigned int li=0;li<u32_layer_stack_count;li++) {
-            U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
-            if(layer->visible&&layer->pixels)
-                c=u32_alpha_over(c,layer->pixels[at]);
-        }
-
         *dst=c;
     }
-    /* Cursor is intentionally absent from the GPU scene surface. */
     u32_flush_graphics(x0,y0,x1-x0,y1-y0);
 }
 

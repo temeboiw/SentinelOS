@@ -1123,6 +1123,11 @@ static int wm_shared_window_slot(int pid) {
         if(wm_tab[i].alive&&wm_tab[i].pid==pid)return i;
     return -1;
 }
+/* Bounded serial diagnostics: detailed startup events plus periodic samples. */
+static uint64_t wm_dbg_compose_calls, wm_dbg_present_calls;
+static uint64_t wm_dbg_window_moves, wm_dbg_window_registers, wm_dbg_window_closes;
+static int wm_dbg_sample(uint64_t n) { return n <= 48u || (n % 128u) == 0u; }
+
 static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(!wm_shared_background||!gfx_surface_pa||!gfx_width||!gfx_height)return;
     uint32_t width=wm_shared_width,height=wm_shared_height;
@@ -1141,6 +1146,16 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         while(j>0&&wm_tab[order[j-1]].z>e->z){order[j]=order[j-1];j--;}
         order[j]=i;
     }
+    uint64_t dbg_n=++wm_dbg_compose_calls;
+    if(wm_dbg_sample(dbg_n)) {
+        DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\\n",
+                 (unsigned long long)dbg_n,x,y,w,h,count,pitch);
+        for(int oi=0;oi<count;oi++) {
+            WmEntry *e=&wm_tab[order[oi]];
+            DbgPrint("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\\n",
+                     oi,e->pid,e->x,e->y,e->w,e->h,e->minimized);
+        }
+    }
     for(uint32_t yy=y;yy<y+h;yy++)for(uint32_t xx=x;xx<x+w;xx++) {
         uint32_t at=yy*width+xx;
         uint32_t c=wm_shared_background[at];
@@ -1149,7 +1164,9 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         c=wm_shared_alpha(c,wm_shared_taskbar[at]);
         out[yy*pitch+xx]=c;
     }
-    (void)gfx_flush(x,y,w,h);
+    int flush_ok=gfx_flush(x,y,w,h);
+    if(wm_dbg_sample(dbg_n))
+        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -1336,15 +1353,23 @@ static Frame *syscall_handler(Frame *f) {
             f->rax=0;return f;
         }
         a=*(WmPresentLayerArgs*)f->rdi;
+        uint64_t dbg_n=++wm_dbg_present_calls;
         uint64_t pixels=(uint64_t)a.width*a.height;
         uint64_t bytes=pixels*sizeof(uint32_t);
         if(!a.pixels||!a.width||!a.height||a.width>1920u||a.height>1080u||
            pixels>WM_COMP_MAX_PIXELS||a.layer>WM_LAYER_TASKBAR||
            !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
            a.width!=gfx_width||a.height!=gfx_height) {
+            if(wm_dbg_sample(dbg_n))
+                DbgPrint("[gfx] present #%llu REJECT layer=%u rect=(%u,%u %ux%u) surface=%ux%u gfx=%ux%u pixels=%p\\n",
+                         (unsigned long long)dbg_n,a.layer,a.x,a.y,a.w,a.h,
+                         a.width,a.height,gfx_width,gfx_height,(void*)a.pixels);
             f->rax=0;return f;
         }
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
+        if(wm_dbg_sample(dbg_n))
+            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\\n",
+                     (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h,a.width,a.height);
         int slot=wm_shared_window_slot(pid);
         KPROCESS *caller=MmCurrentProcess;
         if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
@@ -1365,7 +1390,12 @@ static Frame *syscall_handler(Frame *f) {
         else if(a.layer==WM_LAYER_DESKTOP)dst=wm_shared_desktop;
         else if(a.layer==WM_LAYER_TASKBAR)dst=wm_shared_taskbar;
         else if(slot>=0)dst=wm_shared_windows[slot];
-        if(!dst){f->rax=0;return f;}
+        if(!dst){
+            if(wm_dbg_sample(dbg_n))
+                DbgPrint("[gfx] present #%llu REJECT no destination pid=%d layer=%u slot=%d\\n",
+                         (unsigned long long)dbg_n,pid,a.layer,slot);
+            f->rax=0;return f;
+        }
         for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
             for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
                 dst[yy*a.width+xx]=src[yy*a.width+xx];
@@ -1373,6 +1403,9 @@ static Frame *syscall_handler(Frame *f) {
          * three global layers in order and the taskbar submission commits the frame. */
         if(a.layer==WM_LAYER_TASKBAR||a.layer==WM_LAYER_WINDOW)
             wm_shared_compose(a.x,a.y,a.w,a.h);
+        if(wm_dbg_sample(dbg_n))
+            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\\n",
+                     (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h);
         f->rax=1;
         return f;
     }
@@ -2260,6 +2293,9 @@ static Frame *syscall_handler(Frame *f) {
 
         int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
         wm_register(pid, title);
+        uint64_t dbg_n=++wm_dbg_window_registers;
+        DbgPrint("[wm] register #%llu pid=%d title='%s'\\n",
+                 (unsigned long long)dbg_n,pid,title);
 
         f->rax = 0;
         return f;
@@ -2275,6 +2311,10 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_WmUnregister: {
         int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
         int slot=wm_shared_window_slot(pid);
+        uint64_t dbg_n=++wm_dbg_window_closes;
+        if(wm_dbg_sample(dbg_n))
+            DbgPrint("[wm] unregister #%llu pid=%d slot=%d\\n",
+                     (unsigned long long)dbg_n,pid,slot);
         int x=0,y=0,w=(int)wm_shared_width,h=(int)wm_shared_height;
         if(slot>=0) { x=wm_tab[slot].x-12; y=wm_tab[slot].y-12; w=wm_tab[slot].w+24; h=wm_tab[slot].h+28; }
         KPROCESS *caller=MmCurrentProcess;
@@ -2345,6 +2385,11 @@ static Frame *syscall_handler(Frame *f) {
             for(int yy=y;yy<y1;yy++)for(int xx=x;xx<x1;xx++)wm_shared_windows[slot][(uint32_t)yy*wm_shared_width+(uint32_t)xx]=0;
         }
         wm_set_rect(pid,rect[0],rect[1],rect[2],rect[3]);
+        uint64_t dbg_n=++wm_dbg_window_moves;
+        if(wm_dbg_sample(dbg_n))
+            DbgPrint("[wm] rect #%llu pid=%d old=(%d,%d %dx%d) new=(%d,%d %dx%d)\\n",
+                     (unsigned long long)dbg_n,pid,ox+12,oy+12,ow-24,oh-28,
+                     rect[0],rect[1],rect[2],rect[3]);
         int nx=rect[0]-12,ny=rect[1]-12,nw=rect[2]+24,nh=rect[3]+28;
         int x0=ox<nx?ox:nx,y0=oy<ny?oy:ny,x1=ox+ow>nx+nw?ox+ow:nx+nw,y1=oy+oh>ny+nh?oy+oh:ny+nh;
         if(x0<0)x0=0;if(y0<0)y0=0;

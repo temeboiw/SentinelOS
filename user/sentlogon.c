@@ -140,6 +140,9 @@ void sentlogon_main(void) {
         paint(pixels,&fbinfo);
         int mx=(int)fbinfo.w/2,my=(int)fbinfo.h/2;
         cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);
+        /* VirtIO-GPU uses a backing surface: CPU writes are not visible until
+         * the dirty rectangle is submitted to the device. */
+        (void)NtFlushGraphics(0,0,fbinfo.w,fbinfo.h);
         for(;;) {
             InputEvent ev={0};
             if(sy3(SYS_GetInput,(u64)&ev,0,0)) {
@@ -148,6 +151,7 @@ void sentlogon_main(void) {
                     cursor_restore(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h);
                     mx=ev.x;my=ev.y;
                     cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);
+                    (void)NtFlushGraphics(0,0,fbinfo.w,fbinfo.h);
                     if(ev.type==3) {
                         int pw=(int)fbinfo.w-80;if(pw>620)pw=620;if(pw<300)pw=(int)fbinfo.w-16;
                         int ph=278;if(ph>(int)fbinfo.h-24)ph=(int)fbinfo.h-24;
@@ -159,6 +163,7 @@ void sentlogon_main(void) {
             (void)sy3(SYS_Yield,0,0,0);
         }
         cursor_restore(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h);
+        (void)NtFlushGraphics(0,0,fbinfo.w,fbinfo.h);
     }
     NtWriteConsole("sentlogon: interactive session accepted\n");
     char name[]={'e','x','p','l','o','r','e','r','.','e','x','e',0};

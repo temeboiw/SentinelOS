@@ -57,6 +57,7 @@ typedef struct {
     u32 pci_bus, pci_device, pci_function;
     unsigned short vendor_id, device_id;
     unsigned char pci_class, pci_subclass, pci_prog_if, initialized;
+    u64 surface_va;
 } GfxBootInfo;
 
 #define GFX_CAP_FRAMEBUFFER (1u << 0)

@@ -345,6 +345,31 @@ int main(void) {
     VkDeviceMemory imem = 0;
     CHECK(vkAllocateMemory(device, &imai, 0, &imem) == VK_SUCCESS);
     CHECK(vkBindImageMemory(device, image, imem, 0) == VK_SUCCESS);
+    /* Invalid second image barrier must not partially record the first. */
+    VkImageMemoryBarrier barrierBatch[2] = {0};
+    for (unsigned bi2 = 0; bi2 < 2; ++bi2) {
+        barrierBatch[bi2].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrierBatch[bi2].srcQueueFamilyIndex = 0xFFFFFFFFu;
+        barrierBatch[bi2].dstQueueFamilyIndex = 0xFFFFFFFFu;
+        barrierBatch[bi2].image = image;
+        barrierBatch[bi2].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrierBatch[bi2].subresourceRange.levelCount = 1;
+        barrierBatch[bi2].subresourceRange.layerCount = 1;
+        barrierBatch[bi2].oldLayout = 0;
+        barrierBatch[bi2].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    }
+    barrierBatch[1].pNext = (const void *)1;
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, barrierBatch);
+    CHECK(((VkCmdObj *)cmd)->count == 0); /* atomic rejection */
+    barrierBatch[1].pNext = 0;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, barrierBatch);
+    CHECK(((VkCmdObj *)cmd)->count == 2);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     vkFreeMemory(device, imem, 0);
     CHECK(mem_ok(imem));
     CHECK(vkBindImageMemory(device, image, imem, 0) == VK_ERROR_INITIALIZATION_FAILED);

@@ -504,15 +504,22 @@ __declspec(dllexport) void VKAPI_CALL vkCmdCopyImageToBuffer(VkCommandBuffer c,V
  for(uint32_t j=0;j<n;j++){const VkBufferImageCopy *r=&regions[j];unsigned i=c->count++;c->ops[i].op=6;c->ops[i].a=b;c->ops[i].image=im;c->ops[i].offset=r->bufferOffset;c->ops[i].size=im->size;c->ops[i].layout=layout;}
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer c,uint32_t srcStage,uint32_t dstStage,uint32_t dep,uint32_t memCount,const void *memBarriers,uint32_t bufferCount,const void *bufferBarriers,uint32_t imageCount,const VkImageMemoryBarrier *images) {
- (void)dep;(void)memBarriers;(void)bufferBarriers;
- if(!cmd_ok(c)||c->state!=1||!srcStage||!dstStage||memCount||bufferCount||(!images&&imageCount))return;
+ (void)dep;
+ if(!cmd_ok(c)||c->state!=1||!srcStage||!dstStage||memCount||memBarriers||bufferCount||bufferBarriers||(!images&&imageCount)||imageCount>128u-c->count)return;
+ /* Validate the complete list before recording any operations. */
  for(uint32_t j=0;j<imageCount;j++){
   const VkImageMemoryBarrier *b=&images[j];
-  if(b->sType!=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER||!image_ok(b->image)||b->image->device!=c->device||c->count>=128)return;
+  if(b->sType!=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER||b->pNext||!image_ok(b->image)||b->image->device!=c->device)return;
   if(b->srcQueueFamilyIndex!=0xFFFFFFFFu||b->dstQueueFamilyIndex!=0xFFFFFFFFu)return;
   if(b->subresourceRange.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||b->subresourceRange.baseMipLevel||b->subresourceRange.levelCount!=1||b->subresourceRange.baseArrayLayer||b->subresourceRange.layerCount!=1)return;
   if((b->oldLayout!=0&&b->oldLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)||(b->newLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))return;
-  unsigned i=c->count++;c->ops[i].op=4;c->ops[i].image=b->image;c->ops[i].value=b->oldLayout;c->ops[i].layout=b->newLayout;
+  if(b->oldLayout==b->newLayout)return;
+  if(b->newLayout==VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL&&!(b->image->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT))return;
+  if(b->newLayout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&!(b->image->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT))return;
+ }
+ for(uint32_t j=0;j<imageCount;j++){
+  const VkImageMemoryBarrier *b=&images[j];unsigned i=c->count++;
+  c->ops[i].op=4;c->ops[i].image=b->image;c->ops[i].value=b->oldLayout;c->ops[i].layout=b->newLayout;
  }
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdCopyImage(VkCommandBuffer c,VkImage src,uint32_t srcLayout,VkImage dst,uint32_t dstLayout,uint32_t regionCount,const VkImageCopy *regions) { if(!cmd_ok(c)||c->state!=1||!image_ok(src)||!image_ok(dst)||src==dst||src->device!=c->device||dst->device!=c->device||!src->memory||!dst->memory||!(src->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT)||srcLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL||dstLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL||regionCount!=1||!regions||src->width!=dst->width||src->height!=dst->height||src->format!=dst->format||src->size!=dst->size||c->count>=128)return;const VkImageCopy *r=regions;if(r->srcSubresource.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||r->srcSubresource.mipLevel||r->srcSubresource.baseArrayLayer||r->srcSubresource.layerCount!=1||r->dstSubresource.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||r->dstSubresource.mipLevel||r->dstSubresource.baseArrayLayer||r->dstSubresource.layerCount!=1||r->srcOffset.x||r->srcOffset.y||r->srcOffset.z||r->dstOffset.x||r->dstOffset.y||r->dstOffset.z||r->extent.width!=src->width||r->extent.height!=src->height||r->extent.depth!=1)return;unsigned i=c->count++;c->ops[i].op=8;c->ops[i].image=src;c->ops[i].b=(VkBuffer)dst;c->ops[i].layout=srcLayout;c->ops[i].value=dstLayout;c->ops[i].size=src->size; }

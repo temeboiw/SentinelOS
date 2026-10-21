@@ -99,3 +99,12 @@ The interpreter now executes bounded 32-bit `OpBitFieldInsert`, `OpBitFieldSExtr
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 20% (engineering estimate, not Vulkan conformance).** This step improves resource lifetime and binding correctness in addition to tested transfer operations and the scalar SPIR-V subset. It does not represent graphics/compute pipeline support: pipelines, descriptors, render passes/framebuffers, general shader resource access, presentation, and DXVK compatibility remain major missing areas.
+
+
+### Atomic image pipeline-barrier validation
+
+Image-only `vkCmdPipelineBarrier` now validates the complete barrier list and command-buffer capacity before recording anything. It rejects unsupported memory/buffer barriers, non-null extension chains, queue-family transfers, invalid subresource ranges, no-op layout transitions, and transfer layouts inconsistent with image usage. Regression coverage verifies that an invalid second barrier leaves the command buffer unchanged and that a valid two-barrier list records both operations.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 25% (engineering estimate, not Vulkan conformance).** This milestone adds atomic pipeline-barrier validation on top of tested resource lifetime and transfer paths. The runtime still lacks real graphics/compute pipelines, descriptor sets, render passes/framebuffers, a complete shader runtime, presentation, and DXVK compatibility.

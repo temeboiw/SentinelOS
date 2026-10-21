@@ -1,44 +1,45 @@
-# SentinelOS V4: Vulkan and DXVK implementation
+# SentinelOS V4: in-OS Vulkan and DXVK
 
-## Scope and compatibility contract
+## Requirement
 
-Vulkan and DXVK are separate deliverables. DXVK translates Direct3D 9/10/11 to Vulkan; it is not a Vulkan driver. SentinelOS must provide a usable Vulkan userspace runtime and a device implementation before DXVK can run.
+Vulkan must be implemented as part of SentinelOS. Do not treat a QEMU command-line option, host Vulkan passthrough, or a virtual GPU feature toggle as the implementation. QEMU may be used to test a driver, but the Vulkan API/runtime, kernel interfaces, memory management, command submission, synchronization, and capability reporting belong to SentinelOS.
 
-The current graphics code in `kernel/gfx.h` is a custom VirtIO-GPU 2D path with experimental VirGL/Gallium command submission. That is not a Vulkan implementation, and a VirGL context must not be advertised as Vulkan support.
+DXVK is a separate compatibility component that translates Direct3D 9/10/11 to Vulkan. It depends on a working SentinelOS Vulkan implementation and on the Windows-compatible PE loader, DLL ABI, synchronization semantics, memory APIs, and runtime dependencies required by the DXVK build.
 
-## Required stack
+## Existing graphics baseline
 
-1. **Device/transport:** keep the firmware framebuffer fallback; finish VirtIO-GPU PCI capability parsing, feature negotiation, queue safety, resource lifetime, synchronization and reset/error handling.
-2. **VM Vulkan path:** investigate VirtIO-GPU Venus capset and the QEMU/host requirements. Venus is the relevant Vulkan-over-VirtIO protocol; VirGL alone is an OpenGL/Gallium path. Report Venus as available only after querying and validating the actual device capset.
-3. **Userspace Vulkan ICD/runtime:** implement or port a compatible Vulkan loader plus ICD. Define the supported Vulkan version and extension list from real implementation coverage; return errors for unsupported operations rather than fake success.
-4. **Memory and synchronization:** provide GPU-visible memory allocation/mapping, command submission, fences/semaphores and safe process validation. No user process may submit arbitrary kernel physical addresses.
-5. **DXVK prerequisites:** provide the Windows ABI and PE loader features DXVK needs, Vulkan loader/ICD discovery, required synchronization and memory semantics, and the Windows runtime dependencies. DXVK must be built for and tested against this specific ABI; ordinary Windows DXVK binaries are not automatically compatible with SentinelOS.
-6. **Validation:** add a graphics self-test for device discovery, capset negotiation, allocation, command submission, completion and present. Keep software rendering and framebuffer paths available when GPU acceleration is absent.
+`kernel/gfx.h` currently provides a custom VirtIO-GPU 2D path and experimental VirGL/Gallium command submission. That is not Vulkan. The current graphics ABI exposes framebuffer/2D/3D status but has no Vulkan loader, Vulkan ICD, Vulkan device/queue API, or Vulkan capability negotiation. Do not report Vulkan support merely because a VirtIO-GPU device or VirGL context exists.
+
+## Required in-OS architecture
+
+1. **Vulkan public ABI and loader:** add the Vulkan headers/ABI expected by applications, a loader that resolves supported entry points, instance/physical-device enumeration, extension/version reporting, and ICD discovery. Only expose functions and extensions actually implemented.
+2. **Kernel graphics-device interface:** define a safe driver contract for device discovery, GPU-visible allocations, command submission, fences, and presentation. Validate all user pointers, handles, lengths, and process ownership; user mode must never submit arbitrary physical addresses.
+3. **Hardware driver:** implement a real driver for the chosen GPU/device target, including its PCI identification, BAR/MMIO mapping, DMA/IOMMU constraints where applicable, queue setup, memory model, reset, timeout, and device-loss handling. Keep the firmware framebuffer fallback.
+4. **First Vulkan backend:** choose a concrete target and implement a minimal but real Vulkan feature set end to end: enumerate device, create device/queue, allocate and map memory, create buffers/images, submit commands, synchronize, and present. Return correct errors for unsupported features; do not fake success.
+5. **Shader and pipeline support:** implement or port shader compilation/translation and pipeline handling for the target GPU. A 2D framebuffer and VirGL command stream do not automatically supply Vulkan semantics.
+6. **DXVK integration:** only after the Vulkan ICD passes basic tests, port/build DXVK and its dependencies against SentinelOS's Windows ABI. Resolve required DLLs, imports, TLS/unwind/runtime behavior, memory/synchronization APIs, and present path.
+7. **Validation:** add device enumeration, allocation/map, command submission, fence, image clear, and present tests. Test failure and fallback paths as well as success.
+
+## Hardware target decision
+
+A Vulkan implementation needs a defined hardware target. The current code is VirtIO-GPU-centric and contains experimental VirGL submission, but does not yet provide Vulkan. The first backend should be explicitly selected and documented (for example, a specific VirtIO-GPU protocol or a specific physical GPU family); avoid claiming universal Vulkan support. A driver/protocol that relies on a host-side implementation may be useful as a test backend, but it must still be driven by SentinelOS's own in-OS Vulkan loader/ICD and must not be mistaken for a native driver for physical GPUs.
 
 ## Acceptance criteria
 
-- A normal QEMU VirtIO-VGA device reports 2D support only.
-- Vulkan is reported only when a compatible Venus/Vulkan path is negotiated and tested.
-- DXVK is marked unsupported until a Vulkan loader/ICD and the required Windows ABI/runtime are working.
-- Every advertised capability is backed by a real operation and a test; unsupported paths fail cleanly.
-- Build and boot tests run with both VirtIO-VGA and `SENTINELOS_GPU=none`.
+- The Vulkan loader and ICD are compiled as SentinelOS components and run in the SentinelOS guest.
+- Vulkan device enumeration reflects a real initialized driver, not a hard-coded fake device.
+- Supported versions, extensions, formats, and limits match the actual implementation.
+- Buffer/image allocation, command submission, synchronization, and presentation are exercised by tests.
+- Unsupported features fail cleanly and never return fabricated success.
+- DXVK remains marked unsupported until a compatible Vulkan ICD and required Windows runtime/ABI features are verified.
+- Existing framebuffer and 2D graphics paths continue working when the Vulkan-capable driver is unavailable.
 
-## VM experiment
+## Implementation order
 
-The run script now has an opt-in QEMU Venus device configuration:
+1. Select the first GPU/transport target and write its driver contract.
+2. Audit and harden current PCI/MMIO and VirtIO queue code before reusing it.
+3. Implement the in-OS Vulkan loader/ICD and one end-to-end vertical slice on that target.
+4. Add tests and only then expand Vulkan coverage.
+5. Bring up DXVK and its Windows runtime prerequisites after Vulkan passes those tests.
 
-```sh
-SENTINELOS_VENUS=1 SENTINELOS_DISPLAY=window ./scripts/run.sh
-```
-
-This requires a QEMU build whose `virtio-vga-gl` device supports `venus`, `blob`, and `hostmem`, plus a host graphics stack that can initialize it. The option only configures the virtual device; it does **not** mean the SentinelOS guest has Vulkan yet. If QEMU rejects an option, use a QEMU build with Venus enabled rather than silently falling back and claiming Vulkan support.
-
-## Immediate implementation order
-
-1. Audit and harden the existing VirtIO-GPU queue and PCI capability code.
-2. Add a capability/capset query path and distinguish 2D, VirGL, and Venus.
-3. Implement the minimum Vulkan ICD/device/memory/queue path supported by the chosen VM transport.
-4. Port/implement Vulkan loader integration and run conformance tests.
-5. Port DXVK dependencies only after Vulkan and PE/runtime requirements pass.
-
-Do not add Vulkan/DXVK branding or success logs until those acceptance tests pass.
+The QEMU run script intentionally does not provide a special Venus/Vulkan mode: configuring QEMU is not a substitute for implementing Vulkan inside SentinelOS.

@@ -812,6 +812,14 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
+    /* A shared-scanout repaint must remove the previous CPU cursor before
+     * any window layer is submitted. Otherwise a partial kernel composition
+     * can leave the old cursor in scanout, and the next cursor_save_draw()
+     * saves cursor pixels as its own underlay. Rebuild that footprint through
+     * the kernel's persistent Z-ordered surfaces first. */
+    if (g_gpu_surface && cur_on)
+        cursor_restore();
+
     /* A forced drag redraw must also discard any clip inherited from an
      * earlier paint. Otherwise the parent can move vertically while its child
      * buttons are still clipped to the old Y range. Restore the caller's clip
@@ -1050,9 +1058,9 @@ static void compose(void) {
             } else {
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
             }
-            /* Kernel composition replaced the scanout, including any old cursor
-             * pixels. Re-save the freshly composed underlay and draw the CPU cursor. */
-            cur_on=0;
+            /* cursor_restore() ran before layer submission, so this scanout
+             * now contains clean scene pixels. Save that underlay and draw the
+             * CPU cursor once after the kernel has completed Z-order composition. */
             cursor_save_draw(g_mx,g_my);
             u32_flush_raw(g_mx,g_my,16,16);
         }

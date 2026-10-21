@@ -46,10 +46,10 @@ void bootvid_main(void){
   for(u32 y=0;y<f.h;y++){u32 *row=fb+(u64)y*f.pitch;for(u32 x=0;x<f.w;x++)row[x]=0xFF000000;}
   (void)NtFlushGraphics(0,0,f.w,f.h);
  }
- NtWriteConsole("bootvid: splash complete; launching sentlogon\\n");
+ NtWriteConsole("bootvid: splash complete; launching sentlogon\n");
  char name[]={'s','e','n','t','l','o','g','o','n','.','e','x','e',0};
  NTSTATUS status=NtCreateProcess(name);
- if((u64)status==(u64)-1){NtWriteConsole("bootvid: ERROR creating sentlogon.exe\\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
- NtWriteConsole("bootvid: sentlogon.exe created\\n");
+ if((u64)status==(u64)-1){NtWriteConsole("bootvid: ERROR creating sentlogon.exe\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
+ NtWriteConsole("bootvid: sentlogon.exe created\n");
  NtExit(0);for(;;)(void)sy3(SYS_Yield,0,0,0);
 }

@@ -69,6 +69,7 @@ static int score = 0, moves = 0;
 static int finished = 0, won = 0;
 static void *window_handle;
 static TextOutA_t text_out;
+static UpdateWindow_t update_window;
 
 static void put_wall(int x, int y, int w, int h) {
     for (int yy = y; yy < y + h; ++yy)
@@ -147,6 +148,14 @@ static void draw_game() {
         draw_text(0, 17, "@ = you   X = chaser   # = wall   . = collectible   E = exit");
     }
     draw_text(0, 19, "Standalone PE executable loaded from the SentinelOS disk.");
+
+    /*
+     * SentinelOS TextOutA records text into the window's backing lines; the
+     * frame is published by UpdateWindow. Flush once after the complete frame,
+     * not once per individual text row.
+     */
+    if (update_window && window_handle)
+        (void)update_window(window_handle);
 }
 
 static int can_walk(int x, int y) {
@@ -196,7 +205,7 @@ extern "C" void game_mainCRTStartup() {
         get_proc("user32.dll", "CreateWindowExA"));
     auto show_window = reinterpret_cast<ShowWindow_t>(
         get_proc("user32.dll", "ShowWindow"));
-    auto update_window = reinterpret_cast<UpdateWindow_t>(
+    update_window = reinterpret_cast<UpdateWindow_t>(
         get_proc("user32.dll", "UpdateWindow"));
     text_out = reinterpret_cast<TextOutA_t>(get_proc("user32.dll", "TextOutA"));
     auto get_message = reinterpret_cast<GetMessageA_t>(

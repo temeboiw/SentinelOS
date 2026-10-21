@@ -85,7 +85,14 @@ static void scheduler_selftest(const BootInfo *bi) {
         if (!alive) break;
         KeSleep(10);
     }
-    ULONG reaped = KeReapThreads();
+    /* A terminated thread may still own its stack until the next scheduler
+       switch has moved execution completely off that stack.  Reap repeatedly
+       across clock ticks instead of treating a single pass as final. */
+    ULONG reaped = 0;
+    for (int pass = 0; pass < 20 && reaped < 6; pass++) {
+        reaped += KeReapThreads();
+        if (reaped < 6) KeSleep(10);
+    }
 
     ULONGLONG cmin = t_count[0], cmax = t_count[0];
     for (int i = 1; i < 3; i++) { if (t_count[i] < cmin) cmin = t_count[i]; if (t_count[i] > cmax) cmax = t_count[i]; }

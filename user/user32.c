@@ -1025,6 +1025,11 @@ static void compose(void) {
             } else {
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
             }
+            /* Kernel composition replaced the scanout, including any old cursor
+             * pixels. Re-save the freshly composed underlay and draw the CPU cursor. */
+            cur_on=0;
+            cursor_save_draw(g_mx,g_my);
+            u32_flush_raw(g_mx,g_my,16,16);
         }
     }
 

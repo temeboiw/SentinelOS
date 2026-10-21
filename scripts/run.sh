@@ -97,7 +97,8 @@ exec qemu-system-x86_64 \
     -drive if=pflash,format=raw,file="$VARS" \
     -drive file="$DISKIMG",format=raw,if=none,id=d0 \
     -device virtio-blk-pci,drive=d0 \
-    -device virtio-gpu-pci \
+    -vga none \
+    -device virtio-vga \
     -audiodev "wav,id=audio0,path=$B/sentinel-audio.wav" \
     -device ich9-intel-hda,id=hda,debug=0 \
     -device hda-duplex,bus=hda.0,audiodev=audio0 \

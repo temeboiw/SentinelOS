@@ -81,6 +81,8 @@
 #define VK_PIPELINE_STAGE_TRANSFER_BIT 0x1000u
 #define VK_FORMAT_R8G8B8A8_UNORM 37u
 #define VK_FORMAT_B8G8R8A8_UNORM 44u
+#define VK_FORMAT_FEATURE_TRANSFER_SRC_BIT 0x4000u
+#define VK_FORMAT_FEATURE_TRANSFER_DST_BIT 0x8000u
 #define VK_COMMAND_BUFFER_LEVEL_PRIMARY 0u
 #define VK_COMMAND_BUFFER_LEVEL_SECONDARY 1u
 #define VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 1u
@@ -118,6 +120,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkDeviceQueueCreateFl
 typedef struct { VkStructureType sType; const void *pNext; VkDeviceCreateFlags flags; uint32_t queueCreateInfoCount; const VkDeviceQueueCreateInfo *pQueueCreateInfos; uint32_t enabledLayerCount; const char *const *ppEnabledLayerNames; uint32_t enabledExtensionCount; const char *const *ppEnabledExtensionNames; const void *pEnabledFeatures; } VkDeviceCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkBufferCreateFlags flags; VkDeviceSize size; VkBufferUsageFlags usage; VkSharingMode sharingMode; uint32_t queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; } VkBufferCreateInfo;
 typedef struct { uint32_t width,height,depth; } VkExtent3D;
+typedef struct { VkExtent3D maxExtent; uint32_t maxMipLevels,maxArrayLayers,sampleCounts; VkDeviceSize maxResourceSize; } VkImageFormatProperties;
 typedef struct { VkStructureType sType; const void *pNext; uint32_t flags,imageType,format; VkExtent3D extent; uint32_t mipLevels,arrayLayers,samples,tiling,usage,sharingMode,queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; uint32_t initialLayout; } VkImageCreateInfo;
 typedef struct { uint32_t aspectMask,baseMipLevel,levelCount,baseArrayLayer,layerCount; } VkImageSubresourceRange;
 typedef union { float float32[4]; int32_t int32[4]; uint32_t uint32[4]; } VkClearColorValue;
@@ -201,8 +204,22 @@ __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFeatures(VkPhysicalDevi
  (void)p;
 }
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice p,uint32_t format,void *out) {
- if(out)vk_zero(out,12);
- (void)p;(void)format;
+ if(!out)return;
+ uint32_t *f=(uint32_t*)out;f[0]=f[1]=f[2]=0;
+ if(!phys_ok(p))return;
+ if(format==VK_FORMAT_R8G8B8A8_UNORM||format==VK_FORMAT_B8G8R8A8_UNORM) {
+  f[0]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+  f[1]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+ }
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(VkPhysicalDevice p,uint32_t format,uint32_t type,uint32_t tiling,uint32_t usage,uint32_t flags,VkImageFormatProperties *out) {
+ if(!phys_ok(p)||!out)return VK_ERROR_INITIALIZATION_FAILED;
+ vk_zero(out,sizeof(*out));
+ if((format!=VK_FORMAT_R8G8B8A8_UNORM&&format!=VK_FORMAT_B8G8R8A8_UNORM)||type!=1||tiling>1||flags||
+    !usage||(usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT)))return VK_ERROR_FORMAT_NOT_SUPPORTED;
+ out->maxExtent.width=512;out->maxExtent.height=512;out->maxExtent.depth=1;
+ out->maxMipLevels=1;out->maxArrayLayers=1;out->sampleCounts=1;out->maxResourceSize=VK_MEMORY_BYTES;
+ return VK_SUCCESS;
 }
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p,VkPhysicalDeviceMemoryProperties *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!phys_ok(p))return;out->memoryTypeCount=1;out->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;out->memoryTypes[0].heapIndex=0;out->memoryHeapCount=1;out->memoryHeaps[0].size=(VkDeviceSize)VK_MAX_MEMORY*VK_MEMORY_BYTES; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p,const VkDeviceCreateInfo *ci,const void *alloc,VkDevice *out) {
@@ -305,7 +322,7 @@ __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInst
 #define IPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
  IPROC(vkGetInstanceProcAddr);IPROC(vkGetDeviceProcAddr);IPROC(vkEnumerateInstanceVersion);IPROC(vkEnumerateInstanceExtensionProperties);IPROC(vkEnumerateInstanceLayerProperties);IPROC(vkCreateInstance);
  if(!inst_ok(inst))return (PFN_vkVoidFunction)0;
- IPROC(vkDestroyInstance);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);
+ IPROC(vkDestroyInstance);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceImageFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);
 #undef IPROC
  return (PFN_vkVoidFunction)0;
 }

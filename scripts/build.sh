@@ -329,6 +329,7 @@ lld -flavor link \
   /export:vkGetPhysicalDeviceProperties \
   /export:vkGetPhysicalDeviceFeatures \
   /export:vkGetPhysicalDeviceFormatProperties \
+  /export:vkGetPhysicalDeviceImageFormatProperties \
   /export:vkGetPhysicalDeviceQueueFamilyProperties \
   /export:vkGetPhysicalDeviceMemoryProperties \
   /export:vkCreateDevice \

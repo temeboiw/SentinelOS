@@ -106,6 +106,13 @@ int main(void) {
     CHECK(*(uint32_t *)mapped == 0xA1B2C3D4u);
     vkUnmapMemory(device, dmem);
 
+    uint32_t formatProps[3] = {0};
+    vkGetPhysicalDeviceFormatProperties(physical, VK_FORMAT_R8G8B8A8_UNORM, formatProps);
+    CHECK(formatProps[0] == (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT));
+    VkImageFormatProperties ifp;
+    CHECK(vkGetPhysicalDeviceImageFormatProperties(physical, VK_FORMAT_R8G8B8A8_UNORM,
+          1, 1, VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &ifp) == VK_SUCCESS);
+    CHECK(ifp.maxExtent.width == 512 && ifp.maxExtent.height == 512 && ifp.sampleCounts == 1);
     VkImageCreateInfo imci = {0};
     imci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imci.imageType = 1;

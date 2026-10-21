@@ -1460,7 +1460,7 @@ clang "${USER_CFLAGS[@]}" \
   -o "$B/obj/explorer.o"
 
 lld -flavor link \
-  /subsystem:native /entry:explorer_main /nodefaultlib \
+  /subsystem:windows /entry:explorer_main /nodefaultlib \
   /fixed:no /base:0x40000000 \
   "/out:$SYS32/explorer.exe" \
   "$B/obj/explorer.o"
@@ -1472,7 +1472,7 @@ clang "${USER_CFLAGS[@]}" \
   -o "$B/obj/fileexplorer.o"
 
 lld -flavor link \
-  /subsystem:native /entry:mainCRTStartup /nodefaultlib \
+  /subsystem:windows /entry:mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x40100000 \
   "/out:$SYS32/fileexplorer.exe" \
   "$B/obj/fileexplorer.o"
@@ -1484,7 +1484,7 @@ clang "${USER_CFLAGS[@]}" \
   -o "$B/obj/cmd.o"
 
 lld -flavor link \
-  /subsystem:native /entry:mainCRTStartup /nodefaultlib \
+  /subsystem:windows /entry:mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x40300000 \
   "/out:$SYS32/cmd.exe" \
   "$B/obj/cmd.o"
@@ -1496,7 +1496,7 @@ clang "${USER_CFLAGS[@]}" \
   -o "$B/obj/msiexec.o"
 
 lld -flavor link \
-  /subsystem:native /entry:mainCRTStartup /nodefaultlib \
+  /subsystem:windows /entry:mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x40400000 \
   "/out:$SYS32/msiexec.exe" \
   "$B/obj/msiexec.o"

@@ -340,6 +340,37 @@ int main(void) {
     vkDestroyBuffer(device, readback, 0);
     vkFreeMemory(device, rbmem, 0);
 
+    /* Whole-image Vulkan image-to-image copy stays inside transfer layouts. */
+    VkImageCreateInfo dstci = imci;
+    dstci.initialLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    VkImage dstImage = 0;
+    CHECK(vkCreateImage(device, &dstci, 0, &dstImage) == VK_SUCCESS);
+    VkMemoryRequirements dstReq;
+    vkGetImageMemoryRequirements(device, dstImage, &dstReq);
+    VkMemoryAllocateInfo dstAi = {0};
+    dstAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    dstAi.allocationSize = dstReq.size; dstAi.memoryTypeIndex = 0;
+    VkDeviceMemory dstMem = 0;
+    CHECK(vkAllocateMemory(device, &dstAi, 0, &dstMem) == VK_SUCCESS);
+    CHECK(vkBindImageMemory(device, dstImage, dstMem, 0) == VK_SUCCESS);
+    VkImageCopy imageCopy = {0};
+    imageCopy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageCopy.srcSubresource.layerCount = 1;
+    imageCopy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageCopy.dstSubresource.layerCount = 1;
+    imageCopy.extent.width = 4; imageCopy.extent.height = 4; imageCopy.extent.depth = 1;
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdCopyImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageCopy);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, dstMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)mapped)[0] == 255 && ((uint8_t *)mapped)[1] == 0 &&
+          ((uint8_t *)mapped)[2] == 0 && ((uint8_t *)mapped)[3] == 255);
+    vkUnmapMemory(device, dstMem);
+    vkDestroyImage(device, dstImage, 0);
+    vkFreeMemory(device, dstMem, 0);
     vkUnmapMemory(device, imem);
     vkDestroyImage(device, image, 0);
     vkFreeMemory(device, imem, 0);

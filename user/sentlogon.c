@@ -126,8 +126,21 @@ static void cursor_draw(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y) {
     }
 }
 void sentlogon_main(void) {
+    /* Each process has its own address space. Initialize graphics here so the
+       kernel maps the VirtIO-GPU backing surface into sentlogon.exe too; the
+       firmware framebuffer returned by NtMapFramebuffer is not the VirtIO
+       scanout surface and flushing it cannot update the active display. */
+    GfxBootInfo gfx={0};
+    u64 gfx_ok=NtInitializeGraphics(&gfx);
     LogonFB fbinfo={0};
-    if(!NtMapFramebuffer((FBInfo *)&fbinfo)||!fbinfo.va||fbinfo.w<320||fbinfo.h<200) {
+    if(NtMapFramebuffer((FBInfo *)&fbinfo) && gfx_ok &&
+       gfx.backend==2 && gfx.surface_va) {
+        fbinfo.va=gfx.surface_va;
+        fbinfo.w=gfx.width;
+        fbinfo.h=gfx.height;
+        fbinfo.pitch=gfx.pitch;
+    }
+    if(!fbinfo.va||fbinfo.w<320||fbinfo.h<200) {
         NtWriteConsole("sentlogon: framebuffer unavailable; Enter to continue\n");
         for(;;) {
             InputEvent ev={0};

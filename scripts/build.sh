@@ -1556,19 +1556,38 @@ ls -lh \
   "$SYS32/cmd.exe" \
   "$SYS32/msiexec.exe"
 
-echo "==> GPT disk image (FAT32 ESP + ext4, 20 GiB)"
+echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
 
-# 20 GiB raw disk: 41,943,040 sectors at 512 bytes each.
-# GPT reserves the final 33 sectors, so end the ext4 partition at the
-# last usable LBA (DISK_SECTORS - 34), not at the physical end of disk.
-DISK_SECTORS=$((20 * 1024 * 1024 * 1024 / 512))
-GPT_LAST_USABLE=$((DISK_SECTORS - 34))
-ESP_SECTORS=262144
-EXT_START=264192
-EXT_SECTORS=$((GPT_LAST_USABLE - EXT_START + 1))
+# Size the ESP from the EFI files (minimum 64 MiB for a practical FAT32 ESP),
+# and size ext4 from the rootfs contents plus at least 100 MiB of spare space.
+# Additional allowance covers ext4 metadata and avoids packing files too tightly.
+MIB=$((1024 * 1024))
+SECTOR_SIZE=512
+SECTORS_PER_MIB=$((MIB / SECTOR_SIZE))
+ESP_BYTES=$(du -sb "$B/esp" | awk '{print $1}')
+ROOTFS_BYTES=$(du -sb "$B/rootfs" | awk '{print $1}')
+
+ESP_MIB=$(((ESP_BYTES + 8 * MIB + MIB - 1) / MIB))
+(( ESP_MIB < 64 )) && ESP_MIB=64
+ESP_SECTORS=$((ESP_MIB * SECTORS_PER_MIB))
+EXT_START=$((2048 + ESP_SECTORS))
+
+# Keep the ext4 partition MiB-aligned. The 10% + 16 MiB allowance is for
+# filesystem structures; the requested 100 MiB remains available beyond files.
+EXT_BYTES=$((ROOTFS_BYTES + ROOTFS_BYTES / 10 + 16 * MIB + 100 * MIB))
+EXT_BLOCKS=$(((EXT_BYTES + 4095) / 4096))
+EXT_SECTORS=$((EXT_BLOCKS * 8))
+EXT_OFF=$((EXT_START * SECTOR_SIZE))
+EXT_SZ=$((EXT_SECTORS * SECTOR_SIZE))
+
+# Round the whole disk up to a MiB and leave room for the backup GPT header.
+DISK_SECTORS=$((((EXT_START + EXT_SECTORS + 34 + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
+DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
+
+echo "  -> ESP: \${ESP_MIB} MiB; rootfs data: $((ROOTFS_BYTES / MIB)) MiB; disk: \${DISK_MIB} MiB"
 
 rm -f "$DISKIMG"
-qemu-img create -f raw "$DISKIMG" 20G >/dev/null
+qemu-img create -f raw "$DISKIMG" "\${DISK_MIB}M" >/dev/null
 
 sfdisk "$DISKIMG" <<SFDISK
 label: gpt
@@ -1579,14 +1598,9 @@ start=2048, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="
 start=$EXT_START, size=$EXT_SECTORS, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
 SFDISK
 
-ESP_OFF=$((2048 * 512))
-EXT_OFF=$((EXT_START * 512))
-EXT_SZ=$((EXT_SECTORS * 512))
-EXT_BLOCKS=$((EXT_SZ / 4096))
-
 dd if=/dev/zero \
   of="$B/esp.fat" \
-  bs=1M count=128 status=none
+  bs=1M count="$ESP_MIB" status=none
 
 mkfs.vfat -F 32 -n MAGICESP "$B/esp.fat" >/dev/null
 
@@ -1610,7 +1624,7 @@ rm -f "$B/esp.fat"
 
 FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode,^dir_index"
 
-if ! mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
+if ! mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
   -d "$B/rootfs" \
   -E "offset=$EXT_OFF" \
   "$DISKIMG" "$EXT_BLOCKS" >/dev/null 2>&1
@@ -1619,13 +1633,13 @@ then
 
   qemu-img create -f raw "$B/ext4.tmp" "$EXT_SZ" >/dev/null
 
-  mke2fs -t ext4 -b 4096 -L magic -O "$FEATS" \
+  mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
     -d "$B/rootfs" \
     "$B/ext4.tmp" "$EXT_BLOCKS" >/dev/null
 
   dd if="$B/ext4.tmp" \
     of="$DISKIMG" \
-    bs=512 seek=264192 conv=notrunc status=none
+    bs=512 seek="$EXT_START" conv=notrunc status=none
 
   rm -f "$B/ext4.tmp"
 fi

@@ -243,7 +243,6 @@ static int gfx_queue_init(void) {
 static int gfx_command(const void *request, uint32_t request_len) {
     if(!gfx_gpu_ready && !gfx_common) return 0;
     if(request_len>4096u) return 0;
-    volatile uint8_t *c=gfx_common;
     for(unsigned int i=0;i<request_len;i++)gfx_req[i]=((const uint8_t*)request)[i];
     gfx_resp->hdr.type=0;gfx_resp->hdr.flags=0;gfx_resp->hdr.fence_id=0;
     gfx_resp->hdr.ctx_id=0;gfx_resp->hdr.padding=0;

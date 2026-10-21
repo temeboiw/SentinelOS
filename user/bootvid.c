@@ -24,7 +24,8 @@ void bootvid_main(void){
    txt(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2+62,"VirtIO-GPU 2D active",0xFFB7D7E7,1);
   else
    txt(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2+62,"Framebuffer graphics active",0xFFB7D7E7,1);
-  (void)NtFlushGraphics(0,0,f.w,f.h);\n  static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13},dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
+  (void)NtFlushGraphics(0,0,f.w,f.h);
+  static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13},dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};
   int cx=f.w/2,cy=f.h/2+22;
   /* SYS_NtGetTickCount is RTC-backed and advances in whole-second steps.
    * Keep the splash visible for about three seconds; never use a zero tick
@@ -33,7 +34,8 @@ void bootvid_main(void){
   for(u32 frame=0;;frame++){
    for(int yy=cy-34;yy<cy+34;yy++){if(yy<0||yy>=(int)f.h)continue;u32 bg=mix(0xFF071725,0xFF147AA4,(u32)((u64)yy*255/(f.h>1?f.h-1:1)));u32 *row=fb+(u64)yy*f.pitch;int x0=cx-34;if(x0<0)x0=0;int x1=cx+34;if(x1>(int)f.w)x1=(int)f.w;for(int xx=x0;xx<x1;xx++)row[xx]=bg;}
    for(int i=0;i<12;i++){int age=(i-(int)(frame%12)+12)%12;u32 c=age==0?0xFFFFFFFF:age<4?0xFF80D8F5:age<7?0xFF397FA3:0xFF20465D;rect(fb,f.pitch,f.w,f.h,cx+dx[i]-3,cy+dy[i]-3,6,6,c);}
-   (void)NtFlushGraphics(0,0,f.w,f.h);\n   (void)sy3(SYS_Yield,0,0,0);
+   (void)NtFlushGraphics(0,0,f.w,f.h);
+   (void)sy3(SYS_Yield,0,0,0);
    u64 now=sy3(24,0,0,0);
    if(start_tick!=(u64)-1&&now!=(u64)-1) {
     if(now>=start_tick&&now-start_tick>=2500)break;
@@ -41,7 +43,8 @@ void bootvid_main(void){
     break;
    }
   }
-  for(u32 y=0;y<f.h;y++){u32 *row=fb+(u64)y*f.pitch;for(u32 x=0;x<f.w;x++)row[x]=0xFF000000;}\n  (void)NtFlushGraphics(0,0,f.w,f.h);
+  for(u32 y=0;y<f.h;y++){u32 *row=fb+(u64)y*f.pitch;for(u32 x=0;x<f.w;x++)row[x]=0xFF000000;}
+  (void)NtFlushGraphics(0,0,f.w,f.h);
  }
  NtWriteConsole("bootvid: splash complete; launching sentlogon\\n");
  char name[]={'s','e','n','t','l','o','g','o','n','.','e','x','e',0};

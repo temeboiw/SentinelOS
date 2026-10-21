@@ -136,13 +136,32 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
             if (!(z >= 0.0f && z <= 1.0f)) continue;
             at = (size_t)y * t->stride_pixels + (uint32_t)x;
             if (t->depth_test && t->depth && z > t->depth[at]) continue;
-            r = wa*a->r + wb*b->r + wc*c->r;
-            g = wa*a->g + wb*b->g + wc*c->g;
-            bl = wa*a->b + wb*b->b + wc*c->b;
-            al = wa*a->a + wb*b->a + wc*c->a;
+            /* Perspective-correct varyings when clip-space reciprocal W
+             * is supplied; retain affine behavior for legacy callers that
+             * leave all inv_w values zero. Depth remains screen-linear. */
+            {
+                float iw = wa*a->inv_w + wb*b->inv_w + wc*c->inv_w;
+                if (iw > 1.0e-20f || iw < -1.0e-20f) {
+                    r = (wa*a->r*a->inv_w + wb*b->r*b->inv_w + wc*c->r*c->inv_w) / iw;
+                    g = (wa*a->g*a->inv_w + wb*b->g*b->inv_w + wc*c->g*c->inv_w) / iw;
+                    bl = (wa*a->b*a->inv_w + wb*b->b*b->inv_w + wc*c->b*c->inv_w) / iw;
+                    al = (wa*a->a*a->inv_w + wb*b->a*b->inv_w + wc*c->a*c->inv_w) / iw;
+                } else {
+                    r = wa*a->r + wb*b->r + wc*c->r;
+                    g = wa*a->g + wb*b->g + wc*c->g;
+                    bl = wa*a->b + wb*b->b + wc*c->b;
+                    al = wa*a->a + wb*b->a + wc*c->a;
+                }
+            }
             if (tex && tex->pixels) {
-                uint32_t q = sf_sample(tex, wa*a->u + wb*b->u + wc*c->u,
-                                            wa*a->v + wb*b->v + wc*c->v);
+                float u = wa*a->u + wb*b->u + wc*c->u;
+                float v = wa*a->v + wb*b->v + wc*c->v;
+                float iw = wa*a->inv_w + wb*b->inv_w + wc*c->inv_w;
+                if (iw > 1.0e-20f || iw < -1.0e-20f) {
+                    u = (wa*a->u*a->inv_w + wb*b->u*b->inv_w + wc*c->u*c->inv_w) / iw;
+                    v = (wa*a->v*a->inv_w + wb*b->v*b->inv_w + wc*c->v*c->inv_w) / iw;
+                }
+                uint32_t q = sf_sample(tex, u, v);
                 r *= sf_chan(q, 16); g *= sf_chan(q, 8);
                 bl *= sf_chan(q, 0); al *= sf_chan(q, 24);
             }

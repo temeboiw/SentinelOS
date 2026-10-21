@@ -694,6 +694,17 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
+    /* A forced drag redraw must also discard any clip inherited from an
+     * earlier paint. Otherwise the parent can move vertically while its child
+     * buttons are still clipped to the old Y range. Restore the caller's clip
+     * after the complete frame has been composed. */
+    int force_saved_clip=0, force_saved_x0=u32_clip_x0, force_saved_y0=u32_clip_y0;
+    int force_saved_x1=u32_clip_x1, force_saved_y1=u32_clip_y1;
+    if(u32_force_full_compose) {
+        force_saved_clip=u32_render_clip;
+        u32_render_clip=0;
+    }
+
     /* Do not erase the cursor before painting. Keep it over the scene while
      * layers are recomposed; cursor_save_draw() refreshes its saved-under
      * pixels after the final frame is ready. */
@@ -906,6 +917,11 @@ static void compose(void) {
         cur_ox=g_mx; cur_oy=g_my; cur_on=0;
     } else {
         cursor_save_draw(g_mx,g_my);
+    }
+    if(u32_force_full_compose) {
+        u32_render_clip=force_saved_clip;
+        u32_clip_x0=force_saved_x0; u32_clip_y0=force_saved_y0;
+        u32_clip_x1=force_saved_x1; u32_clip_y1=force_saved_y1;
     }
 }
 

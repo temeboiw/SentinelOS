@@ -202,6 +202,70 @@ static int vk_spirv_validate(const uint32_t *w, size_t n) {
  }
  return i==n && memory_model && entry && function;
 }
+/* A bounded SPIR-V scalar interpreter for the integer subset used by
+ * simple shader helpers. Unsupported executable opcodes fail closed.
+ * Values are 32-bit SPIR-V bit patterns; no host pointers are dereferenced. */
+#define VK_SPIRV_MAX_IDS 4096u
+static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
+                                uint32_t output_id,uint32_t *out_bits) {
+ uint32_t ids[VK_SPIRV_MAX_IDS], defined[VK_SPIRV_MAX_IDS];
+ size_t i=5; uint32_t active=0, found=0, steps=0;
+ if(!w||!out_bits||!vk_spirv_validate(w,n)||!entry||
+    output_id>=VK_SPIRV_MAX_IDS)return 0;
+ vk_zero(ids,sizeof(ids));vk_zero(defined,sizeof(defined));
+ /* Constants are module-scope declarations and are available to the entry. */
+ while(i<n) {
+  uint32_t wc=w[i]>>16,op=w[i]&0xffffu;
+  if(op==43u && wc==4u && w[i+2]<VK_SPIRV_MAX_IDS) {
+   ids[w[i+2]]=w[i+3];defined[w[i+2]]=1;
+  }
+  i+=wc;
+ }
+ i=5;
+ while(i<n) {
+  uint32_t wc=w[i]>>16,op=w[i]&0xffffu;
+  if(op==54u && wc>=5u) active=(w[i+2]==entry);
+  else if(active && op==56u) { active=0;found=1; }
+  else if(active) {
+   uint32_t rid=0,a=0,b=0,v=0;
+   if(++steps>2048u)return 0;
+   if(op==248u||op==253u||op==0u) { /* labels, return, nop */ }
+   else if(op==43u && wc==4u) { /* local constant declarations */ 
+    rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
+   }
+   else if((op==128u||op==132u||op==134u||op==194u||op==195u||
+            op==196u||op==197u||op==198u||op==199u||op==83u||
+            op==124u) && wc==5u && op!=83u && op!=124u) {
+    rid=w[i+2];a=w[i+3];b=w[i+4];
+    if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||
+       !defined[a]||!defined[b])return 0;
+    if(op==128u)v=ids[a]+ids[b];
+    else if(op==132u)v=ids[a]*ids[b];
+    else if(op==134u){if(!ids[b])return 0;v=ids[a]/ids[b];}
+    else if(op==194u)v=ids[a]>>(ids[b]&31u);
+    else if(op==195u)v=(uint32_t)((int32_t)ids[a]>>(ids[b]&31u));
+    else if(op==196u)v=ids[a]<<(ids[b]&31u);
+    else if(op==197u)v=ids[a]|ids[b];
+    else if(op==198u)v=ids[a]^ids[b];
+    else v=ids[a]&ids[b];
+    ids[rid]=v;defined[rid]=1;
+   }
+   else if((op==83u||op==124u)&&wc==4u) {
+    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
+    ids[rid]=ids[a];defined[rid]=1;
+   }
+   else if(op==169u&&wc==6u) {
+    rid=w[i+2];a=w[i+3];b=w[i+4];v=w[i+5];
+    if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||v>=VK_SPIRV_MAX_IDS||!defined[a]||!defined[b]||!defined[v])return 0;
+    ids[rid]=ids[a]?ids[b]:ids[v];defined[rid]=1;
+   }
+   else return 0;
+  }
+  i+=wc;
+ }
+ if(!found||!defined[output_id])return 0;
+ *out_bits=ids[output_id];return 1;
+}
 static VkResult unsupported_extensions(uint32_t n,const char *const *names) { (void)names; return n?VK_ERROR_EXTENSION_NOT_PRESENT:VK_SUCCESS; }
 
 __declspec(dllexport) VkResult VKAPI_CALL vkEnumerateInstanceVersion(uint32_t *v) { if(!v)return VK_ERROR_INITIALIZATION_FAILED;*v=VK_API_VERSION_1_0;return VK_SUCCESS; }

@@ -81,6 +81,7 @@ need() {
 }
 
 need clang
+need clang++
 need lld
 need qemu-img
 need sfdisk
@@ -108,7 +109,8 @@ for src in \
   user/explorer.c \
   user/fileexplorer.c \
   user/cmd.c \
-  user/msiexec.c
+  user/msiexec.c \
+  UserTestApps/game.cpp
 do
   if [[ ! -f "$ROOT/$src" ]]; then
     echo "FATAL: required source file missing: $src"
@@ -1519,6 +1521,43 @@ lld -flavor link \
   /fixed:no /base:0x40400000 \
   "/out:$SYS32/msiexec.exe" \
   "$B/obj/msiexec.o"
+
+echo "  -> game.exe (UserTestApps C++ game, installed at disk root)"
+
+USER_CXXFLAGS=(
+  -target x86_64-windows-gnu
+  -ffreestanding
+  -fno-exceptions
+  -fno-rtti
+  -fno-threadsafe-statics
+  -fno-use-cxa-atexit
+  -fno-stack-protector
+  -fno-pic
+  -mno-red-zone
+  -mno-stack-arg-probe
+  -mgeneral-regs-only
+  -O2
+  -Wall
+  -I"$ROOT/user"
+  -I"$ROOT/shared"
+)
+
+clang++ "${USER_CXXFLAGS[@]}" \
+  -c "$ROOT/UserTestApps/game.cpp" \
+  -o "$B/obj/game.o"
+
+lld -flavor link \
+  /subsystem:windows /entry:game_mainCRTStartup /nodefaultlib \
+  /fixed:no /base:0x42000000 \
+  "/out:$B/rootfs/game.exe" \
+  "$B/obj/game.o"
+
+if [[ ! -s "$B/rootfs/game.exe" ]]; then
+  echo "FATAL: game.exe was not produced"
+  exit 1
+fi
+
+ls -lh "$B/rootfs/game.exe"
 
 echo "==> Checking required images"
 

@@ -61,7 +61,20 @@ static inline void NtExit(u64 code) {
     (void)sy3(SYS_Exit, code, 0, 0);
 }
 static inline NTSTATUS NtCreateProcess(const char *name) {
-    return (NTSTATUS)sy3(SYS_CreateProcess, (u64)name, 0, 0);
+    NTSTATUS status = (NTSTATUS)sy3(SYS_CreateProcess, (u64)name, 0, 0);
+    if (status == (NTSTATUS)-2) {
+        typedef int (*MessageBoxA_t)(void *, const char *, const char *, u32);
+        static const char dll_name[] = "user32.dll";
+        static const char api_name[] = "MessageBoxA";
+        MessageBoxA_t box = (MessageBoxA_t)sy3(
+            SYS_GetProcAddress, (u64)dll_name, (u64)api_name, 0);
+        if (box)
+            (void)box(0, "Cannot use this .exe in Win32 mode.",
+                      "Unsupported executable", 0x10);
+        else
+            NtWriteConsole("Cannot use this .exe in Win32 mode.\n");
+    }
+    return status;
 }
 static inline NTSTATUS NtQueryDirectory(u64 index, char *name_out) {
     return (NTSTATUS)sy3(SYS_QueryDir, index, (u64)name_out, 0);

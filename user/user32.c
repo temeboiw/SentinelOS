@@ -1009,7 +1009,7 @@ static void compose(void) {
     if(layered){g_front=u32_taskbar_layer;g_pitch=g_fw;u32_clear_layer(u32_taskbar_layer);}
     draw_taskbar();
     if(u32_render_clip){layer_x0=u32_clip_x0;layer_y0=u32_clip_y0;layer_x1=u32_clip_x1;layer_y1=u32_clip_y1;}
-    if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
+    if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;if(!g_gpu_surface)u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
     if(layered&&g_gpu_surface) {
         typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
         int px0=layer_x0,py0=layer_y0,px1=layer_x1,py1=layer_y1;

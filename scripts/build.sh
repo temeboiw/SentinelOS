@@ -84,15 +84,15 @@ need() {
 # a wrapper named "clang" that forwards Clang's private -cc1 argument to proot,
 # which fails with: "proot error: unknown option '-cc1'".
 find_llvm_tool() {
-  local tool="$1" candidate resolved description
+  local tool="$1" candidate resolved description path_name
   local -a candidates=()
   if [[ -n "${!tool:-}" ]]; then candidates+=("${!tool}"); fi
   case "$tool" in
-    CLANG_BIN) candidates+=(/usr/local/swift/usr/bin/clang /usr/lib/llvm-*/bin/clang /usr/bin/clang-[0-9]* /usr/bin/clang) ;;
-    CLANGXX_BIN) candidates+=(/usr/local/swift/usr/bin/clang++ /usr/lib/llvm-*/bin/clang++ /usr/bin/clang++-[0-9]* /usr/bin/clang++) ;;
-    LLD_BIN) candidates+=(/usr/local/swift/usr/bin/lld /usr/lib/llvm-*/bin/lld /usr/bin/lld-[0-9]* /usr/bin/lld) ;;
+    CLANG_BIN) path_name=clang; candidates+=(/usr/local/swift/usr/bin/clang /usr/lib/llvm-*/bin/clang /usr/bin/clang-[0-9]* /usr/bin/clang) ;;
+    CLANGXX_BIN) path_name=clang++; candidates+=(/usr/local/swift/usr/bin/clang++ /usr/lib/llvm-*/bin/clang++ /usr/bin/clang++-[0-9]* /usr/bin/clang++) ;;
+    LLD_BIN) path_name=lld; candidates+=(/usr/local/swift/usr/bin/lld /usr/lib/llvm-*/bin/lld /usr/bin/lld-[0-9]* /usr/bin/lld) ;;
   esac
-  candidates+=("$(command -v "${tool%_BIN}" 2>/dev/null || true)")
+  candidates+=("$(command -v "$path_name" 2>/dev/null || true)")
   for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" && -x "$candidate" ]] || continue
     resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"

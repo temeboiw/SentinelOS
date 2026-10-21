@@ -55,7 +55,6 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
     smp_discover();
-    smp_start_aps(bi);
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
     uint64_t got = pmm_reclaim_boot_services(bi);
@@ -66,6 +65,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("\n-- kernel heap --\n");
     heap_selftest();
     heap_stats(); modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
+    smp_start_aps(bi);
 
 #if TEST_FAULT == 1
     DbgPrint("triggering #UD...\n");

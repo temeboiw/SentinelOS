@@ -113,6 +113,7 @@ static void smp_add_cpu(uint32_t id, uint32_t uid, int x2, int enabled) {
 static void smp_discover(void) {
     smp_topology.count = 0;
     smp_topology.bsp_apic_id = smp_current_apic_id();
+    cpu_locals[0].apic_id = smp_topology.bsp_apic_id;
 
     uint8_t *rsdp = smp_find_rsdp();
     if (!rsdp) {
@@ -280,11 +281,17 @@ static void smp_ap_entry(uint32_t cpu_index) {
     smp_cpu_state[cpu_index] = SMP_CPU_STARTING;
     cpu_init_cpu(cpu_index);
     smp_enable_local_apic();
+    cpu_locals[cpu_index].apic_id = smp_topology.cpus[cpu_index].apic_id;
+    MmCurrentProcess = PspSystemProcess;
     if (!KiInitializeApScheduler(cpu_index)) {
         DbgPrint("smp: AP cpu%u scheduler initialization failed; parking\n", cpu_index);
         for (;;) __asm__ volatile("cli; hlt");
     }
-    MmCurrentProcess = PspSystemProcess;
+    if (!HalStartClockInterrupt(100, 0xF0)) {
+        DbgPrint("smp: AP cpu%u local preemption timer failed; parking\n", cpu_index);
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+    cpu_locals[cpu_index].scheduler_active = 1;
 
     DbgPrint("smp: AP cpu%u (APIC ID=%u) initialized; parked pending SMP-safe scheduler\n",
              cpu_index, smp_topology.cpus[cpu_index].apic_id);

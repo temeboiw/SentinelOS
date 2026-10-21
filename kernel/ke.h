@@ -207,8 +207,10 @@ static void KiInitializeScheduler(void) {
     ki_quantum_left = QUANTUM_TICKS;
     KeConnectInterrupt(DISPATCH_VECTOR, KiDispatchInterrupt);
     KeConnectInterrupt(CLOCK_VECTOR, KiClockInterrupt);
+    KeConnectInterrupt(0xF0, KiDispatchInterrupt);  // AP-local preemption timer
     KeConnectInterrupt(0x21, irq_stub_eoi);
     KeConnectInterrupt(0x2C, irq_stub_eoi);
+    cpu_local_current()->scheduler_active = 1;
     KiSchedulerUnlock();
 }
 

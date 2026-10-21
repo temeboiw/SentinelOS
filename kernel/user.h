@@ -1824,6 +1824,10 @@ static Frame *syscall_handler(Frame *f) {
                 int target = wm_hit_test(out->x, out->y);
                 if (target <= 0) target = mepid;
 
+                /* Raise/focus the clicked window before routing its button event. */
+
+                wm_activate_pid(target);
+
                 pending_click = *out;
                 pending_click_pid = target;
                 pending_click_valid = 1;
@@ -1869,6 +1873,10 @@ static Frame *syscall_handler(Frame *f) {
                 if (out->type == 3) {
                     int target = wm_hit_test(out->x, out->y);
                     if (target <= 0) target = mepid;
+
+                    /* Raise/focus the clicked window before routing its button event. */
+
+                    wm_activate_pid(target);
 
                     pending_click = *out;
                     pending_click_pid = target;

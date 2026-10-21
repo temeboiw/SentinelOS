@@ -1387,7 +1387,20 @@ static Frame *syscall_handler(Frame *f) {
         ut_exit_current();
 
         if (dying && dying != PspSystemProcess) {
-            wm_unregister((int)dying->Pid);
+            int dead_pid=(int)dying->Pid;
+            int dead_slot=wm_shared_window_slot(dead_pid);
+            int dx=0,dy=0,dw=(int)wm_shared_width,dh=(int)wm_shared_height;
+            if(dead_slot>=0) {
+                dx=wm_tab[dead_slot].x-12;dy=wm_tab[dead_slot].y-12;
+                dw=wm_tab[dead_slot].w+24;dh=wm_tab[dead_slot].h+28;
+            }
+            MmSwitchToProcess(PspSystemProcess);
+            if(dead_slot>=0&&wm_shared_windows[dead_slot]) {
+                kfree(wm_shared_windows[dead_slot]);wm_shared_windows[dead_slot]=0;
+            }
+            wm_unregister(dead_pid);
+            if(dx<0){dw+=dx;dx=0;}if(dy<0){dh+=dy;dy=0;}
+            if(dw>0&&dh>0)wm_shared_compose((uint32_t)dx,(uint32_t)dy,(uint32_t)dw,(uint32_t)dh);
 
             for (int i = 0; i < UP_MAX; i++) {
                 if (up_tab[i].proc == dying) {

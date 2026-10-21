@@ -454,13 +454,58 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
     uint64_t rounded = (size + USER_IMAGE_PAGE - 1) & ~(USER_IMAGE_PAGE - 1);
     uint64_t pages = rounded / USER_IMAGE_PAGE;
     uint64_t base = mod->base ? mod->base : 0x40000000ULL;
+    uint64_t preferred_base = 0;
+    int relocatable = 0;
+
+    /*
+     * Boot DLLs can share the same recorded/default base. If no explicit
+     * base is supplied, use the PE ImageBase. When that range is occupied,
+     * move the image only if its PE has a bounded base-relocation directory.
+     */
+    if (pe_is_image((const uint8_t *)(HHDM_BASE + mod->phys), size)) {
+        const uint8_t *raw = (const uint8_t *)(HHDM_BASE + mod->phys);
+        int32_t peoff = *(const int32_t *)(raw + 0x3C);
+        const uint8_t *opt = raw + peoff + 4 + 20;
+        preferred_base = *(const uint64_t *)(opt + 24);
+        uint32_t reloc_rva = *(const uint32_t *)(opt + 112 + 5 * 8);
+        uint32_t reloc_size = *(const uint32_t *)(opt + 112 + 5 * 8 + 4);
+        relocatable = reloc_rva && reloc_size &&
+                      reloc_rva < size && reloc_size <= size - reloc_rva;
+        if (!mod->base && preferred_base) base = preferred_base;
+    }
 
     if (!pages || (base & (USER_IMAGE_PAGE - 1)) ||
         base < 0x10000ULL || base >= 0x0000800000000000ULL ||
-        rounded > 0x0000800000000000ULL - base ||
-        !MmUserRangeUnmapped(proc, base, rounded)) {
-        DbgPrint("user: image VA collision or invalid range for %s\n", mod->name);
+        rounded > 0x0000800000000000ULL - base) {
+        DbgPrint("user: invalid image range for %s\\n", mod->name);
         return -1;
+    }
+
+    if (!MmUserRangeUnmapped(proc, base, rounded)) {
+        if (!relocatable) {
+            DbgPrint("user: image VA collision and no relocations for %s\\n",
+                     mod->name);
+            return -1;
+        }
+
+        /* Probe complete image ranges, not just their first page. */
+        uint64_t candidate = 0x50000000ULL;
+        int found = 0;
+        while (candidate < 0x0000800000000000ULL &&
+               rounded <= 0x0000800000000000ULL - candidate) {
+            if (MmUserRangeUnmapped(proc, candidate, rounded)) {
+                base = candidate;
+                found = 1;
+                break;
+            }
+            if (candidate > UINT64_MAX - 0x02000000ULL) break;
+            candidate += 0x02000000ULL;
+        }
+        if (!found) {
+            DbgPrint("user: no free relocatable image range for %s\\n",
+                     mod->name);
+            return -1;
+        }
     }
 
     int slot = -1;

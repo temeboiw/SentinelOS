@@ -1464,9 +1464,23 @@ static Frame *syscall_handler(Frame *f) {
         for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
             for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
                 dst[yy*a.width+xx]=src[yy*a.width+xx];
-        /* Apps repaint their own dirty rectangle. The desktop publishes all
-         * three global layers in order and the taskbar submission commits the frame. */
-        if(a.layer==WM_LAYER_TASKBAR||a.layer==WM_LAYER_WINDOW)
+        /* The desktop publishes its desktop/window/taskbar layers in order.
+         * Composing the window layer here and then composing the taskbar layer
+         * immediately afterwards sends the same damaged rectangle to the GPU
+         * twice. Defer only the Desktop owner's window-layer present; its
+         * taskbar-layer present is the frame commit. Ordinary app windows still
+         * present immediately, and the cursor/taskbar path remains unchanged. */
+        int desktop_owner = slot >= 0 &&
+            wm_tab[slot].title[0] == 'D' &&
+            wm_tab[slot].title[1] == 'e' &&
+            wm_tab[slot].title[2] == 's' &&
+            wm_tab[slot].title[3] == 'k' &&
+            wm_tab[slot].title[4] == 't' &&
+            wm_tab[slot].title[5] == 'o' &&
+            wm_tab[slot].title[6] == 'p' &&
+            wm_tab[slot].title[7] == 0;
+        if(a.layer==WM_LAYER_TASKBAR ||
+           (a.layer==WM_LAYER_WINDOW && !desktop_owner))
             wm_shared_compose(a.x,a.y,a.w,a.h);
         if(wm_dbg_sample(dbg_n))
             DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",

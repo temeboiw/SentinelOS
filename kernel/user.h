@@ -12,6 +12,7 @@
 #include "uthread.h"
 #include "wm.h"
 #include "ntabi.h"
+#include "gfx.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -42,6 +43,11 @@
 #define SYS_NtQueryVirtualMemory       29
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
+#define SYS_NtInitializeGraphics        32
+#define SYS_NtFlushGraphics              33
+#define SYS_NtSubmit3D                    34
+#define SYS_NtPresent3D                   35
+#define SYS_NtUploadVirGLBuffer            36
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1778,6 +1784,73 @@ static Frame *syscall_handler(Frame *f) {
         } else {
             f->rax = 0;
         }
+        return f;
+    }
+
+    case SYS_NtUploadVirGLBuffer: {
+        uint64_t bytes=f->rdi;
+        if(!gfx_3d_ready||!bytes||bytes>GFX_VIRGL_BUFFER_BYTES) { f->rax=0;return f; }
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=gfx_upload_virgl_buffer((uint32_t)bytes);
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=ok?1:0;
+        return f;
+    }
+
+    case SYS_NtPresent3D: {
+        if(!gfx_3d_ready) { f->rax=0;return f; }
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=gfx_present_virgl();
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=ok?1:0;
+        return f;
+    }
+
+    case SYS_NtSubmit3D: {
+        uint64_t user_stream=f->rdi, length=f->rsi;
+        if(!length || length>4064 || !gfx_3d_ready ||
+           !MmValidateUserRange(MmCurrentProcess,user_stream,length,0)) {
+            f->rax=0;return f;
+        }
+        uint8_t stream[4064];
+        for(uint64_t i=0;i<length;i++)stream[i]=((const uint8_t*)user_stream)[i];
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        int ok=gfx_submit_virgl(stream,(uint32_t)length);
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=ok?1:0;
+        return f;
+    }
+
+    case SYS_NtFlushGraphics: {
+        typedef struct { uint32_t x, y, w, h; } GfxUserRect;
+        GfxUserRect rect;
+        if (!f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi, sizeof(rect), 0)) {
+            f->rax = 0;
+            return f;
+        }
+        rect = *(GfxUserRect *)f->rdi;
+        KPROCESS *caller = MmCurrentProcess;
+        if (caller != PspSystemProcess) MmSwitchToProcess(PspSystemProcess);
+        int ok = gfx_flush(rect.x, rect.y, rect.w, rect.h);
+        if (caller != PspSystemProcess) MmSwitchToProcess(caller);
+        f->rax = ok ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtInitializeGraphics: {
+        GfxBootInfo info = {0};
+        if (!f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi, sizeof(info), 1)) {
+            f->rax = 0;
+            return f;
+        }
+        gfx_boot_initialize(&info, user_fb_w, user_fb_h, user_fb_pitch);
+        *(GfxBootInfo *)f->rdi = info;
+        f->rax = info.initialized ? 1 : 0;
         return f;
     }
 

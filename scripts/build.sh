@@ -96,12 +96,14 @@ for src in \
   boot/loadufi.c \
   hal/hal.c \
   kernel/kernel.c \
+  kernel/gfx.h \
   user/smss.c \
   user/bootvid.c \
   user/sentlogon.c \
   user/taskbar.c \
   user/kernel32.c \
   user/user32.c \
+  user/soft3d.c \
   user/font_ttf.h \
   user/explorer.c \
   user/fileexplorer.c \
@@ -865,6 +867,11 @@ clang "${USER_CFLAGS[@]}" \
   -c "$ROOT/user/user32.c" \
   -o "$B/obj/user32.o"
 
+echo "  -> soft3d.o"
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/soft3d.c" \
+  -o "$B/obj/soft3d.o"
+
 lld -flavor link \
   /dll /noentry /subsystem:native /nodefaultlib \
   /fixed:no /base:0x41100000 \
@@ -882,6 +889,17 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:S3DGetSurface \
+  /export:S3DInitializeSurface \
+  /export:S3DInitialize \
+  /export:S3DClear \
+  /export:S3DDrawTriangle \
+  /export:S3DPresent \
+  /export:S3DSubmitVirGL \
+  /export:S3DPresentVirGL \
+  /export:S3DClearVirGL \
+  /export:S3DDrawTriangleVirGL \
+  /export:S3DUploadVirGLBuffer \
   /export:BeginRedrawBatch \
   /export:EndRedrawBatch \
   /export:GetClientRect \
@@ -1451,7 +1469,8 @@ lld -flavor link \
   /export:SetGestureConfig \
   /export:GetTouchInputInfo \
   "/out:$SYS32/user32.dll" \
-  "$B/obj/user32.o"
+  "$B/obj/user32.o" \
+  "$B/obj/soft3d.o"
 
 echo "  -> explorer.exe"
 

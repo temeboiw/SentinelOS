@@ -90,7 +90,9 @@ typedef struct {
 typedef struct { GfxCtrlHdr hdr; } GfxResponse;
 
 static uint8_t gfx_gpu_ready;
-static uint8_t gfx_gpu_failed;\nstatic uint8_t gfx_virgl_supported;\nstatic uint8_t gfx_3d_ready;
+static uint8_t gfx_gpu_failed;
+static uint8_t gfx_virgl_supported;
+static uint8_t gfx_3d_ready;
 static uint64_t gfx_surface_pa, gfx_surface_bytes, gfx_surface_pages;
 static uint64_t gfx_virgl_buffer_pa;
 static uint32_t gfx_width, gfx_height, gfx_pitch;
@@ -101,7 +103,8 @@ static uint64_t gfx_desc_pa, gfx_avail_pa, gfx_used_pa, gfx_req_pa, gfx_resp_pa;
 static GfxDesc *gfx_desc;
 static GfxAvail *gfx_avail;
 static volatile GfxUsed *gfx_used;
-static uint8_t *gfx_req;\nstatic uint8_t gfx_submit_buffer[4096];
+static uint8_t *gfx_req;
+static uint8_t gfx_submit_buffer[4096];
 static volatile GfxResponse *gfx_resp;
 static uint32_t gfx_pci_bus, gfx_pci_dev, gfx_pci_fn;
 static uint16_t gfx_pci_vendor, gfx_pci_device;
@@ -188,7 +191,8 @@ static int gfx_find_caps(void) {
         }
         cap=next;
     }
-    if(!gfx_notify_mult) gfx_notify_mult=1;\n    return gfx_common && gfx_notify;
+    if(!gfx_notify_mult) gfx_notify_mult=1;
+    return gfx_common && gfx_notify;
 }
 static int gfx_queue_init(void) {
     volatile uint8_t *c=gfx_common;
@@ -491,7 +495,8 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
     int gpu=gfx_driver_init(fb_width,fb_height);
     if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
     if(gpu) {
-        out->capabilities|=GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D;\n        if(gfx_3d_ready)out->capabilities|=GFX_CAP_ACCEL_3D;
+        out->capabilities|=GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D;
+        if(gfx_3d_ready)out->capabilities|=GFX_CAP_ACCEL_3D;
         out->backend=GFX_BACKEND_VIRTIO_GPU;out->pitch=gfx_pitch;out->initialized=1;
         out->pci_bus=gfx_pci_bus;out->pci_device=gfx_pci_dev;out->pci_function=gfx_pci_fn;
         out->vendor_id=gfx_pci_vendor;out->device_id=gfx_pci_device;

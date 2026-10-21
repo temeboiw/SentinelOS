@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -59,6 +59,7 @@ typedef struct {
     unsigned char pci_class, pci_subclass, pci_prog_if, initialized;
     u64 surface_va;
 } GfxBootInfo;
+typedef struct { u32 x, y, w, h; } GfxRect;
 
 #define GFX_CAP_FRAMEBUFFER (1u << 0)
 #define GFX_CAP_PCI_SCAN    (1u << 1)
@@ -98,6 +99,10 @@ static inline u64 NtInitializeGraphics(GfxBootInfo *out) {
     out->size = sizeof(*out);
     out->version = 1;
     return sy3(SYS_InitializeGraphics, (u64)out, 0, 0);
+}
+static inline u64 NtFlushGraphics(u32 x, u32 y, u32 w, u32 h) {
+    GfxRect rect = {x, y, w, h};
+    return sy3(SYS_FlushGraphics, (u64)&rect, 0, 0);
 }
 static inline u64 NtMapFramebuffer(FBInfo *out) {
     return sy3(SYS_MapFramebuffer, (u64)out, 0, 0);

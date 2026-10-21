@@ -365,6 +365,8 @@ int main(void) {
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, barrierBatch);
     CHECK(((VkCmdObj *)cmd)->count == 0); /* atomic rejection */
     barrierBatch[1].pNext = 0;
+    barrierBatch[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrierBatch[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, barrierBatch);
     CHECK(((VkCmdObj *)cmd)->count == 2);

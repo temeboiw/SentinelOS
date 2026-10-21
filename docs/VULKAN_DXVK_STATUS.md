@@ -45,3 +45,8 @@ A full Vulkan claim requires API/resource/synchronization/error-path tests and
 an in-guest program that executes graphics/compute work and presents visible
 output. DXVK requires an actual Direct3D application rendered through DXVK in
 the SentinelOS guest. These gates have not been passed.
+
+
+## SPIR-V scalar control flow update
+
+The bounded scalar helper now follows `OpBranch`, `OpBranchConditional`, and 32-bit `OpSwitch` targets within the selected entry function, and resolves `OpPhi` values using the predecessor block. Selection/loop merge declarations are accepted as metadata. Execution remains instruction-budgeted and rejects unsupported operations, malformed targets, and unresolved values. This expands scalar execution but is not a complete SPIR-V runtime or full Vulkan conformance.

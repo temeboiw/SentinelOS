@@ -210,10 +210,25 @@ static int vk_spirv_validate(const uint32_t *w, size_t n) {
 #define VK_SPIRV_MAX_IDS 4096u
 static uint32_t g_spirv_ids[VK_SPIRV_MAX_IDS];
 static uint8_t g_spirv_defined[VK_SPIRV_MAX_IDS];
+static size_t vk_spirv_find_label(const uint32_t *w,size_t n,uint32_t entry,uint32_t label) {
+ size_t i=5; uint32_t in_entry=0;
+ while(i<n) {
+  uint32_t wc=w[i]>>16,op=w[i]&0xffffu;
+  if(!wc||wc>n-i)return n;
+  if(op==54u&&wc>=5u)in_entry=(w[i+2]==entry);
+  else if(op==56u)in_entry=0;
+  else if(in_entry&&op==248u&&wc==2u&&w[i+1]==label)return i;
+  i+=wc;
+ }
+ return n;
+}
+/* Bounded control-flow-aware SPIR-V scalar interpreter. Branches stay within
+ * the selected entry function, Phi selects by predecessor, and an instruction
+ * budget prevents malformed loops from hanging the OS. */
 static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
                                 uint32_t output_id,uint32_t *out_bits) {
  uint32_t *ids=g_spirv_ids; uint8_t *defined=g_spirv_defined;
- size_t i=5; uint32_t active=0, found=0, steps=0;
+ size_t i=5; uint32_t active=0, found=0, steps=0, current_label=0, predecessor=0;
  if(!w||!out_bits||!vk_spirv_validate(w,n)||!entry||
     output_id>=VK_SPIRV_MAX_IDS)return 0;
  vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));
@@ -228,12 +243,39 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
  i=5;
  while(i<n) {
   uint32_t wc=w[i]>>16,op=w[i]&0xffffu;
-  if(op==54u && wc>=5u) active=(w[i+2]==entry);
+  if(op==54u && wc>=5u) { active=(w[i+2]==entry);current_label=0;predecessor=0; }
   else if(active && op==56u) { active=0;found=1; }
   else if(active) {
    uint32_t rid=0,a=0,b=0,v=0;
    if(++steps>2048u)return 0;
-   if(op==248u||op==253u||op==0u) { /* labels, return, nop */ }
+   if(op==248u&&wc==2u) { current_label=w[i+1]; }
+   else if(op==247u||op==246u||op==0u) { /* merge declarations and nop */ }
+   else if(op==253u&&wc==1u) { active=0;found=1; }
+   else if(op==254u&&wc==2u) { active=0;found=1; }
+   else if(op==249u&&wc==2u) {
+    size_t target=vk_spirv_find_label(w,n,entry,w[i+1]);
+    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+   }
+   else if(op==250u&&wc==4u) {
+    uint32_t cond=w[i+1];if(cond>=VK_SPIRV_MAX_IDS||!defined[cond])return 0;
+    size_t target=vk_spirv_find_label(w,n,entry,w[ids[cond]?i+2:i+3]);
+    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+   }
+   else if(op==251u&&wc>=3u&&((wc-3u)&1u)==0u) {
+    uint32_t selector=w[i+1],label=w[i+2];if(selector>=VK_SPIRV_MAX_IDS||!defined[selector])return 0;
+    for(uint32_t k=3;k+1<wc;k+=2)if(w[i+k]==ids[selector]){label=w[i+k+1];break;}
+    size_t target=vk_spirv_find_label(w,n,entry,label);
+    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+   }
+   else if(op==245u&&wc>=5u&&((wc-3u)&1u)==0u) {
+    rid=w[i+2];if(rid>=VK_SPIRV_MAX_IDS)return 0;
+    int selected=0;
+    for(uint32_t k=3;k+1<wc;k+=2)if(w[i+k+1]==predecessor) {
+     uint32_t src=w[i+k];if(src>=VK_SPIRV_MAX_IDS||!defined[src])return 0;
+     ids[rid]=ids[src];defined[rid]=1;selected=1;break;
+    }
+    if(!selected)return 0;
+   }
    else if(op==43u && wc==4u) { /* local constant declarations */ 
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }

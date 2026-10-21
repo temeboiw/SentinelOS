@@ -100,6 +100,41 @@ int main(void) {
     CHECK(executed == 42u);
     CHECK(!vk_spirv_execute_u32(exec_words, sizeof(exec_words)/4u, 3u, 13u, &executed));
 
+    /* Branching SPIR-V with Phi: choose 42 for true and 99 for false. */
+    uint32_t branch_words[] = {
+        0x07230203u, 0x00010000u, 0u, 15u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 1u,
+        (4u<<16)|43u, 2u, 6u, 42u,
+        (4u<<16)|43u, 2u, 7u, 99u,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 8u,
+        (4u<<16)|250u, 5u, 10u, 11u,
+        (2u<<16)|248u, 10u,
+        (2u<<16)|249u, 12u,
+        (2u<<16)|248u, 11u,
+        (2u<<16)|249u, 13u,
+        (2u<<16)|248u, 12u,
+        (2u<<16)|249u, 14u,
+        (2u<<16)|248u, 13u,
+        (2u<<16)|249u, 14u,
+        (2u<<16)|248u, 14u,
+        (7u<<16)|245u, 2u, 9u, 6u, 12u, 7u, 13u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(branch_words, sizeof(branch_words)/4u));
+    CHECK(vk_spirv_execute_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 42u);
+    /* Change the true condition constant to zero and verify the other Phi input. */
+    branch_words[22] = 0u;
+    CHECK(vk_spirv_execute_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 99u);
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

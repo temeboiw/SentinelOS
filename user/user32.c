@@ -356,24 +356,6 @@ static void cursor_restore(void) {
 
 static void cursor_save_draw(int x, int y) {
     /* Classic 16x16 arrow: black outline, white body, blue inner highlight. */
-    static const char shape[16][17] = {
-        "#...............",
-        "##..............",
-        "#w+#............",
-        "#ww#............",
-        "#www#...........",
-        "#wwww#..........",
-        "#wwwww#.........",
-        "#wwwwww#........",
-        "#wwwwwww#.......",
-        "#wwwwwwww#......",
-        "#wwww#####......",
-        "#ww#ww#.........",
-        "#w#.#ww#........",
-        "##...#ww#.......",
-        "#.....#ww#......",
-        "......##........"
-    };
     if (!g_scanout || !g_scan_pitch) return;
     /* Never capture our own pixels as the "under" image. */
     if (cur_on) cursor_restore_fast();
@@ -383,7 +365,7 @@ static void cursor_save_draw(int x, int y) {
     for (int j = 0; j < 16; j++) {
         for (int i = 0; i < 16; i++) {
             int yy = y + j, xx = x + i;
-            char p = shape[j][i];
+            char p = u32_cursor_shape[j][i];
             u32 val = 0;
             cur_paint[j*16+i] = 0;
             if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
@@ -439,6 +421,25 @@ static u32 u32_alpha_over(u32 dst,u32 src) {
     return 0xFF000000u|(r<<16)|(g<<8)|b;
 }
 
+static const char u32_cursor_shape[16][17] = {
+    "#...............",
+    "##..............",
+    "#w+#............",
+    "#ww#............",
+    "#www#...........",
+    "#wwww#..........",
+    "#wwwww#.........",
+    "#wwwwww#........",
+    "#wwwwwww#.......",
+    "#wwwwwwww#......",
+    "#wwww#####......",
+    "#ww#ww#.........",
+    "#w#.#ww#........",
+    "##...#ww#.......",
+    "#.....#ww#......",
+    "......##........"
+};
+
 /* BACKGROUND < DESKTOP < WINDOW < TASKBAR < CURSOR. */
 static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     if(!g_scanout||g_fw>1920u||g_fh>1080u)return;
@@ -454,6 +455,16 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
         c=u32_alpha_over(c,u32_desktop_layer[at]);
         c=u32_alpha_over(c,u32_window_layer[at]);
         c=u32_alpha_over(c,u32_taskbar_layer[at]);
+        /* Cursor is part of the final composition pass, not another app's
+         * save-under pixels. This keeps it above message boxes and windows
+         * even while their private layers are being composited. */
+        int ci=x-g_mx, cj=y-g_my;
+        if(ci>=0&&ci<16&&cj>=0&&cj<16) {
+            char cp=u32_cursor_shape[cj][ci];
+            if(cp=='#')c=0xFF000000u;
+            else if(cp=='w')c=COL_WHITE;
+            else if(cp=='+')c=COL_ACCENT;
+        }
         *dst=c;
     }
 }

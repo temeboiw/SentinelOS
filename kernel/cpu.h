@@ -207,7 +207,7 @@ static void user_set_kernel_stack(uint64_t rsp0) {
 
 static void cpu_init_cpu(uint32_t cpu_index) {
     if (cpu_index >= CPU_MAX) {
-        DbgPrint("cpu: invalid CPU index %u\\n", cpu_index);
+        DbgPrint("cpu: invalid CPU index %u\n", cpu_index);
         for (;;) __asm__ volatile("cli; hlt");
     }
     CpuLocal *cpu = &cpu_locals[cpu_index];
@@ -221,19 +221,19 @@ static void cpu_init_cpu(uint32_t cpu_index) {
     DescPtr g = { sizeof cpu->gdt - 1, (uint64_t)cpu->gdt };
     __asm__ volatile("lgdt %0" :: "m"(g));
     __asm__ volatile(
-        "pushq $0x08\\n"
-        "leaq 1f(%%rip), %%rax\\n"
-        "pushq %%rax\\n"
-        "lretq\\n"
-        "1:\\n"
-        "movw $0x10, %%ax\\n"
-        "movw %%ax, %%ds\\n"
-        "movw %%ax, %%es\\n"
-        "movw %%ax, %%ss\\n"
-        "movw %%ax, %%fs\\n"
-        "movw %%ax, %%gs\\n"
-        "movw $0x28, %%ax\\n"
-        "ltr %%ax\\n"
+        "pushq $0x08\n"
+        "leaq 1f(%%rip), %%rax\n"
+        "pushq %%rax\n"
+        "lretq\n"
+        "1:\n"
+        "movw $0x10, %%ax\n"
+        "movw %%ax, %%ds\n"
+        "movw %%ax, %%es\n"
+        "movw %%ax, %%ss\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
+        "movw $0x28, %%ax\n"
+        "ltr %%ax\n"
         ::: "rax", "memory");
 
     if (cpu_index == 0) {

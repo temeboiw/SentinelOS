@@ -16,8 +16,8 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
 - bounded SPIR-V 1.0 shader-module structure validation and module lifetime;
-- implemented bounded-subset `vkCreateGraphicsPipelines`, `vkCmdBindPipeline`, `vkCmdBindVertexBuffers`, and `vkCmdDraw` entry points for a narrow two-stage scalar-shader path;
-- an end-to-end host regression test that submits a shader-driven triangle draw through command recording, shader evaluation, and CPU rasterization; the target is selected through SentinelOS-only `SentinelVulkanCmdBindColorTarget` because standard render passes/framebuffers are not implemented;
+- implemented bounded-subset `vkCreateGraphicsPipelines`, `vkCmdBindPipeline`, `vkCmdBindVertexBuffers`, and `vkCmdDraw` entry points for a narrow two-stage scalar-shader path;\n- a restricted standard-shaped render-target path: `vkCreateImageView`, single-color `vkCreateRenderPass`, `vkCreateFramebuffer`, `vkCmdBeginRenderPass`, and `vkCmdEndRenderPass`, with clear/store behavior and final-layout tracking;
+- an end-to-end host regression test that submits a shader-driven triangle draw through command recording, shader evaluation, and CPU rasterization; the updated regression test uses the restricted render-pass/framebuffer path and no longer requires the SentinelOS-only color-target hook for that pipeline draw;
 - a tested, bounded scalar SPIR-V instruction interpreter for selected 32-bit integer arithmetic, bitwise/shift operations, comparisons, logical operations, copy/bitcast, and select instructions; unsupported executable instructions fail closed;
 - synchronous binary-semaphore consume/signal for already-signaled waits (an unsignaled wait returns `VK_NOT_READY` because this backend cannot suspend a queue).
 - procedure lookup for implemented entry points.

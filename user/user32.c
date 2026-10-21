@@ -93,6 +93,29 @@ enum { U32_LAYER_BACKGROUND=0, U32_LAYER_DESKTOP=10, U32_LAYER_WINDOW=20, U32_LA
 static u32 u32_desktop_layer[U32_LAYER_MAX_PIXELS];
 static u32 u32_window_layer[U32_LAYER_MAX_PIXELS];
 static u32 u32_taskbar_layer[U32_LAYER_MAX_PIXELS];
+
+/* Automatic layer stack. Each frame registers the active surfaces, then the
+ * compositor sorts them by z-order instead of relying on hard-coded blend
+ * statements. Dirty rectangles are shared by every registered surface. */
+typedef struct { u32 *pixels; int z; int visible; const char *name; } U32_LAYER_SURFACE;
+#define U32_LAYER_SURFACE_COUNT 3
+static U32_LAYER_SURFACE u32_layer_stack[U32_LAYER_SURFACE_COUNT];
+static unsigned int u32_layer_stack_count;
+static void u32_layers_rebuild(void) {
+    u32_layer_stack_count=0;
+    u32_layer_stack[u32_layer_stack_count++]=(U32_LAYER_SURFACE){u32_desktop_layer,U32_LAYER_DESKTOP,1,"desktop"};
+    u32_layer_stack[u32_layer_stack_count++]=(U32_LAYER_SURFACE){u32_window_layer,U32_LAYER_WINDOW,1,"window"};
+    u32_layer_stack[u32_layer_stack_count++]=(U32_LAYER_SURFACE){u32_taskbar_layer,U32_LAYER_TASKBAR,1,"taskbar"};
+    for(unsigned int i=1;i<u32_layer_stack_count;i++) {
+        U32_LAYER_SURFACE item=u32_layer_stack[i];
+        unsigned int j=i;
+        while(j>0 && u32_layer_stack[j-1].z>item.z) {
+            u32_layer_stack[j]=u32_layer_stack[j-1];
+            --j;
+        }
+        u32_layer_stack[j]=item;
+    }
+}
 /* Optional compositor clip used while moving a window. */
 static int u32_render_clip;
 /* Bypass ordinary per-window clipping for drag frames so old window bounds
@@ -462,28 +485,23 @@ static void cursor_save_draw(int x, int y) {
  * for longer than a 16x16 pixel copy while the mouse is moving. */
 static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
-    if (!g_scanout) return;
-    /* Never erase the pointer by restoring its saved-under rectangle: other
-     * window paints may have changed those pixels since they were captured.
-     * With the cached wallpaper available, rebuild just the old and new
-     * cursor footprints from the live scene layers. */
-    if (g_fw<=1920u && g_fh<=1080u &&
-        u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh) {
-        cur_on=0;
-        cur_ox=x; cur_oy=y;
-        u32_repaint_scene_rect(old_x,old_y,old_x+16,old_y+16);
-        u32_repaint_scene_rect(x,y,x+16,y+16);
-        return;
-    }
-    /* If there is no trustworthy wallpaper cache, a saved cursor rectangle
-     * is unsafe. Recompose from the current scene instead of copying stale
-     * pixels, which is what leaves a solid block/trail under the mouse. */
-    cur_on=0;
+    if(!g_scanout)return;
+
+    /* The compositor owns the saved-under image for the cursor actually on
+     * screen. Restore that exact footprint; never reconstruct it from this
+     * process' private wallpaper/window layers, which may not match the
+     * desktop shared with other processes. */
+    int rendered_x=cur_ox, rendered_y=cur_oy;
+    cursor_restore_fast();
     cur_ox=x; cur_oy=y;
-    u32_force_full_compose=1;
-    compose();
-    u32_force_full_compose=0;
-    u32_flush_graphics(0,0,(int)g_fw,(int)g_fh);
+    cursor_save_draw(x,y);
+
+    /* Present only the old and new cursor footprints. old_x/old_y are the
+     * input event's previous coordinates; rendered_* is the last painted
+     * position and remains authoritative if an app composed during the event. */
+    u32_flush_graphics(rendered_x,rendered_y,16,16);
+    u32_flush_graphics(x,y,16,16);
+    (void)old_x; (void)old_y;
 }
 
 static void ensure_fb(void) {
@@ -535,33 +553,45 @@ static u32 u32_alpha_over(u32 dst,u32 src) {
     return 0xFF000000u|(r<<16)|(g<<8)|b;
 }
 
-/* BACKGROUND < DESKTOP < WINDOW < TASKBAR < CURSOR. */
+/* BACKGROUND < registered Z-ordered surfaces < CURSOR. */
 static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     if(!g_scanout||g_fw>1920u||g_fh>1080u)return;
     if(x0<0)x0=0;if(y0<0)y0=0;
     if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    if(x0>=x1||y0>=y1)return;
+
+    u32_layers_rebuild();
+    int cursor_touched=0;
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
-        /* Start from the cached wallpaper so the live framebuffer goes
-         * straight from the old frame to the finished pixel, never showing
-         * a wallpaper-only intermediate state while layers are rendered. */
         u32 c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)?u32_aero_bg_cache[at]:*dst;
-        c=u32_alpha_over(c,u32_desktop_layer[at]);
-        c=u32_alpha_over(c,u32_window_layer[at]);
-        c=u32_alpha_over(c,u32_taskbar_layer[at]);
-        /* Cursor is part of the final composition pass, not another app's
-         * save-under pixels. This keeps it above message boxes and windows
-         * even while their private layers are being composited. */
-        int ci=x-g_mx, cj=y-g_my;
+
+        /* Blend every visible surface in ascending Z order. The stack is
+         * rebuilt automatically so future layers only need a descriptor. */
+        for(unsigned int li=0;li<u32_layer_stack_count;li++) {
+            U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
+            if(layer->visible&&layer->pixels)
+                c=u32_alpha_over(c,layer->pixels[at]);
+        }
+
+        /* Cursor uses its last actually-rendered coordinates, not the input
+         * globals which can change before the old cursor has been removed. */
+        int ci=x-cur_ox, cj=y-cur_oy;
         if(ci>=0&&ci<16&&cj>=0&&cj<16) {
             char cp=u32_cursor_shape[cj][ci];
-            if(cp=='#')c=0xFF000000u;
-            else if(cp=='w')c=COL_WHITE;
-            else if(cp=='+')c=COL_ACCENT;
+            u32 val=0;
+            if(cp=='#')val=0xFF000000u;
+            else if(cp=='w')val=COL_WHITE;
+            else if(cp=='+')val=COL_ACCENT;
+            cur_under[cj*16+ci]=c;
+            cur_paint[cj*16+ci]=val;
+            if(val)c=val;
+            cursor_touched=1;
         }
         *dst=c;
     }
+    if(cursor_touched)cur_on=1;
     u32_flush_graphics(x0,y0,x1-x0,y1-y0);
 }
 
@@ -956,14 +986,13 @@ static void compose(void) {
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
-    /* Layered composition already painted the cursor as the final pixel
-     * layer. Do not paint/save-under it a second time: restoring that buffer
-     * later can leave a cursor-shaped mark over newly drawn content. */
+    /* The layered compositor saves the exact pixels under its cursor
+     * overlay. Do not reset that state after a frame: mouse transitions use it
+     * to erase only the cursor that was actually painted. */
     g_front=g_scanout; g_pitch=g_scan_pitch;
     u32_render_clip=0;
-    if (layered) {
-        cur_ox=g_mx; cur_oy=g_my; cur_on=0;
-    } else {
+    if (!layered) {
+        cur_ox=g_mx; cur_oy=g_my;
         cursor_save_draw(g_mx,g_my);
     }
     if(u32_force_full_compose) {

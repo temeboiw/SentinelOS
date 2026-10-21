@@ -179,7 +179,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; VkRend
 typedef struct { VkStructureType sType; const void *pNext; VkRenderPass renderPass; VkFramebuffer framebuffer; uint32_t renderArea_x,renderArea_y,renderArea_width,renderArea_height; uint32_t clearValueCount; const VkClearColorValue *pClearValues; } VkRenderPassBeginInfo;
 typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
 typedef struct VkPoolObj { uint32_t magic; VkDevice device; uint32_t family; } VkPoolObj;
-typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
+typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
 typedef struct VkFenceObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkFenceObj;
 typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkSemaphoreObj;
 #define VK_MAX_SHADER_MODULES 8
@@ -708,10 +708,10 @@ __declspec(dllexport) void VKAPI_CALL vkCmdBeginRenderPass(VkCommandBuffer c,con
  if(!cmd_ok(c)||c->state!=1||!bi||bi->sType!=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO||bi->pNext||contents>1||!render_pass_ok(bi->renderPass)||!framebuffer_ok(bi->framebuffer)||bi->framebuffer->device!=c->device||bi->framebuffer->renderPass!=bi->renderPass||bi->renderPass->device!=c->device||!bi->renderArea_width||!bi->renderArea_height||bi->renderArea_x||bi->renderArea_y||bi->renderArea_width>bi->framebuffer->width||bi->renderArea_height>bi->framebuffer->height||c->count>=128)return;
  VkImage im=bi->framebuffer->view->image;if(!image_ok(im)||!mem_ok(im->memory)||im->layout!=VK_IMAGE_LAYOUT_GENERAL)return;
  if(bi->renderPass->loadOp==VK_ATTACHMENT_LOAD_OP_CLEAR&&(!bi->pClearValues||!bi->clearValueCount))return;
- c->bound_target=im;unsigned i=c->count++;c->ops[i].op=14;c->ops[i].image=im;c->ops[i].layout=VK_IMAGE_LAYOUT_GENERAL;c->ops[i].value=bi->renderPass->loadOp;
+ c->bound_target=im;c->active_render_final_layout=bi->renderPass->finalLayout;unsigned i=c->count++;c->ops[i].op=14;c->ops[i].image=im;c->ops[i].layout=VK_IMAGE_LAYOUT_GENERAL;c->ops[i].value=bi->renderPass->loadOp;
  if(bi->pClearValues)for(unsigned k=0;k<4;k++)c->ops[i].color[k]=bi->pClearValues[0].float32[k];
 }
-__declspec(dllexport) void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer c) { if(!cmd_ok(c)||c->state!=1||!c->bound_target||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=15;c->ops[i].image=c->bound_target;c->ops[i].layout=c->bound_target->layout; }
+__declspec(dllexport) void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer c) { if(!cmd_ok(c)||c->state!=1||!c->bound_target||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=15;c->ops[i].image=c->bound_target;c->ops[i].layout=c->active_render_final_layout;c->bound_target=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,void *cache,uint32_t count,const VkGraphicsPipelineCreateInfo *ci,const void *alloc,VkPipeline *out) {
  if(!dev_ok(d)||cache||!ci||!out||!count||count>VK_MAX_PIPELINES||alloc)return VK_ERROR_INITIALIZATION_FAILED;
  for(uint32_t k=0;k<count;k++)out[k]=0;

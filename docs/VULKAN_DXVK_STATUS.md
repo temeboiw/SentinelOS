@@ -151,3 +151,8 @@ Added bounded 32-bit `OpFRem` and `OpFMod` support, including the distinct trunc
 Hardened `vkCmdCopyBuffer` for distinct buffer handles that share one device-memory allocation. The runtime now validates every source region against every destination region before recording any operations, rejecting cross-region aliasing atomically. Regression coverage constructs two buffer objects bound to overlapping portions of one allocation and verifies the invalid batch records zero commands.
 
 This is a targeted correctness improvement, not a large percentage jump in Vulkan coverage. Graphics/compute pipelines, descriptor sets, render passes/framebuffers, shader resource access, presentation, and DXVK compatibility remain major missing areas.
+
+
+### Buffer alias regression test ordering fix
+
+Moved the cross-region alias test after the original fill/update submission and readback. The test now verifies the invalid multi-region copy records no commands without resetting and discarding the command buffer used by the pre-existing fill/update assertions. The latest CI run exposed this test-ordering regression; the fix must be validated by a fresh run.

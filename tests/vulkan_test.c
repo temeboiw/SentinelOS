@@ -333,22 +333,6 @@ int main(void) {
     uint32_t update_words[2] = {0x11223344u, 0x55667788u};
     vkCmdUpdateBuffer(cmd, src, 16, sizeof(update_words), update_words);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    /* Two distinct buffer handles can alias one allocation. Cross-region
-       source/destination overlap must reject the entire copy batch. */
-    VkBuffer alias = 0;
-    VkBufferCreateInfo aliasCi = bci;
-    aliasCi.size = 32;
-    CHECK(vkCreateBuffer(device, &aliasCi, 0, &alias) == VK_SUCCESS);
-    CHECK(vkBindBufferMemory(device, alias, smem, 32) == VK_SUCCESS);
-    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
-    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
-    struct { VkDeviceSize srcOffset, dstOffset, size; } crossOverlap[2] =
-        {{0, 0, 16}, {32, 16, 16}};
-    vkCmdCopyBuffer(cmd, src, alias, 2, crossOverlap);
-    CHECK(((VkCmdObj *)cmd)->count == 0); /* cross-region overlap rejected atomically */
-    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
-    vkDestroyBuffer(device, alias, 0);
 
     VkFenceCreateInfo fci = {0};
     fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -370,6 +354,30 @@ int main(void) {
     CHECK(vkFlushMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
     CHECK(vkInvalidateMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
     vkUnmapMemory(device, smem);
+    /* Cross-region overlap is tested after the initial fill/update submission,
+       so it cannot erase the command buffer whose contents the test checks. */
+    /* Two distinct buffer handles can alias one allocation. Cross-region
+       source/destination overlap must reject the entire copy batch. */
+    VkBuffer alias = 0;
+    VkBufferCreateInfo aliasCi = bci;
+    aliasCi.size = 32;
+    CHECK(vkCreateBuffer(device, &aliasCi, 0, &alias) == VK_SUCCESS);
+    CHECK(vkBindBufferMemory(device, alias, smem, 32) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    struct { VkDeviceSize srcOffset, dstOffset, size; } crossOverlap[2] =
+        {{0, 0, 16}, {32, 16, 16}};
+    vkCmdCopyBuffer(cmd, src, alias, 2, crossOverlap);
+    CHECK(((VkCmdObj *)cmd)->count == 0); /* cross-region overlap rejected atomically */
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    vkDestroyBuffer(device, alias, 0);
+
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    vkDestroyBuffer(device, alias, 0);
+
 
     /* Vulkan forbids vkCmdCopyBuffer with identical source/destination handles. */
     uint64_t selfCopyRegion[3] = {0, 16, 16};

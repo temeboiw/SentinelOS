@@ -1308,29 +1308,81 @@ i64 DispatchMessageA(const MSG *m) {
     return proc((void *)(u64)m->hwnd, m->message, m->wParam, m->lParam);
 }
 
+/* Modal message box: a real captioned window with an OK button. */
 __attribute__((dllexport))
 int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
-    (void)hwnd;
-    (void)type;
+    (void)hwnd; (void)type;
+    WINDOW old_wnd = g_wnd;
+    char old_lines[40][80];
+    int old_nlines = g_nlines, old_menu = g_menu, old_search = g_search_focus;
+    for (int i=0;i<40;i++) for(int j=0;j<80;j++) old_lines[i][j]=g_lines[i][j];
 
-    sy3(SYS_Write, 1, (u64)"[MessageBox] ", 13);
-
-    if (caption) {
-        u64 n = 0;
-        while (caption[n]) n++;
-
-        sy3(SYS_Write, 1, (u64)caption, n);
-        sy3(SYS_Write, 1, (u64)": ", 2);
+    ensure_fb();
+    if (!g_front || !g_fw || !g_fh) {
+        const char *s=text?text:"Application error"; u64 n=0;
+        while(s[n])n++;
+        (void)sy3(SYS_Write,1,(u64)s,n);
+        (void)sy3(SYS_Write,1,(u64)"\n",1);
+        return 1;
     }
 
-    if (text) {
-        u64 n = 0;
-        while (text[n]) n++;
+    (void)sy3(SYS_WmUnreg,0,0,0);
+    g_wnd.x=((int)g_fw-440)/2; g_wnd.y=((int)g_fh-210)/2;
+    if(g_wnd.x<8)g_wnd.x=8; if(g_wnd.y<8)g_wnd.y=8;
+    g_wnd.w=440; g_wnd.h=210; g_wnd.visible=1; g_wnd.minimized=0;
+    const char *cap=(caption&&caption[0])?caption:"SentinelOS";
+    int ti=0; while(cap[ti]&&ti<62){g_wnd.title[ti]=cap[ti];ti++;}
+    g_wnd.title[ti]=0;
+    for(int i=0;i<40;i++)g_lines[i][0]=0;
+    g_nlines=0; g_menu=0; g_search_focus=0;
 
-        sy3(SYS_Write, 1, (u64)text, n);
+    const char *src=text?text:"";
+    while(*src&&g_nlines<7) {
+        char line[80]; int n=0,last=-1;
+        while(src[n]&&src[n]!='\n'&&n<48){line[n]=src[n];if(src[n]==' ')last=n;n++;}
+        int take=n;
+        if(src[n]&&src[n]!='\n'&&last>0)take=last;
+        while(take>0&&line[take-1]==' ')take--;
+        line[take]=0;
+        int j=0;while(line[j]&&j<78){g_lines[g_nlines][j]=line[j];j++;}
+        g_lines[g_nlines][j]=0;g_nlines++;
+        src+=take;while(*src==' ')src++;if(*src=='\n')src++;
+        if(take==0&&*src)src++;
+    }
+    int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
+    (void)sy3(SYS_WmReg,0,(u64)g_wnd.title,0);
+    (void)sy3(SYS_WmRect,(u64)rect,0,0);
+
+    int done=0;
+    while(!done) {
+        compose();
+        int bx=g_wnd.x+g_wnd.w-100, by=g_wnd.y+g_wnd.h-42;
+        round_fill(bx,by,78,28,4,0xFF559EBB);
+        round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
+        draw_text(bx+26,by+9,"OK",0xFF164E68);
+        InputEvent ev={0};
+        if(!sy3(SYS_GetInput,(u64)&ev,0,0))continue;
+        if(ev.type==1) {
+            if(ev.key==27||ev.key=='\r'||ev.key=='\n'||ev.key==' ')done=1;
+        } else if(ev.type==2||ev.type==3) {
+            g_mx=ev.x;g_my=ev.y;u32_mouse_record();
+            if(ev.type==3 &&
+              (hit(ev.x,ev.y,bx,by,bx+78,by+28) ||
+               hit(ev.x,ev.y,g_wnd.x+g_wnd.w-30,g_wnd.y+2,
+                            g_wnd.x+g_wnd.w-2,g_wnd.y+30))) done=1;
+        }
     }
 
-    sy3(SYS_Write, 1, (u64)"\n", 1);
+    (void)sy3(SYS_WmUnreg,0,0,0);
+    g_wnd=old_wnd;
+    for(int i=0;i<40;i++)for(int j=0;j<80;j++)g_lines[i][j]=old_lines[i][j];
+    g_nlines=old_nlines;g_menu=old_menu;g_search_focus=old_search;
+    if(g_wnd.visible&&!g_wnd.minimized) {
+        rect[0]=g_wnd.x;rect[1]=g_wnd.y;rect[2]=g_wnd.w;rect[3]=g_wnd.h;
+        (void)sy3(SYS_WmReg,0,(u64)g_wnd.title,0);
+        (void)sy3(SYS_WmRect,(u64)rect,0,0);
+    }
+    compose();
     return 1;
 }
 

@@ -281,6 +281,7 @@ static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
     for(uint32_t i=0;i<length;i++)gfx_submit_buffer[sizeof(submit)+i]=stream[i];
     return gfx_command(gfx_submit_buffer,(uint32_t)sizeof(submit)+length);
 }
+static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h);
 static int gfx_create_virgl_target(void) {
     struct {
         GfxCtrlHdr hdr;
@@ -292,7 +293,7 @@ static int gfx_create_virgl_target(void) {
     cr.format=GFX_GPU_FORMAT_B8G8R8X8_UNORM;
     cr.bind=(1u<<1)|(1u<<3); /* render target + sampler view */
     cr.width=gfx_width;cr.height=gfx_height;cr.depth=1;cr.array_size=1;
-    cr.last_level=0;cr.nr_samples=0;cr.flags=0;cr.padding=0;
+    cr.last_level=0;cr.nr_samples=0;cr.flags=1;cr.padding=0;
     if(!gfx_command(&cr,sizeof cr))return 0;
 
     struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};

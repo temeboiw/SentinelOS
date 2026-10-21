@@ -264,6 +264,16 @@ static int gfx_queue_init(void) {
     uint16_t q=*(volatile uint16_t*)(c+24);
     if(q<2) { DbgPrint("gfx: control queue unavailable\n"); return 0; }
     if(q>GFX_VQ_MAX) q=GFX_VQ_MAX;
+    /* The queue memory below is allocated for at most GFX_VQ_MAX entries.
+       VirtIO's queue_size register is the device-visible ring size, so write
+       the capped value back before publishing descriptor/avail/used addresses.
+       Otherwise a device advertising a larger queue can overrun our 16-entry
+       rings even though the driver indexes them modulo the smaller value. */
+    *(volatile uint16_t*)(c+24)=q;
+    if(*(volatile uint16_t*)(c+24)!=q) {
+        DbgPrint("gfx: device rejected control queue size %u\\n",(unsigned)q);
+        return 0;
+    }
     gfx_queue_size=q;
     gfx_desc_pa=pmm_alloc_zeroed();gfx_avail_pa=pmm_alloc_zeroed();gfx_used_pa=pmm_alloc_zeroed();
     gfx_req_pa=pmm_alloc_zeroed();gfx_resp_pa=pmm_alloc_zeroed();

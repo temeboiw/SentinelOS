@@ -47,10 +47,13 @@ int S3DDrawTriangle(S3D_CONTEXT *ctx, const S3D_VERTEX *a,
 int S3DPresent(S3D_CONTEXT *ctx);
 /* Submit a raw VirGL/Gallium command stream to the kernel-created GPU context.
  * Returns 0 when the VM/device does not expose a real VirGL backend. */
+int S3DUploadVirGLBuffer(uint32_t bytes);
 int S3DSubmitVirGL(const void *commands, uint32_t length);
 int S3DPresentVirGL(void);
 /* Real host-accelerated VirGL clear; returns 0 if VirGL is unavailable. */
 int S3DClearVirGL(uint32_t argb);
+int S3DDrawTriangleVirGL(const S3D_SURFACE *surface, const S3D_VERTEX *a,
+                         const S3D_VERTEX *b, const S3D_VERTEX *c);
 #ifdef __cplusplus
 }
 #endif

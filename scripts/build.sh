@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # SentinelOS build script
 #   ./scripts/build.sh

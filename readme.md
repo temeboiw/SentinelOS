@@ -32,11 +32,6 @@ From the repository root in an Administrator PowerShell:
 .\scripts\build.ps1
 ```
 
-# Build Prerequisites for linux
-
-./scripts/build.sh
-./scripts/run.sh
-
 Build and launch the result in QEMU:
 
 ```powershell
@@ -58,12 +53,22 @@ QEMU connects the guest serial port to the PowerShell terminal. Kernel diagnosti
 - `-ResetNvram`: remove the saved `build\vars.fd` before rebuilding, resetting QEMU's UEFI boot variables.
 - `-Clean`: detach the generated virtual disk if needed and remove `build\`.
 
-## Options for linux
+## Building on Linux
 
---run
---keepfallback
---resetnvram
---clean
+`scripts/build.sh` and `scripts/run.sh` do the same job on Linux. Required tools: `clang`, `lld`, `qemu-img`, `qemu-system-x86_64`, `sfdisk`, `mkfs.vfat`, `mke2fs`, and `mtools` (`mmd`, `mcopy`). EDK II headers are found via the `EDK2` environment variable (needs `MdePkg/Include`), falling back to `/usr/include/efi`.
+
+```bash
+./scripts/build.sh
+./scripts/build.sh --run
+./scripts/run.sh
+```
+
+Linux options:
+
+- `--run`: launch QEMU after a successful build.
+- `--keep-fallback`: keep `EFI/BOOT/BOOTX64.EFI`.
+- `--reset-nvram`: remove the saved `build/vars.fd`.
+- `--clean`: remove `build/`.
 
 For example, rebuild with the fallback loader retained:
 
@@ -92,4 +97,4 @@ Build artifacts are written under `build/`:
 - `kernel/`: kernel entry point, CPU setup, memory managers, heap, and executive routines.
 - `hal/`: hardware abstraction layer.
 - `shared/`: boot information and shared type definitions.
-- `scripts/`: Windows build and QEMU launch scripts.
+- `scripts/`: Windows (`.ps1`) and Linux (`.sh`) build and QEMU launch scripts.

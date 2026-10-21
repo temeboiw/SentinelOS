@@ -72,15 +72,6 @@ static int equals(const char *a, const char *b) {
     return a[i] == 0 && b[i] == 0;
 }
 
-static int starts_with(const char *s, const char *prefix) {
-    int i = 0;
-    while (prefix[i]) {
-        if (s[i] != prefix[i]) return 0;
-        i++;
-    }
-    return 1;
-}
-
 static void str_copy(char *dst, const char *src, int cap) {
     int i = 0;
     if (cap <= 0) return;

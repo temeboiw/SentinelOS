@@ -12,7 +12,7 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - fixed-size host-visible memory allocations, buffer creation/binding/mapping;
 - command pools and command-buffer allocation;
 - CPU execution of `vkCmdFillBuffer`, `vkCmdCopyBuffer`, and `vkCmdClearColorImage` on queue submission;
-- bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory; color-attachment usage is accepted for future render-target integration, but framebuffer rendering is not implemented yet;
+- bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory, restricted to transfer-source/transfer-destination usage; sampled, storage, and color-attachment usages are rejected until their actual operations are implemented;
 - tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
 - bounded SPIR-V 1.0 shader-module structure validation and module lifetime;

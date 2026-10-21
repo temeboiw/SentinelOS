@@ -3,7 +3,8 @@
 
 /* Fixed-point 3D reference renderer for SentinelOS.
  * Vertex x/y/z and focal_length are signed 16.16 values; z must be positive.
- * The caller supplies a 32-bit ARGB target and a width*height depth buffer.\n * Clear depth to S3D_DEPTH_FAR; the z-buffer stores inverse depth.
+ * The caller supplies a 32-bit ARGB target and a width*height depth buffer.
+ * Clear depth to S3D_DEPTH_FAR; the z-buffer stores inverse depth.
  * This is a real software fallback; it does not claim hardware 3D acceleration.
  */
 #define S3D_VIRGL_RENDER_TARGET_ID 2u

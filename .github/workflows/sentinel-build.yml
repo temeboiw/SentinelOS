@@ -14,6 +14,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-utils dosfstools e2fsprogs mtools gnu-efi
+          sudo apt-get install -y clang lld qemu-utils dosfstools e2fsprogs mtools
+      - name: Fetch EDK2 headers
+        run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Build SentinelOS
-        run: JOBS=2 ./scripts/build.sh
+        run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 ./scripts/build.sh

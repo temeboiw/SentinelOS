@@ -407,6 +407,7 @@ static u32 cur_under[16*16];
 static u32 cur_paint[16*16];
 
 static void ensure_fb(void);
+static void compose(void);
 static void cursor_restore_fast(void) {
     if (!cur_on || !g_scanout) return;
     for (int j = 0; j < 16; j++) {
@@ -461,8 +462,10 @@ static void cursor_save_draw(int x, int y) {
 static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if (!g_scanout) return;
-    /* Restore both cursor rectangles from the current scene after every input
-     * event, including button-down/close events that also change the window. */
+    /* Never erase the pointer by restoring its saved-under rectangle: other
+     * window paints may have changed those pixels since they were captured.
+     * With the cached wallpaper available, rebuild just the old and new
+     * cursor footprints from the live scene layers. */
     if (g_fw<=1920u && g_fh<=1080u &&
         u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh) {
         cur_on=0;
@@ -471,8 +474,15 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
         u32_repaint_scene_rect(x,y,x+16,y+16);
         return;
     }
-    cursor_restore_fast();
-    cursor_save_draw(x, y);
+    /* If there is no trustworthy wallpaper cache, a saved cursor rectangle
+     * is unsafe. Recompose from the current scene instead of copying stale
+     * pixels, which is what leaves a solid block/trail under the mouse. */
+    cur_on=0;
+    cur_ox=x; cur_oy=y;
+    u32_force_full_compose=1;
+    compose();
+    u32_force_full_compose=0;
+    u32_flush_graphics(0,0,(int)g_fw,(int)g_fh);
 }
 
 static void ensure_fb(void) {

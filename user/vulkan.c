@@ -625,7 +625,12 @@ __declspec(dllexport) VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,con
      (sub[i].commandBufferCount&&!sub[i].pCommandBuffers))return VK_ERROR_INITIALIZATION_FAILED;
   for(uint32_t j=0;j<sub[i].waitSemaphoreCount;j++) {
    VkSemaphore w=sub[i].pWaitSemaphores[j];
-   if(!sem_ok(w)||w->device!=d)return VK_ERROR_INITIALIZATION_FAILED;
+   if(!sem_ok(w)||w->device!=d||!sub[i].pWaitDstStageMask[j])
+    return VK_ERROR_INITIALIZATION_FAILED;
+   /* Binary semaphores may be waited only once in a submit. Validate the
+    * complete wait list before consuming any semaphore or executing work. */
+   for(uint32_t k=0;k<j;k++)
+    if(sub[i].pWaitSemaphores[k]==w)return VK_ERROR_INITIALIZATION_FAILED;
    if(!w->signaled)return VK_NOT_READY;
   }
   for(uint32_t j=0;j<sub[i].signalSemaphoreCount;j++) {

@@ -294,7 +294,7 @@ static void smp_ap_entry(uint32_t cpu_index) {
     }
     cpu_locals[cpu_index].scheduler_active = 1;
 
-    DbgPrint("smp: AP cpu%u (APIC ID=%u) initialized; parked pending SMP-safe scheduler\n",
+    DbgPrint("smp: AP cpu%u (APIC ID=%u) online; shared scheduler + local preemption timer active\n",
              cpu_index, smp_topology.cpus[cpu_index].apic_id);
     __sync_fetch_and_add(&smp_online_count, 1);
     __asm__ volatile("" ::: "memory");

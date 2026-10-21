@@ -20,6 +20,9 @@ typedef struct { uint32_t magic, cls; uint64_t size; } KHdr;   // size: bytes re
 static const uint32_t k_cls[7] = { 32, 64, 128, 256, 512, 1024, 2048 };
 static KHdr *k_free[7];
 static uint64_t h_in_use, h_allocs, h_frees, h_errors, h_slab_pages, h_large_pages;
+static volatile uint32_t h_lock;
+static void h_lock_acquire(void) { while (__atomic_exchange_n(&h_lock,1,__ATOMIC_ACQUIRE)) while (__atomic_load_n(&h_lock,__ATOMIC_RELAXED)) __asm__ volatile("pause"); }
+static void h_lock_release(void) { __atomic_store_n(&h_lock,0,__ATOMIC_RELEASE); }
 
 static void h_err(const char *what, void *p) {
     h_errors++;
@@ -228,7 +231,7 @@ static void heap_selftest(void) {
 static inline uint64_t KeDisableInterrupts(void) { uint64_t fl; __asm__ volatile("pushfq; cli; popq %0" : "=r"(fl) :: "memory"); return fl; }
 static inline void KeRestoreInterrupts(uint64_t fl) { if (fl & 0x200) __asm__ volatile("sti" ::: "memory"); }
 
-static void *kmalloc(size_t n)           { uint64_t f = KeDisableInterrupts(); void *p = hp_malloc(n);     KeRestoreInterrupts(f); return p; }
-static void *kzalloc(size_t n)           { uint64_t f = KeDisableInterrupts(); void *p = hp_zalloc(n);     KeRestoreInterrupts(f); return p; }
-static void *krealloc(void *p, size_t n) { uint64_t f = KeDisableInterrupts(); void *q = hp_realloc(p, n); KeRestoreInterrupts(f); return q; }
-static void  kfree(void *p)              { uint64_t f = KeDisableInterrupts(); hp_free(p);                 KeRestoreInterrupts(f); }
+static void *kmalloc(size_t n)           { uint64_t f = KeDisableInterrupts(); h_lock_acquire(); void *p = hp_malloc(n);     h_lock_release(); KeRestoreInterrupts(f); return p; }
+static void *kzalloc(size_t n)           { uint64_t f = KeDisableInterrupts(); h_lock_acquire(); void *p = hp_zalloc(n);     h_lock_release(); KeRestoreInterrupts(f); return p; }
+static void *krealloc(void *p, size_t n) { uint64_t f = KeDisableInterrupts(); h_lock_acquire(); void *q = hp_realloc(p, n); h_lock_release(); KeRestoreInterrupts(f); return q; }
+static void  kfree(void *p)              { uint64_t f = KeDisableInterrupts(); h_lock_acquire(); hp_free(p);                 h_lock_release(); KeRestoreInterrupts(f); }

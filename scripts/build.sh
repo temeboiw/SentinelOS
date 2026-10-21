@@ -311,7 +311,7 @@ USER_CFLAGS=(
   -I"$ROOT/shared"
 )
 
-echo "  -> vulkan.dll"
+echo "  -> vulkan.dll (CPU Vulkan core)"
 
 clang "${USER_CFLAGS[@]}" \
   -c "$ROOT/user/vulkan.c" \
@@ -326,6 +326,40 @@ lld -flavor link \
   /export:vkCreateInstance \
   /export:vkDestroyInstance \
   /export:vkEnumeratePhysicalDevices \
+  /export:vkGetPhysicalDeviceQueueFamilyProperties \
+  /export:vkGetPhysicalDeviceMemoryProperties \
+  /export:vkCreateDevice \
+  /export:vkDestroyDevice \
+  /export:vkGetDeviceQueue \
+  /export:vkDeviceWaitIdle \
+  /export:vkQueueWaitIdle \
+  /export:vkCreateBuffer \
+  /export:vkDestroyBuffer \
+  /export:vkGetBufferMemoryRequirements \
+  /export:vkAllocateMemory \
+  /export:vkFreeMemory \
+  /export:vkBindBufferMemory \
+  /export:vkMapMemory \
+  /export:vkUnmapMemory \
+  /export:vkFlushMappedMemoryRanges \
+  /export:vkInvalidateMappedMemoryRanges \
+  /export:vkCreateCommandPool \
+  /export:vkDestroyCommandPool \
+  /export:vkAllocateCommandBuffers \
+  /export:vkFreeCommandBuffers \
+  /export:vkBeginCommandBuffer \
+  /export:vkEndCommandBuffer \
+  /export:vkResetCommandBuffer \
+  /export:vkCmdFillBuffer \
+  /export:vkCmdCopyBuffer \
+  /export:vkQueueSubmit \
+  /export:vkCreateFence \
+  /export:vkDestroyFence \
+  /export:vkGetFenceStatus \
+  /export:vkWaitForFences \
+  /export:vkResetFences \
+  /export:vkCreateSemaphore \
+  /export:vkDestroySemaphore \
   /export:vkGetDeviceProcAddr \
   /export:vkGetInstanceProcAddr \
   /export:SentinelVulkanLoaderStatus \

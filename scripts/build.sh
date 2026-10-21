@@ -867,6 +867,11 @@ clang "${USER_CFLAGS[@]}" \
   -c "$ROOT/user/user32.c" \
   -o "$B/obj/user32.o"
 
+echo "  -> soft3d.o"
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/soft3d.c" \
+  -o "$B/obj/soft3d.o"
+
 lld -flavor link \
   /dll /noentry /subsystem:native /nodefaultlib \
   /fixed:no /base:0x41100000 \
@@ -884,6 +889,10 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:S3DInitialize \
+  /export:S3DClear \
+  /export:S3DDrawTriangle \
+  /export:S3DPresent \
   /export:BeginRedrawBatch \
   /export:EndRedrawBatch \
   /export:GetClientRect \

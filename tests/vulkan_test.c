@@ -135,6 +135,32 @@ int main(void) {
     CHECK(vk_spirv_execute_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
     CHECK(executed == 99u);
 
+    /* Signed negate, logical-not and bitwise-not scalar instructions. */
+    const uint32_t unary_words[] = {
+        0x07230203u, 0x00010000u, 0u, 10u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 40u,
+        (4u<<16)|43u, 2u, 6u, 1u,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 8u,
+        (4u<<16)|126u, 2u, 7u, 5u,
+        (4u<<16)|200u, 2u, 8u, 5u,
+        (4u<<16)|168u, 2u, 9u, 6u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(unary_words, sizeof(unary_words)/4u));
+    CHECK(vk_spirv_execute_u32(unary_words, sizeof(unary_words)/4u, 3u, 7u, &executed));
+    CHECK(executed == 0xFFFFFFD8u);
+    CHECK(vk_spirv_execute_u32(unary_words, sizeof(unary_words)/4u, 3u, 8u, &executed));
+    CHECK(executed == 0xFFFFFFD7u);
+    CHECK(vk_spirv_execute_u32(unary_words, sizeof(unary_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 0u);
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

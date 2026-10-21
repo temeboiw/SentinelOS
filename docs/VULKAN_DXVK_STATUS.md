@@ -50,3 +50,6 @@ the SentinelOS guest. These gates have not been passed.
 ## SPIR-V scalar control flow update
 
 The bounded scalar helper now follows `OpBranch`, `OpBranchConditional`, and 32-bit `OpSwitch` targets within the selected entry function, and resolves `OpPhi` values using the predecessor block. Selection/loop merge declarations are accepted as metadata. Execution remains instruction-budgeted and rejects unsupported operations, malformed targets, and unresolved values. This expands scalar execution but is not a complete SPIR-V runtime or full Vulkan conformance.
+
+
+The scalar SPIR-V subset also executes `OpSNegate`, `OpLogicalNot`, and `OpNot` with unit coverage. These are scalar operations only; they do not imply support for full shader interfaces, pointers, floating-point shader math, or storage-resource access.

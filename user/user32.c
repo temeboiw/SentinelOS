@@ -1224,7 +1224,15 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 msg->wParam=(u64)(unsigned int)ev.btn;msg->lParam=0;msg->time=(u32)u32_tick_now();
                 msg->pt_x=ev.x;msg->pt_y=ev.y;
 
-                if (g_drag && (ev.btn & 1)) {
+                /*
+                 * A type-3 event is the button-down edge; type-2 events
+                 * carry motion and also report button release. Only move
+                 * during motion with the left button still held. If release
+                 * left g_drag set, the next unrelated click used to reuse
+                 * the old drag offset and teleport the window under the
+                 * pointer before hit-testing that click.
+                 */
+                if (ev.type == 2 && g_drag && (ev.btn & 1)) {
                     int old_x=g_wnd.x, old_y=g_wnd.y;
                     g_wnd.x = ev.x - g_drag_ox;
                     g_wnd.y = ev.y - g_drag_oy;
@@ -1256,13 +1264,14 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 }
 
                 if (ev.type == 3) {
+                    /* Button-down starts a fresh hit-test/drag operation. */
                     g_drag = 0;
                     on_click(ev.x, ev.y);
                 } else {
-                    /* Plain move: erase the old cursor from its save-under
-                     * and draw it at the new position. Recomposing the scene
-                     * here made the cursor vanish for the whole duration of
-                     * every move event. */
+                    /* Type 2 also reports button release. End the drag on
+                     * that transition, not on the next button-down. */
+                    if (!(ev.btn & 1)) g_drag = 0;
+                    /* Plain move: keep the existing cursor path unchanged. */
                     cursor_move_fast(g_mx, g_my);
                 }
 

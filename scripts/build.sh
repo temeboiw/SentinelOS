@@ -1531,6 +1531,7 @@ USER_CXXFLAGS=(
   -fno-rtti
   -fno-threadsafe-statics
   -fno-use-cxa-atexit
+  -fno-builtin
   -fno-stack-protector
   -fno-pic
   -mno-red-zone

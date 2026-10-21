@@ -626,9 +626,9 @@ static uint32_t vk_spirv_last_scalar_result(const uint32_t *w,size_t n,uint32_t 
  * general scalar helper avoids pulling host soft-float runtime symbols into
  * the freestanding kernel DLL. Unsupported shader instructions fail closed. */
 static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t entry,uint32_t output,uint32_t *out) {
- uint32_t ids[VK_SPIRV_MAX_IDS];uint8_t def[VK_SPIRV_MAX_IDS];size_t i=5;uint32_t active=0,done=0,steps=0;
+ uint32_t *ids=g_spirv_ids;uint8_t *def=g_spirv_defined;size_t i=5;uint32_t active=0,done=0,steps=0;
  if(!w||!out||output>=VK_SPIRV_MAX_IDS||!vk_spirv_validate(w,n)||!entry)return 0;
- vk_zero(ids,sizeof(ids));vk_zero(def,sizeof(def));
+ vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));
  while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
   if(op==43u&&wc==4u&&w[i+2]<VK_SPIRV_MAX_IDS){ids[w[i+2]]=w[i+3];def[w[i+2]]=1;}
   i+=wc;

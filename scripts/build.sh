@@ -889,6 +889,8 @@ lld -flavor link \
   /export:PostQuitMessage \
   /export:ExitWindowsEx \
   /export:DrawTaskbar \
+  /export:S3DGetSurface \
+  /export:S3DInitializeSurface \
   /export:S3DInitialize \
   /export:S3DClear \
   /export:S3DDrawTriangle \

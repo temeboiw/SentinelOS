@@ -32,7 +32,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -51,6 +51,15 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
 }
 
 typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
+typedef struct {
+    u32 size, version, backend, capabilities;
+    u32 width, height, pitch;
+    u32 pci_bus, pci_device, pci_function;
+    unsigned short vendor_id, device_id;
+    unsigned char pci_class, pci_subclass, pci_prog_if, initialized;
+    u64 surface_va;
+} GfxBootInfo;
+typedef struct { u32 x, y, w, h; } GfxRect;
 typedef struct { int type, x, y, btn; char key; } InputEvent;
 typedef struct { int left, top, right, bottom; } U32_RECT;
 typedef struct {
@@ -67,7 +76,7 @@ typedef struct {
 } WINDOW;
 
 static FBInfo g_fb;
-static u32 *g_front, *g_scanout, g_pitch, g_fw, g_fh, g_scan_pitch;
+static u32 *g_front, *g_scanout, g_pitch, g_fw, g_fh, g_scan_pitch;\nstatic int g_gpu_surface;
 /* Z-ordered surfaces: cached background, desktop, window, taskbar, cursor. */
 enum { U32_LAYER_BACKGROUND=0, U32_LAYER_DESKTOP=10, U32_LAYER_WINDOW=20, U32_LAYER_TASKBAR=30, U32_LAYER_CURSOR=100 };
 #define U32_LAYER_MAX_PIXELS (1920u * 1080u)
@@ -461,8 +470,25 @@ static void ensure_fb(void) {
     g_scanout = (u32 *)g_fb.va;
     g_fw = g_fb.w; g_fh = g_fb.h;
     g_scan_pitch = g_fb.pitch / 4;
+    g_gpu_surface = 0;
+    GfxBootInfo gfx = {0};
+    gfx.size = sizeof(gfx); gfx.version = 1;
+    if (sy3(SYS_InitializeGraphics, (u64)&gfx, 0, 0) &&
+        gfx.backend == 2 && gfx.surface_va &&
+        gfx.width >= 320 && gfx.height >= 200 &&
+        gfx.pitch >= gfx.width * 4u) {
+        g_scanout = (u32 *)gfx.surface_va;
+        g_fw = gfx.width; g_fh = gfx.height;
+        g_scan_pitch = gfx.pitch / 4u;
+        g_gpu_surface = 1;
+    }
     g_front = g_scanout; g_pitch = g_scan_pitch;
     u32_ttf_load();
+}
+static void u32_flush_graphics(int x, int y, int w, int h) {
+    if (!g_gpu_surface || w <= 0 || h <= 0) return;
+    GfxRect rect = {(u32)x, (u32)y, (u32)w, (u32)h};
+    (void)sy3(SYS_FlushGraphics, (u64)&rect, 0, 0);
 }
 
 static void u32_clear_layer(u32 *layer) {
@@ -515,6 +541,7 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
         }
         *dst=c;
     }
+    u32_flush_graphics(x0,y0,x1-x0,y1-y0);
 }
 
 static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {

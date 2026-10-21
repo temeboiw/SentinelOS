@@ -234,8 +234,11 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }
    else if((op==128u||op==130u||op==132u||op==134u||op==135u||
-            op==137u||op==138u||op==139u||op==194u||op==195u||
-            op==196u||op==197u||op==198u||op==199u) && wc==5u) {
+            op==137u||op==138u||op==139u||op==164u||op==165u||
+            op==166u||op==167u||op==170u||op==171u||op==172u||
+            op==173u||op==174u||op==175u||op==176u||op==177u||
+            op==178u||op==179u||op==194u||op==195u||op==196u||
+            op==197u||op==198u||op==199u) && wc==5u) {
     rid=w[i+2];a=w[i+3];b=w[i+4];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||
        !defined[a]||!defined[b])return 0;
@@ -247,6 +250,20 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     else if(op==137u){if(!ids[b])return 0;v=ids[a]%ids[b];}
     else if(op==138u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;v=(uint32_t)((int32_t)ids[a]%(int32_t)ids[b]);}
     else if(op==139u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;int32_t rem=(int32_t)ids[a]%(int32_t)ids[b];if(rem&&((rem<0)!=((int32_t)ids[b]<0)))rem+=(int32_t)ids[b];v=(uint32_t)rem;}
+    else if(op==164u)v=(ids[a]==ids[b]);
+    else if(op==165u)v=(ids[a]!=ids[b]);
+    else if(op==166u)v=(ids[a]||ids[b]);
+    else if(op==167u)v=(ids[a]&&ids[b]);
+    else if(op==170u)v=(ids[a]==ids[b]);
+    else if(op==171u)v=(ids[a]!=ids[b]);
+    else if(op==172u)v=(ids[a]>ids[b]);
+    else if(op==173u)v=((int32_t)ids[a]>(int32_t)ids[b]);
+    else if(op==174u)v=(ids[a]>=ids[b]);
+    else if(op==175u)v=((int32_t)ids[a]>=(int32_t)ids[b]);
+    else if(op==176u)v=(ids[a]<ids[b]);
+    else if(op==177u)v=((int32_t)ids[a]<(int32_t)ids[b]);
+    else if(op==178u)v=(ids[a]<=ids[b]);
+    else if(op==179u)v=((int32_t)ids[a]<=(int32_t)ids[b]);
     else if(op==194u)v=ids[a]>>(ids[b]&31u);
     else if(op==195u)v=(uint32_t)((int32_t)ids[a]>>(ids[b]&31u));
     else if(op==196u)v=ids[a]<<(ids[b]&31u);

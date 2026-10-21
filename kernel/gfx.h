@@ -30,6 +30,9 @@
 #define GFX_GPU_CMD_TRANSFER 0x0105u
 #define GFX_GPU_CMD_ATTACH_BACKING 0x0106u
 #define GFX_GPU_CMD_CTX_CREATE 0x0200u
+#define GFX_GPU_CMD_CTX_ATTACH_RESOURCE 0x0202u
+#define GFX_GPU_CMD_CREATE_3D 0x0204u
+#define GFX_GPU_CMD_TRANSFER_FROM_3D 0x0206u
 #define GFX_GPU_CMD_SUBMIT_3D 0x0207u
 #define GFX_VIRTIO_GPU_F_VIRGL (1u << 0)
 #define GFX_GPU_RESP_OK_NODATA 0x1100u
@@ -278,6 +281,47 @@ static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
     for(uint32_t i=0;i<length;i++)gfx_submit_buffer[sizeof(submit)+i]=stream[i];
     return gfx_command(gfx_submit_buffer,(uint32_t)sizeof(submit)+length);
 }
+static int gfx_create_virgl_target(void) {
+    struct {
+        GfxCtrlHdr hdr;
+        uint32_t resource_id,target,format,bind,width,height,depth;
+        uint32_t array_size,last_level,nr_samples,flags,padding;
+    } cr={0};
+    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;
+    cr.resource_id=2;cr.target=2; /* PIPE_TEXTURE_2D */
+    cr.format=GFX_GPU_FORMAT_B8G8R8X8_UNORM;
+    cr.bind=(1u<<1)|(1u<<3); /* render target + sampler view */
+    cr.width=gfx_width;cr.height=gfx_height;cr.depth=1;cr.array_size=1;
+    cr.last_level=0;cr.nr_samples=0;cr.flags=0;cr.padding=0;
+    if(!gfx_command(&cr,sizeof cr))return 0;
+
+    struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};
+    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;
+    attach.resource_id=2;attach.nr_entries=1;
+    attach.entry.addr=gfx_surface_pa;attach.entry.length=(uint32_t)gfx_surface_bytes;
+    if(!gfx_command(&attach,sizeof attach))return 0;
+
+    struct { GfxCtrlHdr hdr;uint32_t resource_id,padding; } bind={0};
+    bind.hdr.type=GFX_GPU_CMD_CTX_ATTACH_RESOURCE;bind.hdr.ctx_id=1;
+    bind.resource_id=2;
+    if(!gfx_command(&bind,sizeof bind))return 0;
+    return 1;
+}
+static int gfx_present_virgl(void) {
+    if(!gfx_3d_ready)return 0;
+    struct {
+        GfxCtrlHdr hdr;
+        uint32_t x,y,z,width,height,depth;
+        uint64_t offset;
+        uint32_t resource_id,level,stride,layer_stride;
+    } tr={0};
+    tr.hdr.type=GFX_GPU_CMD_TRANSFER_FROM_3D;tr.hdr.ctx_id=1;
+    tr.width=gfx_width;tr.height=gfx_height;tr.depth=1;
+    tr.resource_id=2;tr.level=0;tr.stride=gfx_pitch;
+    tr.layer_stride=gfx_pitch*gfx_height;
+    if(!gfx_command(&tr,sizeof tr))return 0;
+    return gfx_flush(0,0,gfx_width,gfx_height);
+}
 static int gfx_create_resource(void) {
     GfxCreate2D cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_2D;cr.resource_id=GFX_RESOURCE_ID;
@@ -325,11 +369,11 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     }
     gfx_gpu_ready=1;
     if(gfx_virgl_supported) {
-        if(gfx_create_virgl_context()) {
+        if(gfx_create_virgl_context() && gfx_create_virgl_target()) {
             gfx_3d_ready=1;
-            DbgPrint("gfx: VirGL 3D context created; raw command submission enabled\n");
+            DbgPrint("gfx: VirGL context and render target ready; raw command submission enabled\n");
         } else {
-            DbgPrint("gfx: VirGL context creation failed; using 2D acceleration only\n");
+            DbgPrint("gfx: VirGL render target setup failed; using 2D acceleration only\n");
         }
     }
     DbgPrint("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",

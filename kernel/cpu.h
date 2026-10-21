@@ -11,7 +11,6 @@ typedef struct {
 } Frame;
 
 #define DISPATCH_VECTOR 0x2F                    // software interrupt that enters the scheduler (the vector NT uses)
-static volatile int ki_need_resched;
 static Frame *KiSchedule(Frame *f);             // defined in ke.h
 
 #pragma pack(push, 1)
@@ -37,6 +36,7 @@ typedef struct {
     Tss tss;
     uint8_t ist_stack[3][8192] __attribute__((aligned(16)));
     uint32_t index;
+    volatile int need_resched;
 } CpuLocal;
 static CpuLocal cpu_locals[CPU_MAX] __attribute__((aligned(64)));
 static IdtEntry idt[256];
@@ -59,6 +59,7 @@ static void cpu_set_gs_base(CpuLocal *cpu) {
     uint64_t v = (uint64_t)(uintptr_t)cpu;
     __asm__ volatile("wrmsr" :: "c"(0xC0000101), "a"((uint32_t)v), "d"((uint32_t)(v >> 32)));
 }
+#define ki_need_resched (cpu_local_current()->need_resched)
 
 // ---- per-vector stubs: push (fake) error code + vector, then share isr_common ----
 #define STUB_NOERR(n) ".globl isr" #n "\nisr" #n ":\n push 0\n push " #n "\n jmp isr_common\n"

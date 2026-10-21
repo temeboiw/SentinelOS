@@ -321,6 +321,30 @@ static void draw_text(int x, int y, const char *s, u32 col) {
     }
 }
 
+/* Save-under for fast cursor motion. cur_under holds the framebuffer pixels
+ * the cursor covered; cur_paint holds what the cursor wrote (0 = untouched).
+ * On a plain mouse move the old cursor is erased by restoring only pixels that
+ * still contain the cursor's own colour, so content that another process
+ * repainted underneath is never overwritten with stale pixels. */
+static u32 cur_under[16*16];
+static u32 cur_paint[16*16];
+
+static void ensure_fb(void);
+static void cursor_restore_fast(void) {
+    if (!cur_on || !g_scanout) return;
+    for (int j = 0; j < 16; j++) {
+        for (int i = 0; i < 16; i++) {
+            u32 pv = cur_paint[j*16+i];
+            int yy = cur_oy + j, xx = cur_ox + i;
+            if (!pv) continue;
+            if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
+            if (g_scanout[yy * g_scan_pitch + xx] == pv)
+                g_scanout[yy * g_scan_pitch + xx] = cur_under[j*16+i];
+        }
+    }
+    cur_on = 0;
+}
+
 static void cursor_restore(void) {
     if (!cur_on || !g_scanout) return;
     /* Rebuild the scene below the cursor; never restore stale saved pixels. */
@@ -349,6 +373,8 @@ static void cursor_save_draw(int x, int y) {
         "......##........"
     };
     if (!g_scanout || !g_scan_pitch) return;
+    /* Never capture our own pixels as the "under" image. */
+    if (cur_on) cursor_restore_fast();
     /* Independent topmost layer: cursor pixels never enter scene surfaces. */
     cur_ox = x;
     cur_oy = y;
@@ -356,17 +382,27 @@ static void cursor_save_draw(int x, int y) {
         for (int i = 0; i < 16; i++) {
             int yy = y + j, xx = x + i;
             char p = shape[j][i];
+            u32 val = 0;
+            cur_paint[j*16+i] = 0;
             if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
-            if (p == '#') g_scanout[yy * g_scan_pitch + xx] = 0xFF000000;
-            else if (p == 'w') g_scanout[yy * g_scan_pitch + xx] = COL_WHITE;
-            else if (p == '+') g_scanout[yy * g_scan_pitch + xx] = COL_ACCENT;
+            if (p == '#') val = 0xFF000000;
+            else if (p == 'w') val = COL_WHITE;
+            else if (p == '+') val = COL_ACCENT;
+            if (!val) continue;
+            cur_under[j*16+i] = g_scanout[yy * g_scan_pitch + xx];
+            cur_paint[j*16+i] = val;
+            g_scanout[yy * g_scan_pitch + xx] = val;
         }
     }
     cur_on = 1;
 }
 
-static void present_cursor_only(void) {
-    cursor_save_draw(g_mx, g_my);
+/* Cheap cursor move: no scene recomposition, so the cursor is never absent
+ * for longer than a 16x16 pixel copy while the mouse is moving. */
+static void cursor_move_fast(int x, int y) {
+    ensure_fb();
+    cursor_restore_fast();
+    cursor_save_draw(x, y);
 }
 
 static void ensure_fb(void) {
@@ -1171,7 +1207,6 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 /* Keep the previous cursor origin so its pixels can be
                  * repainted from the scene, rather than restoring a stale
                  * saved-under buffer over content that changed meanwhile. */
-                int prev_mx = g_mx, prev_my = g_my;
                 g_mx = ev.x;
                 g_my = ev.y;
                 u32_mouse_record();
@@ -1215,25 +1250,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     g_drag = 0;
                     on_click(ev.x, ev.y);
                 } else {
-                    /*
-                     * Repaint only the cursor's old and new 16x16 footprints.
-                     * A single bounding rectangle between them scales with the
-                     * distance moved and was the source of the growing blocks.
-                     * compose() restores the old scene pixels and then draws a
-                     * fresh cursor, without restoring stale save-under pixels.
-                     */
-                    int was_clipped = u32_render_clip;
-                    int old_x0=u32_clip_x0, old_y0=u32_clip_y0;
-                    int old_x1=u32_clip_x1, old_y1=u32_clip_y1;
-                    u32_render_clip=0;
-                    /* Remove cursor overlay, repaint its old scene pixels, then
-                     * present once at the new position after the clip is restored. */
-                    cursor_restore();
-                    compose_region(prev_mx,prev_my,prev_mx+16,prev_my+16);
-                    u32_render_clip=was_clipped;
-                    u32_clip_x0=old_x0; u32_clip_y0=old_y0;
-                    u32_clip_x1=old_x1; u32_clip_y1=old_y1;
-                    present_cursor_only();
+                    /* Plain move: erase the old cursor from its save-under
+                     * and draw it at the new position. Recomposing the scene
+                     * here made the cursor vanish for the whole duration of
+                     * every move event. */
+                    cursor_move_fast(g_mx, g_my);
                 }
 
                 (void)u32_msg_push(msg);

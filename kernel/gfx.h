@@ -36,6 +36,7 @@
 #define GFX_GPU_CMD_CTX_CREATE 0x0200u
 #define GFX_GPU_CMD_CTX_ATTACH_RESOURCE 0x0202u
 #define GFX_GPU_CMD_CREATE_3D 0x0204u
+#define GFX_GPU_CMD_TRANSFER_TO_3D 0x0205u
 #define GFX_GPU_CMD_TRANSFER_FROM_3D 0x0206u
 #define GFX_GPU_CMD_SUBMIT_3D 0x0207u
 #define GFX_VIRTIO_GPU_F_VIRGL (1u << 0)
@@ -370,6 +371,19 @@ static int gfx_map_virgl_buffer_for_process(KPROCESS *proc,uint64_t *uva_out) {
         *uva_out=uva;return 1;
     }
     return 0;
+}
+static int gfx_upload_virgl_buffer(uint32_t bytes) {
+    if(!gfx_3d_ready||!gfx_virgl_buffer_pa||!bytes||bytes>GFX_VIRGL_BUFFER_BYTES)return 0;
+    struct {
+        GfxCtrlHdr hdr;
+        uint32_t x,y,z,width,height,depth;
+        uint64_t offset;
+        uint32_t resource_id,level,stride,layer_stride;
+    } tr={0};
+    tr.hdr.type=GFX_GPU_CMD_TRANSFER_TO_3D;tr.hdr.ctx_id=1;
+    tr.width=bytes;tr.height=1;tr.depth=1;
+    tr.resource_id=GFX_VIRGL_BUFFER_ID;tr.level=0;
+    return gfx_command(&tr,sizeof tr);
 }
 static int gfx_present_virgl(void) {
     if(!gfx_3d_ready)return 0;

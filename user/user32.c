@@ -481,6 +481,141 @@ static void cursor_restore(void) {
     cur_on = 0;
 }
 
+/* Select a stock cursor from geometry. The arrow remains the original
+ * tested bitmap; other shapes are rasterized into the same 16x16 save-under
+ * buffer so cursor movement keeps the existing no-trail path. */
+static unsigned int u32_hover_cursor_id = 32512u; /* IDC_ARROW */
+static unsigned int u32_cursor_effective_id(void) {
+    unsigned long long raw=(unsigned long long)u32_current_cursor;
+    unsigned int id=(unsigned int)(raw & 0xFFFFu);
+    if ((raw & 0xFFFF0000ULL)==0x00330000ULL && id!=32512u)
+        return id; /* an application's explicit SetCursor wins */
+    return u32_hover_cursor_id;
+}
+static char u32_cursor_pixel(unsigned int id,int x,int y) {
+    if(id==32512u) return u32_cursor_shape[y][x];
+    if(id==32513u) { /* IDC_IBEAM */
+        if(x==7||x==8||y==2||y==3||y==12||y==13) return '#';
+        if((x==7||x==8)&&(y>=4&&y<=11)) return 'w';
+        if(y==3&&(x>=5&&x<=10))return 'w';
+        if(y==12&&(x>=5&&x<=10))return 'w';
+        return '.';
+    }
+    if(id==32514u || id==32650u) { /* wait / app-starting hourglass */
+        if(y==1||y==2||y==13||y==14) return (x>=3&&x<=12)?'#':'.';
+        if(y>=3&&y<=12) {
+            int d=y<8?y-2:13-y;
+            if(x>=3+d&&x<=12-d)return (x==3+d||x==12-d)?'#':'w';
+        }
+        return '.';
+    }
+    if(id==32515u) { /* cross */
+        if(x==7||x==8||y==7||y==8)return (x==7||y==7)?'#':'w';
+        return '.';
+    }
+    if(id==32516u) { /* up arrow */
+        if(y<=7&&x>=7-y/2&&x<=8+y/2)return (x==7-y/2||x==8+y/2)?'#':'w';
+        if(y>=7&&y<=14&&x>=6&&x<=9)return (x==6||x==9||y==14)?'#':'w';
+        return '.';
+    }
+    if(id==32644u || id==32645u || id==32646u ||
+       id==32642u || id==32643u) {
+        int on=0, edge=0;
+        if(id==32644u) { /* horizontal resize */
+            on=(y==7||y==8||((x<=5||x>=10)&&y>=4&&y<=11&&
+                ((x<=5)?(x+y>=7&&x+y<=10):(x-y>=2&&x-y<=5))));
+            edge=(y==7||y==8);
+        } else if(id==32645u) { /* vertical resize */
+            on=(x==7||x==8||((y<=5||y>=10)&&x>=4&&x<=11&&
+                ((y<=5)?(x+y>=7&&x+y<=10):(x-y>=2&&x-y<=5))));
+            edge=(x==7||x==8);
+        } else if(id==32646u) { /* four-way move */
+            on=(x==7||x==8||y==7||y==8||
+                (x>=4&&x<=11&&y>=4&&y<=11&&
+                 ((x==y)||(x+y==15)));
+            edge=(x==7||x==8||y==7||y==8);
+        } else if(id==32642u) { /* NW-SE resize */
+            on=(x==y||x==y+1||x==y-1||
+                (x<=5&&y<=5&&x+y>=4&&x+y<=7)||
+                (x>=10&&y>=10&&x+y>=23&&x+y<=26));
+            edge=(x==y||x==y+1||x==y-1);
+        } else { /* NE-SW resize */
+            on=(x+y==15||x+y==14||x+y==16||
+                (x>=10&&y<=5&&x-y>=5&&x-y<=8)||
+                (x<=5&&y>=10&&y-x>=5&&y-x<=8));
+            edge=(x+y==15||x+y==14||x+y==16);
+        }
+        if(on)return edge?'#':'w';
+        return '.';
+    }
+    if(id==32648u) { /* forbidden */
+        int dx=x-7,dy=y-7;
+        int d=dx*dx+dy*dy;
+        if(d>=25&&d<=64)return '#';
+        if(dx>=-4&&dx<=4&&dy>=-4&&dy<=4&&
+           (dx-dy<=1&&dx-dy>=-1))return 'w';
+        return '.';
+    }
+    if(id==32649u) { /* hand / clickable */
+        /* index finger */
+        if((x>=6&&x<=8&&y>=1&&y<=8) ||
+           (x>=4&&x<=10&&y>=7&&y<=11) ||
+           (x>=3&&x<=11&&y>=10&&y<=13) ||
+           (x>=5&&x<=10&&y==14) ||
+           (x>=3&&x<=5&&y>=8&&y<=11) ||
+           (x>=9&&x<=11&&y>=8&&y<=10)) {
+            if(x==4||x==10||y==13||y==14|| (x==6&&y==1))return '#';
+            return 'w';
+        }
+        return '.';
+    }
+    if(id==32651u) { /* help cursor: arrow with question mark */
+        if(x<=5&&y<=10&&x+y>=3&&x+y<=7)return '#';
+        if((x==9&&y>=3&&y<=5)||(y==3&&x>=9&&x<=12)||
+           (x==12&&y>=4&&y<=6)||(y==7&&x>=10&&x<=12)||
+           (x==10&&y==8)||(x==10&&y==10))return '#';
+        return '.';
+    }
+    return u32_cursor_shape[y][x];
+}
+/* Hover targeting is deliberately conservative: only standard controls and
+ * window resize/title areas change the pointer; desktop painting is untouched. */
+static unsigned int u32_auto_cursor_at(int x,int y) {
+    int h=(int)g_fh,w=(int)g_fw;
+    if(x<0||y<0||x>=w||y>=h)return 32512u;
+    if(g_wnd.visible&&!g_wnd.minimized) {
+        int wx=g_wnd.x,wy=g_wnd.y,ww=g_wnd.w,wh=g_wnd.h;
+        if(x>=wx-4&&x<wx+ww+4&&y>=wy-4&&y<wy+wh+4) {
+            int left=x<wx+4,right=x>=wx+ww-4;
+            int top=y<wy+4,bottom=y>=wy+wh-4;
+            if((left&&top)||(right&&bottom))return 32642u;
+            if((right&&top)||(left&&bottom))return 32643u;
+            if(left||right)return 32644u;
+            if(top||bottom)return 32645u;
+            for(int i=0;i<64;i++) {
+                U32_CHILDWND *c=&u32_child_windows[i];
+                if(!c->used||!c->visible||c->parent!=(void *)1)continue;
+                if(x>=wx+c->x&&x<wx+c->x+c->w&&
+                   y>=wy+c->y&&y<wy+c->y+c->h) {
+                    if(!c->enabled)return 32648u;
+                    if(c->id==0xF020u||c->id==0xF060u||
+                       u32_class_name_equal(c->cls,"BUTTON"))return 32649u;
+                    if(u32_class_name_equal(c->cls,"EDIT"))return 32513u;
+                }
+            }
+            if(y<wy+32&&x<wx+ww-60)return 32646u;
+        }
+    }
+    /* Desktop taskbar, Start button and Start-menu actions are clickable. */
+    if(y>=h-44)return 32649u;
+    if(g_menu) {
+        int my=h-44-142-4;
+        if(x>=8&&x<198&&y>=my+12&&y<my+38)return 32513u;
+        if(x>=8&&x<198&&y>=my+48&&y<my+126)return 32649u;
+    }
+    return 32512u;
+}
+
 static void cursor_save_draw(int x, int y) {
     /* CPU-rendered arrow on the actual framebuffer. Transparent pixels do
      * not touch the scene; cursor pixels never enter the GPU layer surface. */
@@ -491,7 +626,7 @@ static void cursor_save_draw(int x, int y) {
     cur_ox=x; cur_oy=y;
     for (int j=0;j<16;j++) for (int i=0;i<16;i++) {
         int yy=y+j, xx=x+i, idx=j*16+i;
-        char p=u32_cursor_shape[j][i];
+        char p=u32_cursor_pixel(u32_cursor_effective_id(),i,j);
         u32 val=0;
         cur_paint[idx]=0;
         if (yy<0 || (u32)yy>=height || xx<0 || (u32)xx>=width) continue;
@@ -1542,6 +1677,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_mx = ev.x;
                 g_my = ev.y;
                 u32_mouse_record();
+                u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
 
                 msg->hwnd=g_wnd.visible?1u:0u;msg->message=(ev.type==3)?0x0201u:0x0200u;
                 msg->wParam=(u64)(unsigned int)ev.btn;msg->lParam=0;msg->time=(u32)u32_tick_now();
@@ -2608,7 +2744,12 @@ typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos
 __attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=u32_current_cursor;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
 __attribute__((dllexport)) void *SetCursor(void *cursor){
     void *old=u32_current_cursor;
-    if(!cursor || (((unsigned long long)cursor&0xFFFF0000ULL)==0x00330000ULL))u32_current_cursor=cursor;
+    if(!cursor || (((unsigned long long)cursor&0xFFFF0000ULL)==0x00330000ULL)) {
+        u32_current_cursor=cursor;
+        if(!cursor || (((unsigned long long)cursor&0xFFFFu)==32512u))
+            u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
+        cursor_repaint_transition(g_mx,g_my,g_mx,g_my);
+    }
     return old;
 }
 __attribute__((dllexport)) int GetMouseMovePointsEx(unsigned int cbSize,const U32_MOUSEMOVEPOINT *point,U32_MOUSEMOVEPOINT *out,int count,unsigned int resolution){

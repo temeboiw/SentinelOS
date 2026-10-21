@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -101,6 +101,10 @@ static inline u64 NtInitializeGraphics(GfxBootInfo *out) {
     out->size = sizeof(*out);
     out->version = 1;
     return sy3(SYS_InitializeGraphics, (u64)out, 0, 0);
+}
+typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } NT_PRESENT_LAYER;
+static inline u64 NtPresentLayer(const NT_PRESENT_LAYER *layer) {
+    return sy3(SYS_PresentLayer, (u64)layer, 0, 0);
 }
 static inline u64 NtFlushGraphics(u32 x, u32 y, u32 w, u32 h) {
     GfxRect rect = {x, y, w, h};

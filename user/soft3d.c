@@ -51,7 +51,7 @@ int S3DGetSurface(S3D_SURFACE *surface) {
     surface->pixels=0;surface->width=0;surface->height=0;
     surface->pitch=0;surface->backend=0;surface->virgl_buffer=0;
     surface->virgl_buffer_resource_id=0;surface->virgl_buffer_size=0;
-    S3D_GFX_INFO info={0};info.size=sizeof(info);info.version=1;
+    S3D_GFX_INFO info;info.size=sizeof(info);info.version=1;
     if(s3d_syscall3(32,(uint64_t)&info,0,0) && info.backend==2 &&
        info.surface_va && info.width && info.height && info.pitch>=info.width*4u) {
         surface->pixels=(uint32_t*)(uintptr_t)info.surface_va;
@@ -64,7 +64,7 @@ int S3DGetSurface(S3D_SURFACE *surface) {
         }
         return 1;
     }
-    S3D_FB_INFO fb={0};
+    S3D_FB_INFO fb;
     if(!s3d_syscall3(8,(uint64_t)&fb,0,0)||!fb.va||!fb.w||!fb.h||fb.pitch<fb.w*4u)
         return 0;
     surface->pixels=(uint32_t*)(uintptr_t)fb.va;
@@ -252,8 +252,9 @@ static int s3d_vb_emit_shader(S3D_VIRGL_BUILDER *b,uint32_t handle,
     if(!s3d_vb_cmd(b,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_SHADER,payload)||
        !s3d_vb_word(b,handle)||!s3d_vb_word(b,type)||!s3d_vb_word(b,bytes)||
        !s3d_vb_word(b,4096u)||!s3d_vb_word(b,0u))return 0;
-    uint8_t padded[256]={0};
+    uint8_t padded[256];
     if(bytes>sizeof(padded))return 0;
+    for(uint32_t i=0;i<sizeof(padded);i++)padded[i]=0;
     for(uint32_t i=0;i<bytes;i++)padded[i]=(uint8_t)(i<n?text[i]:0);
     for(uint32_t i=0;i<text_dw;i++) {
         uint32_t off=i*4u;
@@ -294,7 +295,7 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
 
     static const char vs[]="VERT\nDCL IN[0]\nDCL IN[1]\nDCL OUT[0], POSITION\nDCL OUT[1], COLOR\nMOV OUT[0], IN[0]\nMOV OUT[1], IN[1]\nEND\n";
     static const char fs[]="FRAG\nDCL IN[0], COLOR\nDCL OUT[0], COLOR\nMOV OUT[0], IN[0]\nEND\n";
-    S3D_VIRGL_BUILDER q={0};
+    S3D_VIRGL_BUILDER q;q.count=0;
     int ok=1;
     ok &= s3d_vb_emit_shader(&q,11,0,vs);
     ok &= s3d_vb_bind_shader(&q,11,0);

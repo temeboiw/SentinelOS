@@ -105,6 +105,39 @@ static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
+/* USER32 child HWNDs. Coordinates are client-relative, so moving the parent
+ * automatically moves every child without stale screen-space rectangles. */
+typedef struct {
+    int used, visible, enabled, pressed;
+    void *parent;
+    unsigned int id, style, exstyle;
+    int x, y, w, h;
+    char cls[24], text[96];
+} U32_CHILDWND;
+static U32_CHILDWND u32_child_windows[64];
+static unsigned int u32_child_next_id=0x1000u;
+static U32_CHILDWND *u32_child_from_hwnd(void *hwnd) {
+    unsigned long long v=(unsigned long long)hwnd;
+    if(v<0x1000u || v>=0x1040u)return 0;
+    U32_CHILDWND *c=&u32_child_windows[v-0x1000u];
+    return c->used?c:0;
+}
+static void *u32_child_create(LPCSTR cls,LPCSTR title,u32 ex,u32 style,int x,int y,int w,int h,void *parent,void *menu) {
+    int slot=-1;
+    for(int i=0;i<64;i++)if(!u32_child_windows[i].used){slot=i;break;}
+    if(slot<0)return 0;
+    U32_CHILDWND *c=&u32_child_windows[slot];
+    c->used=1;c->visible=(style&0x10000000u)!=0;c->enabled=(style&0x08000000u)==0;c->pressed=0;
+    c->parent=parent;c->id=(unsigned int)(unsigned long long)menu;c->style=style;c->exstyle=ex;
+    c->x=x;c->y=y;c->w=w;c->h=h;
+    unsigned int i=0;while(cls&&cls[i]&&i+1<sizeof(c->cls)){c->cls[i]=cls[i];i++;}c->cls[i]=0;
+    i=0;while(title&&title[i]&&i+1<sizeof(c->text)){c->text[i]=title[i];i++;}c->text[i]=0;
+    return (void *)(unsigned long long)(0x1000u+(unsigned int)slot);
+}
+static void u32_child_destroy_all(void *parent) {
+    for(int i=0;i<64;i++)if(u32_child_windows[i].used&&u32_child_windows[i].parent==parent)u32_child_windows[i].used=0;
+}
+static void u32_draw_child_windows(void);
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;
 static int u32_msg_time;
@@ -619,6 +652,28 @@ static int u32_is_desktop_window(void) {
     return desktop[i] == 0 && g_wnd.title[i] == 0;
 }
 
+static void u32_draw_child_windows(void) {
+    for(int i=0;i<64;i++) {
+        U32_CHILDWND *c=&u32_child_windows[i];
+        if(!c->used||!c->visible||c->parent!=(void *)1||g_wnd.minimized)continue;
+        int x=g_wnd.x+c->x,y=g_wnd.y+c->y,w=c->w,h=c->h;
+        if(c->id==0xF020u) {
+            round_fill(x,y,w,h,5,0xFF2B83A8);
+            gradient_v(x+1,y+1,w-2,11,0xFFB9F4FC,0xFF55B7D9);
+            fill(x+6,y+11,w-12,3,0xFF174F6A);
+        } else if(c->id==0xF060u) {
+            round_fill(x,y,w,h,5,0xFFB74F69);
+            gradient_v(x+1,y+1,w-2,10,0xFFFFD4DD,0xFFE56D83);
+            fill(x+7,y+7,2,10,0xFFFFFFFF);fill(x+15,y+7,2,10,0xFFFFFFFF);
+            fill(x+7,y+7,10,2,0xFFFFFFFF);fill(x+7,y+15,10,2,0xFFFFFFFF);
+        } else {
+            round_fill(x,y,w,h,4,0xFF559EBB);
+            round_fill(x+1,y+1,w-2,h-2,3,c->pressed?0xFFD5EDF5:0xFFF5FCFF);
+            draw_text(x+8,y+(h>18?(h-16)/2:1),c->text,0xFF164E68);
+        }
+    }
+}
+
 static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
@@ -786,23 +841,10 @@ static void compose(void) {
 
         draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
 
-        int by = y + 4;
-        int bx = x + w - 56;
-
-        round_fill(bx,by,24,24,5,0xFF2B83A8);
-        gradient_v(bx+1,by+1,22,11,0xFFB9F4FC,0xFF55B7D9);
-        fill(bx+6,by+11,12,3,0xFF174F6A);
-
-        bx = x + w - 28;
-        round_fill(bx,by,24,24,5,0xFFB74F69);
-        gradient_v(bx+1,by+1,22,10,0xFFFFD4DD,0xFFE56D83);
-        fill(bx+7,by+7,2,10,0xFFFFFFFF);
-        fill(bx+15,by+7,2,10,0xFFFFFFFF);
-        fill(bx+7,by+7,10,2,0xFFFFFFFF);
-        fill(bx+7,by+15,10,2,0xFFFFFFFF);
-
         round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
         fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
+
+        u32_draw_child_windows();
 
         for (int i = 0; i < g_nlines; i++) {
             const char *s = g_lines[i];
@@ -897,10 +939,15 @@ static void on_click(int x, int y) {
 
     if (g_wnd.visible && !g_wnd.minimized) {
         int wx = g_wnd.x, wy = g_wnd.y;
-        int ww = g_wnd.w, by = wy + 4;
-        int bx = wx + ww - 28;
+        int ww = g_wnd.w;
+        U32_CHILDWND *clicked_child=0;
+        for(int ci=0;ci<64;ci++) {
+            U32_CHILDWND *cc=&u32_child_windows[ci];
+            if(!cc->used||!cc->visible||!cc->enabled||cc->parent!=(void *)1)continue;
+            if(hit(x,y,wx+cc->x,wy+cc->y,wx+cc->x+cc->w,wy+cc->y+cc->h)){clicked_child=cc;break;}
+        }
 
-        if (hit(x, y, bx, by, bx + 24, by + 24)) {
+        if (clicked_child && clicked_child->id==0xF060u) {
             /*
              * Closing a window is not the same as terminating its process.
              * Give the application its normal WM_CLOSE notification first,
@@ -921,16 +968,14 @@ static void on_click(int x, int y) {
             return;
         }
 
-        bx = wx + ww - 56;
-
-        if (hit(x, y, bx, by, bx + 24, by + 24)) {
+        if (clicked_child && clicked_child->id==0xF020u) {
             g_wnd.minimized = 1;
             sy3(SYS_WmMin, 1, 0, 0);
             compose();
             return;
         }
 
-        if (hit(x, y, wx, wy, wx + ww - 60, wy + 32)) {
+        if (!clicked_child && hit(x, y, wx, wy, wx + ww - 60, wy + 32)) {
             g_drag = 1;
             g_drag_ox = x - wx;
             g_drag_oy = y - wy;
@@ -1024,7 +1069,14 @@ void *CreateWindowExA(
     int x, int y, int w, int h,
     void *parent, void *menu, void *inst, void *param
 ) {
-    (void)cls; (void)inst; (void)param;
+    (void)inst; (void)param;
+    /* Child controls are genuine USER32 HWNDs, not screen-space decorations. */
+    if(parent && parent==(void *)1 && cls &&
+       (u32_class_name_equal(cls,"BUTTON") || u32_class_name_equal(cls,"STATIC") ||
+        u32_class_name_equal(cls,"EDIT") || u32_class_name_equal(cls,"SCROLLBAR"))) {
+        return u32_child_create(cls,title,ex,style,x,y,w,h,parent,menu);
+    }
+    u32_child_destroy_all((void *)1);
     u32_wnd_style=style; u32_wnd_exstyle=ex; u32_wnd_id=0;
     u32_wnd_proc=0; u32_wnd_userdata=0; u32_wnd_menu=menu; u32_wnd_parent=parent;
     u32_context_help_id=0;
@@ -1063,6 +1115,11 @@ void *CreateWindowExA(
 
         int rect[4] = { g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h };
         sy3(SYS_WmRect, (u64)rect, 0, 0);
+        /* Caption buttons are ordinary child BUTTON windows. */
+        (void)CreateWindowExA(0,"BUTTON","Minimize",0x50000000u,
+            g_wnd.w-56,4,24,24,(void *)1,(void *)0xF020u,inst,0);
+        (void)CreateWindowExA(0,"BUTTON","Close",0x50000000u,
+            g_wnd.w-28,4,24,24,(void *)1,(void *)0xF060u,inst,0);
     }
 
     compose();
@@ -1413,7 +1470,12 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
 
 __attribute__((dllexport))
 BOOL DestroyWindow(void *hwnd) {
-    (void)hwnd;
+    if(u32_child_from_hwnd(hwnd)) {
+        u32_child_from_hwnd(hwnd)->used=0;
+        compose();
+        return 1;
+    }
+    if(hwnd!=(void *)1 && hwnd) return 0;
 
     /* Save the old frame before hiding it so every pixel it covered is
      * repainted from the desktop layers, including the title bar and shadow. */
@@ -1555,7 +1617,7 @@ __attribute__((dllexport)) BOOL GetWindowRect(void *hwnd, U32_RECT *r) {
     (void)hwnd; if (!r || !g_wnd.visible) return 0;
     r->left=g_wnd.x; r->top=g_wnd.y; r->right=g_wnd.x+g_wnd.w; r->bottom=g_wnd.y+g_wnd.h; return 1;
 }
-__attribute__((dllexport)) BOOL IsWindow(void *hwnd) { return hwnd==(void *)1 && g_wnd.visible; }
+__attribute__((dllexport)) BOOL IsWindow(void *hwnd) { return (hwnd==(void *)1 && g_wnd.visible) || u32_child_from_hwnd(hwnd)!=0; }
 __attribute__((dllexport)) BOOL IsWindowVisible(void *hwnd) { return IsWindow(hwnd) && !g_wnd.minimized; }
 __attribute__((dllexport)) BOOL EnableWindow(void *hwnd, BOOL enable) {if(!IsWindow(hwnd))return 0;BOOL was_disabled=(u32_wnd_style&0x08000000u)!=0;if(enable)u32_wnd_style&=~0x08000000u;else u32_wnd_style|=0x08000000u;if(was_disabled!=!enable)compose();return was_disabled;}
 __attribute__((dllexport)) BOOL IsIconic(void *hwnd) { (void)hwnd; return g_wnd.visible && g_wnd.minimized; }
@@ -1564,7 +1626,10 @@ __attribute__((dllexport)) BOOL SetForegroundWindow(void *hwnd) { if (!IsWindow(
 __attribute__((dllexport)) void *GetActiveWindow(void) { return u32_active ? u32_active : GetForegroundWindow(); }
 __attribute__((dllexport)) void *SetActiveWindow(void *hwnd) { void *old=GetActiveWindow(); u32_active=hwnd; return old; }
 __attribute__((dllexport)) int GetWindowTextA(void *hwnd, LPSTR out, int cap) {
-    int i=0; (void)hwnd; if (!out || cap<=0 || !g_wnd.visible) return 0;
+    int i=0;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){if(!out||cap<=0)return 0;while(child->text[i]&&i+1<cap){out[i]=child->text[i];i++;}out[i]=0;return i;}
+    if (!out || cap<=0 || !g_wnd.visible) return 0;
     while (g_wnd.title[i] && i+1<cap) { out[i]=g_wnd.title[i]; i++; } out[i]=0; return i;
 }
 __attribute__((dllexport)) BOOL SetWindowTextA(void *hwnd, LPCSTR title) {
@@ -1610,6 +1675,12 @@ __attribute__((dllexport)) U32_LRESULT DefWindowProcA(void *hwnd, U32_UINT msg, 
     }
 }
 __attribute__((dllexport)) U32_LRESULT SendMessageA(void *hwnd, U32_UINT msg, U32_WPARAM wp, U32_LPARAM lp) {
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child) {
+        if(msg==0x000Cu) {unsigned int i=0;const char *s=(const char *)lp;while(s&&s[i]&&i+1<sizeof(child->text)){child->text[i]=s[i];i++;}child->text[i]=0;compose();return 1;}
+        if(msg==0x00F5u) {if(child->parent==(void *)1)SendMessageA(child->parent,0x0111u,child->id,0);return 0;}
+        return DefWindowProcA(hwnd,msg,wp,lp);
+    }
     if(!IsWindow(hwnd))return 0;
     if(u32_wnd_proc){
         U32_LRESULT (*proc)(void *,U32_UINT,U32_WPARAM,U32_LPARAM)=(U32_LRESULT (*)(void *,U32_UINT,U32_WPARAM,U32_LPARAM))u32_wnd_proc;
@@ -2149,7 +2220,9 @@ __attribute__((dllexport)) void *WindowFromPoint(U32_POINT pt){return IsWindow((
 __attribute__((dllexport)) void *ChildWindowFromPoint(void *parent,U32_POINT pt){if(!IsWindow(parent))return 0;return hit(pt.x,pt.y,0,0,g_wnd.w,g_wnd.h-32)?(void *)1:0;}
 __attribute__((dllexport)) BOOL SetDoubleClickTime(unsigned int ms){if(ms==0)ms=500;if(ms<1||ms>5000)return 0;u32_double_click_time=ms;return 1;}
 __attribute__((dllexport)) void *GetLastActivePopup(void *hwnd){return IsWindow(hwnd)?hwnd:0;}
-__attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd) { if (!IsWindow(hwnd)) return 0; int n=0; while (g_wnd.title[n]) n++; return n; }
+__attribute__((dllexport)) int GetWindowTextLengthA(void *hwnd) {
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    if(child){int n=0;while(child->text[n])n++;return n;} if (!IsWindow(hwnd)) return 0; int n=0; while (g_wnd.title[n]) n++; return n; }
 __attribute__((dllexport)) int GetWindowTextLengthW(void *hwnd) { return GetWindowTextLengthA(hwnd); }
 __attribute__((dllexport)) long long GetWindowLongPtrA(void *hwnd, int index) { if (!IsWindow(hwnd)) return 0; if (index==-4) return (long long)(unsigned long long)u32_wnd_proc; if (index==-21) return (long long)(unsigned long long)u32_wnd_userdata; return (long long)GetWindowLongA(hwnd,index); }
 __attribute__((dllexport)) long long SetWindowLongPtrA(void *hwnd, int index, long long value) { if (!IsWindow(hwnd)) return 0; long long old=GetWindowLongPtrA(hwnd,index); if (index==-4) u32_wnd_proc=(void *)(unsigned long long)value; else if (index==-21) u32_wnd_userdata=(void *)(unsigned long long)value; else return (long long)SetWindowLongA(hwnd,index,(long)value); compose(); return old; }

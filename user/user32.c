@@ -1072,7 +1072,9 @@ static void compose(void) {
                  * copy the same background buffer on every ordinary repaint. */
                 a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-                a.layer=3;a.pixels=(u64)u32_taskbar_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                a.layer=3;a.pixels=(u64)u32_taskbar_layer;
+                (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                u32_taskbar_dirty=0;
             } else {
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 /* A click may be delivered to an application USER32 instance

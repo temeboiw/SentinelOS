@@ -609,10 +609,22 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
                     c=u32_alpha_over(c,layer->pixels[at]);
             }
         } else {
-            c=*dst;
-            /* Window layer is this process's private surface. Do not composite
-             * its private desktop or taskbar layers onto the shared scanout. */
-            c=u32_alpha_over(c,u32_window_layer[at]);
+            /*
+             * Never use the live scanout as the destination for translucent
+             * app pixels: scanout already contains the previous frame, so
+             * blending shadows/glass repeatedly causes blue bands, pixel
+             * snow, and ghost title bars. Rebuild this dirty rectangle from
+             * this process's cached scene, then paint the current window over
+             * it. All layer arrays are private backing buffers; scanout is
+             * output-only.
+             */
+            c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
+                ? u32_aero_bg_cache[at] : 0xFF000000u;
+            for(unsigned int li=0;li<u32_layer_stack_count;li++) {
+                U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
+                if(layer->visible&&layer->pixels)
+                    c=u32_alpha_over(c,layer->pixels[at]);
+            }
         }
         *dst=c;
     }

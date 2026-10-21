@@ -1132,10 +1132,10 @@ static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
     uint64_t n=++wm_dbg_input_events;
     if(!wm_dbg_sample(n))return;
     if(type==1)
-        DbgPrint("[input] #%llu pid=%d key='%c' mouse=(%d,%d) buttons=%d\\n",
+        DbgPrint("[input] #%llu pid=%d key='%c' mouse=(%d,%d) buttons=%d\n",
                  (unsigned long long)n,pid,key,x,y,btn);
     else
-        DbgPrint("[input] #%llu pid=%d %s mouse=(%d,%d) buttons=%d\\n",
+        DbgPrint("[input] #%llu pid=%d %s mouse=(%d,%d) buttons=%d\n",
                  (unsigned long long)n,pid,type==3?"click":"move",x,y,btn);
 }
 

@@ -146,5 +146,6 @@ static uint64_t s3d_syscall3(uint64_t n,uint64_t a,uint64_t b,uint64_t c) {
 int S3DPresent(S3D_CONTEXT *ctx) {
     if(!ctx||!ctx->color||!ctx->width||!ctx->height)return 0;
     struct {uint32_t x,y,w,h;} rect={0,0,ctx->width,ctx->height};
-    if(ctx->backend==1)return 1;\n    return s3d_syscall3(33,(uint64_t)&rect,0,0)!=0;
+    if(ctx->backend==1)return 1;
+    return s3d_syscall3(33,(uint64_t)&rect,0,0)!=0;
 }

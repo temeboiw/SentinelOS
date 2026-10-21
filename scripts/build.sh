@@ -897,6 +897,7 @@ lld -flavor link \
   /export:S3DPresent \
   /export:S3DSubmitVirGL \
   /export:S3DPresentVirGL \
+  /export:S3DClearVirGL \
   /export:BeginRedrawBatch \
   /export:EndRedrawBatch \
   /export:GetClientRect \

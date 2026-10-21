@@ -1718,6 +1718,24 @@ BOOL DestroyWindow(void *hwnd) {
         u32_suppress_desktop_card = 1;
         compose_region(x0, y0, x1, y1);
         u32_suppress_desktop_card = 0;
+
+        /*
+         * Closing a window can leave the cursor's saved-under pixels out of
+         * sync with scanout: compose_region() only repaints the old frame,
+         * while compose() also refreshes the CPU cursor. If the cursor is
+         * outside the frame's damage rectangle, explicitly rebuild its own
+         * 16x16 footprint once the window has been removed. The next mouse
+         * move then restores the real desktop pixels instead of stale window
+         * pixels, preventing the rectangular cursor trail after Explorer exits.
+         */
+        int cx0 = g_mx, cy0 = g_my;
+        int cx1 = cx0 + 16, cy1 = cy0 + 16;
+        if (cx0 < 0) cx0 = 0;
+        if (cy0 < 0) cy0 = 0;
+        if (cx1 > (int)g_fw) cx1 = (int)g_fw;
+        if (cy1 > (int)g_fh) cy1 = (int)g_fh;
+        if (cx0 < x0 || cy0 < y0 || cx1 > x1 || cy1 > y1)
+            compose_region(g_mx, g_my, g_mx + 16, g_my + 16);
     } else {
         compose();
     }

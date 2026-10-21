@@ -283,11 +283,22 @@ int main(void) {
     semSubmit.pSignalSemaphores = &sem;
     CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_SUCCESS);
     VkFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSemaphore duplicateWaits[2] = {sem, sem};
+    VkFlags duplicateStages[2] = {VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT};
+    semSubmit.waitSemaphoreCount = 2;
+    semSubmit.pWaitSemaphores = duplicateWaits;
+    semSubmit.pWaitDstStageMask = duplicateStages;
+    semSubmit.signalSemaphoreCount = 0;
+    semSubmit.pSignalSemaphores = 0;
+    CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_ERROR_INITIALIZATION_FAILED);
+    /* Invalid submissions must not consume the semaphore. */
     semSubmit.waitSemaphoreCount = 1;
     semSubmit.pWaitSemaphores = &sem;
     semSubmit.pWaitDstStageMask = &waitStage;
-    semSubmit.signalSemaphoreCount = 0;
-    semSubmit.pSignalSemaphores = 0;
+    waitStage = 0;
+    CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_ERROR_INITIALIZATION_FAILED);
+    waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_NOT_READY);
     vkDestroySemaphore(device, sem, 0);

@@ -127,6 +127,7 @@ static int u32_clip_x0, u32_clip_y0, u32_clip_x1, u32_clip_y1;
 #define U32_AERO_CACHE_H 1080u
 static u32 u32_aero_bg_cache[U32_AERO_CACHE_W * U32_AERO_CACHE_H];
 static u32 u32_aero_bg_w, u32_aero_bg_h;
+static int u32_shared_background_published;
 static int g_mx = 640, g_my = 400;
 typedef struct { int x,y; unsigned int time; unsigned long long extra; } U32_MOUSEMOVEPOINT;
 static U32_MOUSEMOVEPOINT u32_mouse_history[32];
@@ -1018,7 +1019,14 @@ static void compose(void) {
             U32_PRESENT_LAYER a;
             a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);a.width=g_fw;a.height=g_fh;
             if(u32_is_desktop_window()) {
-                a.layer=0;a.pixels=(u64)u32_aero_bg_cache;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                if(!u32_shared_background_published) {
+                    a.layer=0;a.pixels=(u64)u32_aero_bg_cache;
+                    a.x=0;a.y=0;a.w=g_fw;a.h=g_fh;
+                    u32_shared_background_published=(int)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                    a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);
+                } else {
+                    a.layer=0;a.pixels=(u64)u32_aero_bg_cache;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                }
                 a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 a.layer=3;a.pixels=(u64)u32_taskbar_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);

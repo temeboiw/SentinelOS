@@ -591,7 +591,20 @@ int main(void) {
     imageCopy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     imageCopy.dstSubresource.layerCount = 1;
     imageCopy.extent.width = 4; imageCopy.extent.height = 4; imageCopy.extent.depth = 1;
+    /* Distinct VkImage handles can alias the same allocation. Reject an
+     * overlapping image copy atomically instead of recording a self-alias. */
+    VkImage aliasImage = 0;
+    CHECK(vkCreateImage(device, &dstci, 0, &aliasImage) == VK_SUCCESS);
+    CHECK(vkBindImageMemory(device, aliasImage, imem, 0) == VK_SUCCESS);
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdCopyImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   aliasImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageCopy);
+    CHECK(((VkCmdObj *)cmd)->count == 0);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    vkDestroyImage(device, aliasImage, 0);
+
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
     vkCmdCopyImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageCopy);

@@ -183,5 +183,43 @@ static void smp_discover(void) {
                  smp_topology.cpus[i].apic_id,
                  smp_topology.cpus[i].x2apic ? "x2APIC" : "xAPIC",
                  smp_topology.cpus[i].apic_id == smp_topology.bsp_apic_id ? " (BSP)" : "");
+    if (smp_topology.count == 0) {
+        DbgPrint("smp: no enabled processors found in MADT\n");
+        return;
+    }
     DbgPrint("smp: AP startup is not enabled until per-CPU TSS and scheduler state are installed\n");
+}
+
+/* AP state is separate from topology: discovered does not mean started. */
+#define SMP_CPU_OFFLINE  0u
+#define SMP_CPU_STARTING 1u
+#define SMP_CPU_ONLINE   2u
+static volatile uint32_t smp_cpu_state[SMP_MAX_CPUS];
+static volatile uint32_t smp_online_count;
+
+/*
+ * Long-mode entry target for the future low-memory INIT/SIPI trampoline.
+ * This intentionally parks APs after installing private descriptor state;
+ * scheduler/process globals are not yet SMP-safe, so they must not schedule
+ * user or kernel threads on these cores yet.
+ */
+__attribute__((used, noreturn))
+static void smp_ap_entry(uint32_t cpu_index) {
+    __asm__ volatile("cli");
+    if (cpu_index == 0 || cpu_index >= SMP_MAX_CPUS ||
+        cpu_index >= smp_topology.count) {
+        DbgPrint("smp: AP entered with invalid CPU index %u\n", cpu_index);
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+
+    smp_cpu_state[cpu_index] = SMP_CPU_STARTING;
+    cpu_init_cpu(cpu_index);
+
+    __asm__ volatile("" ::: "memory");
+    smp_cpu_state[cpu_index] = SMP_CPU_ONLINE;
+    __sync_fetch_and_add(&smp_online_count, 1);
+    DbgPrint("smp: AP cpu%u (APIC ID=%u) initialized; parked pending SMP-safe scheduler\n",
+             cpu_index, smp_topology.cpus[cpu_index].apic_id);
+
+    for (;;) __asm__ volatile("cli; hlt");
 }

@@ -17,6 +17,10 @@ jobs:
           sudo apt-get install -y clang lld qemu-utils qemu-system-x86 ovmf dosfstools e2fsprogs mtools
       - name: Fetch EDK2 headers
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
+      - name: Test software 3D renderer
+        run: |
+          clang -std=c11 -Wall -Wextra -Iuser user/soft3d.c tests/soft3d_test.c -o "$RUNNER_TEMP/soft3d-test"
+          "$RUNNER_TEMP/soft3d-test"
       - name: Build SentinelOS
         run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 ./scripts/build.sh
       - name: Boot smoke test with VirtIO-VGA

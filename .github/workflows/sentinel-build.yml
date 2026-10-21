@@ -27,12 +27,12 @@ jobs:
           clang -std=c11 -Wall -Wextra -Iuser user/soft3d.c tests/soft3d_test.c -o "$RUNNER_TEMP/soft3d-test"
           "$RUNNER_TEMP/soft3d-test"
       - name: Build SentinelOS
-        run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 ./scripts/build.sh
+        run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 bash ./scripts/build.sh
       - name: Boot smoke test with VirtIO-VGA
         shell: bash
         run: |
           set +e
-          timeout 45s env SENTINELOS_DISPLAY=vnc ./scripts/run.sh > "$RUNNER_TEMP/sentinel-qemu.log" 2>&1
+          timeout 45s env SENTINELOS_DISPLAY=vnc bash ./scripts/run.sh > "$RUNNER_TEMP/sentinel-qemu.log" 2>&1
           rc=$?
           set -e
           if [[ "$rc" -ne 0 && "$rc" -ne 124 ]]; then

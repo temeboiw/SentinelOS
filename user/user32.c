@@ -58,6 +58,8 @@ typedef struct {
     unsigned short vendor_id, device_id;
     unsigned char pci_class, pci_subclass, pci_prog_if, initialized;
     u64 surface_va;
+    u64 virgl_buffer_va;
+    u32 virgl_buffer_resource_id, virgl_buffer_size;
 } GfxBootInfo;
 typedef struct { u32 x, y, w, h; } GfxRect;
 typedef struct { int type, x, y, btn; char key; } InputEvent;

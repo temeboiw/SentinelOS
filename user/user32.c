@@ -439,18 +439,16 @@ static void cursor_save_draw(int x, int y) {
 
 /* Cheap cursor move: no scene recomposition, so the cursor is never absent
  * for longer than a 16x16 pixel copy while the mouse is moving. */
-static void cursor_move_fast(int x, int y) {
+static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if (!g_scanout) return;
-    /* On the layered path, restore the old cursor from the scene layers
-     * instead of save-under pixels: those pixels may now belong to a window
-     * that moved, closed, or repainted beneath the cursor. */
+    /* Restore both cursor rectangles from the current scene after every input
+     * event, including button-down/close events that also change the window. */
     if (g_fw<=1920u && g_fh<=1080u &&
         u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh) {
-        int ox=cur_ox, oy=cur_oy;
         cur_on=0;
         cur_ox=x; cur_oy=y;
-        u32_repaint_scene_rect(ox,oy,ox+16,oy+16);
+        u32_repaint_scene_rect(old_x,old_y,old_x+16,old_y+16);
         u32_repaint_scene_rect(x,y,x+16,y+16);
         return;
     }
@@ -1319,9 +1317,9 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
             }
 
             if (ev.type == 2 || ev.type == 3) {
-                /* Keep the previous cursor origin so its pixels can be
-                 * repainted from the scene, rather than restoring a stale
-                 * saved-under buffer over content that changed meanwhile. */
+                /* Preserve the old cursor rectangle even if this event
+                 * closes a window or triggers composition before repaint. */
+                int old_mx=g_mx, old_my=g_my;
                 g_mx = ev.x;
                 g_my = ev.y;
                 u32_mouse_record();
@@ -1402,10 +1400,11 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_drag_moved=0;
                         }
                     }
-                    /* Plain move: keep the existing cursor path unchanged. */
-                    cursor_move_fast(g_mx, g_my);
                 }
 
+                /* Clear the old cursor footprint after click handlers and drag
+                 * composition finish, then draw it at the new position. */
+                cursor_repaint_transition(old_mx,old_my,g_mx,g_my);
                 (void)u32_msg_push(msg);
                 continue;
             }

@@ -139,12 +139,23 @@ static uint64_t gfx_bar_addr(uint8_t b, uint8_t d, uint8_t f, uint8_t bar) {
         pa |= (uint64_t)gfx_cfg_read(b,d,f,(uint8_t)(0x14u + bar*4u)) << 32;
     return pa;
 }
+/* PCI BARs may sit inside a 2 MiB HHDM mapping established by vmm_init.
+   Never try to split that direct-map large page just to access a device BAR:
+   give each MMIO range its own 4 KiB virtual alias with uncached attributes. */
+static uint64_t gfx_mmio_next_va = 0xFFFFC10000000000ULL;
 static void *gfx_map_mmio(uint64_t pa, uint64_t bytes) {
-    if (!pa || !bytes) return 0;
-    uint64_t first = pa & ~0xFFFULL, last = (pa + bytes + 0xFFFULL) & ~0xFFFULL;
-    for (uint64_t p = first; p < last; p += 0x1000)
-        map_4k(HHDM_BASE + p, p, PTE_RW | PTE_PCD | PTE_PWT);
-    return (void *)(HHDM_BASE + pa);
+    if (!pa || !bytes || bytes > 0x100000ULL || pa > UINT64_MAX - bytes)
+        return 0;
+    uint64_t first = pa & ~0xFFFULL;
+    uint64_t last = (pa + bytes + 0xFFFULL) & ~0xFFFULL;
+    uint64_t span = last - first;
+    if (!span || gfx_mmio_next_va > 0xFFFFC1FFFFFFFFFFULL - span)
+        return 0;
+    uint64_t va = gfx_mmio_next_va;
+    for (uint64_t off = 0; off < span; off += 0x1000ULL)
+        map_4k(va + off, first + off, PTE_RW | PTE_PCD | PTE_PWT);
+    gfx_mmio_next_va += span;
+    return (void *)(va + (pa - first));
 }
 static int gfx_find_device(void) {
     for (uint32_t b=0;b<256;b++) for (uint32_t d=0;d<32;d++) {

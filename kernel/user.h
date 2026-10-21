@@ -1444,7 +1444,7 @@ static Frame *syscall_handler(Frame *f) {
         if (subsystem < 0 ||
             (protected_system_app && subsystem != 1) ||
             (!protected_system_app && subsystem != 2 && subsystem != 3)) {
-            DbgPrint("user: incompatible PE subsystem: %s (subsystem=%d)\\n",
+            DbgPrint("user: incompatible PE subsystem: %s (subsystem=%d)\n",
                      name, subsystem);
             if (disk_mod) PspFreeDiskModule(disk_mod);
             MmSwitchToProcess(caller);

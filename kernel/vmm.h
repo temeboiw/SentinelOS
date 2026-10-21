@@ -5,6 +5,7 @@
 #include "bootinfo.h"
 #include "serial.h"
 #include "pmm.h"
+#include "cpu.h"
 
 #define HHDM_BASE 0xFFFF800000000000ULL
 
@@ -38,8 +39,11 @@ typedef struct _KPROCESS {
 static uint64_t *pml4;
 static uint64_t  vmm_table_pages;
 static KPROCESS *PspSystemProcess;
-static KPROCESS *MmCurrentProcess;
-static ULONG     MmNextPid = 1;
+#define MmCurrentProcess ((KPROCESS *)cpu_local_current()->current_process)
+static volatile uint32_t MmProcessLock;
+static ULONG MmNextPid = 1;
+static void MmLock(void) { while (__atomic_exchange_n(&MmProcessLock,1,__ATOMIC_ACQUIRE)) while (__atomic_load_n(&MmProcessLock,__ATOMIC_RELAXED)) __asm__ volatile("pause"); }
+static void MmUnlock(void) { __atomic_store_n(&MmProcessLock,0,__ATOMIC_RELEASE); }
 
 static void vmm_panic(const char *why) {
     DbgPrint("vmm: %s\n", why);
@@ -116,8 +120,8 @@ static uint64_t vmm_map_user_page(uint64_t virt, int writable) {
 static void MmSwitchToProcess(KPROCESS *p) {
     if (!p || p == MmCurrentProcess) return;
     uint64_t cr3 = p->DirectoryTableBase & ~0xfffULL;
+    __asm__ volatile("cli" ::: "memory");
     MmCurrentProcess = p;
-    __asm__ volatile("cli");
     __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
 }
 
@@ -159,14 +163,16 @@ static void map_2m_in(uint64_t *root, uint64_t virt, uint64_t phys, uint64_t att
 }
 
 static KPROCESS *MmCreateAddressSpace(const char *name) {
+    MmLock();
     KPROCESS *p = NULL;
     for (int i = 0; i < MM_MAX_PROCESSES; i++)
         if (!MmProcessUsed[i]) { MmProcessUsed[i]=1; p=&MmProcessPool[i]; break; }
-    if (!p) return NULL;
+    if (!p) { MmUnlock(); return NULL; }
     for (int i = 0; i < (int)sizeof(KPROCESS); i++) ((char*)p)[i]=0;
     uint64_t pml4_pa = pmm_alloc_zeroed();
     if (!pml4_pa) {
         for (int i=0;i<MM_MAX_PROCESSES;i++) if (p==&MmProcessPool[i]) MmProcessUsed[i]=0;
+        MmUnlock();
         return NULL;
     }
     uint64_t *np = PHYS_TO_VIRT(pml4_pa); /* Shared direct-map access to this address space's root. */
@@ -181,6 +187,7 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
     if (name) for (int i=0;i<15&&name[i];i++) p->ImageName[i]=name[i];
     DbgPrint("mm: created process '%s' pid=%lu cr3=%p\n",
              p->ImageName, (unsigned long)p->Pid, (void*)pml4_pa);
+    MmUnlock();
     return p;
 }
 

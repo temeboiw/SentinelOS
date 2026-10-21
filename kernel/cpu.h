@@ -37,6 +37,10 @@ typedef struct {
     uint8_t ist_stack[3][8192] __attribute__((aligned(16)));
     uint32_t index;
     volatile int need_resched;
+    void *scheduler_current;
+    void *scheduler_idle;
+    int32_t scheduler_quantum;
+    void *current_process;
 } CpuLocal;
 static CpuLocal cpu_locals[CPU_MAX] __attribute__((aligned(64)));
 static IdtEntry idt[256];

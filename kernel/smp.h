@@ -280,6 +280,11 @@ static void smp_ap_entry(uint32_t cpu_index) {
     smp_cpu_state[cpu_index] = SMP_CPU_STARTING;
     cpu_init_cpu(cpu_index);
     smp_enable_local_apic();
+    if (!KiInitializeApScheduler(cpu_index)) {
+        DbgPrint("smp: AP cpu%u scheduler initialization failed; parking\n", cpu_index);
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+    MmCurrentProcess = PspSystemProcess;
 
     DbgPrint("smp: AP cpu%u (APIC ID=%u) initialized; parked pending SMP-safe scheduler\n",
              cpu_index, smp_topology.cpus[cpu_index].apic_id);
@@ -287,7 +292,7 @@ static void smp_ap_entry(uint32_t cpu_index) {
     __asm__ volatile("" ::: "memory");
     smp_cpu_state[cpu_index] = SMP_CPU_ONLINE;
 
-    for (;;) __asm__ volatile("cli; hlt");
+    for (;;) __asm__ volatile("sti; hlt");
 }
 static void smp_start_aps(const BootInfo *bi) {
     if (!bi || !bi->ap_trampoline_phys) {

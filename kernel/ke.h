@@ -30,11 +30,19 @@ typedef struct _KTHREAD {
 } KTHREAD;
 
 static KTHREAD *ki_threads[MAX_THREADS];
-static KTHREAD *ki_current, *ki_idle, *rq_head, *rq_tail;
+static KTHREAD *rq_head, *rq_tail;
 static volatile ULONGLONG KeTickCount;
-static ULONGLONG ki_switches;
-static ULONG ki_next_id;
-static int ki_quantum_left;
+static volatile ULONGLONG ki_switches;
+static volatile ULONG ki_next_id;
+static volatile uint32_t ki_scheduler_lock;
+#define ki_current (*(KTHREAD **)&cpu_local_current()->scheduler_current)
+#define ki_idle (*(KTHREAD **)&cpu_local_current()->scheduler_idle)
+#define ki_quantum_left (cpu_local_current()->scheduler_quantum)
+static void KiSchedulerLock(void) {
+    while (__atomic_exchange_n(&ki_scheduler_lock, 1, __ATOMIC_ACQUIRE))
+        while (__atomic_load_n(&ki_scheduler_lock, __ATOMIC_RELAXED)) __asm__ volatile("pause");
+}
+static void KiSchedulerUnlock(void) { __atomic_store_n(&ki_scheduler_lock, 0, __ATOMIC_RELEASE); }
 
 static void rq_push(KTHREAD *t) {
     t->next = NULL; t->state = ThreadReady;
@@ -53,6 +61,7 @@ static KTHREAD *rq_pop(void) {
 
 // pick the next thread; called from isr_handler with the interrupted thread's frame
 static Frame *KiSchedule(Frame *f) {
+    KiSchedulerLock();
     KTHREAD *cur = ki_current;
     cur->frame = f;
     if (cur->state == ThreadRunning) {
@@ -67,11 +76,14 @@ static Frame *KiSchedule(Frame *f) {
         MmSwitchToProcess(next->Process);
     ki_current = next;
     ki_quantum_left = QUANTUM_TICKS;
-    return next->frame;
+    Frame *resume = next->frame;
+    KiSchedulerUnlock();
+    return resume;
 }
 
 static void KiClockInterrupt(Frame *f) {
     (void)f;
+    KiSchedulerLock();
     KeTickCount++;
     ki_current->ticks++;
     int woke = 0;
@@ -84,6 +96,7 @@ static void KiClockInterrupt(Frame *f) {
     else if (--ki_quantum_left <= 0) {
         if (rq_head) ki_need_resched = 1; else ki_quantum_left = QUANTUM_TICKS;
     }
+    KiSchedulerUnlock();
 }
 
 static void KiDispatchInterrupt(Frame *f) { (void)f; ki_need_resched = 1; }
@@ -99,9 +112,11 @@ static NTSTATUS KeDelayExecutionThread(CHAR WaitMode, BOOLEAN Alertable, PLARGE_
     ULONGLONG ticks = (ms + 9) / 10;
     if (!ticks) ticks = 1;
     uint64_t fl = KeDisableInterrupts();
+    KiSchedulerLock();
     ki_current->wake_tick = KeTickCount + ticks;
     ki_current->state = ThreadWaiting;
     ki_need_resched = 1;
+    KiSchedulerUnlock();
     KeRestoreInterrupts(fl);
     __asm__ volatile("int $0x2F" ::: "memory");                              // switch away until the clock wakes us
     return STATUS_SUCCESS;
@@ -138,7 +153,7 @@ static KTHREAD *ki_make_thread(const char *name, void (*entry)(PVOID), PVOID arg
     f->rip = (uint64_t)entry; f->rcx = (uint64_t)arg;                        // Win64 ABI: first argument in rcx
     f->cs = 0x08; f->ss = 0x10; f->rflags = 0x202; f->rsp = rsp0;           // kernel segments, interrupts enabled
 
-    t->frame = f; t->stack = stack; t->id = ki_next_id++;
+    t->frame = f; t->stack = stack; t->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED);
     t->Process = PspSystemProcess;
     for (int i = 0; i < 15 && name[i]; i++) t->name[i] = name[i];
     return t;
@@ -153,8 +168,10 @@ static KTHREAD *KeCreateThread(const char *name, void (*entry)(PVOID), PVOID arg
     KTHREAD *t = ki_make_thread(name, entry, arg);
     if (!t) return NULL;
     uint64_t fl = KeDisableInterrupts();
-    if (!ki_register(t)) { KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); return NULL; }
+    KiSchedulerLock();
+    if (!ki_register(t)) { KiSchedulerUnlock(); KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); return NULL; }
     rq_push(t);
+    KiSchedulerUnlock();
     KeRestoreInterrupts(fl);
     return t;
 }
@@ -164,9 +181,10 @@ static ULONG KeReapThreads(void) {
     ULONG n = 0;
     for (int i = 0; i < MAX_THREADS; i++) {
         uint64_t fl = KeDisableInterrupts();
+        KiSchedulerLock();
         KTHREAD *t = ki_threads[i];
-        if (t && t->state == ThreadTerminated && t != ki_current) { ki_threads[i] = NULL; KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); n++; }
-        else KeRestoreInterrupts(fl);
+        if (t && t->state == ThreadTerminated && t != ki_current) { ki_threads[i] = NULL; KiSchedulerUnlock(); KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); n++; }
+        else { KiSchedulerUnlock(); KeRestoreInterrupts(fl); }
     }
     return n;
 }
@@ -175,8 +193,9 @@ static void KiIdleThread(PVOID arg) { (void)arg; for (;;) __asm__ volatile("sti;
 
 // the code running now (kmain2 on the boot stack) becomes thread "Main"; a separate idle thread runs when nothing is ready
 static void KiInitializeScheduler(void) {
+    KiSchedulerLock();
     KTHREAD *boot = kzalloc(sizeof *boot);
-    boot->id = ki_next_id++; boot->state = ThreadRunning;
+    boot->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED); boot->state = ThreadRunning;
     boot->Process = PspSystemProcess;
     boot->name[0] = 'M'; boot->name[1] = 'a'; boot->name[2] = 'i'; boot->name[3] = 'n';
     ki_threads[0] = boot; ki_current = boot;
@@ -190,4 +209,24 @@ static void KiInitializeScheduler(void) {
     KeConnectInterrupt(CLOCK_VECTOR, KiClockInterrupt);
     KeConnectInterrupt(0x21, irq_stub_eoi);
     KeConnectInterrupt(0x2C, irq_stub_eoi);
+    KiSchedulerUnlock();
+}
+
+/* APs share the ready queue but own current/idle/quantum state. */
+static int KiInitializeApScheduler(uint32_t cpu_index) {
+    if (!cpu_index || cpu_index >= CPU_MAX || !PspSystemProcess) return 0;
+    KiSchedulerLock();
+    KTHREAD *idle = kzalloc(sizeof *idle);
+    if (!idle) { KiSchedulerUnlock(); return 0; }
+    idle->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED);
+    idle->Process = PspSystemProcess;
+    idle->state = ThreadRunning;
+    idle->name[0]='A'; idle->name[1]='P'; idle->name[2]='I'; idle->name[3]='d'; idle->name[4]='l'; idle->name[5]='e';
+    if (!ki_register(idle)) { KiSchedulerUnlock(); kfree(idle); return 0; }
+    ki_idle = idle;
+    ki_current = idle;
+    ki_quantum_left = QUANTUM_TICKS;
+    KiSchedulerUnlock();
+    DbgPrint("sched: AP cpu%u joined shared run queue\n", cpu_index);
+    return 1;
 }

@@ -53,6 +53,9 @@ static void mmap_dump(const BootInfo *bi) {
 // ------------------------------------------------------------ allocator
 static uint64_t *pm_bits;                 // bit set = page in use
 static uint64_t  pm_pages, pm_free, pm_hint;
+static volatile uint32_t pm_lock;
+static void pmm_lock(void) { while (__atomic_exchange_n(&pm_lock,1,__ATOMIC_ACQUIRE)) while (__atomic_load_n(&pm_lock,__ATOMIC_RELAXED)) __asm__ volatile("pause"); }
+static void pmm_unlock(void) { __atomic_store_n(&pm_lock,0,__ATOMIC_RELEASE); }
 
 static inline int  bit_get(uint64_t i) { return (pm_bits[i >> 6] >> (i & 63)) & 1; }
 static inline void bit_set(uint64_t i) { pm_bits[i >> 6] |=  (1ULL << (i & 63)); }
@@ -128,14 +131,17 @@ static uint64_t find_run(uint64_t from, uint64_t to, uint64_t n) {
 
 // n contiguous pages; returns physical address or 0
 static uint64_t pmm_alloc_n(uint64_t n) {
-    if (!n || n > pm_free) return 0;
+    pmm_lock();
+    if (!n || n > pm_free) { pmm_unlock(); return 0; }
     uint64_t s = find_run(pm_hint, pm_pages, n);
     if (s == ~0ULL) s = find_run(0, pm_pages, n);
-    if (s == ~0ULL) return 0;
+    if (s == ~0ULL) { pmm_unlock(); return 0; }
     for (uint64_t i = 0; i < n; i++) bit_set(s + i);
     pm_free -= n;
     pm_hint = s + n;
-    return s * PAGE_SIZE;
+    uint64_t result = s * PAGE_SIZE;
+    pmm_unlock();
+    return result;
 }
 
 static uint64_t pmm_alloc(void) { return pmm_alloc_n(1); }
@@ -147,11 +153,13 @@ static uint64_t pmm_alloc_zeroed(void) {          // reached by physical address
 }
 
 static void pmm_free(uint64_t pa) {
+    pmm_lock();
     uint64_t i = pa / PAGE_SIZE;
-    if ((pa & (PAGE_SIZE - 1)) || i >= pm_pages) { DbgPrint("pmm: bad free %p\n", (void *)pa); return; }
-    if (!bit_get(i)) { DbgPrint("pmm: double free %p\n", (void *)pa); return; }
+    if ((pa & (PAGE_SIZE - 1)) || i >= pm_pages) { pmm_unlock(); DbgPrint("pmm: bad free %p\n", (void *)pa); return; }
+    if (!bit_get(i)) { pmm_unlock(); DbgPrint("pmm: double free %p\n", (void *)pa); return; }
     bit_clr(i); pm_free++;
     if (i < pm_hint) pm_hint = i;
+    pmm_unlock();
 }
 
 static void pmm_selftest(uint64_t kernel_addr, uint64_t stack_addr) {

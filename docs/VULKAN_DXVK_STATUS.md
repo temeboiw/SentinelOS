@@ -7,7 +7,7 @@ than just an empty loader. It builds as `vulkan.dll` and `vulkan-1.dll`
 and implements a limited subset of the Vulkan 1.0 object and command model:
 
 - instance creation/destruction and CPU physical-device enumeration;
-- one software queue family with graphics/compute/transfer capability bits;
+- one software transfer-only queue family;
 - device and queue creation;
 - fixed-size host-visible memory allocations, buffer creation/binding/mapping;
 - command pools and command-buffer allocation;

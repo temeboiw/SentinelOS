@@ -362,6 +362,8 @@ lld -flavor link \
   /export:vkResetCommandBuffer \
   /export:vkCmdFillBuffer \
   /export:vkCmdCopyBuffer \
+  /export:vkCmdCopyBufferToImage \
+  /export:vkCmdCopyImageToBuffer \
   /export:vkQueueSubmit \
   /export:vkCreateFence \
   /export:vkDestroyFence \

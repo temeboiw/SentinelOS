@@ -13,6 +13,7 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - command pools and command-buffer allocation;
 - CPU execution of `vkCmdFillBuffer`, `vkCmdCopyBuffer`, and `vkCmdClearColorImage` on queue submission;
 - bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory;
+- tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
 - procedure lookup for implemented entry points.
 

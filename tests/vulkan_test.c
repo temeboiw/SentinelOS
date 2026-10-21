@@ -147,7 +147,46 @@ int main(void) {
     CHECK(vkMapMemory(device, imem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(((uint8_t *)mapped)[0] == 255 && ((uint8_t *)mapped)[1] == 0 &&
           ((uint8_t *)mapped)[2] == 0 && ((uint8_t *)mapped)[3] == 255);
-    vkUnmapMemory(device, imem);
+
+    /* Read the cleared image back through the Vulkan transfer command path. */
+    VkBufferCreateInfo rbci = {0};
+    rbci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    rbci.size = 64;
+    rbci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VkBuffer readback = 0;
+    CHECK(vkCreateBuffer(device, &rbci, 0, &readback) == VK_SUCCESS);
+    VkMemoryRequirements rbreq;
+    vkGetBufferMemoryRequirements(device, readback, &rbreq);
+    VkMemoryAllocateInfo rbai = {0};
+    rbai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    rbai.allocationSize = rbreq.size;
+    VkDeviceMemory rbmem = 0;
+    CHECK(vkAllocateMemory(device, &rbai, 0, &rbmem) == VK_SUCCESS);
+    CHECK(vkBindBufferMemory(device, readback, rbmem, 0) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    VkImageMemoryBarrier toSrc = {0};
+    toSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toSrc.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toSrc.srcQueueFamilyIndex = 0xFFFFFFFFu; toSrc.dstQueueFamilyIndex = 0xFFFFFFFFu;
+    toSrc.image = image; toSrc.subresourceRange = range;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &toSrc);
+    VkBufferImageCopy copy = {0};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent.width = 4; copy.imageExtent.height = 4; copy.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, 1, &copy);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, rbmem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)mapped)[0] == 255 && ((uint8_t *)mapped)[1] == 0 &&
+          ((uint8_t *)mapped)[2] == 0 && ((uint8_t *)mapped)[3] == 255);
+    vkUnmapMemory(device, rbmem);
+    vkDestroyBuffer(device, readback, 0);
+    vkFreeMemory(device, rbmem, 0);
+
+        vkUnmapMemory(device, imem);
     vkDestroyImage(device, image, 0);
     vkFreeMemory(device, imem, 0);
     CHECK(vkDeviceWaitIdle(device) == VK_SUCCESS);
@@ -160,6 +199,6 @@ int main(void) {
     vkFreeMemory(device, dmem, 0);
     vkDestroyDevice(device, 0);
     vkDestroyInstance(instance, 0);
-    puts("SentinelOS Vulkan CPU buffer/image subset: PASS");
+    puts("SentinelOS Vulkan CPU buffer/image transfer subset: PASS");
     return 0;
 }

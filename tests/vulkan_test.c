@@ -44,6 +44,53 @@ int main(void) {
     vkGetDeviceQueue(device, 0, 0, &queue);
     CHECK(queue != 0);
 
+    /* Structural SPIR-V validation: a minimal vertex entry point. */
+    const uint32_t shader_words[] = {
+        0x07230203u, 0x00010000u, 0u, 6u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (6u<<16)|15u, 0u, 3u, 0x6e69616du, 0u,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 5u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    VkShaderModuleCreateInfo smci = {0};
+    smci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    smci.codeSize = sizeof(shader_words);
+    smci.pCode = shader_words;
+    VkShaderModule shader = 0;
+    CHECK(vkCreateShaderModule(device, &smci, 0, &shader) == VK_SUCCESS);
+    CHECK(shader != 0 && shader->wordCount == sizeof(shader_words)/4u);
+    vkDestroyShaderModule(device, shader, 0);
+    uint32_t bad_spirv[sizeof(shader_words)/4u];
+    for (unsigned si=0; si<sizeof(shader_words)/4u; ++si) bad_spirv[si]=shader_words[si];
+    bad_spirv[0]=0;
+    smci.pCode=bad_spirv;
+    CHECK(vkCreateShaderModule(device, &smci, 0, &shader) == VK_ERROR_INITIALIZATION_FAILED);
+
+    /* Synchronous binary semaphore signal/wait behavior. */
+    VkSemaphoreCreateInfo semci = {0};
+    semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkSemaphore sem = 0;
+    CHECK(vkCreateSemaphore(device, &semci, 0, &sem) == VK_SUCCESS);
+    VkSubmitInfo semSubmit = {0};
+    semSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    semSubmit.signalSemaphoreCount = 1;
+    semSubmit.pSignalSemaphores = &sem;
+    CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_SUCCESS);
+    VkFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    semSubmit.waitSemaphoreCount = 1;
+    semSubmit.pWaitSemaphores = &sem;
+    semSubmit.pWaitDstStageMask = &waitStage;
+    semSubmit.signalSemaphoreCount = 0;
+    semSubmit.pSignalSemaphores = 0;
+    CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &semSubmit, 0) == VK_NOT_READY);
+    vkDestroySemaphore(device, sem, 0);
+
     VkBufferCreateInfo bci = {0};
     bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bci.size = 64;

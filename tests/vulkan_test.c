@@ -161,6 +161,28 @@ int main(void) {
     CHECK(vk_spirv_execute_u32(unary_words, sizeof(unary_words)/4u, 3u, 9u, &executed));
     CHECK(executed == 0u);
 
+    /* SPIR-V scalar bit reverse and population count. */
+    const uint32_t bit_words[] = {
+        0x07230203u, 0x00010000u, 0u, 10u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 0x0000000Bu,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 8u,
+        (4u<<16)|204u, 2u, 7u, 5u,
+        (4u<<16)|205u, 2u, 9u, 5u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(bit_words, sizeof(bit_words)/4u));
+    CHECK(vk_spirv_execute_u32(bit_words, sizeof(bit_words)/4u, 3u, 7u, &executed));
+    CHECK(executed == 0xD0000000u);
+    CHECK(vk_spirv_execute_u32(bit_words, sizeof(bit_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 3u);
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

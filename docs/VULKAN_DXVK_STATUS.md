@@ -58,3 +58,12 @@ The scalar SPIR-V subset also executes `OpSNegate`, `OpLogicalNot`, and `OpNot` 
 ## Additional command and memory validation batch
 
 The CPU backend now executes bounded `vkCmdUpdateBuffer` writes (up to 256 bytes per recorded update), supports one full-extent `vkCmdCopyImage` region for matching single-mip RGBA8/BGRA8 images already in transfer layouts, and implements `vkResetCommandPool` by resetting its command buffers. Flush/invalidate mapped-memory calls now validate range structures, memory ownership, mapping state, and bounds instead of unconditionally succeeding. These are bounded software-backend operations, not graphics-pipeline or full-conformance support.
+
+
+## Progress estimate (2026-10-21)
+
+**Estimated full Vulkan implementation progress: about 5%.** This is a rough engineering estimate based on functional coverage, not export count or lines of code. The current implementation has a bounded CPU device, buffer/image transfer commands, basic synchronization objects, SPIR-V validation, and a limited scalar integer interpreter. The majority of Vulkan remains unimplemented: graphics/compute pipelines, descriptors, render passes/framebuffers, shader interfaces and floating-point/resource execution, full synchronization semantics, presentation/swapchains, and broad extension/format coverage. DXVK compatibility is not established.
+
+### Additional scalar SPIR-V instructions
+
+The bounded scalar interpreter now handles `OpBitReverse` (204) and `OpBitCount` (205) for 32-bit scalar values, with tests. This does not make it a general shader runtime.

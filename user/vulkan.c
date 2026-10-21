@@ -282,12 +282,21 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    else if(op==43u && wc==4u) { /* local constant declarations */ 
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }
-   else if((op==126u||op==168u||op==200u)&&wc==4u) {
+   else if((op==126u||op==168u||op==200u||op==204u||op==205u)&&wc==4u) {
     rid=w[i+2];a=w[i+3];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
     if(op==126u)v=(uint32_t)(-(int32_t)ids[a]);
     else if(op==168u)v=(ids[a]==0u);
-    else v=~ids[a];
+    else if(op==200u)v=~ids[a];
+    else if(op==204u) {
+     uint32_t x=ids[a],y=0;
+     for(unsigned bit=0;bit<32;bit++)y|=((x>>bit)&1u)<<(31u-bit);
+     v=y;
+    } else {
+     uint32_t x=ids[a],count=0;
+     while(x){count+=x&1u;x>>=1;}
+     v=count;
+    }
     ids[rid]=v;defined[rid]=1;
    }
    else if((op==128u||op==130u||op==132u||op==134u||op==135u||

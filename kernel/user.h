@@ -295,6 +295,27 @@ static int pe_is_image(const uint8_t *image, uint64_t size) {
     return *(const uint16_t *)opt == 0x20B;
 }
 
+/* Safely read the PE32+ Optional Header subsystem field. */
+static int pe_get_subsystem(const uint8_t *image, uint64_t size) {
+    if (!image || size < 0x40 || image[0] != 'M' || image[1] != 'Z')
+        return -1;
+    int32_t lfanew = *(const int32_t *)(image + 0x3C);
+    if (lfanew < 0 || (uint64_t)lfanew > size ||
+        size - (uint64_t)lfanew < 24)
+        return -1;
+    const uint8_t *nt = image + lfanew;
+    if (*(const uint32_t *)nt != 0x00004550)
+        return -1;
+    uint16_t opt_size = *(const uint16_t *)(nt + 20);
+    uint64_t opt_off = (uint64_t)lfanew + 24;
+    if (opt_size < 70 || opt_off > size || opt_size > size - opt_off)
+        return -1;
+    const uint8_t *opt = image + opt_off;
+    if (*(const uint16_t *)opt != 0x20B)
+        return -1;
+    return (int)*(const uint16_t *)(opt + 68);
+}
+
 static uint8_t *PspImageBytes(UserImage *image) {
     if (!image || !image->phys) return 0;
     return (uint8_t *)(HHDM_BASE + image->phys);
@@ -1412,6 +1433,22 @@ static Frame *syscall_handler(Frame *f) {
         if (!mod) {
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
+            return f;
+        }
+
+        /* Only the protected native boot applications may use subsystem 1.
+           Normal Win32 applications must be GUI (2) or console (3) images. */
+        int subsystem = pe_get_subsystem(
+            (const uint8_t *)(HHDM_BASE + mod->phys), mod->size);
+        int protected_system_app = PspIsSystemAppName(name);
+        if (subsystem < 0 ||
+            (protected_system_app && subsystem != 1) ||
+            (!protected_system_app && subsystem != 2 && subsystem != 3)) {
+            DbgPrint("user: incompatible PE subsystem: %s (subsystem=%d)\\n",
+                     name, subsystem);
+            if (disk_mod) PspFreeDiskModule(disk_mod);
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-2LL;
             return f;
         }
 

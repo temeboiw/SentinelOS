@@ -419,10 +419,12 @@ int main(void) {
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
     imci.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
+    imci.tiling = 0; /* color attachments are currently supported with optimal tiling */
     imci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_SUCCESS);
     vkDestroyImage(device, rejectedImage, 0);
     rejectedImage = 0;
+    imci.tiling = 1;
     imci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     VkImage image = 0;
     CHECK(vkCreateImage(device, &imci, 0, &image) == VK_SUCCESS);

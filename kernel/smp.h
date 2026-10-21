@@ -189,7 +189,7 @@ static void smp_discover(void) {
     }
     smp_cpu_state[0] = SMP_CPU_ONLINE;
     smp_online_count = 1;
-    DbgPrint("smp: BSP APIC ID=%u; ACPI reports %u enabled processor(s)\\n",
+    DbgPrint("smp: BSP APIC ID=%u; ACPI reports %u enabled processor(s)\n",
              smp_topology.bsp_apic_id, smp_topology.count);
     for (uint32_t i = 0; i < smp_topology.count; i++)
         DbgPrint("smp: cpu%u APIC ID=%u mode=%s%s\n", i,

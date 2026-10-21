@@ -145,7 +145,7 @@ static int u32_suppress_desktop_card;
 static int g_search_focus;
 static char g_search_text[32];
 static int g_search_len;
-static int cur_on, cur_ox, cur_oy;
+static int cur_on, cur_ox=640, cur_oy=400;
 static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static void u32_clear_layer(u32 *layer);
@@ -565,7 +565,19 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
-        u32 c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)?u32_aero_bg_cache[at]:*dst;
+        u32 c;
+        if(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh) {
+            c=u32_aero_bg_cache[at];
+        } else {
+            c=*dst;
+            /* Without a wallpaper cache, do not mistake our own cursor pixels
+             * for the scene background when rebuilding the pointer footprint. */
+            int old_ci=x-cur_ox, old_cj=y-cur_oy;
+            if(cur_on&&old_ci>=0&&old_ci<16&&old_cj>=0&&old_cj<16) {
+                int old_i=old_cj*16+old_ci;
+                if(cur_paint[old_i]&&c==cur_paint[old_i])c=cur_under[old_i];
+            }
+        }
 
         /* Blend every visible surface in ascending Z order. The stack is
          * rebuilt automatically so future layers only need a descriptor. */

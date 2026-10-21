@@ -342,10 +342,21 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
     ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VERTEX_BUFFERS,0,3);
     ok &= s3d_vb_word(&q,28);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,S3D_VIRGL_VERTEX_BUFFER_ID);
     ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_DRAW_VBO,0,12);
-    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,3);ok &= s3d_vb_word(&q,S3D_VIRGL_PIPE_PRIM_TRIANGLES);
-    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,1);ok &= s3d_vb_word(&q,0);
-    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
-    ok &= s3d_vb_word(&q,0xFFFFFFFFu);ok &= s3d_vb_word(&q,0);
+    /* DRAW_VBO is exactly 12 payload dwords. For this non-indexed triangle:
+       start=0, count=3, mode=TRIANGLES, indexed=0, instances=1,
+       zero bias/instance/restart fields, min=0, max=2, stream-output=0. */
+    ok &= s3d_vb_word(&q,0); /* start */
+    ok &= s3d_vb_word(&q,3); /* vertex count */
+    ok &= s3d_vb_word(&q,S3D_VIRGL_PIPE_PRIM_TRIANGLES);
+    ok &= s3d_vb_word(&q,0); /* non-indexed */
+    ok &= s3d_vb_word(&q,1); /* one instance */
+    ok &= s3d_vb_word(&q,0); /* index bias */
+    ok &= s3d_vb_word(&q,0); /* start instance */
+    ok &= s3d_vb_word(&q,0); /* primitive restart disabled */
+    ok &= s3d_vb_word(&q,0); /* restart index */
+    ok &= s3d_vb_word(&q,0); /* minimum vertex index */
+    ok &= s3d_vb_word(&q,2); /* maximum vertex index */
+    ok &= s3d_vb_word(&q,0); /* count-from-stream-output disabled */
 
     ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SHADER,11);
     ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SHADER,12);

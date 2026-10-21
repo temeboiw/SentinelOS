@@ -16,7 +16,7 @@ void bootvid_main(void){
   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-40,(int)f.h/2-52,"SENTINELOS",0xFFFFFFFF,2);
   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-60,(int)f.h/2-22,"Starting system",0xFFB7D7E7,1);
   if(gfx_ok && (gfx.capabilities&GFX_CAP_VIRTIO_GPU))
-   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2+62,"GPU detected - framebuffer active",0xFFB7D7E7,1);
+   txt(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2+62,"VirtIO-GPU 2D active",0xFFB7D7E7,1);
   else
    txt(fb,f.pitch,f.w,f.h,(int)f.w/2-76,(int)f.h/2+62,"Framebuffer graphics active",0xFFB7D7E7,1);
   static const int dx[12]={0,13,23,27,23,13,0,-13,-23,-27,-23,-13},dy[12]={-27,-23,-13,0,13,23,27,23,13,0,-13,-23};

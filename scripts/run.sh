@@ -55,9 +55,18 @@ case "$MODE" in
         ;;
 esac
 
-# The default is the broadly compatible 2D VirtIO-VGA device. Opt in to
-# VirGL only when QEMU and the host graphics stack support OpenGL.
+# The default is the broadly compatible 2D VirtIO-VGA device. Set
+# SENTINELOS_GPU=none to exercise the firmware-framebuffer fallback.
+# Opt in to VirGL only when QEMU and the host graphics stack support OpenGL.
 GPU_ARGS=(-vga none -device virtio-vga)
+if [[ "${SENTINELOS_GPU:-virtio}" == "none" ]]; then
+    if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
+        echo "Error: SENTINELOS_GPU=none conflicts with SENTINELOS_VIRGL=1." >&2
+        exit 1
+    fi
+    GPU_ARGS=()
+    echo "SentinelOS: using QEMU's default VGA device (GPU fallback test)"
+fi
 if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
     if [[ "$MODE" != "window" ]]; then
         echo "Error: SENTINELOS_VIRGL=1 requires SENTINELOS_DISPLAY=window and host OpenGL." >&2

@@ -445,7 +445,10 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
-        u32 c=*dst;
+        /* Start from the cached wallpaper so the live framebuffer goes
+         * straight from the old frame to the finished pixel, never showing
+         * a wallpaper-only intermediate state while layers are rendered. */
+        u32 c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)?u32_aero_bg_cache[at]:*dst;
         c=u32_alpha_over(c,u32_desktop_layer[at]);
         c=u32_alpha_over(c,u32_window_layer[at]);
         c=u32_alpha_over(c,u32_taskbar_layer[at]);
@@ -699,9 +702,15 @@ static void compose(void) {
                 if (x0>g_fw)x0=g_fw;if(y0>g_fh)y0=g_fh;
                 if (x1>g_fw)x1=g_fw;if(y1>g_fh)y1=g_fh;
             }
-            for (u32 y=y0; y<y1; ++y)
-                for (u32 x=x0; x<x1; ++x)
-                    g_front[y * g_pitch + x] = u32_aero_bg_cache[y * g_fw + x];
+            /* Layered mode composites over the cached wallpaper in one pass
+             * at the end (u32_composite_layers); writing wallpaper into the
+             * live framebuffer here made every repaint visibly blank the
+             * region until the slow layer rendering finished. */
+            if (!layered) {
+                for (u32 y=y0; y<y1; ++y)
+                    for (u32 x=x0; x<x1; ++x)
+                        g_front[y * g_pitch + x] = u32_aero_bg_cache[y * g_fw + x];
+            }
         }
     } else {
         aero_desktop();

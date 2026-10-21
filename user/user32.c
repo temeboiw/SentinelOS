@@ -532,7 +532,7 @@ static char u32_cursor_pixel(unsigned int id,int x,int y) {
         } else if(id==32646u) { /* four-way move */
             on=(x==7||x==8||y==7||y==8||
                 (x>=4&&x<=11&&y>=4&&y<=11&&
-                 ((x==y)||(x+y==15)));
+                 ((x==y)||(x+y==15))));
             edge=(x==7||x==8||y==7||y==8);
         } else if(id==32642u) { /* NW-SE resize */
             on=(x==y||x==y+1||x==y-1||

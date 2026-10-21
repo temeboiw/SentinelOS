@@ -6,6 +6,9 @@
  * The caller supplies a 32-bit ARGB target and a width*height depth buffer.
  * This is a real software fallback; it does not claim hardware 3D acceleration.
  */
+ #define S3D_VIRGL_RENDER_TARGET_ID 2u
+#define S3D_VIRGL_VERTEX_BUFFER_ID 3u
+
 typedef struct {
     int32_t x, y, z;
     uint32_t color;
@@ -15,6 +18,8 @@ typedef struct {
     uint32_t *pixels;
     uint32_t width, height, pitch;
     uint32_t backend; /* 1=firmware framebuffer, 2=VirtIO-GPU 2D */
+    void *virgl_buffer;
+    uint32_t virgl_buffer_resource_id, virgl_buffer_size;
 } S3D_SURFACE;
 
 typedef struct {

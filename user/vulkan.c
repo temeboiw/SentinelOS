@@ -156,7 +156,7 @@ typedef struct VkBufferObj { uint32_t magic; VkDevice device; VkDeviceSize size;
 typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; } VkImageObj;
 typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
 typedef struct VkPoolObj { uint32_t magic; VkDevice device; uint32_t family; } VkPoolObj;
-typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
+typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
 typedef struct VkFenceObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkFenceObj;
 typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkSemaphoreObj;
 #define VK_MAX_SHADER_MODULES 8
@@ -165,7 +165,16 @@ typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signale
 typedef struct VkShaderModuleObj { uint32_t magic; VkDevice device; uint32_t wordCount; uint32_t words[VK_MAX_SPIRV_WORDS]; } VkShaderModuleObj;
 typedef struct VkShaderModuleCreateInfo { VkStructureType sType; const void *pNext; VkFlags flags; size_t codeSize; const uint32_t *pCode; } VkShaderModuleCreateInfo;
 typedef struct VkShaderModuleObj *VkShaderModule;
+#define VK_MAX_PIPELINES 16
+#define VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO 18
+#define VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO 28
+#define VK_PIPELINE_BIND_POINT_GRAPHICS 0u
+typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; } VkPipelineObj;
+typedef VkPipelineObj *VkPipeline;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stage; VkShaderModule module; const char *pName; const void *pSpecializationInfo; } VkPipelineShaderStageCreateInfo;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stageCount; const VkPipelineShaderStageCreateInfo *pStages; const void *pVertexInputState,*pInputAssemblyState,*pTessellationState,*pViewportState,*pRasterizationState,*pMultisampleState,*pDepthStencilState,*pColorBlendState,*pDynamicState; void *layout; void *renderPass; uint32_t subpass; VkPipeline basePipelineHandle; int32_t basePipelineIndex; } VkGraphicsPipelineCreateInfo;
 static VkShaderModuleObj g_shader_modules[VK_MAX_SHADER_MODULES];
+static VkPipelineObj g_pipelines[VK_MAX_PIPELINES];
 static VkInstanceObj g_instances[VK_MAX_INSTANCES];
 static VkPhysicalObj g_phys[VK_MAX_DEVICES];
 static VkDeviceObj g_devices[VK_MAX_DEVICES];
@@ -193,6 +202,7 @@ static int cmd_ok(VkCommandBuffer h) { for(unsigned i=0;i<VK_MAX_CMDS;i++)if(h==
 static int fence_ok(VkFence h) { for(unsigned i=0;i<VK_MAX_FENCES;i++)if(h==(VkFence)&g_fences[i]&&g_fences[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
 static int sem_ok(VkSemaphore h) { for(unsigned i=0;i<VK_MAX_SEMAPHORES;i++)if(h==(VkSemaphore)&g_semaphores[i]&&g_semaphores[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
 static int shader_ok(VkShaderModule h) { for(unsigned i=0;i<VK_MAX_SHADER_MODULES;i++)if(h==(VkShaderModule)&g_shader_modules[i]&&g_shader_modules[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int pipeline_ok(VkPipeline h) { for(unsigned i=0;i<VK_MAX_PIPELINES;i++)if(h==&g_pipelines[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
 /* Bounded SPIR-V 1.0 structural validation. This verifies the instruction
  * stream before storing it; it does not claim to execute shader instructions. */
 static int vk_spirv_validate(const uint32_t *w, size_t n) {
@@ -598,6 +608,72 @@ __declspec(dllexport) void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer c,VkI
  unsigned i=c->count++;c->ops[i].op=3;c->ops[i].image=im;c->ops[i].layout=layout;
  for(unsigned k=0;k<4;k++)c->ops[i].color[k]=color->float32[k];
 }
+
+/* Locate a simple scalar result in a SPIR-V entry function. This deliberately
+ * supports the current scalar interpreter subset, not arbitrary shader IO. */
+static uint32_t vk_spirv_last_scalar_result(const uint32_t *w,size_t n,uint32_t entry) {
+ size_t i=5;uint32_t active=0,last=0;
+ while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
+  if(op==54u&&wc>=5u)active=(w[i+2]==entry);
+  else if(op==56u)active=0;
+  else if(active&&wc>=3u){
+   if((op>=109u&&op<=115u)||(op>=126u&&op<=141u)||(op>=156u&&op<=160u)||
+      (op>=164u&&op<=205u)||op==83u||op==124u||op==169u)last=w[i+2];
+  }i+=wc;
+ }return last;
+}
+static uint32_t vk_spirv_main_id(const uint32_t *w,size_t n) {
+ size_t i=5;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
+  if(op==15u&&wc>=4u){const char *name=(const char*)&w[i+3];if(name[0]=='m'&&name[1]=='a'&&name[2]=='i'&&name[3]=='n'&&name[4]==0)return w[i+2];}
+  i+=wc;}return 0;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,void *cache,uint32_t count,const VkGraphicsPipelineCreateInfo *ci,const void *alloc,VkPipeline *out) {
+ if(!dev_ok(d)||cache||!ci||!out||!count||count>VK_MAX_PIPELINES||alloc)return VK_ERROR_INITIALIZATION_FAILED;
+ for(uint32_t k=0;k<count;k++)out[k]=0;
+ for(uint32_t k=0;k<count;k++){
+  const VkGraphicsPipelineCreateInfo *p=&ci[k];VkShaderModule vs=0,fs=0;uint32_t ve=0,fe=0;
+  if(p->sType!=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO||p->pNext||p->flags||p->stageCount!=2||!p->pStages||p->subpass||p->basePipelineHandle||p->basePipelineIndex!=-1)return VK_ERROR_FEATURE_NOT_PRESENT;
+  for(uint32_t j=0;j<p->stageCount;j++){
+   const VkPipelineShaderStageCreateInfo *st=&p->pStages[j];
+   if(st->sType!=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO||st->pNext||st->flags||!shader_ok(st->module)||st->module->device!=d||!st->pName||!vk_eq(st->pName,"main")||st->pSpecializationInfo)return VK_ERROR_INITIALIZATION_FAILED;
+   if(st->stage==1u){if(vs)return VK_ERROR_FEATURE_NOT_PRESENT;vs=st->module;ve=vk_spirv_main_id(vs->words,vs->wordCount);}
+   else if(st->stage==0x10u){if(fs)return VK_ERROR_FEATURE_NOT_PRESENT;fs=st->module;fe=vk_spirv_main_id(fs->words,fs->wordCount);}
+   else return VK_ERROR_FEATURE_NOT_PRESENT;
+  }
+  if(!vs||!fs||!ve||!fe)return VK_ERROR_INITIALIZATION_FAILED;
+  uint32_t vr=vk_spirv_last_scalar_result(vs->words,vs->wordCount,ve),fr=vk_spirv_last_scalar_result(fs->words,fs->wordCount,fe);
+  if(!vr||!fr)return VK_ERROR_FEATURE_NOT_PRESENT;
+  unsigned slot;for(slot=0;slot<VK_MAX_PIPELINES;slot++)if(!g_pipelines[slot].magic)break;
+  if(slot==VK_MAX_PIPELINES)return VK_ERROR_TOO_MANY_OBJECTS;
+  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;out[k]=o;
+ }
+ return VK_SUCCESS;
+}
+__declspec(dllexport) void VKAPI_CALL vkDestroyPipeline(VkDevice d,VkPipeline p,const void *alloc) {
+ if(alloc||!dev_ok(d)||!pipeline_ok(p)||p->device!=d)return;
+ for(unsigned i=0;i<VK_MAX_CMDS;i++)if(g_cmds[i].magic==VK_OBJECT_MAGIC&&g_cmds[i].bound_pipeline==p)g_cmds[i].bound_pipeline=0;
+ p->magic=0;
+}
+__declspec(dllexport) void VKAPI_CALL vkCmdBindPipeline(VkCommandBuffer c,uint32_t point,VkPipeline p) {
+ if(!cmd_ok(c)||c->state!=1||point!=VK_PIPELINE_BIND_POINT_GRAPHICS||!pipeline_ok(p)||p->device!=c->device||c->count>=128)return;
+ c->bound_pipeline=p;unsigned i=c->count++;c->ops[i].op=10;c->ops[i].value=point;c->ops[i].size=(uintptr_t)p;
+}
+__declspec(dllexport) void VKAPI_CALL vkCmdBindVertexBuffers(VkCommandBuffer c,uint32_t first,uint32_t count,const VkBuffer *buffers,const VkDeviceSize *offsets) {
+ if(!cmd_ok(c)||c->state!=1||first||count!=1||!buffers||!offsets||!buf_ok(buffers[0])||buffers[0]->device!=c->device||!mem_ok(buffers[0]->memory)||!(buffers[0]->usage&VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)||offsets[0]>buffers[0]->size||c->count>=128)return;
+ c->bound_vertex=buffers[0];c->bound_vertex_offset=offsets[0];unsigned i=c->count++;c->ops[i].op=11;c->ops[i].a=buffers[0];c->ops[i].offset=offsets[0];
+}
+/* SentinelOS software-target binding: ordinary Vulkan render-pass/framebuffer
+ * objects are not yet implemented. vkCmdDraw itself uses the standard call
+ * shape, but this target hook is an explicit backend extension. */
+__declspec(dllexport) void VKAPI_CALL SentinelVulkanCmdBindColorTarget(VkCommandBuffer c,VkImage im) {
+ if(!cmd_ok(c)||c->state!=1||!image_ok(im)||im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->count>=128)return;
+ c->bound_target=im;unsigned i=c->count++;c->ops[i].op=12;c->ops[i].image=im;
+}
+__declspec(dllexport) void VKAPI_CALL vkCmdDraw(VkCommandBuffer c,uint32_t vertexCount,uint32_t instanceCount,uint32_t firstVertex,uint32_t firstInstance) {
+ if(!cmd_ok(c)||c->state!=1||!c->bound_pipeline||!c->bound_vertex||!c->bound_target||vertexCount!=3||instanceCount!=1||firstInstance||c->count>=128)return;
+ unsigned i=c->count++;c->ops[i].op=13;c->ops[i].value=firstVertex;c->ops[i].size=vertexCount;c->ops[i].a=c->bound_vertex;c->ops[i].image=c->bound_target;c->ops[i].offset=c->bound_vertex_offset;c->ops[i].offset2=(uintptr_t)c->bound_pipeline;
+}
+
 static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t *bp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];uint8_t *ip=&((VkMemoryObj*)im->memory)->bytes[im->offset];if(c->ops[i].op==5)vk_copy(ip,bp,(size_t)c->ops[i].size);else vk_copy(bp,ip,(size_t)c->ops[i].size);}else if(c->ops[i].op==7){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory)||c->ops[i].offset>b->size||c->ops[i].size>b->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset],c->ops[i].data,(size_t)c->ops[i].size);}else if(c->ops[i].op==8){VkImageObj *src=(VkImageObj*)c->ops[i].image,*dst=(VkImageObj*)c->ops[i].b;if(!image_ok((VkImage)src)||!image_ok((VkImage)dst)||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->layout!=c->ops[i].layout||dst->layout!=c->ops[i].value)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)dst->memory)->bytes[dst->offset],&((VkMemoryObj*)src->memory)->bytes[src->offset],(size_t)c->ops[i].size);}else if(c->ops[i].op==9){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_DEVICE_LOST;VkSoftVertex v[3];vk_copy(v,c->ops[i].data,sizeof(v));uint8_t *bytes=&((VkMemoryObj*)im->memory)->bytes[im->offset];VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1};int pixels=vksoft_triangle(&target,&v[0],&v[1],&v[2],0);if(pixels<0)return VK_ERROR_INITIALIZATION_FAILED;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}}return VK_SUCCESS;}
 
 /* Experimental SentinelOS-only draw bridge; not core Vulkan vkCmdDraw.

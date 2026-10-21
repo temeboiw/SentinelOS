@@ -615,8 +615,19 @@ int main(void) {
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
-    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u] >= 40u);
-    CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255u);
+    /* The shader-driven draw must shade an interior pixel, preserve opaque
+     * alpha, and leave pixels outside the triangle untouched. */
+    {
+        const uint8_t *pixels = (const uint8_t *)mapped;
+        const unsigned inside = (2u*8u+2u)*4u;
+        const unsigned outside = (7u*8u+7u)*4u;
+        CHECK(pixels[inside] >= 40u);
+        CHECK(pixels[inside] == pixels[inside+1u] &&
+              pixels[inside+1u] == pixels[inside+2u]);
+        CHECK(pixels[inside+3u] == 255u);
+        CHECK(pixels[outside] == 0u && pixels[outside+1u] == 0u &&
+              pixels[outside+2u] == 0u && pixels[outside+3u] == 0u);
+    }
     vkUnmapMemory(device, drawMem);
     vkDestroyPipeline(device, pipeline, 0);
     vkDestroyShaderModule(device, vertexShader, 0);
@@ -624,7 +635,6 @@ int main(void) {
     vkDestroyBuffer(device, vertexBuffer, 0);
     vkFreeMemory(device, vertexMem, 0);
     vkDestroyImage(device, drawImage, 0);
-    vkFreeMemory(device, drawMem, 0);
     vkFreeMemory(device, drawMem, 0);
 
     /* Whole-image Vulkan image-to-image copy stays inside transfer layouts. */

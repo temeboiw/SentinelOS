@@ -898,6 +898,8 @@ lld -flavor link \
   /export:S3DSubmitVirGL \
   /export:S3DPresentVirGL \
   /export:S3DClearVirGL \
+  /export:S3DDrawTriangleVirGL \
+  /export:S3DUploadVirGLBuffer \
   /export:BeginRedrawBatch \
   /export:EndRedrawBatch \
   /export:GetClientRect \

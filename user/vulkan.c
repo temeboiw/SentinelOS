@@ -282,6 +282,26 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    else if(op==43u && wc==4u) { /* local constant declarations */ 
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }
+   else if((op>=156u&&op<=160u)&&wc==4u) {
+    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
+    uint32_t bits=ids[a],exp=bits&0x7F800000u,frac=bits&0x007FFFFFu;
+    if(op==156u)v=(exp==0x7F800000u&&frac!=0u);
+    else if(op==157u)v=(exp==0x7F800000u&&frac==0u);
+    else if(op==158u)v=(exp!=0x7F800000u);
+    else if(op==159u)v=(exp!=0u&&exp!=0x7F800000u);
+    else v=(bits>>31)!=0u;
+    ids[rid]=v;defined[rid]=1;
+   }
+   else if((op==109u||op==110u||op==111u||op==112u||op==115u)&&wc==4u) {
+    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
+    union{uint32_t u;float f;}x,y;x.u=ids[a];
+    if(op==109u){if(!(x.f>=0.0f&&x.f<4294967296.0f))return 0;v=(uint32_t)x.f;}
+    else if(op==110u){if(!(x.f>=-2147483648.0f&&x.f<2147483648.0f))return 0;v=(uint32_t)(int32_t)x.f;}
+    else if(op==111u){y.f=(float)(int32_t)ids[a];v=y.u;}
+    else if(op==112u){y.f=(float)ids[a];v=y.u;}
+    else v=ids[a]; /* FConvert is identity for the supported 32-bit float format. */
+    ids[rid]=v;defined[rid]=1;
+   }
    else if((op==126u||op==127u||op==168u||op==200u||op==204u||op==205u)&&wc==4u) {
     rid=w[i+2];a=w[i+3];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;

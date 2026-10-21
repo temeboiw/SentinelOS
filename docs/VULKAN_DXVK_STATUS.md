@@ -130,3 +130,8 @@ The copy command now rejects identical source and destination buffer handles, ma
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 50% (engineering estimate, not Vulkan conformance).** This is a coarse project tracking target after a bundled implementation batch; it does not mean half of Vulkan 1.0 or DXVK is implemented. Major missing pieces include graphics/compute pipelines, descriptors, render passes/framebuffers, shader interfaces and resource access, presentation, and DXVK compatibility.
+
+
+### Scalar float conversion and classification
+
+Expanded the scalar SPIR-V subset with 32-bit `OpConvertFToU`, `OpConvertFToS`, `OpConvertSToF`, `OpConvertUToF`, and `OpFConvert`, plus `OpIsNan`, `OpIsInf`, `OpIsFinite`, `OpIsNormal`, and `OpSignBitSet`. Float-to-integer conversions reject non-finite and out-of-range values before C casts to avoid undefined behavior. Tests exercise float-to-unsigned, signed-to-float, finite classification, and sign-bit detection.

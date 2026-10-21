@@ -159,7 +159,7 @@ int S3DPresent(S3D_CONTEXT *ctx) {
 }
 
 int S3DSubmitVirGL(const void *commands,uint32_t length) {
-    if(!commands||!length||length>4064u)return 0;
+    if(!commands||!length||length>S3D_VIRGL_MAX_COMMAND_BYTES)return 0;
     return s3d_syscall3(34,(uint64_t)commands,(uint64_t)length,0)!=0;
 }
 

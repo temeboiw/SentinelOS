@@ -27,6 +27,14 @@ typedef struct {
 
 static SmpTopology smp_topology;
 
+/* AP state is separate from topology: discovered does not mean started. */
+#define SMP_CPU_OFFLINE  0u
+#define SMP_CPU_STARTING 1u
+#define SMP_CPU_ONLINE   2u
+static volatile uint32_t smp_cpu_state[SMP_MAX_CPUS];
+static volatile uint32_t smp_online_count;
+
+
 static uint8_t smp_in8(uint16_t port) {
     uint8_t v;
     __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(port));
@@ -202,13 +210,6 @@ static void smp_discover(void) {
     }
     DbgPrint("smp: AP startup is not enabled until per-CPU TSS and scheduler state are installed\n");
 }
-
-/* AP state is separate from topology: discovered does not mean started. */
-#define SMP_CPU_OFFLINE  0u
-#define SMP_CPU_STARTING 1u
-#define SMP_CPU_ONLINE   2u
-static volatile uint32_t smp_cpu_state[SMP_MAX_CPUS];
-static volatile uint32_t smp_online_count;
 
 /*
  * Long-mode entry target for the future low-memory INIT/SIPI trampoline.

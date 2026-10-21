@@ -35,7 +35,8 @@ extern "C" {
 #endif
 int S3DGetSurface(S3D_SURFACE *surface);
 int S3DInitializeSurface(S3D_CONTEXT *ctx, const S3D_SURFACE *surface,
-                        uint32_t *depth, int32_t focal_length_16_16);\nint S3DInitialize(S3D_CONTEXT *ctx, uint32_t *color, uint32_t *depth,
+                        uint32_t *depth, int32_t focal_length_16_16);
+int S3DInitialize(S3D_CONTEXT *ctx, uint32_t *color, uint32_t *depth,
                   uint32_t width, uint32_t height, uint32_t pitch_pixels,
                   int32_t focal_length_16_16);
 void S3DClear(S3D_CONTEXT *ctx, uint32_t argb, uint32_t depth_value);

@@ -90,7 +90,7 @@ static uint64_t gfx_desc_pa, gfx_avail_pa, gfx_used_pa, gfx_req_pa, gfx_resp_pa;
 static GfxDesc *gfx_desc;
 static GfxAvail *gfx_avail;
 static volatile GfxUsed *gfx_used;
-static uint8_t *gfx_req;
+static uint8_t *gfx_req;\nstatic uint8_t gfx_submit_buffer[4096];
 static volatile GfxResponse *gfx_resp;
 static uint32_t gfx_pci_bus, gfx_pci_dev, gfx_pci_fn;
 static uint16_t gfx_pci_vendor, gfx_pci_device;
@@ -274,9 +274,9 @@ static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
     submit.hdr.type=GFX_GPU_CMD_SUBMIT_3D;
     submit.hdr.ctx_id=1;
     submit.size=length;
-    for(uint32_t i=0;i<sizeof(submit);i++)gfx_req[i]=((const uint8_t*)&submit)[i];
-    for(uint32_t i=0;i<length;i++)gfx_req[sizeof(submit)+i]=stream[i];
-    return gfx_command(gfx_req,(uint32_t)sizeof(submit)+length);
+    for(uint32_t i=0;i<sizeof(submit);i++)gfx_submit_buffer[i]=((const uint8_t*)&submit)[i];
+    for(uint32_t i=0;i<length;i++)gfx_submit_buffer[sizeof(submit)+i]=stream[i];
+    return gfx_command(gfx_submit_buffer,(uint32_t)sizeof(submit)+length);
 }
 static int gfx_create_resource(void) {
     GfxCreate2D cr={0};

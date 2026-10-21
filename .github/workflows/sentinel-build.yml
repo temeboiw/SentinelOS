@@ -2,6 +2,7 @@ name: SentinelOS build
 on:
   push:
     branches:
+      - main
       - gpu-bootvid-initialization
   pull_request:
     branches:

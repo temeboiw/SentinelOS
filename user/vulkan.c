@@ -104,7 +104,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkInstanceCreateFlags
 typedef struct { VkStructureType sType; const void *pNext; VkDeviceQueueCreateFlags flags; uint32_t queueFamilyIndex; uint32_t queueCount; const float *pQueuePriorities; } VkDeviceQueueCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkDeviceCreateFlags flags; uint32_t queueCreateInfoCount; const VkDeviceQueueCreateInfo *pQueueCreateInfos; uint32_t enabledLayerCount; const char *const *ppEnabledLayerNames; uint32_t enabledExtensionCount; const char *const *ppEnabledExtensionNames; const void *pEnabledFeatures; } VkDeviceCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkBufferCreateFlags flags; VkDeviceSize size; VkBufferUsageFlags usage; VkSharingMode sharingMode; uint32_t queueFamilyIndexCount; const uint32_t *pQueueFamilyIndices; } VkBufferCreateInfo;
-typedef struct { VkStructureType sType; const void *pNext; VkMemoryPropertyFlags propertyFlags; uint32_t memoryTypeBits; } VkMemoryAllocateInfo;
+typedef struct { VkStructureType sType; const void *pNext; VkDeviceSize allocationSize; uint32_t memoryTypeIndex; } VkMemoryAllocateInfo;
 typedef struct { VkDeviceSize size; VkDeviceSize alignment; uint32_t memoryTypeBits; } VkMemoryRequirements;
 typedef struct { uint32_t propertyFlags; uint32_t heapIndex; } VkMemoryType;
 typedef struct { VkDeviceSize size; VkMemoryHeapFlags flags; } VkMemoryHeap;

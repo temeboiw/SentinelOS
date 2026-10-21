@@ -895,6 +895,7 @@ lld -flavor link \
   /export:S3DClear \
   /export:S3DDrawTriangle \
   /export:S3DPresent \
+  /export:S3DSubmitVirGL \
   /export:BeginRedrawBatch \
   /export:EndRedrawBatch \
   /export:GetClientRect \

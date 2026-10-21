@@ -1469,7 +1469,7 @@ lld -flavor link \
   /export:SetGestureConfig \
   /export:GetTouchInputInfo \
   "/out:$SYS32/user32.dll" \
-  "$B/obj/user32.o" \\
+  "$B/obj/user32.o" \
   "$B/obj/soft3d.o"
 
 echo "  -> explorer.exe"

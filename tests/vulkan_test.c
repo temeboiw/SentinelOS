@@ -251,6 +251,25 @@ int main(void) {
     CHECK(vkAllocateMemory(device, &mai, 0, &dmem) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, src, smem, 0) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, dst, dmem, 0) == VK_SUCCESS);
+    /* Vulkan permits non-overlapping copies within one buffer. */
+    void *srcMapped = 0;
+    CHECK(vkMapMemory(device, smem, 0, VK_WHOLE_SIZE, 0, &srcMapped) == VK_SUCCESS);
+    for (unsigned wi = 0; wi < 64; ++wi) ((uint8_t *)srcMapped)[wi] = (uint8_t)wi;
+    vkUnmapMemory(device, smem);
+    uint64_t selfCopyRegion[3] = {0, 16, 16};
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdCopyBuffer(cmd, src, src, 1, selfCopyRegion);
+    CHECK(((VkCmdObj *)cmd)->count == 1);
+    uint64_t overlapRegion[3] = {0, 8, 16};
+    vkCmdCopyBuffer(cmd, src, src, 1, overlapRegion);
+    CHECK(((VkCmdObj *)cmd)->count == 1); /* overlapping self-copy rejected atomically */
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, smem, 0, VK_WHOLE_SIZE, 0, &srcMapped) == VK_SUCCESS);
+    CHECK(((uint8_t *)srcMapped)[16] == 0 && ((uint8_t *)srcMapped)[31] == 15);
+    vkUnmapMemory(device, smem);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     /* Bound allocations cannot be freed out from under live resources. */
     vkFreeMemory(device, smem, 0);
     CHECK(mem_ok(smem));

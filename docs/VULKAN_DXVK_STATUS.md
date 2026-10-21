@@ -108,3 +108,12 @@ Image-only `vkCmdPipelineBarrier` now validates the complete barrier list and co
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 25% (engineering estimate, not Vulkan conformance).** This milestone adds atomic pipeline-barrier validation on top of tested resource lifetime and transfer paths. The runtime still lacks real graphics/compute pipelines, descriptor sets, render passes/framebuffers, a complete shader runtime, presentation, and DXVK compatibility.
+
+
+### Same-buffer copy support
+
+`vkCmdCopyBuffer` now accepts copies whose source and destination are the same buffer when the byte ranges are disjoint, including buffers bound to a shared memory allocation with distinct offsets. It rejects overlapping source/destination ranges before recording any operation. Regression tests verify successful same-buffer copying and atomic rejection of overlapping ranges.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 30% (engineering estimate, not Vulkan conformance).** This milestone adds tested same-buffer transfer behavior and overlap validation. It does not imply graphics/compute pipeline, descriptor, render-pass, presentation, or DXVK support; those remain major gaps.

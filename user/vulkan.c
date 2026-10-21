@@ -16,6 +16,7 @@
 #define VK_TIMEOUT 2
 #define VK_INCOMPLETE 5
 #define VK_ERROR_OUT_OF_HOST_MEMORY (-1)
+#define VK_ERROR_OUT_OF_DEVICE_MEMORY (-2)
 #define VK_ERROR_INITIALIZATION_FAILED (-3)
 #define VK_ERROR_DEVICE_LOST (-4)
 #define VK_ERROR_MEMORY_MAP_FAILED (-5)
@@ -83,7 +84,8 @@ typedef uint32_t VkMemoryPropertyFlags, VkMemoryHeapFlags, VkBufferCreateFlags;
 typedef uint32_t VkBufferUsageFlags, VkSharingMode, VkCommandPoolCreateFlags;
 typedef uint32_t VkCommandPoolResetFlags, VkCommandBufferLevel, VkCommandBufferUsageFlags;
 typedef uint32_t VkFenceCreateFlags, VkSemaphoreCreateFlags;
-typedef uint64_t VkDeviceSize, VkDeviceMemory;
+typedef uint64_t VkDeviceSize;
+typedef struct VkDeviceMemory_T *VkDeviceMemory;
 typedef struct VkInstance_T *VkInstance;
 typedef struct VkPhysicalDevice_T *VkPhysicalDevice;
 typedef struct VkDevice_T *VkDevice;
@@ -162,6 +164,25 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreat
 __declspec(dllexport) void VKAPI_CALL vkDestroyInstance(VkInstance h,const void *alloc) { if(alloc||!inst_ok(h))return;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].parent==h){int used=0;for(unsigned d=0;d<VK_MAX_DEVICES;d++)if(g_devices[d].magic&&g_devices[d].physical==(VkPhysicalDevice)&g_phys[i])used=1;if(!used)g_phys[i].magic=0;}h->magic=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance h,uint32_t *count,VkPhysicalDevice *out) { if(!inst_ok(h)||!count)return VK_ERROR_INITIALIZATION_FAILED;uint32_t n=0;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)n++;if(!out){*count=n;return VK_SUCCESS;}uint32_t cap=*count,k=0;for(unsigned i=0;i<VK_MAX_DEVICES&&k<cap;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)out[k++]=(VkPhysicalDevice)&g_phys[i];*count=k;return k<n?VK_INCOMPLETE:VK_SUCCESS; }
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice p,uint32_t *count,VkQueueFamilyProperties *out) { if(!count)return;if(!phys_ok(p)){*count=0;return;}if(!out){*count=1;return;}if(*count){vk_zero(out,sizeof(*out));out->queueFlags=VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT|VK_QUEUE_TRANSFER_BIT;out->queueCount=1;out->timestampValidBits=64;out->minImageTransferGranularity.width=1;out->minImageTransferGranularity.height=1;out->minImageTransferGranularity.depth=1;*count=1;}else *count=0; }
+__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice p,void *out) {
+ if(!out)return;
+ /* Standard Vulkan 1.0 properties prefix; limits remain conservatively zero. */
+ uint8_t *b=(uint8_t*)out;
+ vk_zero(b,292);
+ if(!phys_ok(p))return;
+ uint32_t api=VK_API_VERSION_1_0,driver=1,vendor=0x534E544Cu,device=1,type=4;
+ vk_copy(b,&api,4);vk_copy(b+4,&driver,4);vk_copy(b+8,&vendor,4);vk_copy(b+12,&device,4);vk_copy(b+16,&type,4);
+ const char name[]="SentinelOS CPU Vulkan";vk_copy(b+20,name,sizeof(name));
+ const uint8_t uuid[16]={0x53,0x65,0x6e,0x74,0x69,0x6e,0x65,0x6c,0x4f,0x53,0x2d,0x43,0x50,0x55,0x01,0x00};vk_copy(b+276,uuid,16);
+}
+__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFeatures(VkPhysicalDevice p,void *out) {
+ if(out)vk_zero(out,55u*sizeof(uint32_t));
+ (void)p;
+}
+__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice p,uint32_t format,void *out) {
+ if(out)vk_zero(out,12);
+ (void)p;(void)format;
+}
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p,VkPhysicalDeviceMemoryProperties *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!phys_ok(p))return;out->memoryTypeCount=1;out->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;out->memoryTypes[0].heapIndex=0;out->memoryHeapCount=1;out->memoryHeaps[0].size=(VkDeviceSize)VK_MAX_MEMORY*VK_MEMORY_BYTES; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p,const VkDeviceCreateInfo *ci,const void *alloc,VkDevice *out) {
  if(!phys_ok(p)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;
@@ -179,7 +200,7 @@ __declspec(dllexport) void VKAPI_CALL vkDestroyBuffer(VkDevice d,VkBuffer b,cons
 __declspec(dllexport) void VKAPI_CALL vkGetBufferMemoryRequirements(VkDevice d,VkBuffer b,VkMemoryRequirements *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!dev_ok(d)||!buf_ok(b)||b->device!=d)return;out->size=(b->size+15u)&~(VkDeviceSize)15u;out->alignment=16;out->memoryTypeBits=1; }
 __declspec(dllexport) VkResult VKAPI_CALL vkAllocateMemory(VkDevice d,const VkMemoryAllocateInfo *ai,const void *alloc,VkDeviceMemory *out) { if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc||!ai->allocationSize||ai->allocationSize>VK_MEMORY_BYTES||ai->memoryTypeIndex!=0)return VK_ERROR_OUT_OF_DEVICE_MEMORY;for(unsigned i=0;i<VK_MAX_MEMORY;i++)if(!g_memories[i].magic){VkMemoryObj *m=&g_memories[i];m->magic=VK_OBJECT_MAGIC;m->device=d;m->used=1;m->mapped=0;vk_zero(m->bytes,VK_MEMORY_BYTES);*out=(VkDeviceMemory)m;return VK_SUCCESS;}return VK_ERROR_OUT_OF_HOST_MEMORY; }
 __declspec(dllexport) void VKAPI_CALL vkFreeMemory(VkDevice d,VkDeviceMemory m,const void *alloc) { if(alloc||!dev_ok(d)||!mem_ok(m)||m->device!=d||m->mapped)return;for(unsigned i=0;i<VK_MAX_BUFFERS;i++)if(g_buffers[i].magic&&g_buffers[i].memory==m)g_buffers[i].memory=0;m->magic=0;m->used=0; }
-__declspec(dllexport) VkResult VKAPI_CALL vkBindBufferMemory(VkDevice d,VkBuffer b,VkDeviceMemory m,VkDeviceSize off) { if(!dev_ok(d)||!buf_ok(b)||!mem_ok(m)||b->device!=d||m->device!=d)return VK_ERROR_INITIALIZATION_FAILED;if((off&15u)||off>b->size||b->size>VK_MEMORY_BYTES-off)return VK_ERROR_OUT_OF_DEVICE_MEMORY;b->memory=m;b->offset=off;return VK_SUCCESS; }
+__declspec(dllexport) VkResult VKAPI_CALL vkBindBufferMemory(VkDevice d,VkBuffer b,VkDeviceMemory m,VkDeviceSize off) { if(!dev_ok(d)||!buf_ok(b)||!mem_ok(m)||b->device!=d||m->device!=d)return VK_ERROR_INITIALIZATION_FAILED;if((off&15u)||off>b->size||off>VK_MEMORY_BYTES||b->size>VK_MEMORY_BYTES-off)return VK_ERROR_OUT_OF_DEVICE_MEMORY;b->memory=m;b->offset=off;return VK_SUCCESS; }
 __declspec(dllexport) VkResult VKAPI_CALL vkMapMemory(VkDevice d,VkDeviceMemory m,VkDeviceSize off,VkDeviceSize size,VkFlags flags,void **out) { (void)flags;if(!dev_ok(d)||!mem_ok(m)||m->device!=d||!out||off>VK_MEMORY_BYTES)return VK_ERROR_MEMORY_MAP_FAILED;if(size==VK_WHOLE_SIZE)size=VK_MEMORY_BYTES-off;if(size>VK_MEMORY_BYTES-off||m->mapped)return VK_ERROR_MEMORY_MAP_FAILED;m->mapped=1;*out=&m->bytes[off];return VK_SUCCESS; }
 __declspec(dllexport) void VKAPI_CALL vkUnmapMemory(VkDevice d,VkDeviceMemory m) { if(dev_ok(d)&&mem_ok(m)&&m->device==d)m->mapped=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkFlushMappedMemoryRanges(VkDevice d,uint32_t n,const void *ranges) { (void)n;(void)ranges;return dev_ok(d)?VK_SUCCESS:VK_ERROR_DEVICE_LOST; }

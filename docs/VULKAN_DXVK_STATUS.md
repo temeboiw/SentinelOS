@@ -1,51 +1,42 @@
-# SentinelOS Vulkan / DXVK integration status
+# SentinelOS Vulkan / DXVK status
 
-## Current repository state
+## Implemented in the current main branch
 
-The current graphics driver exposes VirtIO-GPU 2D scanout and an experimental
-VirGL/Gallium path. Neither is a Vulkan ICD. The kernel has no complete Vulkan
-object model, validated command-buffer submission interface, Vulkan memory
-requirements, fences/semaphores, shader/pipeline compiler, or swapchain
-implementation. DXVK is not integrated.
+`user/vulkan.c` is now a bounded, freestanding CPU Vulkan runtime rather
+than just an empty loader. It builds as `vulkan.dll` and `vulkan-1.dll`
+and implements a limited subset of the Vulkan 1.0 object and command model:
 
-`user/vulkan_sentinel.h` is a bring-up ABI worksheet for SentinelOS-owned code.
-It is intentionally prefixed `SVk` and is **not** a substitute for the official
-Khronos Vulkan headers. It is not a loader, ICD, or implementation. In
-particular, its shortened property structure is not ABI-compatible with
-`VkPhysicalDeviceProperties`; do not pass it to ordinary Vulkan applications.
+- instance creation/destruction and CPU physical-device enumeration;
+- one software queue family with graphics/compute/transfer capability bits;
+- device and queue creation;
+- fixed-size host-visible memory allocations, buffer creation/binding/mapping;
+- command pools and command-buffer allocation;
+- CPU execution of `vkCmdFillBuffer` and `vkCmdCopyBuffer` on queue submission;
+- basic fence status/wait/reset and device/queue idle operations;
+- procedure lookup for implemented entry points.
 
-## Required full integration
+This is an **experimental, incomplete Vulkan software backend**, not a
+conformant full Vulkan 1.0 implementation. It does not implement graphics or
+compute pipelines, shader modules/SPIR-V execution, images, render passes,
+descriptor sets, full synchronization semantics, swapchains/surface
+presentation, or the broad feature/limit set expected by normal engines. It is
+not DXVK-ready.
 
-A complete implementation needs these layers:
+The physical-device properties expose only a minimal software-device identity;
+feature bits and image-format capabilities remain disabled. Unsupported
+extensions are rejected rather than falsely advertised. The CPU runtime is not
+wired to the existing VirtIO-GPU/VirGL renderer and does not provide native
+Intel/AMD/NVIDIA Vulkan drivers.
 
-1. Khronos Vulkan headers and a loader with correct dispatchable/non-dispatchable
-   handles, proc-address rules, extension/layer negotiation, and ABI layout.
-2. A kernel graphics ioctl/syscall contract with process-owned handles, checked
-   buffers, GPU/CPU-visible memory allocation, command submission, synchronization,
-   reset/device-loss handling, and presentation. Never accept caller-supplied
-   physical addresses.
-3. A real backend. VirtIO-GPU VirGL is not Vulkan by itself. A Venus backend
-   requires the compatible virtio protocol and host implementation; a native
-   Intel/AMD/NVIDIA backend requires GPU-family-specific driver code.
-4. Shader modules, SPIR-V validation, pipelines, descriptor sets, image/buffer
-   formats and layouts, barriers, render/compute execution, and accurate feature
-   reporting. Unsupported features must return the corresponding Vulkan error.
-5. Device enumeration, allocation/map/unmap, buffer/image, command submission,
-   fence, clear/render, presentation, timeout/device-loss, and no-driver fallback
-   tests running in the SentinelOS guest.
-6. DXVK and its dependencies, then the required Windows PE loader behavior,
-   TLS/unwind support, synchronization, virtual memory, DLL imports, and a
-   working presentation bridge. DXVK must not be advertised until a real Vulkan
-   ICD meets the version/features needed by the selected DXVK release.
+## DXVK
+
+DXVK is not integrated yet. It requires a substantially more complete Vulkan
+implementation and a working Windows runtime/loader environment. A successful
+DLL link is not proof that DXVK or any Direct3D game works.
 
 ## Verification gate
 
-Do not set a Vulkan capability bit or report a Vulkan device based on PCI
-enumeration, a framebuffer, VirGL availability, or this header. The gate is
-passed only when an actual Vulkan program can enumerate a real backend, create
-resources, submit work, synchronize, render, and present inside SentinelOS.
-DXVK is a separate gate: run an actual Direct3D application through DXVK and
-verify the rendered output and error paths.
-
-Existing 2D scanout and firmware-framebuffer fallback must remain available
-when Vulkan initialization fails.
+A full Vulkan claim requires API/resource/synchronization/error-path tests and
+an in-guest program that executes graphics/compute work and presents visible
+output. DXVK requires an actual Direct3D application rendered through DXVK in
+the SentinelOS guest. These gates have not been passed.

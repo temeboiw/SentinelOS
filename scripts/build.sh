@@ -326,6 +326,9 @@ lld -flavor link \
   /export:vkCreateInstance \
   /export:vkDestroyInstance \
   /export:vkEnumeratePhysicalDevices \
+  /export:vkGetPhysicalDeviceProperties \
+  /export:vkGetPhysicalDeviceFeatures \
+  /export:vkGetPhysicalDeviceFormatProperties \
   /export:vkGetPhysicalDeviceQueueFamilyProperties \
   /export:vkGetPhysicalDeviceMemoryProperties \
   /export:vkCreateDevice \

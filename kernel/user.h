@@ -2261,7 +2261,18 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_WmUnregister: {
         int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        int slot=wm_shared_window_slot(pid);
+        int x=0,y=0,w=(int)wm_shared_width,h=(int)wm_shared_height;
+        if(slot>=0) { x=wm_tab[slot].x-12; y=wm_tab[slot].y-12; w=wm_tab[slot].w+24; h=wm_tab[slot].h+28; }
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        if(slot>=0&&wm_shared_windows[slot]) {
+            kfree(wm_shared_windows[slot]);wm_shared_windows[slot]=0;
+        }
         wm_unregister(pid);
+        if(x<0){w+=x;x=0;}if(y<0){h+=y;y=0;}
+        if(w>0&&h>0)wm_shared_compose((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h);
+        if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
         f->rax = 0;
         return f;
     }
@@ -2304,21 +2315,31 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_WmSetRect: {
         int rect[4];
         int *src = (int *)f->rdi;
-
-        if (!src || !MmValidateUserRange(MmCurrentProcess, (uint64_t)src, sizeof rect, 0)) {
-            f->rax = 0;
-            return f;
+        if (!src || !MmValidateUserRange(MmCurrentProcess,(uint64_t)src,sizeof rect,0)) {
+            f->rax=0;return f;
         }
-
-        for (int i = 0; i < 4; i++)
-            rect[i] = src[i];
-
-        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
-
-        wm_set_rect(pid, rect[0], rect[1], rect[2], rect[3]);
-
-        f->rax = 0;
-        return f;
+        for(int i=0;i<4;i++)rect[i]=src[i];
+        int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
+        int slot=wm_shared_window_slot(pid);
+        int ox=0,oy=0,ow=0,oh=0;
+        if(slot>=0){ox=wm_tab[slot].x-12;oy=wm_tab[slot].y-12;ow=wm_tab[slot].w+24;oh=wm_tab[slot].h+28;}
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        if(slot>=0&&wm_shared_windows[slot]&&wm_shared_width&&wm_shared_height) {
+            int x=wm_tab[slot].x-12,y=wm_tab[slot].y-12;
+            int x1=wm_tab[slot].x+wm_tab[slot].w+12,y1=wm_tab[slot].y+wm_tab[slot].h+16;
+            if(x<0)x=0;if(y<0)y=0;if(x1>(int)wm_shared_width)x1=(int)wm_shared_width;if(y1>(int)wm_shared_height)y1=(int)wm_shared_height;
+            for(int yy=y;yy<y1;yy++)for(int xx=x;xx<x1;xx++)wm_shared_windows[slot][(uint32_t)yy*wm_shared_width+(uint32_t)xx]=0;
+        }
+        wm_set_rect(pid,rect[0],rect[1],rect[2],rect[3]);
+        int nx=rect[0]-12,ny=rect[1]-12,nw=rect[2]+24,nh=rect[3]+28;
+        int x0=ox<nx?ox:nx,y0=oy<ny?oy:ny,x1=ox+ow>nx+nw?ox+ow:nx+nw,y1=oy+oh>ny+nh?oy+oh:ny+nh;
+        if(x0<0){x1+=x0;x0=0;}if(y0<0){y1+=y0;y0=0;}
+        if(wm_shared_width&&x1>(int)wm_shared_width)x1=(int)wm_shared_width;
+        if(wm_shared_height&&y1>(int)wm_shared_height)y1=(int)wm_shared_height;
+        if(x1>x0&&y1>y0)wm_shared_compose((uint32_t)x0,(uint32_t)y0,(uint32_t)(x1-x0),(uint32_t)(y1-y0));
+        if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        f->rax=0;return f;
     }
 
     case SYS_WmRestore:

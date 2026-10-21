@@ -72,3 +72,12 @@ The bounded scalar interpreter now handles `OpBitReverse` (204) and `OpBitCount`
 ### Additional scalar bitfield execution
 
 The interpreter now executes bounded 32-bit `OpBitFieldInsert`, `OpBitFieldSExtract`, and `OpBitFieldUExtract` operations, with checks for invalid offsets/counts and tests for insertion plus signed and unsigned extraction. This expands the scalar subset only; it is not a complete shader runtime.
+
+
+### Buffer-copy validation and multi-region execution
+
+`vkCmdCopyBuffer` now validates the complete region list before recording any operation: buffer/device ownership, distinct source and destination handles, bound live memory, transfer usage, nonzero region sizes, 4-byte alignment, bounds, and command-buffer capacity. Invalid lists are rejected atomically rather than silently skipping bad regions or partially recording valid ones. Tests cover two discontiguous copy regions, untouched gaps, and rejection of an out-of-bounds region without changing the recorded command count.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 10% (engineering target, not Vulkan conformance).** The implementation remains a limited software Vulkan subset. This milestone reflects the growing tested foundation for buffer/image transfer and scalar SPIR-V execution; it does not mean that graphics pipelines, descriptor sets, render passes, shader interfaces, presentation, or DXVK support exist. Those major functional areas remain unimplemented, and full Vulkan compatibility is far from complete.

@@ -293,13 +293,19 @@ int main(void) {
 
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
-    struct { VkDeviceSize srcOffset, dstOffset, size; } region = {0, 0, 64};
-    vkCmdCopyBuffer(cmd, src, dst, 1, &region);
+    struct { VkDeviceSize srcOffset, dstOffset, size; } regions[2] = {{0, 0, 16}, {16, 32, 16}};
+    vkCmdCopyBuffer(cmd, src, dst, 2, regions);
+    CHECK(((VkCmdObj *)cmd)->count == 2);
+    struct { VkDeviceSize srcOffset, dstOffset, size; } invalidRegion = {60, 0, 8};
+    vkCmdCopyBuffer(cmd, src, dst, 1, &invalidRegion);
+    CHECK(((VkCmdObj *)cmd)->count == 2); /* invalid region rejected atomically */
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     CHECK(vkResetFences(device, 1, &fence) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &si, fence) == VK_SUCCESS);
     CHECK(vkMapMemory(device, dmem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(*(uint32_t *)mapped == 0xA1B2C3D4u);
+    CHECK(((uint32_t *)mapped)[8] == 0xA1B2C3D4u); /* second discontiguous region */
+    CHECK(((uint32_t *)mapped)[4] == 0u); /* gap was not overwritten */
     vkUnmapMemory(device, dmem);
 
     uint32_t formatProps[3] = {0};

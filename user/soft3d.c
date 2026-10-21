@@ -193,3 +193,167 @@ int S3DClearVirGL(uint32_t argb) {
     if(!S3DSubmitVirGL(stream,sizeof(stream)))return 0;
     return S3DPresentVirGL();
 }
+
+int S3DUploadVirGLBuffer(uint32_t bytes) {
+    if(!bytes||bytes>S3D_VIRGL_VERTEX_BUFFER_BYTES)return 0;
+    return s3d_syscall3(36,(uint64_t)bytes,0,0)!=0;
+}
+
+#define S3D_VIRGL_CMD_CREATE_OBJECT 1u
+#define S3D_VIRGL_CMD_BIND_OBJECT 2u
+#define S3D_VIRGL_CMD_DESTROY_OBJECT 3u
+#define S3D_VIRGL_CMD_SET_VIEWPORT 4u
+#define S3D_VIRGL_CMD_SET_FRAMEBUFFER 5u
+#define S3D_VIRGL_CMD_SET_VERTEX_BUFFERS 6u
+#define S3D_VIRGL_CMD_DRAW_VBO 8u
+#define S3D_VIRGL_CMD_BIND_SHADER 31u
+#define S3D_VIRGL_OBJECT_BLEND 1u
+#define S3D_VIRGL_OBJECT_RASTERIZER 2u
+#define S3D_VIRGL_OBJECT_DSA 3u
+#define S3D_VIRGL_OBJECT_SHADER 4u
+#define S3D_VIRGL_OBJECT_VERTEX_ELEMENTS 5u
+#define S3D_VIRGL_OBJECT_SURFACE 8u
+#define S3D_VIRGL_FORMAT_R32G32B32_FLOAT 30u
+#define S3D_VIRGL_FORMAT_R32G32B32A32_FLOAT 31u
+#define S3D_VIRGL_PIPE_PRIM_TRIANGLES 4u
+
+typedef struct { uint32_t words[1024]; uint32_t count; } S3D_VIRGL_BUILDER;
+static int s3d_vb_word(S3D_VIRGL_BUILDER *b,uint32_t v) {
+    if(!b||b->count>=1024u)return 0;
+    b->words[b->count++]=v;return 1;
+}
+static int s3d_vb_cmd(S3D_VIRGL_BUILDER *b,uint32_t cmd,uint32_t obj,uint32_t len) {
+    return s3d_vb_word(b,cmd|(obj<<8)|(len<<16));
+}
+static uint32_t s3d_fixed_to_float_bits(int32_t q) {
+    if(!q)return 0;
+    uint32_t sign=0;
+    uint64_t a;
+    if(q<0){sign=0x80000000u;a=(uint64_t)(-(int64_t)q);}else a=(uint32_t)q;
+    unsigned int top=0;
+    for(uint64_t t=a;t>1;t>>=1)top++;
+    int exponent=(int)top-16+127;
+    uint64_t sig;
+    if(top<=23)sig=a<<(23-top);else sig=a>>(top-23);
+    uint32_t mantissa=(uint32_t)sig&0x7FFFFFu;
+    return sign|((uint32_t)exponent<<23)|mantissa;
+}
+static uint32_t s3d_uint_to_float_bits(uint32_t v) {
+    if(!v)return 0;
+    unsigned int top=0;
+    for(uint32_t t=v;t>1;t>>=1)top++;
+    uint64_t sig=(top<=23)?((uint64_t)v<<(23-top)):((uint64_t)v>>(top-23));
+    return ((top+127u)<<23)|((uint32_t)sig&0x7FFFFFu);
+}
+static int s3d_vb_emit_shader(S3D_VIRGL_BUILDER *b,uint32_t handle,
+                              uint32_t type,const char *text) {
+    uint32_t n=0;while(text[n])n++;
+    uint32_t bytes=n+1u, text_dw=(bytes+3u)/4u, payload=5u+text_dw;
+    if(!s3d_vb_cmd(b,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_SHADER,payload)||
+       !s3d_vb_word(b,handle)||!s3d_vb_word(b,type)||!s3d_vb_word(b,bytes)||
+       !s3d_vb_word(b,4096u)||!s3d_vb_word(b,0u))return 0;
+    uint8_t padded[256]={0};
+    if(bytes>sizeof(padded))return 0;
+    for(uint32_t i=0;i<bytes;i++)padded[i]=(uint8_t)(i<n?text[i]:0);
+    for(uint32_t i=0;i<text_dw;i++) {
+        uint32_t off=i*4u;
+        uint32_t d=(uint32_t)padded[off]|((uint32_t)padded[off+1]<<8)|
+                   ((uint32_t)padded[off+2]<<16)|((uint32_t)padded[off+3]<<24);
+        if(!s3d_vb_word(b,d))return 0;
+    }
+    return 1;
+}
+static int s3d_vb_bind_shader(S3D_VIRGL_BUILDER *b,uint32_t handle,uint32_t type) {
+    return s3d_vb_cmd(b,S3D_VIRGL_CMD_BIND_SHADER,0,2)&&
+           s3d_vb_word(b,handle)&&s3d_vb_word(b,type);
+}
+static int s3d_vb_bind_object(S3D_VIRGL_BUILDER *b,uint32_t obj,uint32_t handle) {
+    return s3d_vb_cmd(b,S3D_VIRGL_CMD_BIND_OBJECT,obj,1)&&s3d_vb_word(b,handle);
+}
+static int s3d_vb_destroy_object(S3D_VIRGL_BUILDER *b,uint32_t obj,uint32_t handle) {
+    return s3d_vb_cmd(b,S3D_VIRGL_CMD_DESTROY_OBJECT,obj,1)&&s3d_vb_word(b,handle);
+}
+int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
+                         const S3D_VERTEX *b,const S3D_VERTEX *c) {
+    if(!surface||surface->backend!=2||!surface->virgl_buffer||
+       surface->virgl_buffer_resource_id!=S3D_VIRGL_VERTEX_BUFFER_ID||
+       surface->virgl_buffer_size<84u||!a||!b||!c)return 0;
+    const S3D_VERTEX *v[3]={a,b,c};
+    uint32_t *vb=(uint32_t*)surface->virgl_buffer;
+    for(uint32_t i=0;i<3;i++) {
+        uint32_t o=i*7u;
+        vb[o+0]=s3d_fixed_to_float_bits(v[i]->x);
+        vb[o+1]=s3d_fixed_to_float_bits(v[i]->y);
+        vb[o+2]=s3d_fixed_to_float_bits(v[i]->z);
+        vb[o+3]=s3d_u8_to_float_bits((v[i]->color>>16)&255u);
+        vb[o+4]=s3d_u8_to_float_bits((v[i]->color>>8)&255u);
+        vb[o+5]=s3d_u8_to_float_bits(v[i]->color&255u);
+        vb[o+6]=s3d_u8_to_float_bits((v[i]->color>>24)&255u);
+    }
+    if(!S3DUploadVirGLBuffer(84u))return 0;
+
+    static const char vs[]="VERT\nDCL IN[0]\nDCL IN[1]\nDCL OUT[0], POSITION\nDCL OUT[1], COLOR\nMOV OUT[0], IN[0]\nMOV OUT[1], IN[1]\nEND\n";
+    static const char fs[]="FRAG\nDCL IN[0], COLOR\nDCL OUT[0], COLOR\nMOV OUT[0], IN[0]\nEND\n";
+    S3D_VIRGL_BUILDER q={0};
+    int ok=1;
+    ok &= s3d_vb_emit_shader(&q,11,0,vs);
+    ok &= s3d_vb_bind_shader(&q,11,0);
+    ok &= s3d_vb_emit_shader(&q,12,1,fs);
+    ok &= s3d_vb_bind_shader(&q,12,1);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_SURFACE,5);
+    ok &= s3d_vb_word(&q,10);ok &= s3d_vb_word(&q,S3D_VIRGL_RENDER_TARGET_ID);
+    ok &= s3d_vb_word(&q,2);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_VERTEX_ELEMENTS,9);
+    ok &= s3d_vb_word(&q,13);
+    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,S3D_VIRGL_FORMAT_R32G32B32_FLOAT);
+    ok &= s3d_vb_word(&q,12);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,S3D_VIRGL_FORMAT_R32G32B32A32_FLOAT);
+    ok &= s3d_vb_bind_object(&q,S3D_VIRGL_OBJECT_VERTEX_ELEMENTS,13);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_RASTERIZER,9);
+    ok &= s3d_vb_word(&q,14);ok &= s3d_vb_word(&q,(1u<<1)|(1u<<29));
+    ok &= s3d_vb_word(&q,0x3F800000u);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,0x3F800000u);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_bind_object(&q,S3D_VIRGL_OBJECT_RASTERIZER,14);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_BLEND,11);
+    ok &= s3d_vb_word(&q,15);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,0xFu<<27);
+    for(uint32_t i=0;i<7;i++)ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_bind_object(&q,S3D_VIRGL_OBJECT_BLEND,15);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_DSA,5);
+    ok &= s3d_vb_word(&q,16);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_bind_object(&q,S3D_VIRGL_OBJECT_DSA,16);
+
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_FRAMEBUFFER,0,3);
+    ok &= s3d_vb_word(&q,1);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,10);
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VIEWPORT,0,7);
+    ok &= s3d_vb_word(&q,0);
+    uint32_t hw=s3d_uint_to_float_bits(surface->width/2u);
+    uint32_t hh=s3d_uint_to_float_bits(surface->height/2u);
+    ok &= s3d_vb_word(&q,hw);ok &= s3d_vb_word(&q,hh);ok &= s3d_vb_word(&q,0x3F000000u);
+    ok &= s3d_vb_word(&q,hw);ok &= s3d_vb_word(&q,hh);ok &= s3d_vb_word(&q,0x3F000000u);
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VERTEX_BUFFERS,0,3);
+    ok &= s3d_vb_word(&q,28);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,S3D_VIRGL_VERTEX_BUFFER_ID);
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_DRAW_VBO,0,12);
+    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,3);ok &= s3d_vb_word(&q,S3D_VIRGL_PIPE_PRIM_TRIANGLES);
+    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,1);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,0xFFFFFFFFu);ok &= s3d_vb_word(&q,0);
+
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SHADER,11);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SHADER,12);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_VERTEX_ELEMENTS,13);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_RASTERIZER,14);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_BLEND,15);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_DSA,16);
+    ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SURFACE,10);
+    uint32_t bytes=q.count*4u;
+    if(!ok||bytes>S3D_VIRGL_MAX_COMMAND_BYTES)return 0;
+    return S3DSubmitVirGL(q.words,bytes)&&S3DPresentVirGL();
+}

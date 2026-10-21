@@ -570,6 +570,40 @@ int main(void) {
     CHECK(((uint8_t *)mapped)[(7u*8u+7u)*4u+3u] == 0);
     vkUnmapMemory(device, drawMem);
 
+    /* Standard-shaped single-color image view, render pass, and framebuffer. */
+    VkImageViewCreateInfo viewCi = {0};
+    viewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewCi.image = drawImage; viewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewCi.format = drawCi.format;
+    viewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewCi.subresourceRange.levelCount = 1; viewCi.subresourceRange.layerCount = 1;
+    VkImageView drawView = 0;
+    CHECK(vkCreateImageView(device, &viewCi, 0, &drawView) == VK_SUCCESS);
+    VkAttachmentDescription attachment = {0};
+    attachment.format = drawCi.format; attachment.samples = 1;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+    attachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkAttachmentReference colorRef = {0, VK_IMAGE_LAYOUT_GENERAL};
+    VkSubpassDescription subpass = {0};
+    subpass.pipelineBindPoint = 0; subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    VkRenderPassCreateInfo rpCi = {0};
+    rpCi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpCi.attachmentCount = 1; rpCi.pAttachments = &attachment;
+    rpCi.subpassCount = 1; rpCi.pSubpasses = &subpass;
+    VkRenderPass drawRenderPass = 0;
+    CHECK(vkCreateRenderPass(device, &rpCi, 0, &drawRenderPass) == VK_SUCCESS);
+    VkFramebufferCreateInfo fbCi = {0};
+    fbCi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fbCi.renderPass = drawRenderPass; fbCi.attachmentCount = 1;
+    fbCi.pAttachments = &drawView; fbCi.width = 8; fbCi.height = 8; fbCi.layers = 1;
+    VkFramebuffer drawFramebuffer = 0;
+    CHECK(vkCreateFramebuffer(device, &fbCi, 0, &drawFramebuffer) == VK_SUCCESS);
+
     /* End-to-end bounded graphics pipeline: shader modules execute during
      * vkCmdDraw and their scalar fragment result shades the CPU rasterizer. */
     smci.codeSize = sizeof(exec_words);
@@ -584,7 +618,7 @@ int main(void) {
     stages[1].stage = 0x10u; stages[1].module = fragmentShader; stages[1].pName = "main";
     VkGraphicsPipelineCreateInfo gpci = {0};
     gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gpci.stageCount = 2; gpci.pStages = stages; gpci.basePipelineIndex = -1;
+    gpci.stageCount = 2; gpci.pStages = stages; gpci.basePipelineIndex = -1;\n    gpci.renderPass = drawRenderPass;
     VkPipeline pipeline = 0;
     CHECK(vkCreateGraphicsPipelines(device, 0, 1, &gpci, 0, &pipeline) == VK_SUCCESS);
     VkBufferCreateInfo vertexCi = {0};
@@ -610,8 +644,15 @@ int main(void) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkDeviceSize vertexOffset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &vertexOffset);
-    SentinelVulkanCmdBindColorTarget(cmd, drawImage);
+    VkClearColorValue clear = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkRenderPassBeginInfo renderBegin = {0};
+    renderBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderBegin.renderPass = drawRenderPass; renderBegin.framebuffer = drawFramebuffer;
+    renderBegin.renderArea_width = 8; renderBegin.renderArea_height = 8;
+    renderBegin.clearValueCount = 1; renderBegin.pClearValues = &clear;
+    vkCmdBeginRenderPass(cmd, &renderBegin, 0);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
@@ -634,6 +675,9 @@ int main(void) {
     vkDestroyShaderModule(device, fragmentShader, 0);
     vkDestroyBuffer(device, vertexBuffer, 0);
     vkFreeMemory(device, vertexMem, 0);
+    vkDestroyFramebuffer(device, drawFramebuffer, 0);
+    vkDestroyRenderPass(device, drawRenderPass, 0);
+    vkDestroyImageView(device, drawView, 0);
     vkDestroyImage(device, drawImage, 0);
     vkFreeMemory(device, drawMem, 0);
 

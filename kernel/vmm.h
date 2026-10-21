@@ -33,6 +33,7 @@ typedef struct _KPROCESS {
     uint64_t  DirectoryTableBase;
     uint64_t *Pml4;
     ULONG     Pid;
+    volatile uint32_t ActiveCpus;
     char      ImageName[16];
 } KPROCESS;
 
@@ -42,8 +43,17 @@ static KPROCESS *PspSystemProcess;
 #define MmCurrentProcess ((KPROCESS *)cpu_local_current()->current_process)
 static volatile uint32_t MmProcessLock;
 static ULONG MmNextPid = 1;
-static void MmLock(void) { while (__atomic_exchange_n(&MmProcessLock,1,__ATOMIC_ACQUIRE)) while (__atomic_load_n(&MmProcessLock,__ATOMIC_RELAXED)) __asm__ volatile("pause"); }
-static void MmUnlock(void) { __atomic_store_n(&MmProcessLock,0,__ATOMIC_RELEASE); }
+static uint64_t MmLock(void) {
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+    while (__atomic_exchange_n(&MmProcessLock,1,__ATOMIC_ACQUIRE))
+        while (__atomic_load_n(&MmProcessLock,__ATOMIC_RELAXED)) __asm__ volatile("pause");
+    return flags;
+}
+static void MmUnlock(uint64_t flags) {
+    __atomic_store_n(&MmProcessLock,0,__ATOMIC_RELEASE);
+    if (flags & 0x200) __asm__ volatile("sti" ::: "memory");
+}
 
 static void vmm_panic(const char *why) {
     DbgPrint("vmm: %s\n", why);
@@ -118,9 +128,12 @@ static uint64_t vmm_map_user_page(uint64_t virt, int writable) {
 }
 
 static void MmSwitchToProcess(KPROCESS *p) {
-    if (!p || p == MmCurrentProcess) return;
+    KPROCESS *old = MmCurrentProcess;
+    if (!p || p == old) return;
     uint64_t cr3 = p->DirectoryTableBase & ~0xfffULL;
     __asm__ volatile("cli" ::: "memory");
+    __atomic_add_fetch(&p->ActiveCpus, 1, __ATOMIC_ACQ_REL);
+    if (old) __atomic_sub_fetch(&old->ActiveCpus, 1, __ATOMIC_ACQ_REL);
     MmCurrentProcess = p;
     __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
 }
@@ -132,6 +145,7 @@ static void MmInitSystemProcess(void) {
     sys.DirectoryTableBase = live & ~0xfffULL;
     sys.Pml4 = pml4;
     sys.Pid = 0;
+    sys.ActiveCpus = 1;
     sys.ImageName[0]='S'; sys.ImageName[1]='y'; sys.ImageName[2]='s';
     sys.ImageName[3]='t'; sys.ImageName[4]='e'; sys.ImageName[5]='m';
     PspSystemProcess = &sys;
@@ -163,11 +177,11 @@ static void map_2m_in(uint64_t *root, uint64_t virt, uint64_t phys, uint64_t att
 }
 
 static KPROCESS *MmCreateAddressSpace(const char *name) {
-    MmLock();
+    uint64_t mmfl = MmLock();
     KPROCESS *p = NULL;
     for (int i = 0; i < MM_MAX_PROCESSES; i++)
         if (!MmProcessUsed[i]) { MmProcessUsed[i]=1; p=&MmProcessPool[i]; break; }
-    if (!p) { MmUnlock(); return NULL; }
+    if (!p) { MmUnlock(mmfl); return NULL; }
     for (int i = 0; i < (int)sizeof(KPROCESS); i++) ((char*)p)[i]=0;
     uint64_t pml4_pa = pmm_alloc_zeroed();
     if (!pml4_pa) {
@@ -257,37 +271,43 @@ static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
 
 /* Only for frames allocated by the user-memory allocator, never device mappings. */
 static int MmUnmapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
-    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) return 0;
+    uint64_t mmfl = MmLock();
+    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) { MmUnlock(mmfl); MmUnlock(mmfl); return 0; }
     uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
     uint64_t e4 = root[(va >> 39) & 511];
-    if (!(e4 & PTE_P)) return 0;
+    if (!(e4 & PTE_P)) MmUnlock(mmfl); return 0;
     uint64_t *pdpt = PHYS_TO_VIRT(e4 & PTE_ADDR);
     uint64_t e3 = pdpt[(va >> 30) & 511];
-    if (!(e3 & PTE_P) || (e3 & PTE_PS)) return 0;
+    if (!(e3 & PTE_P) || (e3 & PTE_PS)) MmUnlock(mmfl); return 0;
     uint64_t *pd = PHYS_TO_VIRT(e3 & PTE_ADDR);
     uint64_t e2 = pd[(va >> 21) & 511];
-    if (!(e2 & PTE_P) || (e2 & PTE_PS)) return 0;
+    if (!(e2 & PTE_P) || (e2 & PTE_PS)) MmUnlock(mmfl); return 0;
     uint64_t *pt = PHYS_TO_VIRT(e2 & PTE_ADDR);
     unsigned i = (va >> 12) & 511;
     uint64_t e = pt[i];
-    if (!(e & PTE_P) || !(e & PTE_U) || !(e & PTE_OWNED)) return 0;
+    if (!(e & PTE_P) || !(e & PTE_U) || !(e & PTE_OWNED)) MmUnlock(mmfl); return 0;
     pt[i] = 0;
     pmm_free(e & PTE_ADDR);
     if (MmCurrentProcess == proc) __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+    MmUnlock(mmfl);
     return 1;
 }
 
 static int MmMapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
-    if (!MmUserRangeUnmapped(proc, va, 0x1000ULL)) return 0;
+    uint64_t mmfl = MmLock();
+    if (!MmUserRangeUnmapped(proc, va, 0x1000ULL)) { MmUnlock(mmfl); return 0; }
     uint64_t pa = pmm_alloc_zeroed();
-    if (!pa) return 0;
+    if (!pa) { MmUnlock(mmfl); return 0; }
     map_4k_in(proc->Pml4, va, pa, PTE_U | PTE_RW | PTE_OWNED);
+    MmUnlock(mmfl);
     return 1;
 }
 
 static void MmDeleteAddressSpace(KPROCESS *p) {
     if (!p || p == PspSystemProcess || p == MmCurrentProcess ||
         MmCurrentProcess != PspSystemProcess) return;
+    uint64_t mmfl = MmLock();
+    if (__atomic_load_n(&p->ActiveCpus, __ATOMIC_ACQUIRE) != 0) { MmUnlock(mmfl); return; }
 
     /* Lower-half page tables are private to this process. The upper-half
        kernel mappings are shared and intentionally never traversed here. */
@@ -325,6 +345,7 @@ static void MmDeleteAddressSpace(KPROCESS *p) {
     pmm_free(root_pa);
     for (int i=0;i<MM_MAX_PROCESSES;i++)
         if (p==&MmProcessPool[i]) { MmProcessUsed[i]=0; break; }
+    MmUnlock(mmfl);
 }
 
 // map physical [s, e) at virt = voff + phys, rounded out to 2 MiB

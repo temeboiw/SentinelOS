@@ -619,9 +619,26 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
 }
 
 static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
-    if(!g_scanout||u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
+    if(!g_scanout)return;
     if(x0<0)x0=0;if(y0<0)y0=0;
     if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    if(x0>=x1||y0>=y1)return;
+    if(g_gpu_surface) {
+        /* The kernel owns the shared GPU scanout. Re-submit only the already
+         * rendered layer covering the cursor's old footprint; the kernel then
+         * reconstructs the underlay from its persistent Z-ordered buffers.
+         * Never restore wallpaper directly over a window or taskbar. */
+        typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
+        int desktop_owner=u32_is_desktop_window();
+        U32_PRESENT_LAYER a;
+        a.pixels=(u64)(desktop_owner?u32_taskbar_layer:u32_window_layer);
+        a.layer=desktop_owner?3u:2u;
+        a.x=(u32)x0;a.y=(u32)y0;a.w=(u32)(x1-x0);a.h=(u32)(y1-y0);
+        a.width=g_fw;a.height=g_fh;
+        (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+        return;
+    }
+    if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++)
         g_scanout[(u32)y*g_scan_pitch+(u32)x]=u32_aero_bg_cache[(u32)y*g_fw+(u32)x];
     u32_composite_layers(x0,y0,x1,y1);
@@ -1024,9 +1041,9 @@ static void compose(void) {
                     a.x=0;a.y=0;a.w=g_fw;a.h=g_fh;
                     u32_shared_background_published=(int)sy3(SYS_PresentLayer,(u64)&a,0,0);
                     a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);
-                } else {
-                    a.layer=0;a.pixels=(u64)u32_aero_bg_cache;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 }
+                /* Wallpaper is immutable after its first full publish. Do not
+                 * copy the same background buffer on every ordinary repaint. */
                 a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 a.layer=3;a.pixels=(u64)u32_taskbar_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);

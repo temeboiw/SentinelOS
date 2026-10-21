@@ -271,7 +271,7 @@ static int gfx_queue_init(void) {
        rings even though the driver indexes them modulo the smaller value. */
     *(volatile uint16_t*)(c+24)=q;
     if(*(volatile uint16_t*)(c+24)!=q) {
-        DbgPrint("gfx: device rejected control queue size %u\\n",(unsigned)q);
+        DbgPrint("gfx: device rejected control queue size %u\n",(unsigned)q);
         return 0;
     }
     gfx_queue_size=q;

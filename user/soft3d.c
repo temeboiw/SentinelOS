@@ -166,3 +166,30 @@ int S3DSubmitVirGL(const void *commands,uint32_t length) {
 int S3DPresentVirGL(void) {
     return s3d_syscall3(35,0,0,0)!=0;
 }
+
+static uint32_t s3d_u8_to_float_bits(uint32_t c) {
+    if(!c)return 0;
+    uint64_t q=((uint64_t)c<<31)/255u;
+    int exponent=0;
+    while(q<(1ULL<<31)){q<<=1;exponent--;}
+    uint32_t mantissa=(uint32_t)((q-(1ULL<<31))>>8);
+    if(mantissa>0x7FFFFFu)mantissa=0x7FFFFFu;
+    return ((uint32_t)(127+exponent)<<23)|mantissa;
+}
+int S3DClearVirGL(uint32_t argb) {
+    /* VirGL context resource 2 is the attached B8G8R8X8 render target. */
+    uint32_t stream[] = {
+        (1u|(8u<<8)|(5u<<16)), 1u, S3D_VIRGL_RENDER_TARGET_ID, 2u, 0u, 0u,
+        (2u|(8u<<8)|(1u<<16)), 1u,
+        (4u|(3u<<16)), 1u, 0u, 1u,
+        (6u|(8u<<16)), 4u,
+        s3d_u8_to_float_bits((argb>>16)&255u),
+        s3d_u8_to_float_bits((argb>>8)&255u),
+        s3d_u8_to_float_bits(argb&255u),
+        s3d_u8_to_float_bits((argb>>24)&255u),
+        0u, 0x3FF00000u, 0u,
+        (3u|(8u<<8)|(1u<<16)), 1u
+    };
+    if(!S3DSubmitVirGL(stream,sizeof(stream)))return 0;
+    return S3DPresentVirGL();
+}

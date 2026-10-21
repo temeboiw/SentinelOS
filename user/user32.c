@@ -1133,6 +1133,15 @@ static void show_shutdown_screen(int reboot) {
     fill(cx-174,cy-52,348,1,0xFF4BA6C7);
     draw_text(cx-142,cy-22,reboot?"Restarting SentinelOS":"Shutting down SentinelOS",0xFFFFFFFF);
     draw_text(cx-142,cy+12,reboot?"Your system is restarting...":"Your system is shutting down...",0xFF9CD9EB);
+
+    /*
+     * This screen is drawn directly into the shared scanout, bypassing the
+     * layered compositor. On VirtIO-GPU those CPU writes are not visible
+     * until the dirty rectangle is transferred and flushed to the host.
+     * Flush the complete screen before starting the five-second hold.
+     */
+    u32_flush_raw(0,0,(int)g_fw,(int)g_fh);
+
     /* Keep the shutdown screen visible before handing control to firmware. */
     u64 start=sy3(SYS_GetTickCount,0,0,0);
     if (start!=(u64)-1) {

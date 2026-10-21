@@ -801,7 +801,13 @@ static void compose(void) {
     /* Do not erase the cursor before painting. Keep it over the scene while
      * layers are recomposed; cursor_save_draw() refreshes its saved-under
      * pixels after the final frame is ready. */
-    int layered = g_fw<=1920u && g_fh<=1080u;
+    /* The layer descriptors and their backing arrays are process-local USER32
+     * globals, but every process maps the same scanout. If an ordinary app
+     * composites its private desktop/window layers, it replaces pixels owned
+     * by Explorer and other apps with its own stale copy. Only the desktop
+     * owner may run the full-screen layered compositor; app paints are clipped
+     * to that app's window and go straight to scanout. */
+    int layered = g_fw<=1920u && g_fh<=1080u && u32_is_desktop_window();
     int layer_x0=0,layer_y0=0,layer_x1=(int)g_fw,layer_y1=(int)g_fh;
 
     /* Ordinary app redraws are clipped to their own window. The desktop

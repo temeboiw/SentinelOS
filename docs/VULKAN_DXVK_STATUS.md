@@ -7,17 +7,17 @@ than just an empty loader. It builds as `vulkan.dll` and `vulkan-1.dll`
 and implements a limited subset of the Vulkan 1.0 object and command model:
 
 - instance creation/destruction and CPU physical-device enumeration;
-- one software graphics/transfer queue family (graphics support is still experimental);
+- one software graphics/transfer queue family with a tested, bounded triangle-draw path;
 - device and queue creation;
 - fixed-size host-visible memory allocations, buffer creation/binding/mapping;
 - command pools and command-buffer allocation;
 - CPU execution of `vkCmdFillBuffer`, `vkCmdCopyBuffer`, and `vkCmdClearColorImage` on queue submission;
-- bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory, restricted to transfer-source/transfer-destination usage; sampled, storage, and color-attachment usages are rejected until their actual operations are implemented;
+- bounded RGBA8/BGRA8 images in CPU memory, including a restricted color-attachment path used by the software triangle rasterizer;
 - tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
 - bounded SPIR-V 1.0 shader-module structure validation and module lifetime;
-- experimental `vkCreateGraphicsPipelines`, `vkCmdBindPipeline`, `vkCmdBindVertexBuffers`, and `vkCmdDraw` entry points for a narrow two-stage scalar-shader subset;
-- a host regression test that submits a shader-driven triangle draw to the CPU rasterizer and checks the rendered pixel values; this currently uses the SentinelOS-only `SentinelVulkanCmdBindColorTarget` hook because standard render passes/framebuffers are not implemented;
+- implemented bounded-subset `vkCreateGraphicsPipelines`, `vkCmdBindPipeline`, `vkCmdBindVertexBuffers`, and `vkCmdDraw` entry points for a narrow two-stage scalar-shader path;
+- an end-to-end host regression test that submits a shader-driven triangle draw through command recording, shader evaluation, and CPU rasterization; the target is selected through SentinelOS-only `SentinelVulkanCmdBindColorTarget` because standard render passes/framebuffers are not implemented;
 - a tested, bounded scalar SPIR-V instruction interpreter for selected 32-bit integer arithmetic, bitwise/shift operations, comparisons, logical operations, copy/bitcast, and select instructions; unsupported executable instructions fail closed;
 - synchronous binary-semaphore consume/signal for already-signaled waits (an unsignaled wait returns `VK_NOT_READY` because this backend cannot suspend a queue).
 - procedure lookup for implemented entry points.
@@ -33,7 +33,7 @@ framebuffers, compute pipelines, full synchronization, swapchains/surface
 presentation, or the broad feature/limit set expected by normal engines. It is
 not DXVK-ready.
 
-Shader-module creation validates the SPIR-V header and bounded instruction\nstream; it does not prove full shader semantic validity. The new scalar\ninterpreter is an internal execution primitive covered by host tests, not yet a\ncomplete Vulkan shader stage: it does not implement general control flow,\nvariables/pointers, interfaces, floating-point arithmetic, or resource access.\nThe software rasterizer in `user/vk_softpipe.c` remains separate and is not yet\nconnected to Vulkan draw commands.\n\nThe physical-device properties expose only a minimal software-device identity;
+Shader-module creation validates the SPIR-V header and bounded instruction\nstream; it does not prove full shader semantic validity. The new scalar\ninterpreter is an internal execution primitive covered by host tests, not yet a\ncomplete Vulkan shader stage: it does not implement general control flow,\nvariables/pointers, interfaces, floating-point arithmetic, or resource access.\nThe software rasterizer in `user/vk_softpipe.c` is connected to the bounded `vkCmdDraw` path and exercised by the shader-driven triangle regression test.\n\nThe physical-device properties expose only a minimal software-device identity;
 feature bits and image-format capabilities remain disabled. Unsupported
 extensions are rejected rather than falsely advertised. The CPU runtime is not
 wired to the existing VirtIO-GPU/VirGL renderer and does not provide native

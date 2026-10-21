@@ -313,8 +313,22 @@ static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
 }
 static int gfx_map_surface_for_process(KPROCESS *proc,uint64_t *uva_out) {
     if(!gfx_gpu_ready||!proc||!uva_out)return 0;
-    uint64_t uva=0x71000000ULL,bytes=gfx_surface_pages*4096ULL;
-    if(!MmUserRangeUnmapped(proc,uva,bytes))return 0;
+    uint64_t bytes=gfx_surface_pages*4096ULL;
+    uint64_t uva=0x71000000ULL;
+    if(!MmUserRangeUnmapped(proc,uva,bytes)) {
+        /* Repeated initialization in the same process reuses its mapping. */
+        uint64_t first=MmLookupUserPte(proc,uva,0);
+        uint64_t last=MmLookupUserPte(proc,uva+bytes-4096ULL,0);
+        if((first&PTE_ADDR)==gfx_surface_pa &&
+           (last&PTE_ADDR)==gfx_surface_pa+(gfx_surface_pages-1)*4096ULL &&
+           (first&PTE_U) && (last&PTE_U)) {
+            *uva_out=uva;return 1;
+        }
+        /* Avoid colliding with an application's existing allocation. */
+        for(uva=0x72000000ULL;uva<0x7F000000ULL;uva+=0x01000000ULL)
+            if(MmUserRangeUnmapped(proc,uva,bytes))break;
+        if(uva>=0x7F000000ULL)return 0;
+    }
     KPROCESS *old=MmCurrentProcess;
     MmSwitchToProcess(PspSystemProcess);
     for(uint64_t i=0;i<gfx_surface_pages;i++)

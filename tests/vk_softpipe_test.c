@@ -47,5 +47,16 @@ int main(void) {
     fails += check(color[4 * 16 + 4] == 0xff00ff00u,
                    "nearer triangle replaces fragment");
 
+    vksoft_clear(&target, 0xff000000u, 1.0f);
+    a.x=2; a.y=2; a.z=0.5f; a.r=1; a.g=0; a.b=0; a.a=1; a.inv_w=1.0f;
+    b.x=14; b.y=2; b.z=0.5f; b.r=0; b.g=0; b.b=0; b.a=1; b.inv_w=0.25f;
+    c.x=2; c.y=14; c.z=0.5f; c.r=0; c.g=0; c.b=0; c.a=1; c.inv_w=0.25f;
+    (void)vksoft_triangle(&target,&a,&b,&c,0);
+    {
+        unsigned red = (color[4 * 16 + 4] >> 16) & 255u;
+        fails += check(red >= 210u && red <= 222u,
+                       "perspective-correct color interpolation");
+    }
+
     return fails ? 1 : 0;
 }

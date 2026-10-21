@@ -115,6 +115,7 @@ echo "Machine: Q35 | RAM: 1024 MiB"
 
 exec qemu-system-x86_64 \
     -machine q35 \
+    -smp 4 \
     -m 1024 \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$VARS" \

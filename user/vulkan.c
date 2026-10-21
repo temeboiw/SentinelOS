@@ -337,7 +337,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     ids[rid]=v;defined[rid]=1;
    }
    else if((op==128u||op==129u||op==130u||op==131u||op==132u||op==133u||op==134u||op==135u||op==136u||
-            op==137u||op==138u||op==139u||op==140u||op==141u||op==164u||op==165u||
+            op==137u||op==138u||op==139u||op==164u||op==165u||
             op==166u||op==167u||op==170u||op==171u||op==172u||
             op==173u||op==174u||op==175u||op==176u||op==177u||
             op==178u||op==179u||op==180u||op==181u||op==182u||op==183u||

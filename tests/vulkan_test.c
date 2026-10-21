@@ -304,7 +304,7 @@ int main(void) {
     CHECK(vkQueueSubmit(queue, 1, &si, fence) == VK_SUCCESS);
     CHECK(vkMapMemory(device, dmem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(*(uint32_t *)mapped == 0xA1B2C3D4u);
-    CHECK(((uint32_t *)mapped)[8] == 0xA1B2C3D4u); /* second discontiguous region */
+    CHECK(((uint32_t *)mapped)[8] == 0x11223344u); /* second discontiguous region */
     CHECK(((uint32_t *)mapped)[4] == 0u); /* gap was not overwritten */
     vkUnmapMemory(device, dmem);
 

@@ -86,9 +86,9 @@ static uint16_t gfx_queue_size, gfx_avail_idx, gfx_last_used, gfx_notify_off;
 static uint64_t gfx_desc_pa, gfx_avail_pa, gfx_used_pa, gfx_req_pa, gfx_resp_pa;
 static GfxDesc *gfx_desc;
 static GfxAvail *gfx_avail;
-static GfxUsed *gfx_used;
+static volatile GfxUsed *gfx_used;
 static uint8_t *gfx_req;
-static GfxResponse *gfx_resp;
+static volatile GfxResponse *gfx_resp;
 static uint32_t gfx_pci_bus, gfx_pci_dev, gfx_pci_fn;
 static uint16_t gfx_pci_vendor, gfx_pci_device;
 static uint8_t gfx_pci_class, gfx_pci_subclass, gfx_pci_prog_if;
@@ -174,7 +174,7 @@ static int gfx_find_caps(void) {
         }
         cap=next;
     }
-    return gfx_common && gfx_notify;
+    if(!gfx_notify_mult) gfx_notify_mult=1;\n    return gfx_common && gfx_notify;
 }
 static int gfx_queue_init(void) {
     volatile uint8_t *c=gfx_common;
@@ -206,9 +206,9 @@ static int gfx_queue_init(void) {
     if(!gfx_desc_pa||!gfx_avail_pa||!gfx_used_pa||!gfx_req_pa||!gfx_resp_pa) return 0;
     gfx_desc=(GfxDesc*)(HHDM_BASE+gfx_desc_pa);
     gfx_avail=(GfxAvail*)(HHDM_BASE+gfx_avail_pa);
-    gfx_used=(GfxUsed*)(HHDM_BASE+gfx_used_pa);
+    gfx_used=(volatile GfxUsed*)(HHDM_BASE+gfx_used_pa);
     gfx_req=(uint8_t*)(HHDM_BASE+gfx_req_pa);
-    gfx_resp=(GfxResponse*)(HHDM_BASE+gfx_resp_pa);
+    gfx_resp=(volatile GfxResponse*)(HHDM_BASE+gfx_resp_pa);
     *(volatile uint64_t*)(c+32)=gfx_desc_pa;
     *(volatile uint64_t*)(c+40)=gfx_avail_pa;
     *(volatile uint64_t*)(c+48)=gfx_used_pa;

@@ -90,3 +90,12 @@ The interpreter now executes bounded 32-bit `OpBitFieldInsert`, `OpBitFieldSExtr
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 15% (engineering estimate, not Vulkan conformance).** This milestone records the growing set of exercised buffer/image transfer commands, validation paths, and scalar SPIR-V operations. Graphics and compute pipelines, descriptor binding, render passes/framebuffers, general shader/resource execution, presentation, and DXVK compatibility remain unimplemented or unverified.
+
+
+### Bound-memory lifetime safety
+
+`vkFreeMemory` now refuses to release an allocation while any live buffer or image still references it, preventing stale image-memory pointers and use-after-free behavior. Buffer and image memory binding now reject rebinding an already-bound resource and reject binding while the allocation is mapped. Regression tests cover freeing allocations still referenced by a buffer/image and duplicate binding attempts.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 20% (engineering estimate, not Vulkan conformance).** This step improves resource lifetime and binding correctness in addition to tested transfer operations and the scalar SPIR-V subset. It does not represent graphics/compute pipeline support: pipelines, descriptors, render passes/framebuffers, general shader resource access, presentation, and DXVK compatibility remain major missing areas.

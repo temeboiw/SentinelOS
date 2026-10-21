@@ -251,6 +251,10 @@ int main(void) {
     CHECK(vkAllocateMemory(device, &mai, 0, &dmem) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, src, smem, 0) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, dst, dmem, 0) == VK_SUCCESS);
+    /* Bound allocations cannot be freed out from under live resources. */
+    vkFreeMemory(device, smem, 0);
+    CHECK(mem_ok(smem));
+    CHECK(vkBindBufferMemory(device, src, smem, 0) == VK_ERROR_INITIALIZATION_FAILED);
 
     VkCommandPoolCreateInfo pci = {0};
     pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -341,6 +345,9 @@ int main(void) {
     VkDeviceMemory imem = 0;
     CHECK(vkAllocateMemory(device, &imai, 0, &imem) == VK_SUCCESS);
     CHECK(vkBindImageMemory(device, image, imem, 0) == VK_SUCCESS);
+    vkFreeMemory(device, imem, 0);
+    CHECK(mem_ok(imem));
+    CHECK(vkBindImageMemory(device, image, imem, 0) == VK_ERROR_INITIALIZATION_FAILED);
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
     VkClearColorValue clear = {{1.0f, 0.0f, 0.0f, 1.0f}};

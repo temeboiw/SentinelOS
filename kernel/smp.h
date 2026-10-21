@@ -381,9 +381,9 @@ static void smp_start_aps(const BootInfo *bi) {
             DbgPrint("smp: APIC ID=%u failed to come online; stopping AP startup\n", id);
             break;
         }
-        DbgPrint("smp: AP cpu%u confirmed online (%u/%u); scheduler remains BSP-only\n",
+        DbgPrint("smp: AP cpu%u confirmed online (%u/%u); shared scheduler active\n",
                  i, smp_online_count, smp_topology.count);
     }
-    DbgPrint("smp: %u logical CPU(s) online; secondary CPUs remain parked\n",
+    DbgPrint("smp: %u logical CPU(s) online; scheduler active on each initialized CPU\n",
              smp_online_count);
 }

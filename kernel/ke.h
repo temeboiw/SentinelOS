@@ -15,7 +15,7 @@
 #define QUANTUM_TICKS  2                            // 20 ms at 100 Hz
 #define CLOCK_VECTOR   0xD1                         // the same vector the Windows x64 clock uses
 
-typedef enum { ThreadReady, ThreadRunning, ThreadWaiting, ThreadTerminated } KTHREAD_STATE;
+typedef enum { ThreadReady, ThreadRunning, ThreadWaiting, ThreadTerminated, ThreadParking } KTHREAD_STATE;
 
 typedef struct _KTHREAD {
     Frame *frame;
@@ -25,6 +25,7 @@ typedef struct _KTHREAD {
     ULONGLONG wake_tick;
     ULONGLONG runs, ticks;
     ULONG id;
+    volatile uint32_t cpu_owner; /* UINT32_MAX means not currently executing */
     KTHREAD_STATE state;
     char name[16];
 } KTHREAD;
@@ -64,12 +65,15 @@ static Frame *KiSchedule(Frame *f) {
     KiSchedulerLock();
     KTHREAD *cur = ki_current;
     cur->frame = f;
+    cur->cpu_owner = UINT32_MAX;
+    if (cur->state == ThreadParking) cur->state = ThreadWaiting;
     if (cur->state == ThreadRunning) {
         if (cur != ki_idle) rq_push(cur); else cur->state = ThreadReady;     // the idle thread is never queued
     }
     KTHREAD *next = rq_pop();
     if (!next) next = ki_idle;
     next->state = ThreadRunning;
+    next->cpu_owner = cpu_local_current()->index;
     next->runs++;
     if (next != cur) ki_switches++;
     if (next->Process && next->Process != cur->Process)
@@ -114,7 +118,7 @@ static NTSTATUS KeDelayExecutionThread(CHAR WaitMode, BOOLEAN Alertable, PLARGE_
     uint64_t fl = KeDisableInterrupts();
     KiSchedulerLock();
     ki_current->wake_tick = KeTickCount + ticks;
-    ki_current->state = ThreadWaiting;
+    ki_current->state = ThreadParking;
     ki_need_resched = 1;
     KiSchedulerUnlock();
     KeRestoreInterrupts(fl);
@@ -154,6 +158,7 @@ static KTHREAD *ki_make_thread(const char *name, void (*entry)(PVOID), PVOID arg
     f->cs = 0x08; f->ss = 0x10; f->rflags = 0x202; f->rsp = rsp0;           // kernel segments, interrupts enabled
 
     t->frame = f; t->stack = stack; t->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED);
+    t->cpu_owner = UINT32_MAX;
     t->Process = PspSystemProcess;
     for (int i = 0; i < 15 && name[i]; i++) t->name[i] = name[i];
     return t;
@@ -183,7 +188,7 @@ static ULONG KeReapThreads(void) {
         uint64_t fl = KeDisableInterrupts();
         KiSchedulerLock();
         KTHREAD *t = ki_threads[i];
-        if (t && t->state == ThreadTerminated && t != ki_current) { ki_threads[i] = NULL; KiSchedulerUnlock(); KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); n++; }
+        if (t && t->state == ThreadTerminated && t->cpu_owner == UINT32_MAX) { ki_threads[i] = NULL; KiSchedulerUnlock(); KeRestoreInterrupts(fl); kfree(t->stack); kfree(t); n++; }
         else { KiSchedulerUnlock(); KeRestoreInterrupts(fl); }
     }
     return n;
@@ -196,6 +201,7 @@ static void KiInitializeScheduler(void) {
     KiSchedulerLock();
     KTHREAD *boot = kzalloc(sizeof *boot);
     boot->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED); boot->state = ThreadRunning;
+    boot->cpu_owner = cpu_local_current()->index;
     boot->Process = PspSystemProcess;
     boot->name[0] = 'M'; boot->name[1] = 'a'; boot->name[2] = 'i'; boot->name[3] = 'n';
     ki_threads[0] = boot; ki_current = boot;
@@ -221,6 +227,7 @@ static int KiInitializeApScheduler(uint32_t cpu_index) {
     KTHREAD *idle = kzalloc(sizeof *idle);
     if (!idle) { KiSchedulerUnlock(); return 0; }
     idle->id = __atomic_fetch_add(&ki_next_id, 1, __ATOMIC_RELAXED);
+    idle->cpu_owner = cpu_index;
     idle->Process = PspSystemProcess;
     idle->state = ThreadRunning;
     idle->name[0]='A'; idle->name[1]='P'; idle->name[2]='I'; idle->name[3]='d'; idle->name[4]='l'; idle->name[5]='e';

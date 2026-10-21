@@ -186,7 +186,7 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
     uint64_t pml4_pa = pmm_alloc_zeroed();
     if (!pml4_pa) {
         for (int i=0;i<MM_MAX_PROCESSES;i++) if (p==&MmProcessPool[i]) MmProcessUsed[i]=0;
-        MmUnlock();
+        MmUnlock(mmfl);
         return NULL;
     }
     uint64_t *np = PHYS_TO_VIRT(pml4_pa); /* Shared direct-map access to this address space's root. */
@@ -201,7 +201,7 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
     if (name) for (int i=0;i<15&&name[i];i++) p->ImageName[i]=name[i];
     DbgPrint("mm: created process '%s' pid=%lu cr3=%p\n",
              p->ImageName, (unsigned long)p->Pid, (void*)pml4_pa);
-    MmUnlock();
+    MmUnlock(mmfl);
     return p;
 }
 

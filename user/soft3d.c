@@ -154,3 +154,7 @@ int S3DSubmitVirGL(const void *commands,uint32_t length) {
     if(!commands||!length||length>4064u)return 0;
     return s3d_syscall3(34,(uint64_t)commands,(uint64_t)length,0)!=0;
 }
+
+int S3DPresentVirGL(void) {
+    return s3d_syscall3(35,0,0,0)!=0;
+}

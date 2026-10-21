@@ -7,6 +7,96 @@
 
 EFI_GUID gEfiGraphicsOutputProtocolGuid = {0x9042a9de,0x23dc,0x4a38,{0x96,0xfb,0x7a,0xde,0xd0,0x80,0x51,0x6a}};
 
+/* EDID protocols expose the monitor's preferred timing. If EDID is absent or
+ * unusable, leave the firmware-selected GOP mode unchanged. */
+typedef struct { UINT32 SizeOfEdid; UINT8 *Edid; } SENTINEL_EDID_PROTOCOL;
+EFI_GUID gEfiEdidActiveProtocolGuid =
+    {0xbd8c1056,0x9f36,0x44ec,{0x92,0xa8,0xa6,0x33,0x7f,0x81,0x79,0x86}};
+EFI_GUID gEfiEdidDiscoveredProtocolGuid =
+    {0x1c0c34f6,0xd380,0x41fa,{0xa0,0x49,0x8a,0xd0,0x6c,0x1a,0x66,0xaa}};
+
+static int edid_preferred_size(EFI_SYSTEM_TABLE *sys, UINT32 *width, UINT32 *height) {
+    EFI_GUID *guids[2] = { &gEfiEdidActiveProtocolGuid, &gEfiEdidDiscoveredProtocolGuid };
+    for (UINTN g = 0; g < 2; g++) {
+        SENTINEL_EDID_PROTOCOL *edid = NULL;
+        if (EFI_ERROR(sys->BootServices->LocateProtocol(guids[g], NULL, (VOID **)&edid)) ||
+            !edid || !edid->Edid || edid->SizeOfEdid < 128)
+            continue;
+        const UINT8 *e = edid->Edid;
+        static const UINT8 header[8] = {0x00,0xff,0xff,0xff,0xff,0xff,0xff,0x00};
+        int valid = 1;
+        for (UINTN i = 0; i < 8; i++) if (e[i] != header[i]) valid = 0;
+        UINT32 sum = 0;
+        for (UINTN i = 0; i < 128; i++) sum += e[i];
+        if (!valid || (sum & 0xffu) != 0) continue;
+        /* The first base-block detailed timing descriptor is the EDID
+         * preferred timing when present. Skip monitor descriptors (clock=0). */
+        for (UINTN off = 54; off + 18 <= 126; off += 18) {
+            const UINT8 *d = e + off;
+            if (!(d[0] | d[1])) continue;
+            UINT32 w = (UINT32)d[2] | ((UINT32)(d[4] & 0xf0u) << 4);
+            UINT32 h = (UINT32)d[5] | ((UINT32)(d[7] & 0xf0u) << 4);
+            if (w >= 320 && h >= 200 && w <= 8192 && h <= 4320) {
+                *width = w; *height = h;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void gop_select_display_mode(EFI_SYSTEM_TABLE *sys,
+                                    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
+    UINT32 want_w = 0, want_h = 0;
+    if (!gop || !gop->Mode || !edid_preferred_size(sys, &want_w, &want_h)) {
+        say(L"loadufi: EDID preferred mode unavailable; keeping firmware GOP mode\\r\\n");
+        return;
+    }
+    UINT32 exact = 0xffffffffu, best = 0xffffffffu;
+    UINT64 best_area = 0;
+    UINTN max_mode = gop->Mode->MaxMode;
+    for (UINT32 mode = 0; mode < max_mode; mode++) {
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = NULL;
+        UINTN info_size = 0;
+        EFI_STATUS st_mode = gop->QueryMode(gop, mode, &info_size, &info);
+        if (EFI_ERROR(st_mode) || !info) continue;
+        UINT32 w = info->HorizontalResolution, h = info->VerticalResolution;
+        if (w == want_w && h == want_h) exact = mode;
+        /* If exact timing is unavailable, choose the largest mode which does
+         * not exceed the preferred dimensions and has the closest aspect ratio. */
+        if (w >= 320 && h >= 200 && w <= want_w && h <= want_h) {
+            UINT64 area = (UINT64)w * h;
+            if (area > best_area) { best_area = area; best = mode; }
+        }
+        sys->BootServices->FreePool(info);
+    }
+    UINT32 chosen = exact != 0xffffffffu ? exact : best;
+    if (chosen == 0xffffffffu) {
+        say(L"loadufi: EDID preferred mode has no compatible GOP mode; keeping firmware mode\\r\\n");
+        return;
+    }
+    if (gop->Mode->Mode == chosen) {
+        say(L"loadufi: firmware already uses EDID display mode\\r\\n");
+        return;
+    }
+    EFI_STATUS set_status = gop->SetMode(gop, chosen);
+    if (EFI_ERROR(set_status)) {
+        say(L"loadufi: could not set EDID display mode; keeping firmware mode\\r\\n");
+        return;
+    }
+    say(L"loadufi: selected EDID-preferred display mode ");
+    /* Avoid printf dependencies in the UEFI loader. */
+    CHAR16 digits[12];
+    UINT32 vals[2] = { gop->Mode->Info->HorizontalResolution,
+                       gop->Mode->Info->VerticalResolution };
+    for (UINTN v = 0; v < 2; v++) {
+        UINT32 n = vals[v]; UINTN p = 0;
+        do { digits[p++] = (CHAR16)(L'0' + n % 10); n /= 10; } while (n && p < 11);
+        while (p) { CHAR16 c[2] = { digits[--p], 0 }; say(c); }
+        say(v == 0 ? L"x" : L"\\r\\n");
+    }
+}
+
 typedef struct { UINT32 OriginalFirstThunk, TimeDateStamp, ForwarderChain, Name, FirstThunk; } IMPORT_DESC;
 typedef struct {
     UINT32 Characteristics, TimeDateStamp; UINT16 MajorVersion, MinorVersion;
@@ -344,6 +434,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     memset(bi, 0, sizeof *bi);
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     if (!EFI_ERROR(bs->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **)&gop))) {
+        gop_select_display_mode(sys, gop);
         bi->fb_base = gop->Mode->FrameBufferBase;
         bi->width   = gop->Mode->Info->HorizontalResolution;
         bi->height  = gop->Mode->Info->VerticalResolution;

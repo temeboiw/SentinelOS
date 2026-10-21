@@ -292,7 +292,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     else v=(bits>>31)!=0u;
     ids[rid]=v;defined[rid]=1;
    }
-   else if((op==109u||op==110u||op==111u||op==112u||op==115u)&&wc==4u) {
+   else if((op==109u||op==110u||op==111u||op==112u||op==113u||op==114u||op==115u)&&wc==4u) {
     rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
     union{uint32_t u;float f;}x,y;x.u=ids[a];
     if(op==109u){if(!(x.f>=0.0f&&x.f<4294967296.0f))return 0;v=(uint32_t)x.f;}
@@ -337,7 +337,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     ids[rid]=v;defined[rid]=1;
    }
    else if((op==128u||op==129u||op==130u||op==131u||op==132u||op==133u||op==134u||op==135u||op==136u||
-            op==137u||op==138u||op==139u||op==164u||op==165u||
+            op==137u||op==138u||op==139u||op==140u||op==141u||op==164u||op==165u||
             op==166u||op==167u||op==170u||op==171u||op==172u||
             op==173u||op==174u||op==175u||op==176u||op==177u||
             op==178u||op==179u||op==180u||op==181u||op==182u||op==183u||
@@ -359,6 +359,15 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     else if(op==137u){if(!ids[b])return 0;v=ids[a]%ids[b];}
     else if(op==138u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;v=(uint32_t)((int32_t)ids[a]%(int32_t)ids[b]);}
     else if(op==139u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;int32_t rem=(int32_t)ids[a]%(int32_t)ids[b];if(rem&&((rem<0)!=((int32_t)ids[b]<0)))rem+=(int32_t)ids[b];v=(uint32_t)rem;}
+    else if(op==140u||op==141u){
+     union{uint32_t u;float f;}x,y,z,q;x.u=ids[a];y.u=ids[b];
+     if(y.f==0.0f)return 0;
+     q.f=x.f/y.f;
+     if(!(q.f>=-2147483648.0f&&q.f<2147483648.0f))return 0;
+     int32_t whole=(int32_t)q.f;
+     if(op==141u&&q.f<(float)whole)whole--;
+     z.f=x.f-(float)whole*y.f;v=z.u;
+    }
     else if(op==164u)v=(ids[a]==ids[b]);
     else if(op==165u)v=(ids[a]!=ids[b]);
     else if(op==166u)v=(ids[a]||ids[b]);

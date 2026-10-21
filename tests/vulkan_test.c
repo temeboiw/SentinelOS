@@ -214,7 +214,7 @@ int main(void) {
 
     /* Scalar IEEE-754 shader arithmetic and ordered/unordered comparisons. */
     const uint32_t float_words[] = {
-        0x07230203u, 0x00010000u, 0u, 20u, 0u,
+        0x07230203u, 0x00010000u, 0u, 24u, 0u,
         (2u<<16)|17u, 1u,
         (3u<<16)|14u, 0u, 1u,
         (4u<<16)|15u, 0u, 3u, 0x6e69616du,
@@ -224,6 +224,10 @@ int main(void) {
         (4u<<16)|43u, 2u, 6u, 0x40000000u,
         (4u<<16)|43u, 2u, 11u, 0xC0000000u,
         (4u<<16)|43u, 2u, 12u, 3u,
+        (4u<<16)|43u, 2u, 19u, 0x40B00000u,
+        (4u<<16)|43u, 2u, 20u, 0x40000000u,
+        (4u<<16)|43u, 2u, 21u, 0xC0B00000u,
+        (4u<<16)|43u, 2u, 22u, 0x40000000u,
         (5u<<16)|54u, 2u, 3u, 0u, 4u,
         (2u<<16)|248u, 17u,
         (5u<<16)|129u, 2u, 7u, 5u, 6u,
@@ -234,6 +238,10 @@ int main(void) {
         (4u<<16)|111u, 2u, 14u, 12u,
         (4u<<16)|158u, 2u, 15u, 5u,
         (4u<<16)|160u, 2u, 16u, 11u,
+        (5u<<16)|140u, 2u, 18u, 19u, 20u,
+        (5u<<16)|141u, 2u, 23u, 21u, 22u,
+        (4u<<16)|113u, 2u, 12u, 12u,
+        (4u<<16)|114u, 2u, 12u, 12u,
         (1u<<16)|253u,
         (1u<<16)|56u
     };
@@ -254,6 +262,10 @@ int main(void) {
     CHECK(executed == 1u); /* finite predicate */
     CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 16u, &executed));
     CHECK(executed == 1u); /* sign-bit predicate */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 18u, &executed));
+    CHECK(executed == 0x3FC00000u); /* 5.5 rem 2.0 = 1.5 */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 23u, &executed));
+    CHECK(executed == 0x3F000000u); /* -5.5 mod 2.0 = 0.5 */
 
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};

@@ -214,7 +214,7 @@ int main(void) {
 
     /* Scalar IEEE-754 shader arithmetic and ordered/unordered comparisons. */
     const uint32_t float_words[] = {
-        0x07230203u, 0x00010000u, 0u, 24u, 0u,
+        0x07230203u, 0x00010000u, 0u, 28u, 0u,
         (2u<<16)|17u, 1u,
         (3u<<16)|14u, 0u, 1u,
         (4u<<16)|15u, 0u, 3u, 0x6e69616du,
@@ -240,8 +240,8 @@ int main(void) {
         (4u<<16)|160u, 2u, 16u, 11u,
         (5u<<16)|140u, 2u, 18u, 19u, 20u,
         (5u<<16)|141u, 2u, 23u, 21u, 22u,
-        (4u<<16)|113u, 2u, 12u, 12u,
-        (4u<<16)|114u, 2u, 12u, 12u,
+        (4u<<16)|113u, 2u, 24u, 12u,
+        (4u<<16)|114u, 2u, 25u, 12u,
         (1u<<16)|253u,
         (1u<<16)|56u
     };
@@ -266,6 +266,10 @@ int main(void) {
     CHECK(executed == 0x3FC00000u); /* 5.5 rem 2.0 = 1.5 */
     CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 23u, &executed));
     CHECK(executed == 0x3F000000u); /* -5.5 mod 2.0 = 0.5 */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 24u, &executed));
+    CHECK(executed == 3u); /* UConvert 32-bit bit-preserving form */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 25u, &executed));
+    CHECK(executed == 3u); /* SConvert 32-bit bit-preserving form */
 
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};

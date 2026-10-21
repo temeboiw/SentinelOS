@@ -458,7 +458,21 @@ static void cursor_restore_fast(void) {
 
 static void cursor_restore(void) {
     if (!cur_on || !g_scanout) return;
-    /* Rebuild the scene below the cursor; never restore stale saved pixels. */
+
+    /*
+     * A non-desktop USER32 process does not own the shared Z-ordered scene.
+     * u32_repaint_scene_rect() would submit this process's private window
+     * layer as shared layer 2, which can overwrite the desktop compositor's
+     * authoritative pixels after this window has closed. In that case remove
+     * only the cursor pixels we actually painted, using the underlay captured
+     * after the last scene presentation. The desktop owner can safely ask the
+     * kernel to reconstruct the cursor footprint from its persistent layers.
+     */
+    if (g_gpu_surface && !u32_is_desktop_window()) {
+        cursor_restore_fast();
+        return;
+    }
+
     u32_repaint_scene_rect(cur_ox, cur_oy, cur_ox + 16, cur_oy + 16);
     cur_on = 0;
 }

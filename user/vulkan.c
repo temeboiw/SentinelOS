@@ -75,7 +75,6 @@
 #define VK_IMAGE_USAGE_TRANSFER_DST_BIT 2u
 #define VK_IMAGE_USAGE_SAMPLED_BIT 4u
 #define VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT 0x10u
-#define VK_IMAGE_USAGE_STORAGE_BIT 0x8u
 #define VK_IMAGE_ASPECT_COLOR_BIT 1u
 #define VK_IMAGE_LAYOUT_GENERAL 1u
 #define VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL 7u
@@ -334,7 +333,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperti
  if(!phys_ok(p)||!out)return VK_ERROR_INITIALIZATION_FAILED;
  vk_zero(out,sizeof(*out));
  if((format!=VK_FORMAT_R8G8B8A8_UNORM&&format!=VK_FORMAT_B8G8R8A8_UNORM)||type!=1||tiling>1||flags||
-    !usage||(usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT)))return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    !usage||(usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)))return VK_ERROR_FORMAT_NOT_SUPPORTED;
  out->maxExtent.width=512;out->maxExtent.height=512;out->maxExtent.depth=1;
  out->maxMipLevels=1;out->maxArrayLayers=1;out->sampleCounts=1;out->maxResourceSize=VK_MEMORY_BYTES;
  return VK_SUCCESS;

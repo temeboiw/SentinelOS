@@ -1169,9 +1169,18 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     for(uint32_t yy=y;yy<y+h;yy++)for(uint32_t xx=x;xx<x+w;xx++) {
         uint32_t at=yy*width+xx;
-        uint32_t c=wm_shared_background[at];
-        c=wm_shared_alpha(c,wm_shared_desktop[at]);
-        for(int oi=0;oi<count;oi++)c=wm_shared_alpha(c,wm_shared_windows[order[oi]][at]);
+        uint32_t c=wm_shared_alpha(wm_shared_background[at],wm_shared_desktop[at]);
+        /* Window surfaces are screen-sized buffers, but their valid drawing
+         * area is bounded by the registered frame. Never composite stale
+         * pixels outside that frame into the shared scanout. */
+        for(int oi=0;oi<count;oi++) {
+            WmEntry *e=&wm_tab[order[oi]];
+            int left=e->x-12, top=e->y-12;
+            int right=e->x+e->w+12, bottom=e->y+e->h+16;
+            if((int)xx<left||(int)yy<top||(int)xx>=right||(int)yy>=bottom)
+                continue;
+            c=wm_shared_alpha(c,wm_shared_windows[order[oi]][at]);
+        }
         c=wm_shared_alpha(c,wm_shared_taskbar[at]);
         out[yy*pitch+xx]=c;
     }

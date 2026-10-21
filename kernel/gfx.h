@@ -29,6 +29,9 @@
 #define GFX_GPU_CMD_FLUSH 0x0104u
 #define GFX_GPU_CMD_TRANSFER 0x0105u
 #define GFX_GPU_CMD_ATTACH_BACKING 0x0106u
+#define GFX_GPU_CMD_CTX_CREATE 0x0200u
+#define GFX_GPU_CMD_SUBMIT_3D 0x0207u
+#define GFX_VIRTIO_GPU_F_VIRGL (1u << 0)
 #define GFX_GPU_RESP_OK_NODATA 0x1100u
 #define GFX_GPU_FORMAT_B8G8R8X8_UNORM 2u
 
@@ -77,7 +80,7 @@ typedef struct {
 typedef struct { GfxCtrlHdr hdr; } GfxResponse;
 
 static uint8_t gfx_gpu_ready;
-static uint8_t gfx_gpu_failed;
+static uint8_t gfx_gpu_failed;\nstatic uint8_t gfx_virgl_supported;\nstatic uint8_t gfx_3d_ready;
 static uint64_t gfx_surface_pa, gfx_surface_bytes, gfx_surface_pages;
 static uint32_t gfx_width, gfx_height, gfx_pitch;
 static volatile uint8_t *gfx_common, *gfx_notify;
@@ -184,6 +187,9 @@ static int gfx_queue_init(void) {
     c[20]=3; /* DRIVER */
     /* Modern VirtIO devices require VIRTIO_F_VERSION_1 (feature bit 32).
        Do not mark FEATURES_OK unless the device advertises it. */
+    *(volatile uint32_t*)(c+0)=0; /* device feature selector: low word */
+    uint32_t device_features_lo=*(volatile uint32_t*)(c+4);
+    gfx_virgl_supported=(device_features_lo&GFX_VIRTIO_GPU_F_VIRGL)?1:0;
     *(volatile uint32_t*)(c+0)=1; /* device feature selector: high word */
     uint32_t device_features_hi=*(volatile uint32_t*)(c+4);
     if(!(device_features_hi&1u)) {
@@ -191,7 +197,7 @@ static int gfx_queue_init(void) {
         return 0;
     }
     *(volatile uint32_t*)(c+8)=0; /* driver feature selector: low word */
-    *(volatile uint32_t*)(c+12)=0; /* no optional low-word features */
+    *(volatile uint32_t*)(c+12)=gfx_virgl_supported?GFX_VIRTIO_GPU_F_VIRGL:0;
     *(volatile uint32_t*)(c+8)=1; /* driver feature selector: high word */
     *(volatile uint32_t*)(c+12)=1; /* negotiate VIRTIO_F_VERSION_1 */
     c[20]=11; /* FEATURES_OK */
@@ -249,6 +255,29 @@ static int gfx_command(const void *request, uint32_t request_len) {
     }
     return 1;
 }
+static int gfx_create_virgl_context(void) {
+    struct {
+        GfxCtrlHdr hdr;
+        uint32_t nlen, context_init;
+        char debug_name[64];
+    } ctx={0};
+    ctx.hdr.type=GFX_GPU_CMD_CTX_CREATE;
+    ctx.hdr.ctx_id=1;
+    const char name[]="SentinelOS VirGL";
+    ctx.nlen=(uint32_t)(sizeof(name)-1);
+    for(uint32_t i=0;i<sizeof(name);i++)ctx.debug_name[i]=name[i];
+    return gfx_command(&ctx,sizeof ctx);
+}
+static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
+    if(!gfx_3d_ready||!stream||!length||length>4096u-32u)return 0;
+    struct { GfxCtrlHdr hdr; uint32_t size,padding; } submit={0};
+    submit.hdr.type=GFX_GPU_CMD_SUBMIT_3D;
+    submit.hdr.ctx_id=1;
+    submit.size=length;
+    for(uint32_t i=0;i<sizeof(submit);i++)gfx_req[i]=((const uint8_t*)&submit)[i];
+    for(uint32_t i=0;i<length;i++)gfx_req[sizeof(submit)+i]=stream[i];
+    return gfx_command(gfx_req,(uint32_t)sizeof(submit)+length);
+}
 static int gfx_create_resource(void) {
     GfxCreate2D cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_2D;cr.resource_id=GFX_RESOURCE_ID;
@@ -295,6 +324,14 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
         gfx_gpu_failed=1;return 0;
     }
     gfx_gpu_ready=1;
+    if(gfx_virgl_supported) {
+        if(gfx_create_virgl_context()) {
+            gfx_3d_ready=1;
+            DbgPrint("gfx: VirGL 3D context created; raw command submission enabled\n");
+        } else {
+            DbgPrint("gfx: VirGL context creation failed; using 2D acceleration only\n");
+        }
+    }
     DbgPrint("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",
         gfx_width,gfx_height,(unsigned long long)gfx_surface_pages);
     return 1;
@@ -350,7 +387,7 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
     int gpu=gfx_driver_init(fb_width,fb_height);
     if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
     if(gpu) {
-        out->capabilities|=GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D;
+        out->capabilities|=GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D;\n        if(gfx_3d_ready)out->capabilities|=GFX_CAP_ACCEL_3D;
         out->backend=GFX_BACKEND_VIRTIO_GPU;out->pitch=gfx_pitch;out->initialized=1;
         out->pci_bus=gfx_pci_bus;out->pci_device=gfx_pci_dev;out->pci_function=gfx_pci_fn;
         out->vendor_id=gfx_pci_vendor;out->device_id=gfx_pci_device;

@@ -244,7 +244,7 @@ static void KiInitializeScheduler(void) {
     KiSchedulerUnlock();
 }
 
-/* APs share the ready queue but own current/idle/quantum state. */
+/* APs share the locked ready queue but own current/idle/quantum state. */
 static int KiInitializeApScheduler(uint32_t cpu_index) {
     if (!cpu_index || cpu_index >= CPU_MAX || !PspSystemProcess) return 0;
     KiSchedulerLock();

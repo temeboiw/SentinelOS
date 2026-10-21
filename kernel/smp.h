@@ -2,9 +2,10 @@
 /*
  * SentinelOS SMP bring-up:
  * Discover processors through ACPI MADT, start APs with a low-memory INIT/SIPI
- * trampoline, and install each AP's private GDT/TSS/GS/APIC state. APs remain
- * parked because the scheduler and process address-space bookkeeping are
- * still BSP-only; marking an AP online does not mean it schedules processes.
+ * trampoline, and install each AP's private GDT/TSS/GS/APIC state. APs join the
+ * shared locked scheduler with per-CPU current-thread/process state and a local
+ * preemption timer. Process teardown refuses to free an address space active on
+ * any CPU.
  */
 #include <stdint.h>
 #include "bootinfo.h"
@@ -220,10 +221,10 @@ static void smp_discover(void) {
 }
 
 /*
- * Long-mode entry target for the future low-memory INIT/SIPI trampoline.
- * This intentionally parks APs after installing private descriptor state;
- * scheduler/process globals are not yet SMP-safe, so they must not schedule
- * user or kernel threads on these cores yet.
+ * Long-mode entry target for the low-memory INIT/SIPI trampoline.
+ * Each AP installs private descriptor, process, scheduler, and APIC state
+ * before publishing ONLINE. Its local periodic timer enters the scheduler
+ * through a separate vector so only the BSP advances the global clock.
  */
 static uint64_t smp_rdmsr(uint32_t msr) {
     uint32_t lo, hi;

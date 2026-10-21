@@ -44,7 +44,7 @@ jobs:
             cat "$RUNNER_TEMP/sentinel-qemu.log"
             exit 1
           fi
-          if ! grep -q 'bootvid: sentlogon.exe created' "$RUNNER_TEMP/sentinel-qemu.log"; then
+          if ! grep -Eq 'bootvid: sentlogon\\.exe created|bootvid: splash complete; launching sentlogon' "$RUNNER_TEMP/sentinel-qemu.log"; then
             echo "bootvid.exe did not finish and launch sentlogon.exe."
             cat "$RUNNER_TEMP/sentinel-qemu.log"
             exit 1

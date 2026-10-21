@@ -233,15 +233,20 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    else if(op==43u && wc==4u) { /* local constant declarations */ 
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }
-   else if((op==128u||op==132u||op==134u||op==194u||op==195u||
-            op==196u||op==197u||op==198u||op==199u||op==83u||
-            op==124u) && wc==5u && op!=83u && op!=124u) {
+   else if((op==128u||op==130u||op==132u||op==134u||op==135u||
+            op==137u||op==138u||op==139u||op==194u||op==195u||
+            op==196u||op==197u||op==198u||op==199u) && wc==5u) {
     rid=w[i+2];a=w[i+3];b=w[i+4];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||
        !defined[a]||!defined[b])return 0;
     if(op==128u)v=ids[a]+ids[b];
+    else if(op==130u)v=ids[a]-ids[b];
     else if(op==132u)v=ids[a]*ids[b];
     else if(op==134u){if(!ids[b])return 0;v=ids[a]/ids[b];}
+    else if(op==135u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;v=(uint32_t)((int32_t)ids[a]/(int32_t)ids[b]);}
+    else if(op==137u){if(!ids[b])return 0;v=ids[a]%ids[b];}
+    else if(op==138u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;v=(uint32_t)((int32_t)ids[a]%(int32_t)ids[b]);}
+    else if(op==139u){if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;int32_t rem=(int32_t)ids[a]%(int32_t)ids[b];if(rem&&((rem<0)!=((int32_t)ids[b]<0)))rem+=(int32_t)ids[b];v=(uint32_t)rem;}
     else if(op==194u)v=ids[a]>>(ids[b]&31u);
     else if(op==195u)v=(uint32_t)((int32_t)ids[a]>>(ids[b]&31u));
     else if(op==196u)v=ids[a]<<(ids[b]&31u);

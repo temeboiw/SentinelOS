@@ -408,6 +408,7 @@ static u32 cur_paint[16*16];
 
 static void ensure_fb(void);
 static void compose(void);
+static void u32_flush_graphics(int x, int y, int w, int h);
 static void cursor_restore_fast(void) {
     if (!cur_on || !g_scanout) return;
     for (int j = 0; j < 16; j++) {

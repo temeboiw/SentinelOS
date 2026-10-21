@@ -181,8 +181,8 @@ int S3DClearVirGL(uint32_t argb) {
     uint32_t stream[] = {
         (1u|(8u<<8)|(5u<<16)), 1u, S3D_VIRGL_RENDER_TARGET_ID, 2u, 0u, 0u,
         (2u|(8u<<8)|(1u<<16)), 1u,
-        (4u|(3u<<16)), 1u, 0u, 1u,
-        (6u|(8u<<16)), 4u,
+        (5u|(3u<<16)), 1u, 0u, 1u,
+        (7u|(8u<<16)), 4u,
         s3d_u8_to_float_bits((argb>>16)&255u),
         s3d_u8_to_float_bits((argb>>8)&255u),
         s3d_u8_to_float_bits(argb&255u),

@@ -7,7 +7,7 @@ than just an empty loader. It builds as `vulkan.dll` and `vulkan-1.dll`
 and implements a limited subset of the Vulkan 1.0 object and command model:
 
 - instance creation/destruction and CPU physical-device enumeration;
-- one software transfer-only queue family;
+- one software graphics/transfer queue family (graphics support is still experimental);
 - device and queue creation;
 - fixed-size host-visible memory allocations, buffer creation/binding/mapping;
 - command pools and command-buffer allocation;
@@ -16,14 +16,20 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
 - bounded SPIR-V 1.0 shader-module structure validation and module lifetime;
+- experimental `vkCreateGraphicsPipelines`, `vkCmdBindPipeline`, `vkCmdBindVertexBuffers`, and `vkCmdDraw` entry points for a narrow two-stage scalar-shader subset;
+- a host regression test that submits a shader-driven triangle draw to the CPU rasterizer and checks the rendered pixel values; this currently uses the SentinelOS-only `SentinelVulkanCmdBindColorTarget` hook because standard render passes/framebuffers are not implemented;
 - a tested, bounded scalar SPIR-V instruction interpreter for selected 32-bit integer arithmetic, bitwise/shift operations, comparisons, logical operations, copy/bitcast, and select instructions; unsupported executable instructions fail closed;
 - synchronous binary-semaphore consume/signal for already-signaled waits (an unsignaled wait returns `VK_NOT_READY` because this backend cannot suspend a queue).
 - procedure lookup for implemented entry points.
 
 This is an **experimental, incomplete Vulkan software backend**, not a
-conformant full Vulkan 1.0 implementation. It does not implement graphics or
-compute pipelines, shader modules/SPIR-V execution, image views, render passes,
-descriptor sets, full synchronization semantics, swapchains/surface
+conformant full Vulkan 1.0 implementation. The new graphics-pipeline path is a
+narrow bring-up path, not general Vulkan graphics support: it consumes three
+pre-transformed `VkSoftVertex` records, executes only scalar SPIR-V results
+supported by the existing interpreter, and uses a SentinelOS-specific target
+binding hook. It does not yet implement standard vertex-input declarations,
+shader interfaces/variables, descriptor sets, image views, render passes,
+framebuffers, compute pipelines, full synchronization, swapchains/surface
 presentation, or the broad feature/limit set expected by normal engines. It is
 not DXVK-ready.
 
@@ -62,7 +68,7 @@ The CPU backend now executes bounded `vkCmdUpdateBuffer` writes (up to 256 bytes
 
 ## Progress estimate (2026-10-21)
 
-**Estimated full Vulkan implementation progress: about 5%.** This is a rough engineering estimate based on functional coverage, not export count or lines of code. The current implementation has a bounded CPU device, buffer/image transfer commands, basic synchronization objects, SPIR-V validation, and a limited scalar integer interpreter. The majority of Vulkan remains unimplemented: graphics/compute pipelines, descriptors, render passes/framebuffers, shader interfaces and floating-point/resource execution, full synchronization semantics, presentation/swapchains, and broad extension/format coverage. DXVK compatibility is not established.
+**Estimated full Vulkan implementation progress: about 5%.** This is a rough engineering estimate based on functional coverage, not export count or lines of code. The current implementation has a bounded CPU device, buffer/image transfer commands, basic synchronization objects, SPIR-V validation, and a limited scalar integer interpreter. The majority of Vulkan remains unimplemented: general graphics/compute pipelines, descriptors, render passes/framebuffers, shader interfaces and resource execution, full synchronization semantics, presentation/swapchains, and broad extension/format coverage. DXVK compatibility is not established.
 
 ### Additional scalar SPIR-V instructions
 

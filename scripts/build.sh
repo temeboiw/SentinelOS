@@ -1468,15 +1468,6 @@ lld -flavor link \
   /export:GetGestureExtraArgs \
   /export:SetGestureConfig \
   /export:GetTouchInputInfo \
-  /export:S3DGetSurface \
-  /export:S3DInitializeSurface \
-  /export:S3DInitialize \
-  /export:S3DClear \
-  /export:S3DDrawTriangle \
-  /export:S3DPresent \
-  /export:S3DSubmitVirGL \
-  /export:S3DPresentVirGL \
-  /export:S3DClearVirGL \
   "/out:$SYS32/user32.dll" \
   "$B/obj/user32.o" \
   "$B/obj/soft3d.o"

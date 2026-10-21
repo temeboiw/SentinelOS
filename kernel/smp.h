@@ -1,10 +1,10 @@
 #pragma once
 /*
- * SentinelOS SMP bring-up, phase 1:
- * Discover xAPIC processor IDs from the ACPI MADT. This deliberately does
- * not start APs yet; the current kernel still has BSP-global scheduler,
- * TSS and interrupt state, so running another core before those are made
- * per-CPU would corrupt live process state.
+ * SentinelOS SMP bring-up:
+ * Discover processors through ACPI MADT, start APs with a low-memory INIT/SIPI
+ * trampoline, and install each AP's private GDT/TSS/GS/APIC state. APs remain
+ * parked because the scheduler and process address-space bookkeeping are
+ * still BSP-only; marking an AP online does not mean it schedules processes.
  */
 #include <stdint.h>
 #include "bootinfo.h"

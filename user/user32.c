@@ -139,6 +139,10 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+/* A non-desktop process can receive clicks over the shared taskbar. Publish
+ * its freshly redrawn taskbar layer only when that process changes taskbar UI;
+ * ordinary window repaints must never overwrite the desktop's taskbar/menu. */
+static int u32_taskbar_dirty;
 /* Window geometry is committed only when the title-bar grab is released. */
 static int g_drag_pending_x, g_drag_pending_y, g_drag_moved;
 /* Suppress the per-process welcome card while exposing desktop after close. */
@@ -1071,6 +1075,14 @@ static void compose(void) {
                 a.layer=3;a.pixels=(u64)u32_taskbar_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
             } else {
                 a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                /* A click may be delivered to an application USER32 instance
+                 * rather than Desktop. Publish its Start-menu/taskbar change
+                 * explicitly; ordinary app paints must not overwrite layer 3. */
+                if(u32_taskbar_dirty) {
+                    a.layer=3;a.pixels=(u64)u32_taskbar_layer;
+                    if(sy3(SYS_PresentLayer,(u64)&a,0,0))
+                        u32_taskbar_dirty=0;
+                }
             }
             /* cursor_restore() ran before layer submission, so this scanout
              * now contains clean scene pixels. Save that underlay and draw the
@@ -1236,6 +1248,7 @@ static void on_click(int x, int y) {
         }
 
         if (hit(x, y, 8, ty + 6, 78, ty + 38)) {
+            u32_taskbar_dirty=1;
             g_menu = !g_menu;
             g_search_focus = 0;
 
@@ -1258,6 +1271,7 @@ static void on_click(int x, int y) {
                 mx + 10, my + 12,
                 mx + mw - 10, my + 38)) {
             g_search_focus = 1;
+            u32_taskbar_dirty=1;
             compose_region(0, my, (int)g_fw, (int)g_fh);
             return;
         }
@@ -1277,6 +1291,7 @@ static void on_click(int x, int y) {
         if (hit(x, y, mx, my + 92, mx + mw, my + 118)) {
             g_menu = 0;
             g_search_focus = 0;
+            u32_taskbar_dirty=1;
             compose_region(0, my, (int)g_fw, (int)g_fh);
             return;
         }
@@ -1284,6 +1299,7 @@ static void on_click(int x, int y) {
         /* Click elsewhere closes the menu. */
         g_menu = 0;
         g_search_focus = 0;
+        u32_taskbar_dirty=1;
         compose_region(0, my, (int)g_fw, (int)g_fh);
         return;
     }

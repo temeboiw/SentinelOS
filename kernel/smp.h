@@ -7,6 +7,12 @@
  * per-CPU would corrupt live process state.
  */
 #include <stdint.h>
+#include "bootinfo.h"
+
+extern uint8_t smp_trampoline_start[], smp_trampoline_end[];
+extern uint8_t smp_tramp_gdtr[], smp_tramp_gdt[], smp_tramp_pm_far[], smp_tramp_pm_entry[];
+extern uint8_t smp_tramp_cr3_imm[], smp_tramp_lm_far[], smp_tramp_lm_entry[];
+extern uint8_t smp_tramp_stack_imm[], smp_tramp_index_imm[], smp_tramp_entry_imm[];
 
 #define SMP_MAX_CPUS 64
 #define SMP_MADT_LAPIC 0
@@ -33,6 +39,7 @@ static SmpTopology smp_topology;
 #define SMP_CPU_ONLINE   2u
 static volatile uint32_t smp_cpu_state[SMP_MAX_CPUS];
 static volatile uint32_t smp_online_count;
+static uint8_t smp_ap_stacks[SMP_MAX_CPUS][16384] __attribute__((aligned(16)));
 
 
 static uint8_t smp_in8(uint16_t port) {
@@ -208,7 +215,7 @@ static void smp_discover(void) {
         DbgPrint("smp: no enabled processors found in MADT\n");
         return;
     }
-    DbgPrint("smp: AP startup is not enabled until per-CPU TSS and scheduler state are installed\n");
+    /* AP startup follows discovery once the low-memory trampoline is installed. */
 }
 
 /*
@@ -217,6 +224,50 @@ static void smp_discover(void) {
  * scheduler/process globals are not yet SMP-safe, so they must not schedule
  * user or kernel threads on these cores yet.
  */
+static uint64_t smp_rdmsr(uint32_t msr) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | lo;
+}
+static void smp_wrmsr(uint32_t msr, uint64_t value) {
+    __asm__ volatile("wrmsr" :: "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32)));
+}
+static void smp_delay(volatile uint32_t spins) {
+    while (spins--) __asm__ volatile("pause");
+}
+static int smp_x2apic_enabled(void) {
+    return (smp_rdmsr(0x1B) & (1ULL << 10)) != 0;
+}
+static void smp_lapic_write(uint32_t reg, uint32_t value) {
+    if (smp_x2apic_enabled()) smp_wrmsr(0x800 + (reg >> 4), value);
+    else {
+        uint64_t base = smp_rdmsr(0x1B) & 0xFFFFF000ULL;
+        ((volatile uint32_t *)(uintptr_t)base)[reg / 4] = value;
+    }
+}
+static int smp_send_ipi(uint32_t destination, uint32_t command) {
+    if (smp_x2apic_enabled()) {
+        smp_wrmsr(0x830, ((uint64_t)destination << 32) | command);
+        return 1;
+    }
+    if (destination > 255) return 0;
+    uint64_t base = smp_rdmsr(0x1B) & 0xFFFFF000ULL;
+    volatile uint32_t *lapic = (volatile uint32_t *)(uintptr_t)base;
+    for (uint32_t i = 0; i < 1000000 && (lapic[0x300 / 4] & (1u << 12)); i++)
+        __asm__ volatile("pause");
+    lapic[0x310 / 4] = destination << 24;
+    lapic[0x300 / 4] = command;
+    for (uint32_t i = 0; i < 1000000 && (lapic[0x300 / 4] & (1u << 12)); i++)
+        __asm__ volatile("pause");
+    return !(lapic[0x300 / 4] & (1u << 12));
+}
+static void smp_enable_local_apic(void) {
+    uint64_t base = smp_rdmsr(0x1B);
+    if (!(base & (1ULL << 11))) smp_wrmsr(0x1B, base | (1ULL << 11));
+    smp_lapic_write(0x80, 0);
+    smp_lapic_write(0xF0, 0x1FF);
+}
+
 __attribute__((used, noreturn))
 static void smp_ap_entry(uint32_t cpu_index) {
     __asm__ volatile("cli");
@@ -228,6 +279,7 @@ static void smp_ap_entry(uint32_t cpu_index) {
 
     smp_cpu_state[cpu_index] = SMP_CPU_STARTING;
     cpu_init_cpu(cpu_index);
+    smp_enable_local_apic();
 
     __asm__ volatile("" ::: "memory");
     smp_cpu_state[cpu_index] = SMP_CPU_ONLINE;
@@ -236,4 +288,89 @@ static void smp_ap_entry(uint32_t cpu_index) {
              cpu_index, smp_topology.cpus[cpu_index].apic_id);
 
     for (;;) __asm__ volatile("cli; hlt");
+}
+static void smp_start_aps(const BootInfo *bi) {
+    if (!bi || !bi->ap_trampoline_phys) {
+        DbgPrint("smp: UEFI did not reserve a low-memory AP trampoline; BSP only\n");
+        return;
+    }
+    if (smp_topology.count < 2) {
+        DbgPrint("smp: no secondary processors to start\n");
+        return;
+    }
+    uint64_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    cr3 &= ~0xFFFULL;
+    if (cr3 > 0xFFFFFFFFULL) {
+        DbgPrint("smp: PML4 at %p exceeds 32-bit AP trampoline limit\n", (void *)cr3);
+        return;
+    }
+    uint64_t apic_base = smp_rdmsr(0x1B);
+    if (!(apic_base & (1ULL << 11))) smp_wrmsr(0x1B, apic_base | (1ULL << 11));
+    smp_enable_local_apic();
+
+    uint8_t *page = (uint8_t *)(uintptr_t)bi->ap_trampoline_phys;
+    uintptr_t bytes = (uintptr_t)smp_trampoline_end - (uintptr_t)smp_trampoline_start;
+    if (bytes > 4096 || (bi->ap_trampoline_phys & 0xFFFULL) ||
+        bi->ap_trampoline_phys >= 0x100000ULL) {
+        DbgPrint("smp: invalid SIPI page %p (template %llu bytes)\n",
+                 (void *)bi->ap_trampoline_phys, (unsigned long long)bytes);
+        return;
+    }
+    for (uintptr_t i = 0; i < 4096; i++) page[i] = 0;
+    for (uintptr_t i = 0; i < bytes; i++) page[i] = smp_trampoline_start[i];
+
+    uintptr_t gdtr_off = (uintptr_t)smp_tramp_gdtr - (uintptr_t)smp_trampoline_start;
+    uintptr_t gdt_off = (uintptr_t)smp_tramp_gdt - (uintptr_t)smp_trampoline_start;
+    uintptr_t pm_far_off = (uintptr_t)smp_tramp_pm_far - (uintptr_t)smp_trampoline_start;
+    uintptr_t cr3_off = (uintptr_t)smp_tramp_cr3_imm - (uintptr_t)smp_trampoline_start;
+    uintptr_t lm_far_off = (uintptr_t)smp_tramp_lm_far - (uintptr_t)smp_trampoline_start;
+    uintptr_t stack_off = (uintptr_t)smp_tramp_stack_imm - (uintptr_t)smp_trampoline_start;
+    uintptr_t index_off = (uintptr_t)smp_tramp_index_imm - (uintptr_t)smp_trampoline_start;
+    uintptr_t entry_off = (uintptr_t)smp_tramp_entry_imm - (uintptr_t)smp_trampoline_start;
+    uintptr_t pm_off = (uintptr_t)smp_tramp_pm_entry - (uintptr_t)smp_trampoline_start;
+    uintptr_t lm_off = (uintptr_t)smp_tramp_lm_entry - (uintptr_t)smp_trampoline_start;
+    *(uint32_t *)(page + gdtr_off + 2) = (uint32_t)(bi->ap_trampoline_phys + gdt_off);
+    *(uint32_t *)(page + pm_far_off) = (uint32_t)(bi->ap_trampoline_phys + pm_off);
+    *(uint32_t *)(page + cr3_off) = (uint32_t)cr3;
+    *(uint32_t *)(page + lm_far_off) = (uint32_t)(bi->ap_trampoline_phys + lm_off);
+    *(uint64_t *)(page + entry_off) = (uint64_t)(uintptr_t)smp_ap_entry;
+
+    uint32_t vector = (uint32_t)(bi->ap_trampoline_phys >> 12);
+    DbgPrint("smp: INIT/SIPI trampoline at %p, vector=%u, PML4=%p\n",
+             (void *)bi->ap_trampoline_phys, vector, (void *)cr3);
+    for (uint32_t i = 1; i < smp_topology.count; i++) {
+        uint32_t id = smp_topology.cpus[i].apic_id;
+        smp_cpu_state[i] = SMP_CPU_OFFLINE;
+        *(uint64_t *)(page + stack_off) =
+            (((uint64_t)(uintptr_t)smp_ap_stacks[i] + sizeof smp_ap_stacks[i]) & ~15ULL) - 8ULL;
+        *(uint32_t *)(page + index_off) = i;
+        if (!smp_send_ipi(id, 0x0000C500u)) {
+            DbgPrint("smp: could not send INIT to APIC ID=%u; stopping AP startup\n", id);
+            break;
+        }
+        smp_delay(20000000u);
+        if (!smp_send_ipi(id, 0x00008500u)) {
+            DbgPrint("smp: INIT deassert failed for APIC ID=%u; stopping AP startup\n", id);
+            break;
+        }
+        smp_delay(2000000u);
+        if (!smp_send_ipi(id, 0x00000600u | vector)) {
+            DbgPrint("smp: first SIPI failed for APIC ID=%u; stopping AP startup\n", id);
+            break;
+        }
+        smp_delay(2000000u);
+        (void)smp_send_ipi(id, 0x00000600u | vector);
+        uint32_t wait = 200000000u;
+        while (wait-- && smp_cpu_state[i] != SMP_CPU_ONLINE)
+            __asm__ volatile("pause");
+        if (smp_cpu_state[i] != SMP_CPU_ONLINE) {
+            DbgPrint("smp: APIC ID=%u failed to come online; stopping AP startup\n", id);
+            break;
+        }
+        DbgPrint("smp: AP cpu%u confirmed online (%u/%u); scheduler remains BSP-only\n",
+                 i, smp_online_count, smp_topology.count);
+    }
+    DbgPrint("smp: %u logical CPU(s) online; secondary CPUs remain parked\n",
+             smp_online_count);
 }

@@ -618,7 +618,8 @@ int main(void) {
     stages[1].stage = 0x10u; stages[1].module = fragmentShader; stages[1].pName = "main";
     VkGraphicsPipelineCreateInfo gpci = {0};
     gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gpci.stageCount = 2; gpci.pStages = stages; gpci.basePipelineIndex = -1;\n    gpci.renderPass = drawRenderPass;
+    gpci.stageCount = 2; gpci.pStages = stages; gpci.basePipelineIndex = -1;
+    gpci.renderPass = drawRenderPass;
     VkPipeline pipeline = 0;
     CHECK(vkCreateGraphicsPipelines(device, 0, 1, &gpci, 0, &pipeline) == VK_SUCCESS);
     VkBufferCreateInfo vertexCi = {0};
@@ -644,12 +645,12 @@ int main(void) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkDeviceSize vertexOffset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &vertexOffset);
-    VkClearColorValue clear = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearColorValue drawClear = {{0.0f, 0.0f, 0.0f, 0.0f}};
     VkRenderPassBeginInfo renderBegin = {0};
     renderBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderBegin.renderPass = drawRenderPass; renderBegin.framebuffer = drawFramebuffer;
     renderBegin.renderArea_width = 8; renderBegin.renderArea_height = 8;
-    renderBegin.clearValueCount = 1; renderBegin.pClearValues = &clear;
+    renderBegin.clearValueCount = 1; renderBegin.pClearValues = &drawClear;
     vkCmdBeginRenderPass(cmd, &renderBegin, 0);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);

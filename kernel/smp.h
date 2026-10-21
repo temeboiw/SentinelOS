@@ -176,7 +176,20 @@ static void smp_discover(void) {
         off += len;
     }
 
-    DbgPrint("smp: BSP APIC ID=%u; ACPI reports %u enabled processor(s)\n",
+    /* Reserve logical CPU 0 for the BSP regardless of MADT entry ordering. */
+    for (uint32_t i = 0; i < smp_topology.count; i++) {
+        if (smp_topology.cpus[i].apic_id == smp_topology.bsp_apic_id) {
+            if (i != 0) {
+                SmpCpuInfo tmp = smp_topology.cpus[0];
+                smp_topology.cpus[0] = smp_topology.cpus[i];
+                smp_topology.cpus[i] = tmp;
+            }
+            break;
+        }
+    }
+    smp_cpu_state[0] = SMP_CPU_ONLINE;
+    smp_online_count = 1;
+    DbgPrint("smp: BSP APIC ID=%u; ACPI reports %u enabled processor(s)\\n",
              smp_topology.bsp_apic_id, smp_topology.count);
     for (uint32_t i = 0; i < smp_topology.count; i++)
         DbgPrint("smp: cpu%u APIC ID=%u mode=%s%s\n", i,

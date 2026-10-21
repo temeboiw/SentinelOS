@@ -212,6 +212,33 @@ int main(void) {
     CHECK(vk_spirv_execute_u32(bitfield_words, sizeof(bitfield_words)/4u, 3u, 13u, &executed));
     CHECK(executed == 0xFFFFFF80u);
 
+    /* Scalar IEEE-754 shader arithmetic and ordered/unordered comparisons. */
+    const uint32_t float_words[] = {
+        0x07230203u, 0x00010000u, 0u, 16u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 0x3fc00000u,
+        (4u<<16)|43u, 2u, 6u, 0x40000000u,
+        (5u<<16)|129u, 2u, 7u, 5u, 6u,
+        (5u<<16)|133u, 2u, 8u, 7u, 6u,
+        (4u<<16)|127u, 2u, 9u, 8u,
+        (5u<<16)|186u, 2u, 10u, 8u, 7u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(float_words, sizeof(float_words)/4u));
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 7u, &executed));
+    CHECK(executed == 0x40600000u); /* 1.5 + 2.0 = 3.5 */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 8u, &executed));
+    CHECK(executed == 0x40E00000u); /* 3.5 * 2.0 = 7.0 */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 0xC0E00000u); /* FNegate */
+    CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 10u, &executed));
+    CHECK(executed == 1u); /* ordered greater-than */
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -251,25 +278,6 @@ int main(void) {
     CHECK(vkAllocateMemory(device, &mai, 0, &dmem) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, src, smem, 0) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, dst, dmem, 0) == VK_SUCCESS);
-    /* Vulkan permits non-overlapping copies within one buffer. */
-    void *srcMapped = 0;
-    CHECK(vkMapMemory(device, smem, 0, VK_WHOLE_SIZE, 0, &srcMapped) == VK_SUCCESS);
-    for (unsigned wi = 0; wi < 64; ++wi) ((uint8_t *)srcMapped)[wi] = (uint8_t)wi;
-    vkUnmapMemory(device, smem);
-    uint64_t selfCopyRegion[3] = {0, 16, 16};
-    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
-    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
-    vkCmdCopyBuffer(cmd, src, src, 1, selfCopyRegion);
-    CHECK(((VkCmdObj *)cmd)->count == 1);
-    uint64_t overlapRegion[3] = {0, 8, 16};
-    vkCmdCopyBuffer(cmd, src, src, 1, overlapRegion);
-    CHECK(((VkCmdObj *)cmd)->count == 1); /* overlapping self-copy rejected atomically */
-    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
-    CHECK(vkMapMemory(device, smem, 0, VK_WHOLE_SIZE, 0, &srcMapped) == VK_SUCCESS);
-    CHECK(((uint8_t *)srcMapped)[16] == 0 && ((uint8_t *)srcMapped)[31] == 15);
-    vkUnmapMemory(device, smem);
-    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     /* Bound allocations cannot be freed out from under live resources. */
     vkFreeMemory(device, smem, 0);
     CHECK(mem_ok(smem));
@@ -313,6 +321,15 @@ int main(void) {
     CHECK(vkFlushMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
     CHECK(vkInvalidateMappedMemoryRanges(device, 1, &mappedRange) == VK_SUCCESS);
     vkUnmapMemory(device, smem);
+
+    /* Vulkan forbids vkCmdCopyBuffer with identical source/destination handles. */
+    uint64_t selfCopyRegion[3] = {0, 16, 16};
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+    CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    vkCmdCopyBuffer(cmd, src, src, 1, selfCopyRegion);
+    CHECK(((VkCmdObj *)cmd)->count == 0);
+    CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
 
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);

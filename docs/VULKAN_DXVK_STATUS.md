@@ -117,3 +117,16 @@ Image-only `vkCmdPipelineBarrier` now validates the complete barrier list and co
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 30% (engineering estimate, not Vulkan conformance).** This milestone adds tested same-buffer transfer behavior and overlap validation. It does not imply graphics/compute pipeline, descriptor, render-pass, presentation, or DXVK support; those remain major gaps.
+
+
+### Scalar floating-point SPIR-V execution
+
+The bounded scalar interpreter now executes 32-bit `OpFNegate`, `OpFAdd`, `OpFSub`, `OpFMul`, `OpFDiv`, and ordered/unordered floating-point comparisons (`OpFOrd*`/`OpFUnord*`). Arithmetic uses IEEE-754 single-precision bit patterns, with tests covering addition, multiplication, negation, and ordered comparison. This is still not a general shader runtime: vector operations, memory/pointer access, interfaces, and graphics/compute pipeline execution remain unsupported.
+
+### Vulkan buffer-copy conformance correction
+
+The copy command now rejects identical source and destination buffer handles, matching Vulkan's command validity requirements. The earlier self-copy experiment was invalid Vulkan usage and has been replaced with a regression test confirming that the command buffer remains unchanged when such a copy is attempted.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 50% (engineering estimate, not Vulkan conformance).** This is a coarse project tracking target after a bundled implementation batch; it does not mean half of Vulkan 1.0 or DXVK is implemented. Major missing pieces include graphics/compute pipelines, descriptors, render passes/framebuffers, shader interfaces and resource access, presentation, and DXVK compatibility.

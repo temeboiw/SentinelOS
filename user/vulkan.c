@@ -282,10 +282,11 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    else if(op==43u && wc==4u) { /* local constant declarations */ 
     rid=w[i+2];v=w[i+3];if(rid>=VK_SPIRV_MAX_IDS)return 0;ids[rid]=v;defined[rid]=1;
    }
-   else if((op==126u||op==168u||op==200u||op==204u||op==205u)&&wc==4u) {
+   else if((op==126u||op==127u||op==168u||op==200u||op==204u||op==205u)&&wc==4u) {
     rid=w[i+2];a=w[i+3];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
-    if(op==126u)v=(uint32_t)(-(int32_t)ids[a]);
+    if(op==126u)v=0u-ids[a];
+    else if(op==127u){union{uint32_t u;float f;}x;x.u=ids[a];x.f=-x.f;v=x.u;}
     else if(op==168u)v=(ids[a]==0u);
     else if(op==200u)v=~ids[a];
     else if(op==204u) {
@@ -315,16 +316,22 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     }
     ids[rid]=v;defined[rid]=1;
    }
-   else if((op==128u||op==130u||op==132u||op==134u||op==135u||
-            op==137u||op==138u||op==139u||op==164u||op==165u||
+   else if((op==128u||op==129u||op==130u||op==131u||op==132u||op==133u||op==134u||op==135u||op==136u||
+            op==137u||op==138u||op==139u||op==140u||op==141u||op==164u||op==165u||
             op==166u||op==167u||op==170u||op==171u||op==172u||
             op==173u||op==174u||op==175u||op==176u||op==177u||
-            op==178u||op==179u||op==194u||op==195u||op==196u||
-            op==197u||op==198u||op==199u) && wc==5u) {
+            op==178u||op==179u||op==180u||op==181u||op==182u||op==183u||
+            op==184u||op==185u||op==186u||op==187u||op==188u||op==189u||op==190u||op==191u||
+            op==194u||op==195u||op==196u||op==197u||op==198u||op==199u) && wc==5u) {
     rid=w[i+2];a=w[i+3];b=w[i+4];
     if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||
        !defined[a]||!defined[b])return 0;
     if(op==128u)v=ids[a]+ids[b];
+    else if(op==129u||op==131u||op==133u||op==136u){
+     union{uint32_t u;float f;}x,y,z;x.u=ids[a];y.u=ids[b];
+     if(op==129u)z.f=x.f+y.f;else if(op==131u)z.f=x.f-y.f;else if(op==133u)z.f=x.f*y.f;else z.f=x.f/y.f;
+     v=z.u;
+    }
     else if(op==130u)v=ids[a]-ids[b];
     else if(op==132u)v=ids[a]*ids[b];
     else if(op==134u){if(!ids[b])return 0;v=ids[a]/ids[b];}
@@ -346,6 +353,18 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     else if(op==177u)v=((int32_t)ids[a]<(int32_t)ids[b]);
     else if(op==178u)v=(ids[a]<=ids[b]);
     else if(op==179u)v=((int32_t)ids[a]<=(int32_t)ids[b]);
+    else if(op>=180u&&op<=191u){
+     union{uint32_t u;float f;}x,y;x.u=ids[a];y.u=ids[b];
+     int unordered=(x.f!=x.f)||(y.f!=y.f);
+     switch(op){
+      case 180u:v=!unordered&&(x.f==y.f);break;case 181u:v=unordered||(x.f==y.f);break;
+      case 182u:v=!unordered&&(x.f!=y.f);break;case 183u:v=unordered||(x.f!=y.f);break;
+      case 184u:v=!unordered&&(x.f<y.f);break;case 185u:v=unordered||(x.f<y.f);break;
+      case 186u:v=!unordered&&(x.f>y.f);break;case 187u:v=unordered||(x.f>y.f);break;
+      case 188u:v=!unordered&&(x.f<=y.f);break;case 189u:v=unordered||(x.f<=y.f);break;
+      case 190u:v=!unordered&&(x.f>=y.f);break;default:v=unordered||(x.f>=y.f);break;
+     }
+    }
     else if(op==194u)v=ids[a]>>(ids[b]&31u);
     else if(op==195u)v=(uint32_t)((int32_t)ids[a]>>(ids[b]&31u));
     else if(op==196u)v=ids[a]<<(ids[b]&31u);
@@ -478,7 +497,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer c) 
 __declspec(dllexport) VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c,VkFlags flags) { (void)flags;if(!cmd_ok(c))return VK_ERROR_INITIALIZATION_FAILED;c->count=0;c->state=0;return VK_SUCCESS; }
 __declspec(dllexport) void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,uint32_t value) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||c->count>=128||off>b->size||(off&3u))return;if(size==VK_WHOLE_SIZE)size=b->size-off;if(size>b->size-off||(size!=VK_WHOLE_SIZE&&(size&3u)))return;unsigned i=c->count++;c->ops[i].op=1;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;c->ops[i].value=value; }
 __declspec(dllexport) void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,const void *data) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||b->device!=c->device||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!data||!size||size>256u||(size&3u)||(off&3u)||off>b->size||size>b->size-off||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=7;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;vk_copy(c->ops[i].data,data,(size_t)size); }
-__declspec(dllexport) void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) { if(!cmd_ok(c)||c->state!=1||!buf_ok(src)||!buf_ok(dst)||src->device!=c->device||dst->device!=c->device||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->memory->device!=c->device||dst->memory->device!=c->device||!(src->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!n||!regions||n>128u-c->count)return;const uint64_t *r=(const uint64_t*)regions;for(uint32_t j=0;j<n;j++){uint64_t so=r[j*3],doff=r[j*3+1],sz=r[j*3+2];if(!sz||(so&3u)||(doff&3u)||(sz&3u)||so>src->size||sz>src->size-so||doff>dst->size||sz>dst->size-doff)return;if(src->memory==dst->memory){uint64_t sb=src->offset+so,db=dst->offset+doff;if(sb<db+sz&&db<sb+sz)return;}}for(uint32_t j=0;j<n;j++){unsigned i=c->count++;c->ops[i].op=2;c->ops[i].a=src;c->ops[i].b=dst;c->ops[i].offset=r[j*3];c->ops[i].size=r[j*3+2];c->ops[i].offset2=r[j*3+1];} }
+__declspec(dllexport) void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) { if(!cmd_ok(c)||c->state!=1||!buf_ok(src)||!buf_ok(dst)||src->device!=c->device||dst->device!=c->device||src==dst||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->memory->device!=c->device||dst->memory->device!=c->device||!(src->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(dst->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!n||!regions||n>128u-c->count)return;const uint64_t *r=(const uint64_t*)regions;for(uint32_t j=0;j<n;j++){uint64_t so=r[j*3],doff=r[j*3+1],sz=r[j*3+2];if(!sz||(so&3u)||(doff&3u)||(sz&3u)||so>src->size||sz>src->size-so||doff>dst->size||sz>dst->size-doff)return;if(src->memory==dst->memory){uint64_t sb=src->offset+so,db=dst->offset+doff;if(sb<db+sz&&db<sb+sz)return;}}for(uint32_t j=0;j<n;j++){unsigned i=c->count++;c->ops[i].op=2;c->ops[i].a=src;c->ops[i].b=dst;c->ops[i].offset=r[j*3];c->ops[i].size=r[j*3+2];c->ops[i].offset2=r[j*3+1];} }
 
 
 

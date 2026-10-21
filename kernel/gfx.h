@@ -301,7 +301,7 @@ static int gfx_create_virgl_target(void) {
         uint32_t resource_id,target,format,bind,width,height,depth;
         uint32_t array_size,last_level,nr_samples,flags,padding;
     } cr={0};
-    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;
+    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.hdr.ctx_id=1;
     cr.resource_id=GFX_VIRGL_TARGET_ID;cr.target=2; /* PIPE_TEXTURE_2D */
     cr.format=GFX_GPU_FORMAT_B8G8R8X8_UNORM;
     cr.bind=(1u<<1)|(1u<<3); /* render target + sampler view */
@@ -310,7 +310,7 @@ static int gfx_create_virgl_target(void) {
     if(!gfx_command(&cr,sizeof cr))return 0;
 
     struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};
-    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;
+    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;attach.hdr.ctx_id=1;
     attach.resource_id=GFX_VIRGL_TARGET_ID;attach.nr_entries=1;
     attach.entry.addr=gfx_surface_pa;attach.entry.length=(uint32_t)gfx_surface_bytes;
     if(!gfx_command(&attach,sizeof attach))return 0;
@@ -333,14 +333,14 @@ static int gfx_create_virgl_buffer(void) {
         uint32_t resource_id,target,format,bind,width,height,depth;
         uint32_t array_size,last_level,nr_samples,flags,padding;
     } cr={0};
-    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.resource_id=GFX_VIRGL_BUFFER_ID;
+    cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.hdr.ctx_id=1;cr.resource_id=GFX_VIRGL_BUFFER_ID;
     cr.target=0; /* PIPE_BUFFER */
     cr.format=0; /* PIPE_BUFFER resources use format 0 */
     cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
     cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;
     if(!gfx_command(&cr,sizeof cr))return 0;
     struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};
-    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;
+    attach.hdr.type=GFX_GPU_CMD_ATTACH_BACKING;attach.hdr.ctx_id=1;
     attach.resource_id=GFX_VIRGL_BUFFER_ID;attach.nr_entries=1;
     attach.entry.addr=gfx_virgl_buffer_pa;attach.entry.length=GFX_VIRGL_BUFFER_BYTES;
     if(!gfx_command(&attach,sizeof attach))return 0;

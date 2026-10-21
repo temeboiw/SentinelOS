@@ -97,6 +97,7 @@ for src in \
   boot/loadufi.c \
   hal/hal.c \
   kernel/kernel.c \
+  kernel/smp_trampoline.S \
   kernel/gfx.h \
   user/smss.c \
   user/bootvid.c \
@@ -230,11 +231,16 @@ clang "${COMMON[@]}" \
   -c "$ROOT/kernel/kernel.c" \
   -o "$B/obj/kernel.o"
 
+clang "${COMMON[@]}" \
+  -c "$ROOT/kernel/smp_trampoline.S" \
+  -o "$B/obj/smp_trampoline.o"
+
 lld -flavor link \
   /subsystem:native /entry:kmain /nodefaultlib /dynamicbase \
   /base:0xFFFFFFFF80200000 /fixed:no \
   "/out:$SYS32/krnl.exe" \
   "$B/obj/kernel.o" \
+  "$B/obj/smp_trampoline.o" \
   "$B/obj/hal.lib"
 
 echo "==> User-mode PE images"

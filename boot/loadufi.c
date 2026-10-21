@@ -432,6 +432,19 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     BootInfo *bi;
     bs->AllocatePool(EfiLoaderData, sizeof *bi, (VOID **)&bi);
     memset(bi, 0, sizeof *bi);
+    /* SIPI vectors address a 4 KiB page below 1 MiB. Reserve it before the
+       final memory-map snapshot so the kernel can copy its AP trampoline there. */
+    EFI_PHYSICAL_ADDRESS ap_trampoline = 0x9FFFF;
+    EFI_STATUS ap_page_status = bs->AllocatePages(
+        AllocateMaxAddress, EfiLoaderData, 1, &ap_trampoline);
+    if (!EFI_ERROR(ap_page_status) && ap_trampoline < 0x100000ULL) {
+        bi->ap_trampoline_phys = ap_trampoline;
+        memset((VOID *)(UINTN)ap_trampoline, 0, 4096);
+        say(L"loadufi: reserved low-memory AP SIPI page\r\n");
+    } else {
+        bi->ap_trampoline_phys = 0;
+        say(L"loadufi: AP SIPI page unavailable; booting BSP-only\r\n");
+    }
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     if (!EFI_ERROR(bs->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **)&gop))) {
         gop_select_display_mode(sys, gop);

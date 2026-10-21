@@ -19,4 +19,5 @@ typedef struct {
     uint64_t desc_size;
     uint32_t module_count, pad;
     BootModule modules[BOOT_MAX_MODULES];
+    uint64_t ap_trampoline_phys; /* UEFI-reserved SIPI page below 1 MiB, zero if unavailable */
 } BootInfo;

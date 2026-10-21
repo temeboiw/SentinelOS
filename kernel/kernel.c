@@ -55,6 +55,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
     smp_discover();
+    smp_start_aps(bi);
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
     uint64_t got = pmm_reclaim_boot_services(bi);

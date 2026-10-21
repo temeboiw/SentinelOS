@@ -44,6 +44,7 @@
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
 #define SYS_NtInitializeGraphics        32
+#define SYS_NtFlushGraphics              33
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1780,6 +1781,23 @@ static Frame *syscall_handler(Frame *f) {
         } else {
             f->rax = 0;
         }
+        return f;
+    }
+
+    case SYS_NtFlushGraphics: {
+        typedef struct { uint32_t x, y, w, h; } GfxUserRect;
+        GfxUserRect rect;
+        if (!f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi, sizeof(rect), 0)) {
+            f->rax = 0;
+            return f;
+        }
+        rect = *(GfxUserRect *)f->rdi;
+        KPROCESS *caller = MmCurrentProcess;
+        if (caller != PspSystemProcess) MmSwitchToProcess(PspSystemProcess);
+        int ok = gfx_flush(rect.x, rect.y, rect.w, rect.h);
+        if (caller != PspSystemProcess) MmSwitchToProcess(caller);
+        f->rax = ok ? 1 : 0;
         return f;
     }
 

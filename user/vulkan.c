@@ -494,12 +494,14 @@ static int vk_copy_region_ok(const VkBufferImageCopy *r,const VkImageObj *im) {
   r->imageExtent.depth==1 && !(r->bufferOffset&3u);
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdCopyBufferToImage(VkCommandBuffer c,VkBuffer b,VkImage im,uint32_t layout,uint32_t n,const VkBufferImageCopy *regions) {
- if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!image_ok(im)||!b->memory||!im->memory||b->device!=c->device||im->device!=c->device||!(b->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(im->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT)||layout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL||!regions)return;
- for(uint32_t j=0;j<n&&c->count<128;j++){const VkBufferImageCopy *r=&regions[j];if(!vk_copy_region_ok(r,im)||r->bufferOffset>b->size||im->size>b->size-r->bufferOffset)continue;unsigned i=c->count++;c->ops[i].op=5;c->ops[i].a=b;c->ops[i].image=im;c->ops[i].offset=r->bufferOffset;c->ops[i].size=im->size;c->ops[i].layout=layout;}
+ if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!image_ok(im)||b->device!=c->device||im->device!=c->device||!mem_ok(b->memory)||!mem_ok(im->memory)||b->memory->device!=c->device||im->memory->device!=c->device||!(b->usage&VK_BUFFER_USAGE_TRANSFER_SRC_BIT)||!(im->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT)||layout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL||!n||!regions||n>128u-c->count)return;
+ for(uint32_t j=0;j<n;j++){const VkBufferImageCopy *r=&regions[j];if(!vk_copy_region_ok(r,im)||r->bufferOffset>b->size||im->size>b->size-r->bufferOffset)return;}
+ for(uint32_t j=0;j<n;j++){const VkBufferImageCopy *r=&regions[j];unsigned i=c->count++;c->ops[i].op=5;c->ops[i].a=b;c->ops[i].image=im;c->ops[i].offset=r->bufferOffset;c->ops[i].size=im->size;c->ops[i].layout=layout;}
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdCopyImageToBuffer(VkCommandBuffer c,VkImage im,uint32_t layout,VkBuffer b,uint32_t n,const VkBufferImageCopy *regions) {
- if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!image_ok(im)||!b->memory||!im->memory||b->device!=c->device||im->device!=c->device||!(im->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT)||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||layout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL||!regions)return;
- for(uint32_t j=0;j<n&&c->count<128;j++){const VkBufferImageCopy *r=&regions[j];if(!vk_copy_region_ok(r,im)||r->bufferOffset>b->size||im->size>b->size-r->bufferOffset)continue;unsigned i=c->count++;c->ops[i].op=6;c->ops[i].a=b;c->ops[i].image=im;c->ops[i].offset=r->bufferOffset;c->ops[i].size=im->size;c->ops[i].layout=layout;}
+ if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!image_ok(im)||b->device!=c->device||im->device!=c->device||!mem_ok(b->memory)||!mem_ok(im->memory)||b->memory->device!=c->device||im->memory->device!=c->device||!(im->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT)||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||layout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL||!n||!regions||n>128u-c->count)return;
+ for(uint32_t j=0;j<n;j++){const VkBufferImageCopy *r=&regions[j];if(!vk_copy_region_ok(r,im)||r->bufferOffset>b->size||im->size>b->size-r->bufferOffset)return;}
+ for(uint32_t j=0;j<n;j++){const VkBufferImageCopy *r=&regions[j];unsigned i=c->count++;c->ops[i].op=6;c->ops[i].a=b;c->ops[i].image=im;c->ops[i].offset=r->bufferOffset;c->ops[i].size=im->size;c->ops[i].layout=layout;}
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer c,uint32_t srcStage,uint32_t dstStage,uint32_t dep,uint32_t memCount,const void *memBarriers,uint32_t bufferCount,const void *bufferBarriers,uint32_t imageCount,const VkImageMemoryBarrier *images) {
  (void)dep;(void)memBarriers;(void)bufferBarriers;

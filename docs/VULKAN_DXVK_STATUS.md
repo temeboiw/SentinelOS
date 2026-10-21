@@ -81,3 +81,12 @@ The interpreter now executes bounded 32-bit `OpBitFieldInsert`, `OpBitFieldSExtr
 ## Progress estimate update (2026-10-21)
 
 **Tracked implementation milestone: 10% (engineering target, not Vulkan conformance).** The implementation remains a limited software Vulkan subset. This milestone reflects the growing tested foundation for buffer/image transfer and scalar SPIR-V execution; it does not mean that graphics pipelines, descriptor sets, render passes, shader interfaces, presentation, or DXVK support exist. Those major functional areas remain unimplemented, and full Vulkan compatibility is far from complete.
+
+
+### Atomic image-buffer transfer validation
+
+`vkCmdCopyBufferToImage` and `vkCmdCopyImageToBuffer` now validate every region before recording any commands. They reject empty/oversized region lists, invalid handles or memory ownership, unsupported transfer usage, invalid layout/extent/packing, out-of-bounds offsets, and command-buffer overflow. A malformed region list can no longer silently skip an invalid region while recording other regions. Tests verify an out-of-bounds image-to-buffer copy leaves the command buffer unchanged.
+
+## Progress estimate update (2026-10-21)
+
+**Tracked implementation milestone: 15% (engineering estimate, not Vulkan conformance).** This milestone records the growing set of exercised buffer/image transfer commands, validation paths, and scalar SPIR-V operations. Graphics and compute pipelines, descriptor binding, render passes/framebuffers, general shader/resource execution, presentation, and DXVK compatibility remain unimplemented or unverified.

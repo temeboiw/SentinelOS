@@ -388,6 +388,11 @@ int main(void) {
     copy.imageSubresource.layerCount = 1;
     copy.imageExtent.width = 4; copy.imageExtent.height = 4; copy.imageExtent.depth = 1;
     vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, 1, &copy);
+    uint32_t recordedCopies = ((VkCmdObj *)cmd)->count;
+    VkBufferImageCopy invalidCopy = copy;
+    invalidCopy.bufferOffset = 60; /* 64-byte image does not fit at this offset */
+    vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, 1, &invalidCopy);
+    CHECK(((VkCmdObj *)cmd)->count == recordedCopies); /* invalid copy is rejected atomically */
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, rbmem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);

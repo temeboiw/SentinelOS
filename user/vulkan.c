@@ -206,9 +206,11 @@ static int vk_spirv_validate(const uint32_t *w, size_t n) {
  * simple shader helpers. Unsupported executable opcodes fail closed.
  * Values are 32-bit SPIR-V bit patterns; no host pointers are dereferenced. */
 #define VK_SPIRV_MAX_IDS 4096u
+static uint32_t g_spirv_ids[VK_SPIRV_MAX_IDS];
+static uint8_t g_spirv_defined[VK_SPIRV_MAX_IDS];
 static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
                                 uint32_t output_id,uint32_t *out_bits) {
- uint32_t ids[VK_SPIRV_MAX_IDS], defined[VK_SPIRV_MAX_IDS];
+ uint32_t *ids=g_spirv_ids; uint8_t *defined=g_spirv_defined;
  size_t i=5; uint32_t active=0, found=0, steps=0;
  if(!w||!out_bits||!vk_spirv_validate(w,n)||!entry||
     output_id>=VK_SPIRV_MAX_IDS)return 0;

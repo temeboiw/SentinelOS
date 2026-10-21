@@ -477,13 +477,13 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
     if (!pages || (base & (USER_IMAGE_PAGE - 1)) ||
         base < 0x10000ULL || base >= 0x0000800000000000ULL ||
         rounded > 0x0000800000000000ULL - base) {
-        DbgPrint("user: invalid image range for %s\\n", mod->name);
+        DbgPrint("user: invalid image range for %s\n", mod->name);
         return -1;
     }
 
     if (!MmUserRangeUnmapped(proc, base, rounded)) {
         if (!relocatable) {
-            DbgPrint("user: image VA collision and no relocations for %s\\n",
+            DbgPrint("user: image VA collision and no relocations for %s\n",
                      mod->name);
             return -1;
         }
@@ -502,7 +502,7 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
             candidate += 0x02000000ULL;
         }
         if (!found) {
-            DbgPrint("user: no free relocatable image range for %s\\n",
+            DbgPrint("user: no free relocatable image range for %s\n",
                      mod->name);
             return -1;
         }

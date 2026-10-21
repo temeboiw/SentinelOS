@@ -2347,7 +2347,7 @@ static Frame *syscall_handler(Frame *f) {
         wm_set_rect(pid,rect[0],rect[1],rect[2],rect[3]);
         int nx=rect[0]-12,ny=rect[1]-12,nw=rect[2]+24,nh=rect[3]+28;
         int x0=ox<nx?ox:nx,y0=oy<ny?oy:ny,x1=ox+ow>nx+nw?ox+ow:nx+nw,y1=oy+oh>ny+nh?oy+oh:ny+nh;
-        if(x0<0){x1+=x0;x0=0;}if(y0<0){y1+=y0;y0=0;}
+        if(x0<0)x0=0;if(y0<0)y0=0;
         if(wm_shared_width&&x1>(int)wm_shared_width)x1=(int)wm_shared_width;
         if(wm_shared_height&&y1>(int)wm_shared_height)y1=(int)wm_shared_height;
         if(x1>x0&&y1>y0)wm_shared_compose((uint32_t)x0,(uint32_t)y0,(uint32_t)(x1-x0),(uint32_t)(y1-y0));

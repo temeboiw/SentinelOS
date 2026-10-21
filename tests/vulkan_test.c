@@ -73,7 +73,7 @@ int main(void) {
 
     /* Execute real SPIR-V scalar instructions: 40 + 2 must produce 42. */
     const uint32_t exec_words[] = {
-        0x07230203u, 0x00010000u, 0u, 10u, 0u,
+        0x07230203u, 0x00010000u, 0u, 11u, 0u,
         (2u<<16)|17u, 1u,
         (3u<<16)|14u, 0u, 1u,
         (4u<<16)|15u, 0u, 3u, 0x6e69616du,
@@ -84,13 +84,16 @@ int main(void) {
         (5u<<16)|54u, 2u, 3u, 0u, 4u,
         (2u<<16)|248u, 8u,
         (5u<<16)|128u, 2u, 7u, 5u, 6u,
+        (5u<<16)|132u, 2u, 9u, 7u, 6u,
         (1u<<16)|253u,
         (1u<<16)|56u
     };
     uint32_t executed = 0;
     CHECK(vk_spirv_execute_u32(exec_words, sizeof(exec_words)/4u, 3u, 7u, &executed));
     CHECK(executed == 42u);
-    CHECK(!vk_spirv_execute_u32(exec_words, sizeof(exec_words)/4u, 3u, 9u, &executed));
+    CHECK(vk_spirv_execute_u32(exec_words, sizeof(exec_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 84u);
+    CHECK(!vk_spirv_execute_u32(exec_words, sizeof(exec_words)/4u, 3u, 10u, &executed));
 
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};

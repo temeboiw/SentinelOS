@@ -492,17 +492,18 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if(!g_scanout)return;
 
-    /* The compositor owns the saved-under image for the cursor actually on
-     * screen. Restore that exact footprint; never reconstruct it from this
-     * process' private wallpaper/window layers, which may not match the
-     * desktop shared with other processes. */
+    /* Repaint the old cursor footprint from the scene, rather than restoring
+     * saved-under pixels: other windows/processes may have updated that area
+     * while the cursor was there. Then draw the cursor exactly once at its
+     * new position and flush that footprint. */
     int rendered_x=cur_ox, rendered_y=cur_oy;
-    cursor_restore_fast();
+    if (cur_on) {
+        cursor_restore();
+        u32_flush_graphics(rendered_x,rendered_y,16,16);
+    }
     cur_ox=x; cur_oy=y;
-    /* Present the scene first; the flush path then paints the CPU cursor last. */
-    u32_flush_graphics(rendered_x,rendered_y,16,16);
+    cursor_save_draw(x,y);
     u32_flush_graphics(x,y,16,16);
-    if (!g_gpu_surface) cursor_save_draw(x,y);
     (void)old_x; (void)old_y;
 }
 
@@ -545,11 +546,12 @@ static void u32_flush_raw(int x, int y, int w, int h) {
 }
 
 static void u32_flush_graphics(int x, int y, int w, int h) {
+    /* Flush only scene pixels here. Drawing the cursor from inside a generic
+     * flush used to save cursor pixels as their own background, then save
+     * them again on the next flush; once the compositor changed even one
+     * pixel, the equality-based restore left a growing rectangular trail.
+     * Cursor movement and cursor repaint are handled explicitly below. */
     u32_flush_raw(x,y,w,h);
-    /* Scene composition can replace cursor pixels in the backing surface.
-     * Redraw and explicitly present the cursor footprint after every flush. */
-    cursor_save_draw(cur_ox,cur_oy);
-    u32_flush_raw(cur_ox,cur_oy,16,16);
 }
 
 static void u32_clear_layer(u32 *layer) {

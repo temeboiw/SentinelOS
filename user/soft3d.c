@@ -20,7 +20,7 @@ static int s3d_project(const S3D_CONTEXT *ctx,const S3D_VERTEX *in,
     sy=(int64_t)(ctx->height/2)-(sy>>16);
     out->x=s3d_clamp_screen(sx);
     out->y=s3d_clamp_screen(sy);
-    out->z=in->z;
+    out->z=(int64_t)((1ULL<<32)/(uint64_t)(uint32_t)in->z);
     out->color=in->color;
     return 1;
 }
@@ -130,7 +130,7 @@ int S3DDrawTriangle(S3D_CONTEXT *ctx,const S3D_VERTEX *a,
         if(w0<0||w1<0||w2<0)continue;
         uint64_t depth=(uint64_t)((w0*v[0].z+w1*v[1].z+w2*v[2].z)/area);
         uint64_t zi=(uint64_t)(uint32_t)y*ctx->width+(uint32_t)x;
-        if(depth>=ctx->depth[zi])continue;
+        if(depth<=ctx->depth[zi])continue;
         uint64_t ci=(uint64_t)(uint32_t)y*ctx->pitch+(uint32_t)x;
         uint32_t ca=v[0].color,cb=v[1].color,cc=v[2].color;
         uint32_t aa=s3d_lerp_channel(ca>>24,cb>>24,cc>>24,w0,w1,w2,area);

@@ -542,8 +542,8 @@ static void u32_flush_graphics(int x, int y, int w, int h) {
         }
     }
     /* Presentation can overwrite the cursor. Overlay it afterward on the
-     * CPU-mapped framebuffer, never in the GPU surface itself. */
-    if(cur_on) cursor_save_draw(cur_ox,cur_oy);
+     * CPU-mapped framebuffer, even after a move restored the old pointer. */
+    cursor_save_draw(cur_ox,cur_oy);
 }
 
 static void u32_clear_layer(u32 *layer) {

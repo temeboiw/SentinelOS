@@ -76,6 +76,9 @@ static u32 u32_window_layer[U32_LAYER_MAX_PIXELS];
 static u32 u32_taskbar_layer[U32_LAYER_MAX_PIXELS];
 /* Optional compositor clip used while moving a window. */
 static int u32_render_clip;
+/* Bypass ordinary per-window clipping for drag frames so old window bounds
+ * are cleared and every child control is rebuilt at its new screen X/Y. */
+static int u32_force_full_compose;
 static int u32_clip_x0, u32_clip_y0, u32_clip_x1, u32_clip_y1;
 /* Cached static Aero wallpaper. Dynamic window/taskbar content is composed over it. */
 #define U32_AERO_CACHE_W 1920u
@@ -438,6 +441,19 @@ static void cursor_save_draw(int x, int y) {
  * for longer than a 16x16 pixel copy while the mouse is moving. */
 static void cursor_move_fast(int x, int y) {
     ensure_fb();
+    if (!g_scanout) return;
+    /* On the layered path, restore the old cursor from the scene layers
+     * instead of save-under pixels: those pixels may now belong to a window
+     * that moved, closed, or repainted beneath the cursor. */
+    if (g_fw<=1920u && g_fh<=1080u &&
+        u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh) {
+        int ox=cur_ox, oy=cur_oy;
+        cur_on=0;
+        cur_ox=x; cur_oy=y;
+        u32_repaint_scene_rect(ox,oy,ox+16,oy+16);
+        u32_repaint_scene_rect(x,y,x+16,y+16);
+        return;
+    }
     cursor_restore_fast();
     cursor_save_draw(x, y);
 }
@@ -691,14 +707,14 @@ static void compose(void) {
     int auto_clip = 0;
     int saved_x0=u32_clip_x0, saved_y0=u32_clip_y0;
     int saved_x1=u32_clip_x1, saved_y1=u32_clip_y1;
-    if (!u32_render_clip && g_wnd.visible && !g_wnd.minimized &&
+    if (!u32_render_clip && !u32_force_full_compose && g_wnd.visible && !g_wnd.minimized &&
         g_wnd.w > 2 && !u32_is_desktop_window()) {
         u32_render_clip=1;
         u32_clip_x0=g_wnd.x-6; u32_clip_y0=g_wnd.y-6;
         u32_clip_x1=g_wnd.x+g_wnd.w+10;
         u32_clip_y1=g_wnd.y+g_wnd.h+14;
         auto_clip=1;
-    } else if (!u32_render_clip && u32_is_desktop_window() &&
+    } else if (!u32_render_clip && !u32_force_full_compose && u32_is_desktop_window() &&
                u32_aero_bg_w == g_fw && u32_aero_bg_h == g_fh) {
         /* After initial desktop paint, ordinary desktop updates cover the
          * card and taskbar only, not the static wallpaper or icon area. */
@@ -883,10 +899,16 @@ static void compose(void) {
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
-    /* Cursor is always presented last, above every scene layer. */
+    /* Layered composition already painted the cursor as the final pixel
+     * layer. Do not paint/save-under it a second time: restoring that buffer
+     * later can leave a cursor-shaped mark over newly drawn content. */
     g_front=g_scanout; g_pitch=g_scan_pitch;
     u32_render_clip=0;
-    cursor_save_draw(g_mx,g_my);
+    if (layered) {
+        cur_ox=g_mx; cur_oy=g_my; cur_on=0;
+    } else {
+        cursor_save_draw(g_mx,g_my);
+    }
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is
@@ -1335,14 +1357,15 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_drag_pending_y = ny;
                         int rect[4] = { nx, ny, g_wnd.w, g_wnd.h };
                         sy3(SYS_WmRect, (u64)rect, 0, 0);
-                        /* The layered compositor's dirty-region clipping can
-                         * leave the previous horizontal window/button pixels in
-                         * the window layer. Rebuild all layers for a drag frame so
-                         * both the old and new X positions are cleared/repainted
-                         * consistently, including USER32 child HWNDs. */
+                        /* A normal compose auto-clips to the new window bounds,
+                         * which leaves the old X position and child-button pixels
+                         * behind. Force a true full-screen layer rebuild for this
+                         * drag frame, then restore the normal clipping policy. */
                         (void)old_x;
                         (void)old_y;
+                        u32_force_full_compose=1;
                         compose();
+                        u32_force_full_compose=0;
                     }
                 }
 

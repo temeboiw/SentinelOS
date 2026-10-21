@@ -12,11 +12,42 @@ typedef struct {
 
 static WmEntry wm_tab[WM_MAX];
 static unsigned long long wm_zseq;
+static int wm_active_pid;
 
 static int wm_find_pid(int pid) {
     for (int i = 0; i < WM_MAX; i++)
         if (wm_tab[i].alive && wm_tab[i].pid == pid) return i;
     return -1;
+}
+
+/* The active window is always the highest-z, non-minimized live window. */
+static void wm_choose_active(void) {
+    int best = -1;
+    unsigned long long best_z = 0;
+    for (int i = 0; i < WM_MAX; i++) {
+        WmEntry *e = &wm_tab[i];
+        if (!e->alive || e->minimized) continue;
+        if (best < 0 || e->z > best_z) {
+            best = i;
+            best_z = e->z;
+        }
+    }
+    wm_active_pid = best >= 0 ? wm_tab[best].pid : 0;
+}
+
+static void wm_activate_pid(int pid) {
+    int i = wm_find_pid(pid);
+    if (i < 0 || wm_tab[i].minimized) return;
+    wm_tab[i].z = ++wm_zseq;
+    wm_active_pid = pid;
+}
+
+static int wm_get_active_pid(void) {
+    if (wm_find_pid(wm_active_pid) >= 0 &&
+        !wm_tab[wm_find_pid(wm_active_pid)].minimized)
+        return wm_active_pid;
+    wm_choose_active();
+    return wm_active_pid;
 }
 
 static void wm_register(int pid, const char *title) {
@@ -31,6 +62,7 @@ static void wm_register(int pid, const char *title) {
     }
     wm_tab[i].minimized = 0;
     wm_tab[i].z = ++wm_zseq;
+    wm_active_pid = pid;
     int k = 0;
     if (title)
         for (; title[k] && k < 39; k++) wm_tab[i].title[k] = title[k];
@@ -40,6 +72,9 @@ static void wm_register(int pid, const char *title) {
 static void wm_set_rect(int pid, int x, int y, int w, int h) {
     int i = wm_find_pid(pid);
     if (i < 0) return;
+    /* Invalid/empty rectangles must never become click targets. */
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
     wm_tab[i].x = x;
     wm_tab[i].y = y;
     wm_tab[i].w = w;
@@ -50,12 +85,20 @@ static void wm_set_min(int pid, int min) {
     int i = wm_find_pid(pid);
     if (i < 0) return;
     wm_tab[i].minimized = min ? 1 : 0;
-    if (!min) wm_tab[i].z = ++wm_zseq;
+    if (min) {
+        if (wm_active_pid == pid) wm_choose_active();
+    } else {
+        wm_tab[i].z = ++wm_zseq;
+        wm_active_pid = pid;
+    }
 }
 
 static void wm_unregister(int pid) {
     int i = wm_find_pid(pid);
-    if (i >= 0) wm_tab[i].alive = 0;
+    if (i >= 0) {
+        wm_tab[i].alive = 0;
+        if (wm_active_pid == pid) wm_choose_active();
+    }
 }
 
 static int wm_query(int index, char *name_out, int *min_out, int *pid_out) {
@@ -113,5 +156,6 @@ static void wm_restore_pid(int pid) {
     if (i >= 0) {
         wm_tab[i].minimized = 0;
         wm_tab[i].z = ++wm_zseq;
+        wm_active_pid = pid;
     }
 }

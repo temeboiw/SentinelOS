@@ -157,6 +157,37 @@ static void *gfx_map_mmio(uint64_t pa, uint64_t bytes) {
     gfx_mmio_next_va += span;
     return (void *)(va + (pa - first));
 }
+/* Enumerate PCI display controllers without touching their BARs. This is
+ * inventory only: it deliberately does not claim that any vendor has a
+ * working Vulkan driver. Keep it separate from the active VirtIO-GPU path. */
+static void gfx_log_display_adapters(void) {
+    unsigned int found=0;
+    for(uint32_t b=0;b<256;b++) {
+        for(uint32_t d=0;d<32;d++) {
+            uint32_t id0=gfx_cfg_read((uint8_t)b,(uint8_t)d,0,0);
+            if((uint16_t)id0==0 || (uint16_t)id0==0xFFFFu) continue;
+            uint32_t hdr=gfx_cfg_read((uint8_t)b,(uint8_t)d,0,0x0C);
+            uint32_t nf=((hdr>>16)&0x80u)?8u:1u;
+            for(uint32_t fn=0;fn<nf;fn++) {
+                uint32_t id=fn?gfx_cfg_read((uint8_t)b,(uint8_t)d,(uint8_t)fn,0):id0;
+                uint16_t vendor=(uint16_t)id,device=(uint16_t)(id>>16);
+                if(!vendor||vendor==0xFFFFu)continue;
+                uint32_t cl=gfx_cfg_read((uint8_t)b,(uint8_t)d,(uint8_t)fn,8);
+                uint8_t base=(uint8_t)(cl>>24),sub=(uint8_t)(cl>>16);
+                if(base!=0x03u)continue;
+                const char *name="other";
+                if(vendor==0x8086u)name="Intel";
+                else if(vendor==0x10DEu)name="NVIDIA";
+                else if(vendor==0x1002u || vendor==0x1022u)name="AMD";
+                else if(vendor==GFX_VIRTIO_VENDOR)name="VirtIO";
+                DbgPrint("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (inventory only; no Vulkan driver implied)\n",
+                    found,name,vendor,device,b,d,fn,base,sub);
+                found++;
+            }
+        }
+    }
+    if(!found)DbgPrint("gfx: no PCI display-class adapter found; framebuffer fallback remains available\n");
+}
 static int gfx_find_device(void) {
     for (uint32_t b=0;b<256;b++) for (uint32_t d=0;d<32;d++) {
         uint32_t id0=gfx_cfg_read((uint8_t)b,(uint8_t)d,0,0);
@@ -518,6 +549,7 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
         out->capabilities|=GFX_CAP_FRAMEBUFFER;out->backend=GFX_BACKEND_FRAMEBUFFER;out->initialized=1;
     }
     out->capabilities|=GFX_CAP_PCI_SCAN;
+    gfx_log_display_adapters();
     KPROCESS *caller=MmCurrentProcess;
     if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
     int gpu=gfx_driver_init(fb_width,fb_height);

@@ -168,7 +168,7 @@ static int gfx_find_device(void) {
 static int gfx_find_caps(void) {
     uint8_t b=gfx_pci_bus,d=gfx_pci_dev,f=gfx_pci_fn;
     uint32_t command=gfx_cfg_read(b,d,f,4);
-    gfx_cfg_write(b,d,f,4,command|0x0006u); /* memory decode + bus master */
+    gfx_cfg_write(b,d,f,4,(command&0xFFFFu)|0x0006u); /* memory decode + bus master */
     uint8_t cap=gfx_cfg_read8(b,d,f,0x34);
     for(unsigned int guard=0;cap && cap!=0xFF && guard<48;guard++) {
         uint8_t id=gfx_cfg_read8(b,d,f,cap);

@@ -513,21 +513,20 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
 
 static void ensure_fb(void) {
     if (!sy3(SYS_MapFb, (u64)&g_fb, 0, 0) || !g_fb.va) return;
+    /*
+     * Keep USER32 on the same CPU-rendered framebuffer path as sentlogon.exe.
+     * The optional GPU surface is a separate backing store presented through
+     * dirty-rectangle flushes. Mixing cursor save-under pixels from the mapped
+     * framebuffer with that surface causes the pointer to be overwritten and
+     * leaves trails when Explorer redraws windows or text.
+     *
+     * Deliberately do not call SYS_InitializeGraphics here: every USER32 draw,
+     * cursor save/restore, and scene update now targets the same framebuffer.
+     */
     g_scanout = (u32 *)g_fb.va;
     g_fw = g_fb.w; g_fh = g_fb.h;
-    g_scan_pitch = g_fb.pitch / 4;
+    g_scan_pitch = g_fb.pitch / 4u;
     g_gpu_surface = 0;
-    GfxBootInfo gfx = {0};
-    gfx.size = sizeof(gfx); gfx.version = 1;
-    if (sy3(SYS_InitializeGraphics, (u64)&gfx, 0, 0) &&
-        gfx.backend == 2 && gfx.surface_va &&
-        gfx.width >= 320 && gfx.height >= 200 &&
-        gfx.pitch >= gfx.width * 4u) {
-        g_scanout = (u32 *)gfx.surface_va;
-        g_fw = gfx.width; g_fh = gfx.height;
-        g_scan_pitch = gfx.pitch / 4u;
-        g_gpu_surface = 1;
-    }
     g_front = g_scanout; g_pitch = g_scan_pitch;
     u32_ttf_load();
 }

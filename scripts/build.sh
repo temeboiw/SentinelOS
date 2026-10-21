@@ -80,9 +80,45 @@ need() {
   }
 }
 
-need clang
-need clang++
-need lld
+# Resolve real LLVM compiler binaries. Some Android/proot environments expose
+# a wrapper named "clang" that forwards Clang's private -cc1 argument to proot,
+# which fails with: "proot error: unknown option '-cc1'".
+find_llvm_tool() {
+  local tool="$1" candidate resolved description
+  local -a candidates=()
+  if [[ -n "${!tool:-}" ]]; then candidates+=("${!tool}"); fi
+  case "$tool" in
+    CLANG_BIN) candidates+=(/usr/local/swift/usr/bin/clang /usr/lib/llvm-*/bin/clang /usr/bin/clang-[0-9]* /usr/bin/clang) ;;
+    CLANGXX_BIN) candidates+=(/usr/local/swift/usr/bin/clang++ /usr/lib/llvm-*/bin/clang++ /usr/bin/clang++-[0-9]* /usr/bin/clang++) ;;
+    LLD_BIN) candidates+=(/usr/local/swift/usr/bin/lld /usr/lib/llvm-*/bin/lld /usr/bin/lld-[0-9]* /usr/bin/lld) ;;
+  esac
+  candidates+=("$(command -v "${tool%_BIN}" 2>/dev/null || true)")
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" && -x "$candidate" ]] || continue
+    resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    description="$(file -b "$resolved" 2>/dev/null || true)"
+    # Never run a shell wrapper or proot binary as if it were the compiler.
+    [[ "$description" == *"script"* || "$description" == *"text executable"* ]] && continue
+    [[ "$(basename "$resolved")" == "proot" ]] && continue
+    printf '%s\n' "$resolved"
+    return 0
+  done
+  echo "error: could not find a real LLVM executable for $tool; set the corresponding *_BIN variable" >&2
+  return 1
+}
+
+CLANG_BIN="$(find_llvm_tool CLANG_BIN)"
+CLANGXX_BIN="$(find_llvm_tool CLANGXX_BIN)"
+LLD_BIN="$(find_llvm_tool LLD_BIN)"
+clang()   { "$CLANG_BIN" "$@"; }
+clang++() { "$CLANGXX_BIN" "$@"; }
+lld()     { "$LLD_BIN" "$@"; }
+
+# Catch broken compiler wrappers before starting parallel EFI builds.
+printf 'int sentinel_compiler_probe;\n' | clang --target=x86_64-unknown-windows -ffreestanding -x c -c -o /dev/null -
+echo "  -> clang: $CLANG_BIN"
+echo "  -> clang++: $CLANGXX_BIN"
+echo "  -> lld: $LLD_BIN"
 need qemu-img
 need sfdisk
 need mkfs.vfat

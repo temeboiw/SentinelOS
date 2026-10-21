@@ -49,6 +49,8 @@ int S3DPresent(S3D_CONTEXT *ctx);
  * Returns 0 when the VM/device does not expose a real VirGL backend. */
 int S3DSubmitVirGL(const void *commands, uint32_t length);
 int S3DPresentVirGL(void);
+/* Real host-accelerated VirGL clear; returns 0 if VirGL is unavailable. */
+int S3DClearVirGL(uint32_t argb);
 #ifdef __cplusplus
 }
 #endif

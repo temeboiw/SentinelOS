@@ -49,7 +49,7 @@ static void gop_select_display_mode(EFI_SYSTEM_TABLE *sys,
                                     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
     UINT32 want_w = 0, want_h = 0;
     if (!gop || !gop->Mode || !edid_preferred_size(sys, &want_w, &want_h)) {
-        say(L"loadufi: EDID preferred mode unavailable; keeping firmware GOP mode\\r\\n");
+        say(L"loadufi: EDID preferred mode unavailable; keeping firmware GOP mode\r\n");
         return;
     }
     UINT32 exact = 0xffffffffu, best = 0xffffffffu;
@@ -63,7 +63,7 @@ static void gop_select_display_mode(EFI_SYSTEM_TABLE *sys,
         UINT32 w = info->HorizontalResolution, h = info->VerticalResolution;
         if (w == want_w && h == want_h) exact = mode;
         /* If exact timing is unavailable, choose the largest mode which does
-         * not exceed the preferred dimensions and has the closest aspect ratio. */
+         * not exceed the preferred dimensions and fits within the preferred dimensions. */
         if (w >= 320 && h >= 200 && w <= want_w && h <= want_h) {
             UINT64 area = (UINT64)w * h;
             if (area > best_area) { best_area = area; best = mode; }
@@ -72,16 +72,16 @@ static void gop_select_display_mode(EFI_SYSTEM_TABLE *sys,
     }
     UINT32 chosen = exact != 0xffffffffu ? exact : best;
     if (chosen == 0xffffffffu) {
-        say(L"loadufi: EDID preferred mode has no compatible GOP mode; keeping firmware mode\\r\\n");
+        say(L"loadufi: EDID preferred mode has no compatible GOP mode; keeping firmware mode\r\n");
         return;
     }
     if (gop->Mode->Mode == chosen) {
-        say(L"loadufi: firmware already uses EDID display mode\\r\\n");
+        say(L"loadufi: firmware already uses EDID display mode\r\n");
         return;
     }
     EFI_STATUS set_status = gop->SetMode(gop, chosen);
     if (EFI_ERROR(set_status)) {
-        say(L"loadufi: could not set EDID display mode; keeping firmware mode\\r\\n");
+        say(L"loadufi: could not set EDID display mode; keeping firmware mode\r\n");
         return;
     }
     say(L"loadufi: selected EDID-preferred display mode ");
@@ -93,7 +93,7 @@ static void gop_select_display_mode(EFI_SYSTEM_TABLE *sys,
         UINT32 n = vals[v]; UINTN p = 0;
         do { digits[p++] = (CHAR16)(L'0' + n % 10); n /= 10; } while (n && p < 11);
         while (p) { CHAR16 c[2] = { digits[--p], 0 }; say(c); }
-        say(v == 0 ? L"x" : L"\\r\\n");
+        say(v == 0 ? L"x" : L"\r\n");
     }
 }
 

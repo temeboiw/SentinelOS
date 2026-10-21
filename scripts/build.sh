@@ -317,6 +317,11 @@ clang "${USER_CFLAGS[@]}" \
   -c "$ROOT/user/vulkan.c" \
   -o "$B/obj/vulkan.o"
 
+echo "  -> CPU software rasterizer primitives"
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/vk_softpipe.c" \
+  -o "$B/obj/vk_softpipe.o"
+
 lld -flavor link \
   /dll /noentry /subsystem:native /nodefaultlib \
   /fixed:no /base:0x41800000 \
@@ -376,7 +381,8 @@ lld -flavor link \
   /export:vkGetInstanceProcAddr \
   /export:SentinelVulkanLoaderStatus \
   "/out:$SYS32/vulkan.dll" \
-  "$B/obj/vulkan.o"
+  "$B/obj/vulkan.o" \
+  "$B/obj/vk_softpipe.o"
 cp "$SYS32/vulkan.dll" "$SYS32/vulkan-1.dll"
 
 echo "  -> bootvid.exe"

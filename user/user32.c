@@ -1335,13 +1335,14 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_drag_pending_y = ny;
                         int rect[4] = { nx, ny, g_wnd.w, g_wnd.h };
                         sy3(SYS_WmRect, (u64)rect, 0, 0);
-                        int x0 = old_x < nx ? old_x : nx;
-                        int y0 = old_y < ny ? old_y : ny;
-                        int x1 = (old_x + g_wnd.w + 8) > (nx + g_wnd.w + 8)
-                            ? old_x + g_wnd.w + 8 : nx + g_wnd.w + 8;
-                        int y1 = (old_y + g_wnd.h + 12) > (ny + g_wnd.h + 12)
-                            ? old_y + g_wnd.h + 12 : ny + g_wnd.h + 12;
-                        compose_region(x0, y0, x1, y1);
+                        /* The layered compositor's dirty-region clipping can
+                         * leave the previous horizontal window/button pixels in
+                         * the window layer. Rebuild all layers for a drag frame so
+                         * both the old and new X positions are cleared/repainted
+                         * consistently, including USER32 child HWNDs. */
+                        (void)old_x;
+                        (void)old_y;
+                        compose();
                     }
                 }
 

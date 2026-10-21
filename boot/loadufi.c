@@ -434,7 +434,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     memset(bi, 0, sizeof *bi);
     /* SIPI vectors address a 4 KiB page below 1 MiB. Reserve it before the
        final memory-map snapshot so the kernel can copy its AP trampoline there. */
-    EFI_PHYSICAL_ADDRESS ap_trampoline = 0x9FFFF;
+    EFI_PHYSICAL_ADDRESS ap_trampoline = 0x7FFFF; /* stay below EBDA and VGA memory */
     EFI_STATUS ap_page_status = bs->AllocatePages(
         AllocateMaxAddress, EfiLoaderData, 1, &ap_trampoline);
     if (!EFI_ERROR(ap_page_status) && ap_trampoline < 0x100000ULL) {

@@ -76,7 +76,6 @@ typedef struct {
 } GfxFlush;
 typedef struct { GfxCtrlHdr hdr; } GfxResponse;
 
-static uint8_t gfx_initialized;
 static uint8_t gfx_gpu_ready;
 static uint8_t gfx_gpu_failed;
 static uint64_t gfx_surface_pa, gfx_surface_bytes, gfx_surface_pages;
@@ -132,7 +131,7 @@ static void *gfx_map_mmio(uint64_t pa, uint64_t bytes) {
 static int gfx_find_device(void) {
     for (uint32_t b=0;b<256;b++) for (uint32_t d=0;d<32;d++) {
         uint32_t id0=gfx_cfg_read((uint8_t)b,(uint8_t)d,0,0);
-        uint16_t v0=(uint16_t)id0, d0=(uint16_t)(id0>>16);
+        uint16_t v0=(uint16_t)id0;
         if (!v0 || v0==0xFFFFu) continue;
         uint32_t hdr=gfx_cfg_read((uint8_t)b,(uint8_t)d,0,0x0C);
         uint32_t nf=((hdr>>16)&0x80u)?8u:1u;
@@ -329,6 +328,9 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
     if(gpu) {
         out->capabilities|=GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D;
         out->backend=GFX_BACKEND_VIRTIO_GPU;out->pitch=gfx_pitch;out->initialized=1;
+        out->pci_bus=gfx_pci_bus;out->pci_device=gfx_pci_dev;out->pci_function=gfx_pci_fn;
+        out->vendor_id=gfx_pci_vendor;out->device_id=gfx_pci_device;
+        out->pci_class=gfx_pci_class;out->pci_subclass=gfx_pci_subclass;out->pci_prog_if=gfx_pci_prog_if;
         if(gfx_map_surface_for_process(caller,&out->surface_va)) {
             DbgPrint("gfx: mapped GPU surface into pid=%lu at %p\n",
                 (unsigned long)caller->Pid,(void*)out->surface_va);

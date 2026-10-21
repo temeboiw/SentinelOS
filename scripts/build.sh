@@ -311,6 +311,28 @@ USER_CFLAGS=(
   -I"$ROOT/shared"
 )
 
+echo "  -> vulkan.dll"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/vulkan.c" \
+  -o "$B/obj/vulkan.o"
+
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /base:0x41800000 \
+  /export:vkEnumerateInstanceVersion \
+  /export:vkEnumerateInstanceExtensionProperties \
+  /export:vkEnumerateInstanceLayerProperties \
+  /export:vkCreateInstance \
+  /export:vkDestroyInstance \
+  /export:vkEnumeratePhysicalDevices \
+  /export:vkGetDeviceProcAddr \
+  /export:vkGetInstanceProcAddr \
+  /export:SentinelVulkanLoaderStatus \
+  "/out:$SYS32/vulkan.dll" \
+  "$B/obj/vulkan.o"
+cp "$SYS32/vulkan.dll" "$SYS32/vulkan-1.dll"
+
 echo "  -> bootvid.exe"
 
 clang "${USER_CFLAGS[@]}" \

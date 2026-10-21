@@ -432,19 +432,31 @@ static u32 cur_paint[16*16];
 static void ensure_fb(void);
 static void compose(void);
 static void u32_flush_graphics(int x, int y, int w, int h);
+/* Draw the pointer with the CPU on the real framebuffer, never in the GPU
+ * composition surface. This keeps cursor pixels out of dirty-rectangle copies. */
+static u32 *cursor_target(void) {
+    if (g_fb.va && g_fb.pitch >= g_fb.w * 4u) return (u32 *)g_fb.va;
+    return g_scanout;
+}
+static u32 cursor_target_pitch(void) {
+    if (g_fb.va && g_fb.pitch >= g_fb.w * 4u) return g_fb.pitch / 4u;
+    return g_scan_pitch;
+}
+static u32 cursor_target_width(void) { return g_fb.w ? g_fb.w : g_fw; }
+static u32 cursor_target_height(void) { return g_fb.h ? g_fb.h : g_fh; }
+
 static void cursor_restore_fast(void) {
-    if (!cur_on || !g_scanout) return;
-    for (int j = 0; j < 16; j++) {
-        for (int i = 0; i < 16; i++) {
-            u32 pv = cur_paint[j*16+i];
-            int yy = cur_oy + j, xx = cur_ox + i;
-            if (!pv) continue;
-            if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
-            if (g_scanout[yy * g_scan_pitch + xx] == pv)
-                g_scanout[yy * g_scan_pitch + xx] = cur_under[j*16+i];
-        }
+    u32 *target=cursor_target();
+    u32 pitch=cursor_target_pitch(), width=cursor_target_width(), height=cursor_target_height();
+    if (!cur_on || !target || !pitch) return;
+    for (int j=0;j<16;j++) for (int i=0;i<16;i++) {
+        u32 pv=cur_paint[j*16+i];
+        int yy=cur_oy+j, xx=cur_ox+i;
+        if (!pv || yy<0 || (u32)yy>=height || xx<0 || (u32)xx>=width) continue;
+        if (target[(u32)yy*pitch+(u32)xx]==pv)
+            target[(u32)yy*pitch+(u32)xx]=cur_under[j*16+i];
     }
-    cur_on = 0;
+    cur_on=0;
 }
 
 static void cursor_restore(void) {
@@ -455,30 +467,28 @@ static void cursor_restore(void) {
 }
 
 static void cursor_save_draw(int x, int y) {
-    /* Classic 16x16 arrow: black outline, white body, blue inner highlight. */
-    if (!g_scanout || !g_scan_pitch) return;
-    /* Never capture our own pixels as the "under" image. */
+    /* CPU-rendered arrow on the actual framebuffer. Transparent pixels do
+     * not touch the scene; cursor pixels never enter the GPU layer surface. */
+    u32 *target=cursor_target();
+    u32 pitch=cursor_target_pitch(), width=cursor_target_width(), height=cursor_target_height();
+    if (!target || !pitch || !width || !height) return;
     if (cur_on) cursor_restore_fast();
-    /* Independent topmost layer: cursor pixels never enter scene surfaces. */
-    cur_ox = x;
-    cur_oy = y;
-    for (int j = 0; j < 16; j++) {
-        for (int i = 0; i < 16; i++) {
-            int yy = y + j, xx = x + i;
-            char p = u32_cursor_shape[j][i];
-            u32 val = 0;
-            cur_paint[j*16+i] = 0;
-            if (yy < 0 || (u32)yy >= g_fh || xx < 0 || (u32)xx >= g_fw) continue;
-            if (p == '#') val = 0xFF000000;
-            else if (p == 'w') val = COL_WHITE;
-            else if (p == '+') val = COL_ACCENT;
-            if (!val) continue;
-            cur_under[j*16+i] = g_scanout[yy * g_scan_pitch + xx];
-            cur_paint[j*16+i] = val;
-            g_scanout[yy * g_scan_pitch + xx] = val;
-        }
+    cur_ox=x; cur_oy=y;
+    for (int j=0;j<16;j++) for (int i=0;i<16;i++) {
+        int yy=y+j, xx=x+i, idx=j*16+i;
+        char p=u32_cursor_shape[j][i];
+        u32 val=0;
+        cur_paint[idx]=0;
+        if (yy<0 || (u32)yy>=height || xx<0 || (u32)xx>=width) continue;
+        if (p=='#') val=0xFF000000u;
+        else if (p=='w') val=COL_WHITE;
+        else if (p=='+') val=COL_ACCENT;
+        if (!val) continue;
+        cur_under[idx]=target[(u32)yy*pitch+(u32)xx];
+        cur_paint[idx]=val;
+        target[(u32)yy*pitch+(u32)xx]=val;
     }
-    cur_on = 1;
+    cur_on=1;
 }
 
 /* Cheap cursor move: no scene recomposition, so the cursor is never absent
@@ -494,13 +504,10 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     int rendered_x=cur_ox, rendered_y=cur_oy;
     cursor_restore_fast();
     cur_ox=x; cur_oy=y;
-    cursor_save_draw(x,y);
-
-    /* Present only the old and new cursor footprints. old_x/old_y are the
-     * input event's previous coordinates; rendered_* is the last painted
-     * position and remains authoritative if an app composed during the event. */
+    /* Present the scene first; the flush path then paints the CPU cursor last. */
     u32_flush_graphics(rendered_x,rendered_y,16,16);
     u32_flush_graphics(x,y,16,16);
+    if (!g_gpu_surface) cursor_save_draw(x,y);
     (void)old_x; (void)old_y;
 }
 
@@ -525,9 +532,18 @@ static void ensure_fb(void) {
     u32_ttf_load();
 }
 static void u32_flush_graphics(int x, int y, int w, int h) {
-    if (!g_gpu_surface || w <= 0 || h <= 0) return;
-    GfxRect rect = {(u32)x, (u32)y, (u32)w, (u32)h};
-    (void)sy3(SYS_FlushGraphics, (u64)&rect, 0, 0);
+    if (g_gpu_surface && w>0 && h>0) {
+        int x0=x<0?0:x, y0=y<0?0:y, x1=x+w, y1=y+h;
+        if(x1>(int)g_fw)x1=(int)g_fw;
+        if(y1>(int)g_fh)y1=(int)g_fh;
+        if(x1>x0&&y1>y0) {
+            GfxRect rect={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
+            (void)sy3(SYS_FlushGraphics,(u64)&rect,0,0);
+        }
+    }
+    /* Presentation can overwrite the cursor. Overlay it afterward on the
+     * CPU-mapped framebuffer, never in the GPU surface itself. */
+    if(cur_on) cursor_save_draw(cur_ox,cur_oy);
 }
 
 static void u32_clear_layer(u32 *layer) {
@@ -561,7 +577,6 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
     if(x0>=x1||y0>=y1)return;
 
     u32_layers_rebuild();
-    int cursor_touched=0;
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
@@ -570,13 +585,7 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
             c=u32_aero_bg_cache[at];
         } else {
             c=*dst;
-            /* Without a wallpaper cache, do not mistake our own cursor pixels
-             * for the scene background when rebuilding the pointer footprint. */
-            int old_ci=x-cur_ox, old_cj=y-cur_oy;
-            if(cur_on&&old_ci>=0&&old_ci<16&&old_cj>=0&&old_cj<16) {
-                int old_i=old_cj*16+old_ci;
-                if(cur_paint[old_i]&&c==cur_paint[old_i])c=cur_under[old_i];
-            }
+            /* Cursor pixels are kept out of this scene surface. */
         }
 
         /* Blend every visible surface in ascending Z order. The stack is
@@ -587,23 +596,9 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
                 c=u32_alpha_over(c,layer->pixels[at]);
         }
 
-        /* Cursor uses its last actually-rendered coordinates, not the input
-         * globals which can change before the old cursor has been removed. */
-        int ci=x-cur_ox, cj=y-cur_oy;
-        if(ci>=0&&ci<16&&cj>=0&&cj<16) {
-            char cp=u32_cursor_shape[cj][ci];
-            u32 val=0;
-            if(cp=='#')val=0xFF000000u;
-            else if(cp=='w')val=COL_WHITE;
-            else if(cp=='+')val=COL_ACCENT;
-            cur_under[cj*16+ci]=c;
-            cur_paint[cj*16+ci]=val;
-            if(val)c=val;
-            cursor_touched=1;
-        }
         *dst=c;
     }
-    if(cursor_touched)cur_on=1;
+    /* Cursor is intentionally absent from the GPU scene surface. */
     u32_flush_graphics(x0,y0,x1-x0,y1-y0);
 }
 

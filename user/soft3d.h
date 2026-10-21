@@ -38,6 +38,7 @@ int S3DPresent(S3D_CONTEXT *ctx);
 /* Submit a raw VirGL/Gallium command stream to the kernel-created GPU context.
  * Returns 0 when the VM/device does not expose a real VirGL backend. */
 int S3DSubmitVirGL(const void *commands, uint32_t length);
+int S3DPresentVirGL(void);
 #ifdef __cplusplus
 }
 #endif

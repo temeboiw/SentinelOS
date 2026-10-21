@@ -272,20 +272,26 @@ static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
 /* Only for frames allocated by the user-memory allocator, never device mappings. */
 static int MmUnmapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
     uint64_t mmfl = MmLock();
-    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) { MmUnlock(mmfl); MmUnlock(mmfl); return 0; }
+    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) {
+        MmUnlock(mmfl);
+        return 0;
+    }
     uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
     uint64_t e4 = root[(va >> 39) & 511];
-    if (!(e4 & PTE_P)) MmUnlock(mmfl); return 0;
+    if (!(e4 & PTE_P)) { MmUnlock(mmfl); return 0; }
     uint64_t *pdpt = PHYS_TO_VIRT(e4 & PTE_ADDR);
     uint64_t e3 = pdpt[(va >> 30) & 511];
-    if (!(e3 & PTE_P) || (e3 & PTE_PS)) MmUnlock(mmfl); return 0;
+    if (!(e3 & PTE_P) || (e3 & PTE_PS)) { MmUnlock(mmfl); return 0; }
     uint64_t *pd = PHYS_TO_VIRT(e3 & PTE_ADDR);
     uint64_t e2 = pd[(va >> 21) & 511];
-    if (!(e2 & PTE_P) || (e2 & PTE_PS)) MmUnlock(mmfl); return 0;
+    if (!(e2 & PTE_P) || (e2 & PTE_PS)) { MmUnlock(mmfl); return 0; }
     uint64_t *pt = PHYS_TO_VIRT(e2 & PTE_ADDR);
     unsigned i = (va >> 12) & 511;
     uint64_t e = pt[i];
-    if (!(e & PTE_P) || !(e & PTE_U) || !(e & PTE_OWNED)) MmUnlock(mmfl); return 0;
+    if (!(e & PTE_P) || !(e & PTE_U) || !(e & PTE_OWNED)) {
+        MmUnlock(mmfl);
+        return 0;
+    }
     pt[i] = 0;
     pmm_free(e & PTE_ADDR);
     if (MmCurrentProcess == proc) __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");

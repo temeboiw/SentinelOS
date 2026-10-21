@@ -144,7 +144,7 @@ static uint64_t pmm_alloc_n(uint64_t n) {
     if (!n || n > pm_free) { pmm_unlock(pmfl); return 0; }
     uint64_t s = find_run(pm_hint, pm_pages, n);
     if (s == ~0ULL) s = find_run(0, pm_pages, n);
-    if (s == ~0ULL) { pmm_unlock(); return 0; }
+    if (s == ~0ULL) { pmm_unlock(pmfl); return 0; }
     for (uint64_t i = 0; i < n; i++) bit_set(s + i);
     pm_free -= n;
     pm_hint = s + n;
@@ -164,8 +164,8 @@ static uint64_t pmm_alloc_zeroed(void) {          // reached by physical address
 static void pmm_free(uint64_t pa) {
     uint64_t pmfl = pmm_lock();
     uint64_t i = pa / PAGE_SIZE;
-    if ((pa & (PAGE_SIZE - 1)) || i >= pm_pages) { pmm_unlock(); DbgPrint("pmm: bad free %p\n", (void *)pa); return; }
-    if (!bit_get(i)) { pmm_unlock(); DbgPrint("pmm: double free %p\n", (void *)pa); return; }
+    if ((pa & (PAGE_SIZE - 1)) || i >= pm_pages) { pmm_unlock(pmfl); DbgPrint("pmm: bad free %p\n", (void *)pa); return; }
+    if (!bit_get(i)) { pmm_unlock(pmfl); DbgPrint("pmm: double free %p\n", (void *)pa); return; }
     bit_clr(i); pm_free++;
     if (i < pm_hint) pm_hint = i;
     pmm_unlock();

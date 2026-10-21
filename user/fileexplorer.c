@@ -313,11 +313,11 @@ void mainCRTStartup(void) {
                         unsigned long long pid = sy3(
                             SYS_CreateProcess, (u64)g_names[row], 0, 0);
                         if ((long long)pid < 0 || pid == 0) {
-                            print("fileexplorer: executable is not loaded by the bootloader: ");
+                            print("fileexplorer: disk executable launch failed: ");
                             print(g_names[row]);
                             print("\n");
                             if (pMsgBox) pMsgBox(0,
-                                "This EXE is not loaded by SentinelOS yet.",
+                                "This EXE could not be loaded. Check the disk path and PE compatibility.",
                                 "Cannot launch executable", 0);
                         }
                         g_last_file_row = -1;

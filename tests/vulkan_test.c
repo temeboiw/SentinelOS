@@ -401,7 +401,7 @@ int main(void) {
 
     uint32_t formatProps[3] = {0};
     vkGetPhysicalDeviceFormatProperties(physical, VK_FORMAT_R8G8B8A8_UNORM, formatProps);
-    CHECK(formatProps[0] == (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT));
+    CHECK(formatProps[0] == (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT));
     VkImageFormatProperties ifp;
     CHECK(vkGetPhysicalDeviceImageFormatProperties(physical, VK_FORMAT_R8G8B8A8_UNORM,
           1, 1, VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &ifp) == VK_SUCCESS);
@@ -413,14 +413,16 @@ int main(void) {
     imci.extent.width = 4; imci.extent.height = 4; imci.extent.depth = 1;
     imci.mipLevels = 1; imci.arrayLayers = 1; imci.samples = 1;
     imci.tiling = 1;
-    /* Unsupported storage/sampling/render-target usages must be rejected. */
+    /* Storage and sampling remain unsupported; color attachment images are now supported. */
     VkImage rejectedImage = 0;
     imci.usage = VK_IMAGE_USAGE_STORAGE_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
     imci.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
     imci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
+    CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_SUCCESS);
+    vkDestroyImage(device, rejectedImage, 0);
+    rejectedImage = 0;
     imci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     VkImage image = 0;
     CHECK(vkCreateImage(device, &imci, 0, &image) == VK_SUCCESS);

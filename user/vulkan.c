@@ -196,7 +196,7 @@ __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDe
  if(!out)return;
  /* Standard Vulkan 1.0 properties prefix; limits remain conservatively zero. */
  uint8_t *b=(uint8_t*)out;
- vk_zero(b,292);
+ vk_zero(b,824); /* sizeof(VkPhysicalDeviceProperties on x86-64 */
  if(!phys_ok(p))return;
  uint32_t api=VK_API_VERSION_1_0,driver=1,vendor=0x534E544Cu,device=1,type=4;
  vk_copy(b,&api,4);vk_copy(b+4,&driver,4);vk_copy(b+8,&vendor,4);vk_copy(b+12,&device,4);vk_copy(b+16,&type,4);
@@ -346,7 +346,7 @@ __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInst
 #define IPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
  IPROC(vkGetInstanceProcAddr);IPROC(vkGetDeviceProcAddr);IPROC(vkEnumerateInstanceVersion);IPROC(vkEnumerateInstanceExtensionProperties);IPROC(vkEnumerateInstanceLayerProperties);IPROC(vkCreateInstance);
  if(!inst_ok(inst))return (PFN_vkVoidFunction)0;
- IPROC(vkDestroyInstance);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceImageFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);
+ IPROC(vkDestroyInstance);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceImageFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);IPROC(vkDestroyDevice);IPROC(vkGetDeviceQueue);IPROC(vkDeviceWaitIdle);IPROC(vkQueueWaitIdle);IPROC(vkCreateBuffer);IPROC(vkDestroyBuffer);IPROC(vkGetBufferMemoryRequirements);IPROC(vkCreateImage);IPROC(vkDestroyImage);IPROC(vkGetImageMemoryRequirements);IPROC(vkBindImageMemory);IPROC(vkAllocateMemory);IPROC(vkFreeMemory);IPROC(vkBindBufferMemory);IPROC(vkMapMemory);IPROC(vkUnmapMemory);IPROC(vkFlushMappedMemoryRanges);IPROC(vkInvalidateMappedMemoryRanges);IPROC(vkCreateCommandPool);IPROC(vkDestroyCommandPool);IPROC(vkAllocateCommandBuffers);IPROC(vkFreeCommandBuffers);IPROC(vkBeginCommandBuffer);IPROC(vkEndCommandBuffer);IPROC(vkResetCommandBuffer);IPROC(vkCmdFillBuffer);IPROC(vkCmdCopyBuffer);IPROC(vkCmdCopyBufferToImage);IPROC(vkCmdCopyImageToBuffer);IPROC(vkCmdClearColorImage);IPROC(vkCmdPipelineBarrier);IPROC(vkQueueSubmit);IPROC(vkCreateFence);IPROC(vkDestroyFence);IPROC(vkGetFenceStatus);IPROC(vkWaitForFences);IPROC(vkResetFences);IPROC(vkCreateSemaphore);IPROC(vkDestroySemaphore);
 #undef IPROC
  return (PFN_vkVoidFunction)0;
 }

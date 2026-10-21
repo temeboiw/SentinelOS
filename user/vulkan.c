@@ -4,8 +4,8 @@
  * This implements a real, bounded Vulkan 1.0 software-device core:
  * instance/device/queue discovery, CPU memory, buffers, command pools,
  * command buffers, buffer fill/copy, fences and queue-idle semantics.
- * Graphics pipelines, shader execution, images/swapchains and extensions
- * are intentionally not advertised until implemented.
+ * This remains a deliberately bounded software subset; unsupported Vulkan
+ * semantics are rejected rather than advertised as fully conformant.
  */
 #include <stdint.h>
 #include <stddef.h>
@@ -74,6 +74,8 @@
 #define VK_IMAGE_USAGE_TRANSFER_SRC_BIT 1u
 #define VK_IMAGE_USAGE_TRANSFER_DST_BIT 2u
 #define VK_IMAGE_USAGE_SAMPLED_BIT 4u
+#define VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT 0x10u
+#define VK_IMAGE_USAGE_STORAGE_BIT 0x8u
 #define VK_IMAGE_ASPECT_COLOR_BIT 1u
 #define VK_IMAGE_LAYOUT_GENERAL 1u
 #define VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL 7u
@@ -303,7 +305,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreat
 }
 __declspec(dllexport) void VKAPI_CALL vkDestroyInstance(VkInstance h,const void *alloc) { if(alloc||!inst_ok(h))return;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].parent==h){int used=0;for(unsigned d=0;d<VK_MAX_DEVICES;d++)if(g_devices[d].magic&&g_devices[d].physical==(VkPhysicalDevice)&g_phys[i])used=1;if(!used)g_phys[i].magic=0;}h->magic=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance h,uint32_t *count,VkPhysicalDevice *out) { if(!inst_ok(h)||!count)return VK_ERROR_INITIALIZATION_FAILED;uint32_t n=0;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)n++;if(!out){*count=n;return VK_SUCCESS;}uint32_t cap=*count,k=0;for(unsigned i=0;i<VK_MAX_DEVICES&&k<cap;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)out[k++]=(VkPhysicalDevice)&g_phys[i];*count=k;return k<n?VK_INCOMPLETE:VK_SUCCESS; }
-__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice p,uint32_t *count,VkQueueFamilyProperties *out) { if(!count)return;if(!phys_ok(p)){*count=0;return;}if(!out){*count=1;return;}if(*count){vk_zero(out,sizeof(*out));out->queueFlags=VK_QUEUE_TRANSFER_BIT;out->queueCount=1;out->timestampValidBits=64;out->minImageTransferGranularity.width=1;out->minImageTransferGranularity.height=1;out->minImageTransferGranularity.depth=1;*count=1;}else *count=0; }
+__declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice p,uint32_t *count,VkQueueFamilyProperties *out) { if(!count)return;if(!phys_ok(p)){*count=0;return;}if(!out){*count=1;return;}if(*count){vk_zero(out,sizeof(*out));out->queueFlags=VK_QUEUE_TRANSFER_BIT|VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT;out->queueCount=1;out->timestampValidBits=64;out->minImageTransferGranularity.width=1;out->minImageTransferGranularity.height=1;out->minImageTransferGranularity.depth=1;*count=1;}else *count=0; }
 __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice p,void *out) {
  if(!out)return;
  /* Standard Vulkan 1.0 properties prefix; limits remain conservatively zero. */
@@ -324,15 +326,15 @@ __declspec(dllexport) void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(VkPhys
  uint32_t *f=(uint32_t*)out;f[0]=f[1]=f[2]=0;
  if(!phys_ok(p))return;
  if(format==VK_FORMAT_R8G8B8A8_UNORM||format==VK_FORMAT_B8G8R8A8_UNORM) {
-  f[0]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-  f[1]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+  f[0]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT|0x80u|0x100u;
+  f[1]=VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT|0x80u|0x100u;
  }
 }
 __declspec(dllexport) VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(VkPhysicalDevice p,uint32_t format,uint32_t type,uint32_t tiling,uint32_t usage,uint32_t flags,VkImageFormatProperties *out) {
  if(!phys_ok(p)||!out)return VK_ERROR_INITIALIZATION_FAILED;
  vk_zero(out,sizeof(*out));
  if((format!=VK_FORMAT_R8G8B8A8_UNORM&&format!=VK_FORMAT_B8G8R8A8_UNORM)||type!=1||tiling>1||flags||
-    !usage||(usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT)))return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    !usage||(usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT)))return VK_ERROR_FORMAT_NOT_SUPPORTED;
  out->maxExtent.width=512;out->maxExtent.height=512;out->maxExtent.depth=1;
  out->maxMipLevels=1;out->maxArrayLayers=1;out->sampleCounts=1;out->maxResourceSize=VK_MEMORY_BYTES;
  return VK_SUCCESS;
@@ -359,7 +361,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateImage(VkDevice d,const VkImage
  *out=0;
  if(alloc||ci->imageType!=1||!ci->extent.width||!ci->extent.height||ci->extent.depth!=1||ci->mipLevels!=1||ci->arrayLayers!=1||ci->samples!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
  if(ci->format!=VK_FORMAT_R8G8B8A8_UNORM&&ci->format!=VK_FORMAT_B8G8R8A8_UNORM)return VK_ERROR_FORMAT_NOT_SUPPORTED;
- if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
+ if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
  uint64_t bytes=(uint64_t)ci->extent.width*(uint64_t)ci->extent.height*4u;
  if(bytes>VK_MEMORY_BYTES||bytes/4u/(uint64_t)ci->extent.width!=ci->extent.height)return VK_ERROR_OUT_OF_DEVICE_MEMORY;
  for(unsigned i=0;i<32;i++)if(!g_images[i].magic){VkImageObj *im=&g_images[i];im->magic=VK_OBJECT_MAGIC;im->device=d;im->size=bytes;im->width=ci->extent.width;im->height=ci->extent.height;im->depth=1;im->format=ci->format;im->usage=ci->usage;im->tiling=ci->tiling;im->mipLevels=1;im->arrayLayers=1;im->samples=1;im->layout=ci->initialLayout;*out=(VkImage)im;return VK_SUCCESS;}

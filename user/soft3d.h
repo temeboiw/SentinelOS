@@ -12,16 +12,23 @@ typedef struct {
 } S3D_VERTEX;
 
 typedef struct {
+    uint32_t *pixels;
+    uint32_t width, height, pitch;
+    uint32_t backend; /* 1=firmware framebuffer, 2=VirtIO-GPU 2D */
+} S3D_SURFACE;
+
+typedef struct {
     uint32_t *color;
     uint32_t *depth;
     uint32_t width, height, pitch;
     int32_t focal_length;
+    uint32_t backend;
 } S3D_CONTEXT;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-int S3DInitialize(S3D_CONTEXT *ctx, uint32_t *color, uint32_t *depth,
+int S3DGetSurface(S3D_SURFACE *surface);\nint S3DInitializeSurface(S3D_CONTEXT *ctx, const S3D_SURFACE *surface,\n                        uint32_t *depth, int32_t focal_length_16_16);\nint S3DInitialize(S3D_CONTEXT *ctx, uint32_t *color, uint32_t *depth,
                   uint32_t width, uint32_t height, uint32_t pitch_pixels,
                   int32_t focal_length_16_16);
 void S3DClear(S3D_CONTEXT *ctx, uint32_t argb, uint32_t depth_value);

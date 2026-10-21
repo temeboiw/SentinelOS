@@ -149,3 +149,8 @@ int S3DPresent(S3D_CONTEXT *ctx) {
     if(ctx->backend==1)return 1;
     return s3d_syscall3(33,(uint64_t)&rect,0,0)!=0;
 }
+
+int S3DSubmitVirGL(const void *commands,uint32_t length) {
+    if(!commands||!length||length>4064u)return 0;
+    return s3d_syscall3(34,(uint64_t)commands,(uint64_t)length,0)!=0;
+}

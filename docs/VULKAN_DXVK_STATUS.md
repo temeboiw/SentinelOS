@@ -15,6 +15,8 @@ and implements a limited subset of the Vulkan 1.0 object and command model:
 - bounded 2D RGBA8/BGRA8 image allocation and clear operations in CPU memory;
 - tightly packed whole-image buffer-to-image and image-to-buffer transfers, with explicit layout checks;
 - basic fence status/wait/reset and device/queue idle operations;
+- bounded SPIR-V 1.0 shader-module structure validation and module lifetime;
+- synchronous binary-semaphore consume/signal for already-signaled waits (an unsignaled wait returns `VK_NOT_READY` because this backend cannot suspend a queue).
 - procedure lookup for implemented entry points.
 
 This is an **experimental, incomplete Vulkan software backend**, not a
@@ -24,7 +26,7 @@ descriptor sets, full synchronization semantics, swapchains/surface
 presentation, or the broad feature/limit set expected by normal engines. It is
 not DXVK-ready.
 
-The physical-device properties expose only a minimal software-device identity;
+Shader-module creation validates the SPIR-V header and bounded instruction\nstream only; it does not prove shader semantic validity or execute shaders.\nThe software rasterizer in `user/vk_softpipe.c` remains a separate primitive\nmodule and is not yet connected to Vulkan draw commands.\n\nThe physical-device properties expose only a minimal software-device identity;
 feature bits and image-format capabilities remain disabled. Unsupported
 extensions are rejected rather than falsely advertised. The CPU runtime is not
 wired to the existing VirtIO-GPU/VirGL renderer and does not provide native

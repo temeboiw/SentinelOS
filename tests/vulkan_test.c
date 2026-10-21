@@ -595,6 +595,8 @@ int main(void) {
      * overlapping image copy atomically instead of recording a self-alias. */
     VkImage aliasImage = 0;
     CHECK(vkCreateImage(device, &dstci, 0, &aliasImage) == VK_SUCCESS);
+    /* The earlier readback leaves imem mapped; Vulkan binding requires it unmapped. */
+    vkUnmapMemory(device, imem);
     CHECK(vkBindImageMemory(device, aliasImage, imem, 0) == VK_SUCCESS);
     CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
     CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
@@ -616,7 +618,6 @@ int main(void) {
     vkUnmapMemory(device, dstMem);
     vkDestroyImage(device, dstImage, 0);
     vkFreeMemory(device, dstMem, 0);
-    vkUnmapMemory(device, imem);
     vkDestroyImage(device, image, 0);
     vkFreeMemory(device, imem, 0);
     CHECK(vkDeviceWaitIdle(device) == VK_SUCCESS);

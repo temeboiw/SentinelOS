@@ -149,7 +149,7 @@ static uint64_t pmm_alloc_n(uint64_t n) {
     pm_free -= n;
     pm_hint = s + n;
     uint64_t result = s * PAGE_SIZE;
-    pmm_unlock();
+    pmm_unlock(pmfl);
     return result;
 }
 
@@ -168,7 +168,7 @@ static void pmm_free(uint64_t pa) {
     if (!bit_get(i)) { pmm_unlock(pmfl); DbgPrint("pmm: double free %p\n", (void *)pa); return; }
     bit_clr(i); pm_free++;
     if (i < pm_hint) pm_hint = i;
-    pmm_unlock();
+    pmm_unlock(pmfl);
 }
 
 static void pmm_selftest(uint64_t kernel_addr, uint64_t stack_addr) {

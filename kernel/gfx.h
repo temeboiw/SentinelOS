@@ -335,7 +335,7 @@ static int gfx_create_virgl_buffer(void) {
     } cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.resource_id=GFX_VIRGL_BUFFER_ID;
     cr.target=0; /* PIPE_BUFFER */
-    cr.format=14; /* PIPE_FORMAT_R8_UNORM */
+    cr.format=0; /* PIPE_BUFFER resources use format 0 */
     cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
     cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;
     if(!gfx_command(&cr,sizeof cr))return 0;
@@ -395,8 +395,8 @@ static int gfx_present_virgl(void) {
     } tr={0};
     tr.hdr.type=GFX_GPU_CMD_TRANSFER_FROM_3D;tr.hdr.ctx_id=1;
     tr.width=gfx_width;tr.height=gfx_height;tr.depth=1;
-    tr.resource_id=GFX_VIRGL_TARGET_ID;tr.level=0;tr.stride=gfx_pitch;
-    tr.layer_stride=gfx_pitch*gfx_height;
+    tr.resource_id=GFX_VIRGL_TARGET_ID;tr.level=0;tr.stride=0;
+    tr.layer_stride=0;
     if(!gfx_command(&tr,sizeof tr))return 0;
     return gfx_flush(0,0,gfx_width,gfx_height);
 }

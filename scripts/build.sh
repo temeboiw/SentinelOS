@@ -110,15 +110,28 @@ find_llvm_tool() {
 CLANG_BIN="$(find_llvm_tool CLANG_BIN)"
 CLANGXX_BIN="$(find_llvm_tool CLANGXX_BIN)"
 LLD_BIN="$(find_llvm_tool LLD_BIN)"
-# Termux/proot: keep Clang frontend execution in-process; otherwise its
-# /proc/self/exe re-exec can resolve to proot and reject the private -cc1 flag.
-unset CLANG_SPAWN_CC1
-clang()   { "$CLANG_BIN" -fintegrated-cc1 "$@"; }
-clang++() { "$CLANGXX_BIN" -fintegrated-cc1 "$@"; }
+# Termux/proot: the clang driver re-execs itself via /proc/self/exe, which is
+# proot here. Ask the driver for its job list (-###) and run the -cc1 jobs
+# directly with the real clang binary instead.
+run_cc() {
+  local drv="$1" out line
+  shift
+  out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
+  while IFS= read -r line; do
+    [[ "$line" == \ \"* ]] || continue
+    line="$(printf '%s' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
+    eval "$line" </dev/null || return 1
+  done <<<"$out"
+}
+clang()   { run_cc "$CLANG_BIN" "$@"; }
+clang++() { run_cc "$CLANGXX_BIN" "$@"; }
 lld()     { "$LLD_BIN" "$@"; }
 
 # Catch broken compiler wrappers before starting parallel EFI builds.
-printf 'int sentinel_compiler_probe;\n' | clang --target=x86_64-unknown-windows -ffreestanding -x c -c -o /dev/null -
+PROBE_SRC="$(mktemp --suffix=.c)"
+printf 'int sentinel_compiler_probe;\n' > "$PROBE_SRC"
+clang --target=x86_64-unknown-windows -ffreestanding -c -o /dev/null "$PROBE_SRC"
+rm -f "$PROBE_SRC"
 echo "  -> clang: $CLANG_BIN"
 echo "  -> clang++: $CLANGXX_BIN"
 echo "  -> lld: $LLD_BIN"

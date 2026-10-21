@@ -14,8 +14,29 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-utils dosfstools e2fsprogs mtools
+          sudo apt-get install -y clang lld qemu-utils qemu-system-x86 ovmf dosfstools e2fsprogs mtools
       - name: Fetch EDK2 headers
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Build SentinelOS
         run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 ./scripts/build.sh
+      - name: Boot smoke test with VirtIO-VGA
+        shell: bash
+        run: |
+          set +e
+          timeout 45s env SENTINELOS_DISPLAY=vnc ./scripts/run.sh > "$RUNNER_TEMP/sentinel-qemu.log" 2>&1
+          rc=$?
+          set -e
+          if [[ "$rc" -ne 0 && "$rc" -ne 124 ]]; then
+            cat "$RUNNER_TEMP/sentinel-qemu.log"
+            exit "$rc"
+          fi
+          if ! grep -Eq 'gfx: VirtIO-GPU 2D scanout active|gfx: using firmware framebuffer fallback' "$RUNNER_TEMP/sentinel-qemu.log"; then
+            echo "Graphics initialization did not report a working backend."
+            cat "$RUNNER_TEMP/sentinel-qemu.log"
+            exit 1
+          fi
+          if ! grep -q 'bootvid: sentlogon.exe created' "$RUNNER_TEMP/sentinel-qemu.log"; then
+            echo "bootvid.exe did not finish and launch sentlogon.exe."
+            cat "$RUNNER_TEMP/sentinel-qemu.log"
+            exit 1
+          fi

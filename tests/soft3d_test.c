@@ -9,7 +9,7 @@ int main(void) {
     S3D_CONTEXT ctx;
 
     assert(S3DInitialize(&ctx, pixels, depth, 64, 64, 64, 32 * 65536));
-    S3DClear(&ctx, 0xFF000000u, UINT32_MAX);
+    S3DClear(&ctx, 0xFF000000u, 0);
 
     const S3D_VERTEX near_tri[3] = {
         {-16384, -16384, 65536, 0xFFFF0000u},

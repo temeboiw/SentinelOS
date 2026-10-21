@@ -93,6 +93,8 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+/* Window geometry is committed only when the title-bar grab is released. */
+static int g_drag_pending_x, g_drag_pending_y, g_drag_moved;
 /* Suppress the per-process welcome card while exposing desktop after close. */
 static int u32_suppress_desktop_card;
 static int g_search_focus;
@@ -611,7 +613,9 @@ static void compose(void) {
     ensure_fb();
     if (!g_front) return;
 
-    cursor_restore();
+    /* Do not erase the cursor before painting. Keep it over the scene while
+     * layers are recomposed; cursor_save_draw() refreshes its saved-under
+     * pixels after the final frame is ready. */
     int layered = g_fw<=1920u && g_fh<=1080u;
     int layer_x0=0,layer_y0=0,layer_x1=(int)g_fw,layer_y1=(int)g_fh;
 
@@ -919,6 +923,9 @@ static void on_click(int x, int y) {
             g_drag = 1;
             g_drag_ox = x - wx;
             g_drag_oy = y - wy;
+            g_drag_pending_x = wx;
+            g_drag_pending_y = wy;
+            g_drag_moved = 0;
             return;
         }
     }
@@ -1233,34 +1240,16 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                  * pointer before hit-testing that click.
                  */
                 if (ev.type == 2 && g_drag && (ev.btn & 1)) {
-                    int old_x=g_wnd.x, old_y=g_wnd.y;
-                    g_wnd.x = ev.x - g_drag_ox;
-                    g_wnd.y = ev.y - g_drag_oy;
-
-                    if (g_wnd.x < 0) g_wnd.x = 0;
-                    if (g_wnd.y < 0) g_wnd.y = 0;
-
-                    int rect[4] = {
-                        g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h
-                    };
-                    sy3(SYS_WmRect, (u64)rect, 0, 0);
-
-                    /* Redraw only the union of old/new window bounds and
-                     * both cursor positions. This restores exposed wallpaper,
-                     * redraws intersecting desktop elements, and preserves
-                     * the pixels outside the affected area. */
-                    int x0=old_x, y0=old_y, x1=old_x+g_wnd.w+8, y1=old_y+g_wnd.h+12;
-                    int nx0=g_wnd.x, ny0=g_wnd.y, nx1=g_wnd.x+g_wnd.w+8, ny1=g_wnd.y+g_wnd.h+12;
-                    if(nx0<x0)x0=nx0;if(ny0<y0)y0=ny0;
-                    if(nx1>x1)x1=nx1;if(ny1>y1)y1=ny1;
-                    int cx0=cur_ox<g_mx?cur_ox:g_mx, cy0=cur_oy<g_my?cur_oy:g_my;
-                    int cx1=(cur_ox>g_mx?cur_ox:g_mx)+16, cy1=(cur_oy>g_my?cur_oy:g_my)+16;
-                    if(cx0<x0)x0=cx0;if(cy0<y0)y0=cy0;
-                    if(cx1>x1)x1=cx1;if(cy1>y1)y1=cy1;
-                    u32_render_clip=1;
-                    u32_clip_x0=x0;u32_clip_y0=y0;u32_clip_x1=x1;u32_clip_y1=y1;
-                    compose();
-                    u32_render_clip=0;
+                    int nx = ev.x - g_drag_ox;
+                    int ny = ev.y - g_drag_oy;
+                    if (nx < 0) nx = 0;
+                    if (ny < 0) ny = 0;
+                    if (nx != g_drag_pending_x || ny != g_drag_pending_y)
+                        g_drag_moved = 1;
+                    /* Keep the rendered window and its controls stable while
+                     * the title bar is grabbed. Only remember the destination. */
+                    g_drag_pending_x = nx;
+                    g_drag_pending_y = ny;
                 }
 
                 if (ev.type == 3) {
@@ -1270,7 +1259,32 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 } else {
                     /* Type 2 also reports button release. End the drag on
                      * that transition, not on the next button-down. */
-                    if (!(ev.btn & 1)) g_drag = 0;
+                    if (!(ev.btn & 1)) {
+                        if (g_drag && g_drag_moved &&
+                            (g_drag_pending_x != g_wnd.x ||
+                             g_drag_pending_y != g_wnd.y)) {
+                            int old_x=g_wnd.x, old_y=g_wnd.y;
+                            g_wnd.x=g_drag_pending_x;
+                            g_wnd.y=g_drag_pending_y;
+                            int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
+                            sy3(SYS_WmRect,(u64)rect,0,0);
+                            /* One committed redraw after release: old bounds
+                             * are restored and the complete window, including
+                             * every button/control, is painted at its new spot. */
+                            int x0=old_x<g_wnd.x?old_x:g_wnd.x;
+                            int y0=old_y<g_wnd.y?old_y:g_wnd.y;
+                            int x1=(old_x+g_wnd.w+8)>(g_wnd.x+g_wnd.w+8)
+                                ?old_x+g_wnd.w+8:g_wnd.x+g_wnd.w+8;
+                            int y1=(old_y+g_wnd.h+12)>(g_wnd.y+g_wnd.h+12)
+                                ?old_y+g_wnd.h+12:g_wnd.y+g_wnd.h+12;
+                            g_drag=0;
+                            g_drag_moved=0;
+                            compose_region(x0,y0,x1,y1);
+                        } else {
+                            g_drag=0;
+                            g_drag_moved=0;
+                        }
+                    }
                     /* Plain move: keep the existing cursor path unchanged. */
                     cursor_move_fast(g_mx, g_my);
                 }

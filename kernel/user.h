@@ -258,13 +258,19 @@ static int PspIsSystemAppName(const char *name) {
     for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         const char *a = name;
         const char *b = names[i];
-        while (*a && *b) {
-            char ca = *a++, cb = *b++;
+        int equal = 1;
+        while (*a || *b) {
+            char ca = *a, cb = *b;
             if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + ('a' - 'A'));
             if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
-            if (ca != cb) break;
+            if (ca != cb) {
+                equal = 0;
+                break;
+            }
+            if (*a) a++;
+            if (*b) b++;
         }
-        if (!*a && !*b) return 1;
+        if (equal) return 1;
     }
     return 0;
 }

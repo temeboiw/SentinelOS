@@ -807,7 +807,7 @@ static void compose(void) {
      * by Explorer and other apps with its own stale copy. Only the desktop
      * owner may run the full-screen layered compositor; app paints are clipped
      * to that app's window and go straight to scanout. */
-    int layered = g_fw<=1920u && g_fh<=1080u && u32_is_desktop_window();
+    int layered = g_fw<=1920u && g_fh<=1080u;
     int layer_x0=0,layer_y0=0,layer_x1=(int)g_fw,layer_y1=(int)g_fh;
 
     /* Ordinary app redraws are clipped to their own window. The desktop

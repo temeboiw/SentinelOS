@@ -691,7 +691,7 @@ int main(void) {
     renderBegin.clearValueCount = 1; renderBegin.pClearValues = &drawClear;
     vkCmdBeginRenderPass(cmd, &renderBegin, 0);
     vkCmdDraw(cmd, 3, 1, 0, 0);
-    fprintf(stderr, "depth state test=%u write=%u compare=%u bound-depth=%p op=%u\\n", (unsigned)pipeline->depth_test, (unsigned)pipeline->depth_write, (unsigned)pipeline->depth_compare, (void*)cmd->bound_depth_target, (unsigned)cmd->ops[cmd->count-2].op);
+    fprintf(stderr, "depth state test=%u write=%u compare=%u bound-depth=%p op=%u count=%u state=%u pipeline=%p vertex=%p target=%p offset=%llu vbsize=%llu\\n", (unsigned)pipeline->depth_test, (unsigned)pipeline->depth_write, (unsigned)pipeline->depth_compare, (void*)cmd->bound_depth_target, (unsigned)cmd->ops[cmd->count-2].op, (unsigned)cmd->count, (unsigned)cmd->state, (void*)cmd->bound_pipeline, (void*)cmd->bound_vertex, (void*)cmd->bound_target, (unsigned long long)cmd->bound_vertex_offset, (unsigned long long)(cmd->bound_vertex?cmd->bound_vertex->size:0));
     vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d debug=%u\\n", (int)rpSubmitResult, (unsigned)g_vk_debug); CHECK(rpSubmitResult == VK_SUCCESS); }

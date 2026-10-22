@@ -710,6 +710,100 @@ int main(void) {
               pixels[outside+2u] == 0u && pixels[outside+3u] == 0u);
     }
     vkUnmapMemory(device, drawMem);
+
+    /* Depth attachment integration: create a D32 image, clear it to 1,
+     * draw at z=0.5 with LESS/write enabled, and verify stored depth. */
+    {
+        VkImageCreateInfo depthCi = drawCi;
+        depthCi.format = VK_FORMAT_D32_SFLOAT;
+        depthCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        depthCi.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkImage depthImage = 0;
+        CHECK(vkCreateImage(device, &depthCi, 0, &depthImage) == VK_SUCCESS);
+        VkMemoryRequirements depthReq;
+        vkGetImageMemoryRequirements(device, depthImage, &depthReq);
+        VkMemoryAllocateInfo depthAi = {0};
+        depthAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        depthAi.allocationSize = depthReq.size;
+        VkDeviceMemory depthMem = 0;
+        CHECK(vkAllocateMemory(device, &depthAi, 0, &depthMem) == VK_SUCCESS);
+        CHECK(vkBindImageMemory(device, depthImage, depthMem, 0) == VK_SUCCESS);
+
+        VkImageViewCreateInfo depthViewCi = {0};
+        depthViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        depthViewCi.image = depthImage;
+        depthViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depthViewCi.format = VK_FORMAT_D32_SFLOAT;
+        depthViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthViewCi.subresourceRange.levelCount = 1;
+        depthViewCi.subresourceRange.layerCount = 1;
+        VkImageView depthView = 0;
+        CHECK(vkCreateImageView(device, &depthViewCi, 0, &depthView) == VK_SUCCESS);
+
+        VkAttachmentDescription depthAttachments[2] = {attachment, {0}};
+        depthAttachments[1].format = VK_FORMAT_D32_SFLOAT;
+        depthAttachments[1].samples = 1;
+        depthAttachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depthAttachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachments[1].initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+        depthAttachments[1].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkAttachmentReference depthRef = {1, VK_IMAGE_LAYOUT_GENERAL};
+        VkSubpassDescription depthSubpass = subpass;
+        depthSubpass.pDepthStencilAttachment = &depthRef;
+        VkRenderPassCreateInfo depthRpCi = rpCi;
+        depthRpCi.attachmentCount = 2;
+        depthRpCi.pAttachments = depthAttachments;
+        depthRpCi.pSubpasses = &depthSubpass;
+        VkRenderPass depthRenderPass = 0;
+        CHECK(vkCreateRenderPass(device, &depthRpCi, 0, &depthRenderPass) == VK_SUCCESS);
+
+        VkImageView depthViews[2] = {drawView, depthView};
+        VkFramebufferCreateInfo depthFbCi = fbCi;
+        depthFbCi.renderPass = depthRenderPass;
+        depthFbCi.attachmentCount = 2;
+        depthFbCi.pAttachments = depthViews;
+        VkFramebuffer depthFramebuffer = 0;
+        CHECK(vkCreateFramebuffer(device, &depthFbCi, 0, &depthFramebuffer) == VK_SUCCESS);
+
+        VkPipelineDepthStencilStateCreateInfo depthState = {0};
+        depthState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthState.depthTestEnable = 1;
+        depthState.depthWriteEnable = 1;
+        depthState.depthCompareOp = 1; /* VK_COMPARE_OP_LESS */
+        VkGraphicsPipelineCreateInfo depthGpci = gpci;
+        depthGpci.renderPass = depthRenderPass;
+        depthGpci.pDepthStencilState = &depthState;
+        VkPipeline depthPipeline = 0;
+        CHECK(vkCreateGraphicsPipelines(device, 0, 1, &depthGpci, 0, &depthPipeline) == VK_SUCCESS);
+
+        CHECK(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+        CHECK(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &vertexOffset);
+        VkClearColorValue depthClears[2] = {{{0.0f, 0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 0.0f, 0.0f}}};
+        renderBegin.renderPass = depthRenderPass;
+        renderBegin.framebuffer = depthFramebuffer;
+        renderBegin.clearValueCount = 2;
+        renderBegin.pClearValues = depthClears;
+        vkCmdBeginRenderPass(cmd, &renderBegin, 0);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdEndRenderPass(cmd);
+        CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+        CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+        CHECK(vkMapMemory(device, depthMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+        CHECK(((float *)mapped)[2u * 8u + 2u] == 0.5f);
+        vkUnmapMemory(device, depthMem);
+
+        vkDestroyPipeline(device, depthPipeline, 0);
+        vkDestroyFramebuffer(device, depthFramebuffer, 0);
+        vkDestroyRenderPass(device, depthRenderPass, 0);
+        vkDestroyImageView(device, depthView, 0);
+        vkDestroyImage(device, depthImage, 0);
+        vkFreeMemory(device, depthMem, 0);
+    }
     vkDestroyPipeline(device, pipeline, 0);
     vkDestroyDescriptorPool(device, descriptorPool, 0);
     vkDestroyPipelineLayout(device, pipelineLayout, 0);

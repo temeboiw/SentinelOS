@@ -16,7 +16,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -34,6 +34,7 @@ static void print(const char *s) {
 using CreateWindowExA_t=void*(*)(u32,LPCSTR,LPCSTR,u32,int,int,int,int,void*,void*,void*,void*);
 using ShowWindow_t=BOOL(*)(void*,int);
 using GetMessageA_t=BOOL(*)(void*,void*,u32,u32);
+using PeekMessageA_t=BOOL(*)(void*,void*,u32,u32,u32);
 using TranslateMessage_t=BOOL(*)(const void*);
 using DispatchMessageA_t=long long(*)(const void*);
 using UpdateWindow_t=BOOL(*)(void*);
@@ -87,6 +88,7 @@ static u32 screen_w,screen_h,pitch;
 static int px=2,py=2,heading=0,won=0;
 static void *window_handle;
 static UpdateWindow_t update_window;
+static PeekMessageA_t peek_message;
 
 static const int dirx[4]={0,1,0,-1};
 static const int diry[4]={-1,0,1,0};
@@ -193,9 +195,10 @@ extern "C" void maze_mainCRTStartup() {
     auto show_cursor=(ShowCursor_t)get_proc("user32.dll","ShowCursor");
     update_window=(UpdateWindow_t)get_proc("user32.dll","UpdateWindow");
     auto get_message=(GetMessageA_t)get_proc("user32.dll","GetMessageA");
+    peek_message=(PeekMessageA_t)get_proc("user32.dll","PeekMessageA");
     auto translate=(TranslateMessage_t)get_proc("user32.dll","TranslateMessage");
     auto dispatch=(DispatchMessageA_t)get_proc("user32.dll","DispatchMessageA");
-    if(!create_window||!show_window||!get_message||!dispatch) {
+    if(!create_window||!show_window||!get_message||!dispatch||!peek_message) {
         print("maze.exe: required USER32 functions missing\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
@@ -225,22 +228,39 @@ extern "C" void maze_mainCRTStartup() {
     print(vulkan_available?"maze.exe: Vulkan loader found; current 3D scene uses software fallback\n":
                            "maze.exe: Vulkan loader unavailable; software fallback selected\n");
     Message msg{};
+    u32 last_frame=(u32)syscall3(SYS_GET_TICK_COUNT,0,0,0);
+    u32 last_step=last_frame;
     for(;;) {
-        if(!get_message(&msg,nullptr,0,0)) break;
-        /* Consume game keys before dispatching the message to USER32. */
-        if(msg.message==0x0010||msg.message==0x0012)break;
-        if(msg.message==0x0100) {
-            switch((u32)msg.wParam) {
-              case 0x57: case 0x77: move_relative(1,0); break;  /* W: forward */
-              case 0x53: case 0x73: move_relative(-1,0); break; /* S: backward */
-              case 0x41: case 0x61: move_relative(0,-1); break; /* A: strafe left */
-              case 0x44: case 0x64: move_relative(0,1); break;  /* D: strafe right */
-              case 0x1b: (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0); for(;;)__asm__ volatile("pause");
+        /* Poll messages without blocking the simulation thread. */
+        while(peek_message(&msg,nullptr,0,0,1)) {
+            if(msg.message==0x0010||msg.message==0x0012) goto game_exit;
+            if(msg.message==0x0100 && (u32)msg.wParam==0x1b) goto game_exit;
+            if(translate)(void)translate(&msg);
+            (void)dispatch(&msg);
+        }
+
+        /* A make/break-aware kernel state keeps movement continuous while
+         * a physical key is held, without depending on keyboard typematic. */
+        u32 now=(u32)syscall3(SYS_GET_TICK_COUNT,0,0,0);
+        if((u32)(now-last_frame)>=16u) {
+            last_frame=now; /* 60 Hz simulation cadence */
+            u64 keys=syscall3(SYS_GAME_KEY_STATE,0,0,0);
+            if(keys&(1u<<4)) goto game_exit;
+            if((u32)(now-last_step)>=115u) {
+                int forward=0,strafe=0;
+                if(keys&(1u<<0)) forward=1;
+                else if(keys&(1u<<2)) forward=-1;
+                if(keys&(1u<<1)) strafe=-1;
+                else if(keys&(1u<<3)) strafe=1;
+                if(forward||strafe) {
+                    move_relative(forward,strafe);
+                    last_step=now;
+                }
             }
         }
-        if(translate)(void)translate(&msg);
-        (void)dispatch(&msg);
+        (void)syscall3(SYS_YIELD,0,0,0);
     }
+game_exit:
     (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0);
     for(;;)__asm__ volatile("pause");
 }

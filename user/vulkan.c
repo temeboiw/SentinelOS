@@ -698,27 +698,52 @@ static uint32_t vk_spirv_last_scalar_result(const uint32_t *w,size_t n,uint32_t 
  * general scalar helper avoids pulling host soft-float runtime symbols into
  * the freestanding kernel DLL. Unsupported shader instructions fail closed. */
 static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t entry,uint32_t output,uint32_t *out) {
- uint32_t *ids=g_spirv_ids;uint8_t *def=g_spirv_defined;size_t i=5;uint32_t active=0,done=0,steps=0;
+ uint32_t *ids=g_spirv_ids;uint8_t *def=g_spirv_defined;size_t i=5;
+ uint32_t active=0,done=0,steps=0,current_label=0,predecessor=0;
  if(!w||!out||output>=VK_SPIRV_MAX_IDS||!vk_spirv_validate(w,n)||!entry)return 0;
  vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));
  while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
-  if(op==43u&&wc==4u&&w[i+2]<VK_SPIRV_MAX_IDS){ids[w[i+2]]=w[i+3];def[w[i+2]]=1;}
-  i+=wc;
- }
+  if(op==43u&&wc==4u&&w[i+2]<VK_SPIRV_MAX_IDS){ids[w[i+2]]=w[i+3];def[w[i+2]]=1;}i+=wc;}
  i=5;
  while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
-  if(op==54u&&wc>=5u)active=(w[i+2]==entry);
+  if(op==54u&&wc>=5u){active=(w[i+2]==entry);current_label=0;predecessor=0;}
   else if(active&&op==56u){active=0;done=1;}
-  else if(active&&op==248u&&wc==2u){}
-  else if(active&&op==253u&&wc==1u){active=0;done=1;}
-  else if(active&&op==128u&&wc==5u){uint32_t r=w[i+2],a=w[i+3],b=w[i+4];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[a]||!def[b])return 0;ids[r]=ids[a]+ids[b];def[r]=1;}
-  else if(active&&op==130u&&wc==5u){uint32_t r=w[i+2],a=w[i+3],b=w[i+4];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[a]||!def[b])return 0;ids[r]=ids[a]-ids[b];def[r]=1;}
-  else if(active&&op==132u&&wc==5u){uint32_t r=w[i+2],a=w[i+3],b=w[i+4];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[a]||!def[b])return 0;ids[r]=ids[a]*ids[b];def[r]=1;}
-  else if(active&&op==170u&&wc==5u){uint32_t r=w[i+2],a=w[i+3],b=w[i+4];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[a]||!def[b])return 0;ids[r]=(ids[a]==ids[b]);def[r]=1;}
-  else if(active&&op==169u&&wc==6u){uint32_t r=w[i+2],c=w[i+3],a=w[i+4],b=w[i+5];if(r>=VK_SPIRV_MAX_IDS||c>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[c]||!def[a]||!def[b])return 0;ids[r]=ids[c]?ids[a]:ids[b];def[r]=1;}
-  else if(active&&(op==83u||op==124u)&&wc==4u){uint32_t r=w[i+2],a=w[i+3];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!def[a])return 0;ids[r]=ids[a];def[r]=1;}
-  else if(active&&op!=14u&&op!=15u&&op!=17u&&op!=19u&&op!=33u&&op!=43u&&op!=54u&&op!=56u&&op!=248u&&op!=253u)return 0;
-  if(++steps>2048u)return 0;i+=wc;
+  else if(active){
+   uint32_t r=0,a=0,b=0,v=0;if(++steps>4096u)return 0;
+   if(op==248u&&wc==2u)current_label=w[i+1];
+   else if(op==247u||op==246u||op==0u){}
+   else if(op==253u&&wc==1u){active=0;done=1;}
+   else if(op==254u&&wc==2u){active=0;done=1;}
+   else if(op==249u&&wc==2u){size_t t=vk_spirv_find_label(w,n,entry,w[i+1]);if(t>=n)return 0;predecessor=current_label;i=t;continue;}
+   else if(op==250u&&wc==4u){uint32_t c=w[i+1];if(c>=VK_SPIRV_MAX_IDS||!def[c])return 0;size_t t=vk_spirv_find_label(w,n,entry,w[ids[c]?i+2:i+3]);if(t>=n)return 0;predecessor=current_label;i=t;continue;}
+   else if(op==251u&&wc>=3u&&((wc-3u)&1u)==0u){uint32_t c=w[i+1],label=w[i+2];if(c>=VK_SPIRV_MAX_IDS||!def[c])return 0;for(uint32_t k=3;k+1<wc;k+=2)if(w[i+k]==ids[c]){label=w[i+k+1];break;}size_t t=vk_spirv_find_label(w,n,entry,label);if(t>=n)return 0;predecessor=current_label;i=t;continue;}
+   else if(op==245u&&wc>=5u&&((wc-3u)&1u)==0u){r=w[i+2];if(r>=VK_SPIRV_MAX_IDS)return 0;int selected=0;for(uint32_t k=3;k+1<wc;k+=2)if(w[i+k+1]==predecessor){a=w[i+k];if(a>=VK_SPIRV_MAX_IDS||!def[a])return 0;ids[r]=ids[a];def[r]=1;selected=1;break;}if(!selected)return 0;}
+   else if(op==43u&&wc==4u){r=w[i+2];if(r>=VK_SPIRV_MAX_IDS)return 0;ids[r]=w[i+3];def[r]=1;}
+   else if((op==83u||op==124u||op==126u||op==168u||op==200u)&&wc==4u){r=w[i+2];a=w[i+3];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!def[a])return 0;if(op==126u)v=0u-ids[a];else if(op==168u)v=(ids[a]==0u);else if(op==200u)v=~ids[a];else v=ids[a];ids[r]=v;def[r]=1;}
+   else if(op==169u&&wc==6u){r=w[i+2];uint32_t c=w[i+3],x=w[i+4],y=w[i+5];if(r>=VK_SPIRV_MAX_IDS||c>=VK_SPIRV_MAX_IDS||x>=VK_SPIRV_MAX_IDS||y>=VK_SPIRV_MAX_IDS||!def[c]||!def[x]||!def[y])return 0;ids[r]=ids[c]?ids[x]:ids[y];def[r]=1;}
+   else if(wc==5u&&(op==128u||op==130u||op==132u||op==134u||op==135u||op==137u||op==138u||op==139u||(op>=164u&&op<=179u)||(op>=194u&&op<=199u))){
+    r=w[i+2];a=w[i+3];b=w[i+4];if(r>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!def[a]||!def[b])return 0;
+    switch(op){
+     case 128u:v=ids[a]+ids[b];break;case 130u:v=ids[a]-ids[b];break;case 132u:v=ids[a]*ids[b];break;
+     case 134u:if(!ids[b])return 0;v=ids[a]/ids[b];break;
+     case 135u:if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;v=(uint32_t)((int32_t)ids[a]/(int32_t)ids[b]);break;
+     case 137u:if(!ids[b])return 0;v=ids[a]%ids[b];break;
+     case 138u:case 139u:if(!ids[b]||((int32_t)ids[a]==INT32_MIN&&(int32_t)ids[b]==-1))return 0;{int32_t q=(int32_t)ids[a]%(int32_t)ids[b];if(op==139u&&q&&((q<0)!=((int32_t)ids[b]<0)))q+=(int32_t)ids[b];v=(uint32_t)q;}break;
+     case 164u:case 170u:v=ids[a]==ids[b];break;case 165u:case 171u:v=ids[a]!=ids[b];break;
+     case 166u:v=(ids[a]!=0u)||(ids[b]!=0u);break;case 167u:v=(ids[a]!=0u)&&(ids[b]!=0u);break;
+     case 172u:v=(int32_t)ids[a]>(int32_t)ids[b];break;case 173u:v=(int32_t)ids[a]>=(int32_t)ids[b];break;
+     case 174u:v=(int32_t)ids[a]<(int32_t)ids[b];break;case 175u:v=(int32_t)ids[a]<=(int32_t)ids[b];break;
+     case 176u:v=ids[a]>ids[b];break;case 177u:v=ids[a]>=ids[b];break;case 178u:v=ids[a]<ids[b];break;case 179u:v=ids[a]<=ids[b];break;
+     case 194u:v=ids[b]>=32u?0u:ids[a]>>ids[b];break;
+     case 195u:v=ids[b]>=32u?((ids[a]&0x80000000u)?0xffffffffu:0u):(uint32_t)((int32_t)ids[a]>>ids[b]);break;
+     case 196u:v=ids[b]>=32u?0u:ids[a]<<ids[b];break;
+     case 197u:v=ids[a]|ids[b];break;case 198u:v=ids[a]^ids[b];break;case 199u:v=ids[a]&ids[b];break;
+     default:return 0;
+    }ids[r]=v;def[r]=1;
+   }
+   else if(op!=14u&&op!=15u&&op!=17u&&op!=19u&&op!=20u&&op!=21u&&op!=22u&&op!=23u&&op!=24u&&op!=25u&&op!=26u&&op!=27u&&op!=28u&&op!=29u&&op!=30u&&op!=31u&&op!=32u&&op!=33u&&op!=39u&&op!=43u&&op!=54u&&op!=55u&&op!=56u&&op!=248u)return 0;
+  }
+  i+=wc;
  }
  if(!done||!def[output])return 0;*out=ids[output];return 1;
 }

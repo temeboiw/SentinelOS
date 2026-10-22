@@ -2226,7 +2226,14 @@ static Frame *syscall_handler(Frame *f) {
         if (vi_ok)
             virtio_input_poll();
 
-        /* Tablet owns absolute position when present. */
+        /* Tablet owns absolute position when present. Route ordinary pointer
+         * motion only to the active window so a background process cannot
+         * repaint a game-hidden cursor over the foreground scene. Clicks are
+         * still hit-tested and delivered to their actual target below. */
+        if (vi_ok && vi_moved && !vi_clicked &&
+            wm_get_active_pid() && wm_get_active_pid() != mepid)
+            goto no_input_event;
+
         if (vi_ok && (vi_moved || vi_clicked)) {
             mouse_x = vi_x;
             mouse_y = vi_y;
@@ -2288,6 +2295,9 @@ static Frame *syscall_handler(Frame *f) {
 
             if (mouse_x != lx || mouse_y != ly || mouse_btn != lb) {
                 int pressed = (mouse_btn & 1) && !(lb & 1);
+                int active_mouse_pid = wm_get_active_pid();
+                if (!pressed && active_mouse_pid && active_mouse_pid != mepid)
+                    goto no_input_event;
 
                 out->type = pressed ? 3 : 2;
                 out->x = mouse_x;

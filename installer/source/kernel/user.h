@@ -2700,7 +2700,7 @@ static Frame *syscall_handler(Frame *f) {
         const uint8_t *src = (const uint8_t *)(HHDM_BASE + image->phys);
         uint8_t sector[512];
         if ((off % (32ULL * 1024ULL * 1024ULL)) == 0) {
-            DbgPrint("installer: image %llu write progress %llu/%llu MiB\\n",
+            DbgPrint("installer: image %llu write progress %llu/%llu MiB\n",
                      (unsigned long long)f->rdi,
                      (unsigned long long)(off / (1024ULL * 1024ULL)),
                      (unsigned long long)(image->size / (1024ULL * 1024ULL)));
@@ -2710,7 +2710,7 @@ static Frame *syscall_handler(Frame *f) {
            and copying each sector through a tiny bounce buffer. */
         if (virtio_blk_write_buffer(dest + off / 512ULL,
                                     image->phys + off, (uint32_t)bytes) != 0) {
-            DbgPrint("installer: image %llu write failed at LBA %llu\\n",
+            DbgPrint("installer: image %llu write failed at LBA %llu\n",
                      (unsigned long long)f->rdi,
                      (unsigned long long)(dest + off / 512ULL));
             f->rax = (uint64_t)-2LL; return f;

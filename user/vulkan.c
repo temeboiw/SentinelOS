@@ -320,6 +320,7 @@ static uint8_t g_spirv_defined[VK_SPIRV_MAX_IDS];
 static uint32_t g_spirv_local_values[VK_SPIRV_MAX_IDS];
 static uint8_t g_spirv_local_defined[VK_SPIRV_MAX_IDS];
 static uint8_t g_spirv_local_pointer[VK_SPIRV_MAX_IDS];
+static uint32_t g_spirv_local_target[VK_SPIRV_MAX_IDS];
 static size_t vk_spirv_find_label(const uint32_t *w,size_t n,uint32_t entry,uint32_t label) {
  size_t i=5; uint32_t in_entry=0;
  while(i<n) {
@@ -341,7 +342,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
  size_t i=5; uint32_t active=0, found=0, steps=0, current_label=0, predecessor=0;
  if(!w||!out_bits||!vk_spirv_validate(w,n)||!entry||
     output_id>=VK_SPIRV_MAX_IDS)return 0;
- vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));vk_zero(g_spirv_local_values,sizeof(g_spirv_local_values));vk_zero(g_spirv_local_defined,sizeof(g_spirv_local_defined));vk_zero(g_spirv_local_pointer,sizeof(g_spirv_local_pointer));
+ vk_zero(g_spirv_ids,sizeof(g_spirv_ids));vk_zero(g_spirv_defined,sizeof(g_spirv_defined));vk_zero(g_spirv_local_values,sizeof(g_spirv_local_values));vk_zero(g_spirv_local_defined,sizeof(g_spirv_local_defined));vk_zero(g_spirv_local_pointer,sizeof(g_spirv_local_pointer));vk_zero(g_spirv_local_target,sizeof(g_spirv_local_target));
  /* Constants are module-scope declarations and are available to the entry. */
  while(i<n) {
   uint32_t wc=w[i]>>16,op=w[i]&0xffffu;
@@ -391,16 +392,16 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    }
    else if(op==59u&&(wc==4u||wc==5u)) { /* Function-storage scalar local */
     rid=w[i+2];if(rid>=VK_SPIRV_MAX_IDS||w[i+3]!=7u||g_spirv_local_pointer[rid])return 0;
-    g_spirv_local_pointer[rid]=1u;
+    g_spirv_local_pointer[rid]=1u;g_spirv_local_target[rid]=rid;
     if(wc==5u){a=w[i+4];if(a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;g_spirv_local_values[rid]=ids[a];g_spirv_local_defined[rid]=1u;}
    }
    else if(op==62u&&wc==3u) { /* Store to a supported local scalar */
     a=w[i+1];b=w[i+2];if(a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!g_spirv_local_pointer[a]||!defined[b])return 0;
-    g_spirv_local_values[a]=ids[b];g_spirv_local_defined[a]=1u;
+    v=g_spirv_local_target[a];if(v>=VK_SPIRV_MAX_IDS||!g_spirv_local_pointer[v])return 0;g_spirv_local_values[v]=ids[b];g_spirv_local_defined[v]=1u;
    }
    else if(op==61u&&wc==4u) { /* Load from a supported local scalar */
-    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!g_spirv_local_pointer[a]||!g_spirv_local_defined[a])return 0;
-    ids[rid]=g_spirv_local_values[a];defined[rid]=1u;
+    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!g_spirv_local_pointer[a])return 0;
+    v=g_spirv_local_target[a];if(v>=VK_SPIRV_MAX_IDS||!g_spirv_local_pointer[v]||!g_spirv_local_defined[v])return 0;ids[rid]=g_spirv_local_values[v];defined[rid]=1u;
    }
    else if((op>=156u&&op<=160u)&&wc==4u) {
     rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
@@ -523,8 +524,9 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
     ids[rid]=v;defined[rid]=1;
    }
    else if((op==83u||op==124u)&&wc==4u) {
-    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS||!defined[a])return 0;
-    ids[rid]=ids[a];defined[rid]=1;
+    rid=w[i+2];a=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||a>=VK_SPIRV_MAX_IDS)return 0;
+    if(g_spirv_local_pointer[a]){g_spirv_local_pointer[rid]=1u;g_spirv_local_target[rid]=g_spirv_local_target[a];}
+    else {if(!defined[a])return 0;ids[rid]=ids[a];defined[rid]=1;}
    }
    else if(op==169u&&wc==6u) {
     rid=w[i+2];a=w[i+3];b=w[i+4];v=w[i+5];

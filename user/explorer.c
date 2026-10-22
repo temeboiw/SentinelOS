@@ -23,6 +23,7 @@ typedef int (*TranslateMessage_t)(const MSG *);
 typedef i64 (*DispatchMessageA_t)(const MSG *);
 typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef void (*DrawTaskbar_t)(void);
+typedef u64 (*SetTimer_t)(void *, u64, u32, void *);
 typedef int (*InvalidateRect_t)(void *, void *, int);
 typedef int (*UpdateWindow_t)(void *);
 typedef void (*BeginRedrawBatch_t)(void);
@@ -36,6 +37,7 @@ static TranslateMessage_t pTrans;
 static DispatchMessageA_t pDisp;
 static TextOutA_t pText;
 static DrawTaskbar_t pBar;
+static SetTimer_t pSetTimer;
 static InvalidateRect_t pInv;
 static UpdateWindow_t pUpd;
 static BeginRedrawBatch_t pBeginBatch;
@@ -183,6 +185,7 @@ void explorer_main(void) {
     pDisp   = (DispatchMessageA_t)NtGetProcAddress(u32n, "DispatchMessageA");
     pText   = (TextOutA_t)NtGetProcAddress(u32n, "TextOutA");
     pBar    = (DrawTaskbar_t)NtGetProcAddress(u32n, "DrawTaskbar");
+    pSetTimer = (SetTimer_t)NtGetProcAddress(u32n, "SetTimer");
     pInv    = (InvalidateRect_t)NtGetProcAddress(u32n, "InvalidateRect");
     pUpd    = (UpdateWindow_t)NtGetProcAddress(u32n, "UpdateWindow");
     pBeginBatch = (BeginRedrawBatch_t)NtGetProcAddress(u32n, "BeginRedrawBatch");
@@ -195,6 +198,9 @@ void explorer_main(void) {
 
     void *hwnd = 0;
     redraw_desktop(&hwnd);
+    /* Refresh the RTC-backed taskbar clock once per minute without repainting
+       the wallpaper or spinning a permanent polling loop. */
+    if (pSetTimer && hwnd) (void)pSetTimer(hwnd, 1, 60000, 0);
 
     NtWriteConsole("explorer: glass desktop ready; search supports cmd\n");
 
@@ -206,6 +212,7 @@ void explorer_main(void) {
 
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
+        if (msg.message == 0x0113 && pBar) pBar(); /* WM_TIMER: refresh clock/date */
 
         handle_search_key(&msg, &hwnd);
 

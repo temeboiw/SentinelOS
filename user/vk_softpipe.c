@@ -138,10 +138,19 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
             if (t->depth_test && t->depth) {
                 float old_z = t->depth[at];
                 uint8_t cmp = t->depth_compare;
-                if ((cmp == 0u && !(z < old_z)) ||
-                    (cmp == 1u && !(z <= old_z)) ||
-                    (cmp == 3u) ||
-                    (cmp == 4u && !(z > old_z))) continue;
+                int pass = 0;
+                switch (cmp) {
+                case 0u: pass = 0; break;                 /* NEVER */
+                case 1u: pass = z < old_z; break;         /* LESS */
+                case 2u: pass = z == old_z; break;        /* EQUAL */
+                case 3u: pass = z <= old_z; break;        /* LESS_OR_EQUAL */
+                case 4u: pass = z > old_z; break;         /* GREATER */
+                case 5u: pass = z != old_z; break;        /* NOT_EQUAL */
+                case 6u: pass = z >= old_z; break;        /* GREATER_OR_EQUAL */
+                case 7u: pass = 1; break;                 /* ALWAYS */
+                default: pass = 0; break;
+                }
+                if (!pass) continue;
             }
             /* Perspective-correct varyings when clip-space reciprocal W
              * is supplied; retain affine behavior for legacy callers that

@@ -169,7 +169,12 @@ static void step(int dx,int dy) {
     if(maze[py][px]=='E')won=1;
     draw_frame();
 }
-static void turn(int delta) { heading=(heading+delta+4)&3; draw_frame(); }
+/* Camera heading stays fixed: A/D strafe instead of rotating the view. */
+static void move_relative(int forward,int strafe) {
+    int fx=dirx[heading], fy=diry[heading];
+    int sx=dirx[(heading+1)&3], sy=diry[(heading+1)&3];
+    step(fx*forward+sx*strafe,fy*forward+sy*strafe);
+}
 
 extern "C" void maze_mainCRTStartup() {
     /* Verify that the SentinelOS Vulkan runtime is present and exposes its
@@ -218,10 +223,10 @@ extern "C" void maze_mainCRTStartup() {
         if(msg.message==0x0010||msg.message==0x0012)break;
         if(msg.message!=0x0100)continue;
         switch((u32)msg.wParam) {
-          case 0x57: case 0x77: step(dirx[heading],diry[heading]); break;
-          case 0x53: case 0x73: step(-dirx[heading],-diry[heading]); break;
-          case 0x41: case 0x61: turn(-1); break;
-          case 0x44: case 0x64: turn(1); break;
+          case 0x57: case 0x77: move_relative(1,0); break;  /* W: forward */
+          case 0x53: case 0x73: move_relative(-1,0); break; /* S: backward */
+          case 0x41: case 0x61: move_relative(0,-1); break; /* A: strafe left */
+          case 0x44: case 0x64: move_relative(0,1); break;  /* D: strafe right */
           case 0x1b: (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0); for(;;)__asm__ volatile("pause");
         }
     }

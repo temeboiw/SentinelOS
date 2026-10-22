@@ -16,7 +16,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -39,6 +39,8 @@ using TranslateMessage_t=BOOL(*)(const void*);
 using DispatchMessageA_t=long long(*)(const void*);
 using UpdateWindow_t=BOOL(*)(void*);
 using ShowCursor_t=int(*)(BOOL);
+using SetCursorPos_t=BOOL(*)(int,int);
+using ClipCursor_t=BOOL(*)(const Rect*);
 using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,void**);
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
@@ -86,9 +88,12 @@ static const char maze[MH][MW+1]={
 static u32 *pixels;
 static u32 screen_w,screen_h,pitch;
 static int px=2,py=2,heading=0,won=0;
+static int mouse_turn_accum=0;
 static void *window_handle;
 static UpdateWindow_t update_window;
 static PeekMessageA_t peek_message;
+static SetCursorPos_t set_cursor_pos;
+static ClipCursor_t clip_cursor;
 
 static const int dirx[4]={0,1,0,-1};
 static const int diry[4]={-1,0,1,0};
@@ -210,6 +215,8 @@ extern "C" void maze_mainCRTStartup() {
     auto create_window=(CreateWindowExA_t)get_proc("user32.dll","CreateWindowExA");
     auto show_window=(ShowWindow_t)get_proc("user32.dll","ShowWindow");
     auto show_cursor=(ShowCursor_t)get_proc("user32.dll","ShowCursor");
+    set_cursor_pos=(SetCursorPos_t)get_proc("user32.dll","SetCursorPos");
+    clip_cursor=(ClipCursor_t)get_proc("user32.dll","ClipCursor");
     update_window=(UpdateWindow_t)get_proc("user32.dll","UpdateWindow");
     auto get_message=(GetMessageA_t)get_proc("user32.dll","GetMessageA");
     peek_message=(PeekMessageA_t)get_proc("user32.dll","PeekMessageA");
@@ -231,6 +238,8 @@ extern "C" void maze_mainCRTStartup() {
             if(show_cursor(0)<0) break;
         }
     }
+    /* Confine pointer to the screen while the game owns mouse-look. */
+    if(clip_cursor) { Rect clip={0,0,1280,800}; (void)clip_cursor(&clip); }
     if(update_window)(void)update_window(window_handle);
 
     GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;
@@ -242,8 +251,7 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    print(vulkan_available?"maze.exe: Vulkan loader found; current 3D scene uses software fallback\n":
-                           "maze.exe: Vulkan loader unavailable; software fallback selected\n");
+    print("maze.exe: mouse-look enabled; pointer hidden and centered; software scene\n");
     Message msg{};
     u64 hz=tsc_frequency();
     u64 frame_cycles=hz/60ULL;
@@ -265,6 +273,14 @@ extern "C" void maze_mainCRTStartup() {
         if(now-last_frame>=frame_cycles) {
             last_frame=now; /* 60 Hz input/simulation polling cadence */
             u64 keys=syscall3(SYS_GAME_KEY_STATE,0,0,0);
+            u32 mouse=(u32)syscall3(SYS_GAME_MOUSE_DELTA,0,0,0);
+            int mdx=(int)(short)(mouse&0xffffu);
+            mouse_turn_accum+=mdx;
+            /* Grid renderer currently turns in quarter-turn increments. */
+            while(mouse_turn_accum>=28) { heading=(heading+1)&3; mouse_turn_accum-=28; draw_frame(); }
+            while(mouse_turn_accum<=-28) { heading=(heading+3)&3; mouse_turn_accum+=28; draw_frame(); }
+            if(set_cursor_pos && screen_w && screen_h)
+                (void)set_cursor_pos((int)screen_w/2,(int)screen_h/2);
             if(keys&(1u<<4)) goto game_exit;
             if(now-last_step>=step_cycles) {
                 int forward=0,strafe=0;

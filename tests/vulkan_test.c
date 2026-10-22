@@ -96,7 +96,7 @@ int main(void) {
 
     /* Execute real SPIR-V scalar instructions: 40 + 2 must produce 42. */
     const uint32_t exec_words[] = {
-        0x07230203u, 0x00010000u, 0u, 14u, 0u,
+        0x07230203u, 0x00010000u, 0u, 13u, 0u,
         (2u<<16)|17u, 1u,
         (3u<<16)|14u, 0u, 1u,
         (4u<<16)|15u, 0u, 3u, 0x6e69616du,
@@ -111,7 +111,6 @@ int main(void) {
         (5u<<16)|132u, 2u, 9u, 7u, 6u,
         (5u<<16)|170u, 2u, 10u, 7u, 11u,
         (6u<<16)|169u, 2u, 12u, 10u, 7u, 5u,
-        (5u<<16)|87u, 2u, 13u, 11u, 10u,
         (1u<<16)|253u,
         (1u<<16)|56u
     };
@@ -638,6 +637,19 @@ int main(void) {
     smci.pCode = exec_words;
     VkShaderModule vertexShader = 0, fragmentShader = 0;
     CHECK(vkCreateShaderModule(device, &smci, 0, &vertexShader) == VK_SUCCESS);
+    /* Add OpImageSampleImplicitLod to the fragment entry. The bounded software
+       pipeline resolves this instruction against the bound image-sampler descriptor. */
+    uint32_t texture_shader_words[sizeof(exec_words)/sizeof(exec_words[0]) + 5u];
+    uint32_t exec_word_count = (uint32_t)(sizeof(exec_words)/sizeof(exec_words[0]));
+    for (uint32_t wi = 0; wi < exec_word_count - 2u; ++wi) texture_shader_words[wi] = exec_words[wi];
+    texture_shader_words[3] = 14u;
+    uint32_t tex_sample_at = exec_word_count - 2u;
+    texture_shader_words[tex_sample_at++] = (5u<<16)|87u;
+    texture_shader_words[tex_sample_at++] = 2u; texture_shader_words[tex_sample_at++] = 13u;
+    texture_shader_words[tex_sample_at++] = 11u; texture_shader_words[tex_sample_at++] = 10u;
+    texture_shader_words[tex_sample_at++] = exec_words[exec_word_count - 2u];
+    texture_shader_words[tex_sample_at++] = exec_words[exec_word_count - 1u];
+    smci.codeSize = sizeof(texture_shader_words); smci.pCode = texture_shader_words;
     CHECK(vkCreateShaderModule(device, &smci, 0, &fragmentShader) == VK_SUCCESS);
     VkPipelineShaderStageCreateInfo stages[2] = {{0}};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;

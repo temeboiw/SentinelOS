@@ -83,7 +83,7 @@ The graphical installer is designed to install without a shell. The ISO builder 
 
 When the user clicks **Install OS**, the in-OS setup app writes GPT metadata and asks the trusted kernel to copy the verified images to the fixed partition offsets. The kernel bounds-checks image sizes against the VirtIO disk capacity and reads back the first and last sectors after copying. The target disk must be at least the combined partition-image size plus GPT metadata (about 640 MiB at defaults). The installed ext4 filesystem initially retains the image size even if its partition is larger.
 
-The host-side SPF extractor and .spf packages remain build/validation utilities; they are not the installation path. **The code path has been connected, but this session has not run the installer build, ISO checks, or a real UEFI install-and-reboot test. Do not treat the installer as release-ready until those checks pass.** Installing erases the selected disk. Use only a disposable virtual disk during testing.
+The only supported installation path is the native in-OS graphical installer. Host-side install/extraction entry points are intentionally not provided. **The code path has been connected, but this session has not run the installer build, ISO checks, or a real UEFI install-and-reboot test. Do not treat the installer as release-ready until those checks pass.** Installing erases the selected disk. Use only a disposable virtual disk during testing.
 
 ## Regression tests
 

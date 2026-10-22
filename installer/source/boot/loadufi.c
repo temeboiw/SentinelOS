@@ -212,7 +212,7 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
         if ((offset % (32U * 1024U * 1024U)) == 0 || offset == bytes) {
             UINTN percent = bytes ? (offset * 100U) / bytes : 100U;
             UINTN filled = (percent * 30U) / 100U;
-            say(L"\\rloadufi: [");
+            say(L"\rloadufi: [");
             for (UINTN bar = 0; bar < 30; ++bar)
                 serial_putc(bar < filled ? '#' : '-');
             say(L"] ");
@@ -223,7 +223,7 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
             say_uint((UINT64)((bytes + 1048575U) / 1048576U));
             say(L" MiB");
             if (offset == bytes) say(L" complete");
-            if (offset == bytes) say(L"\\r\\n");
+            if (offset == bytes) say(L"\r\n");
         }
     }
     handle->Close(handle);

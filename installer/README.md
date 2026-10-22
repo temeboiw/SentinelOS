@@ -28,3 +28,28 @@ python3 -m unittest discover -s installer/tests -v
 ```
 
 The tests cover a package round-trip, overwrite protection, payload corruption, and path traversal rejection. They exercise the host-side package utility, not the in-kernel disk or filesystem drivers.
+
+## Safe host-side package installation coordinator
+
+`installer/install_from_spf.py` coordinates the two packages against **already-mounted, existing directories**. It never mounts, partitions, formats, or writes raw disks. It defaults to a dry run:
+
+```sh
+python3 installer/install_from_spf.py \
+  --esp-package installer/artifacts/esp.spf \
+  --system-package installer/artifacts/system.spf \
+  --esp-target /mnt/sentinel-esp \
+  --system-target /mnt/sentinel-system
+```
+
+Only after reviewing the targets should an operator apply it, with the exact confirmation phrase:
+
+```sh
+python3 installer/install_from_spf.py \
+  --esp-package installer/artifacts/esp.spf \
+  --system-package installer/artifacts/system.spf \
+  --esp-target /mnt/sentinel-esp \
+  --system-target /mnt/sentinel-system \
+  --apply --confirm "INSTALL SENTINELOS"
+```
+
+Existing files are protected by default; `--overwrite` is a separate opt-in. The coordinator checks both package kinds, verifies package hashes, rejects overlapping target directories and preflights destination paths before writing. Extraction of two filesystems is not transactional: a power loss or I/O error can leave a partial installation. This host utility is not yet wired into the booted installer UI and does not perform disk enumeration, partitioning, formatting, or bootloader installation.

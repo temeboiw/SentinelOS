@@ -180,7 +180,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
-   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Payload package headers: valid":"Payload package headers: invalid/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
+   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Payload integrity: SHA-256 verified":"Payload integrity: failed/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
    text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"System ext4 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{

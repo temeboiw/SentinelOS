@@ -133,7 +133,8 @@ static void draw_frame() {
     rect(0,0,(int)screen_w,horizon,rgb(24,45,75));
     rect(0,horizon,(int)screen_w,(int)screen_h-horizon,rgb(38,35,31));
     /* Distance slices create a perspective 3D corridor with shaded wall faces. */
-    for(int d=1;d<=8;d++) {
+    /* Paint distant geometry first so near walls cover it instead of bleeding through. */
+    for(int d=8;d>=1;d--) {
         int wx=px,wy=py;
         for(int step=1;step<=d;step++) { wx+=dirx[heading]; wy+=diry[heading]; }
         int sideL=heading==0?3:heading==1?0:heading==2?1:2;
@@ -153,7 +154,7 @@ static void draw_frame() {
                 int yy=top+(bottom-top)*k/4;
                 rect((int)screen_w/2-half,yy,half*2,2,rgb(55,46,38));
             }
-            break;
+            continue;
         }
         /* Side-wall faces, narrowed by distance to suggest perspective. */
         if(blocked(leftx,lefty)) {

@@ -2682,39 +2682,43 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtInstallerInstallImage: {
-        /* Only the trusted graphical setup process may deploy the immutable
-           filesystem images staged by UEFI. Their fixed destinations match
-           the GPT layout written by make_gpt(). */
+        /* Deploy bounded chunks so setup can repaint its progress screen between
+           calls instead of blocking the UI for the entire 640 MiB image. */
         if (!PspIsSystemProcess(MmCurrentProcess) || !user_bootinfo || f->rdi > 1 || !vb_ok) {
             f->rax = (uint64_t)-1LL; return f;
         }
         BootModule *image = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.img" : "system.img");
         uint64_t dest = f->rdi == 0 ? 2048ULL : 264192ULL;
+        uint64_t off = f->rsi, bytes = f->rdx;
         if (!image || !image->phys || !image->size || (image->size & 511ULL) ||
             image->size > (1ULL << 30) || dest >= vb_capacity_sectors ||
-            image->size / 512ULL > vb_capacity_sectors - dest) {
+            image->size / 512ULL > vb_capacity_sectors - dest ||
+            (off & 511ULL) || (bytes & 511ULL) || !bytes ||
+            bytes > (4ULL * 1024 * 1024) || off > image->size || bytes > image->size - off) {
             f->rax = (uint64_t)-1LL; return f;
         }
         const uint8_t *src = (const uint8_t *)(HHDM_BASE + image->phys);
         uint8_t sector[512];
-        for (uint64_t off = 0; off < image->size; off += 512ULL) {
-            if ((off % (32ULL * 1024 * 1024)) == 0)
-                DbgPrint("installer: image %llu write progress %llu/%llu MiB\n",
+        for (uint64_t pos = off; pos < off + bytes; pos += 512ULL) {
+            for (unsigned j = 0; j < 512; j++) sector[j] = src[pos + j];
+            if (virtio_blk_write_sector(dest + pos / 512ULL, sector) != 0) {
+                DbgPrint("installer: image %llu write failed at LBA %llu\n",
                          (unsigned long long)f->rdi,
-                         (unsigned long long)(off / (1024ULL * 1024)),
-                         (unsigned long long)(image->size / (1024ULL * 1024)));
-            for (unsigned j = 0; j < 512; j++) sector[j] = src[off + j];
-            if (virtio_blk_write_sector(dest + off / 512ULL, sector) != 0) {
-                DbgPrint("installer: image write failed at LBA %llu\\n",
-                         (unsigned long long)(dest + off / 512ULL));
+                         (unsigned long long)(dest + pos / 512ULL));
                 f->rax = (uint64_t)-2LL; return f;
             }
         }
-        /* Verify both ends of the copied image against the staged source. */
-        if (virtio_blk_read_sector(dest, sector) != 0) { f->rax=(uint64_t)-3LL; return f; }
-        for (unsigned j=0;j<512;j++) if (sector[j] != src[j]) { f->rax=(uint64_t)-4LL; return f; }
-        if (virtio_blk_read_sector(dest + image->size/512ULL - 1, sector) != 0) { f->rax=(uint64_t)-5LL; return f; }
-        for (unsigned j=0;j<512;j++) if (sector[j] != src[image->size - 512ULL + j]) { f->rax=(uint64_t)-6LL; return f; }
+        if (off + bytes == image->size) {
+            /* Verify first and last sectors only after the final chunk. */
+            if (virtio_blk_read_sector(dest, sector) != 0) { f->rax=(uint64_t)-3LL; return f; }
+            for (unsigned j=0;j<512;j++) if (sector[j] != src[j]) { f->rax=(uint64_t)-4LL; return f; }
+            if (virtio_blk_read_sector(dest + image->size/512ULL - 1, sector) != 0) { f->rax=(uint64_t)-5LL; return f; }
+            for (unsigned j=0;j<512;j++) if (sector[j] != src[image->size - 512ULL + j]) { f->rax=(uint64_t)-6LL; return f; }
+            DbgPrint("installer: image %llu write progress %llu/%llu MiB (verified)\n",
+                     (unsigned long long)f->rdi,
+                     (unsigned long long)(image->size / (1024ULL * 1024)),
+                     (unsigned long long)(image->size / (1024ULL * 1024)));
+        }
         f->rax = 0; return f;
     }
 

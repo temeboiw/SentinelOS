@@ -51,7 +51,7 @@ mkfs.ext4 -F -q -L SENTINELOS -O extents,^64bit,^metadata_csum,^dir_index,^has_j
 for f in magic/System32/hal.dll magic/System32/krnl.exe magic/System32/smss.exe magic/System32/instlr.exe; do
   debugfs -R "stat /$f" "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:' || { echo "error: system image is missing /$f" >&2; exit 4; }
 done
-printf '%s\\n%s\\n' "$(sha256sum "$TARGET_ESP_IMG" | cut -d ' ' -f1)" "$(sha256sum "$TARGET_SYSTEM_IMG" | cut -d ' ' -f1)" > "$INSTALL_SUMS"
+printf '%s\n%s\n' "$(sha256sum "$TARGET_ESP_IMG" | cut -d ' ' -f1)" "$(sha256sum "$TARGET_SYSTEM_IMG" | cut -d ' ' -f1)" > "$INSTALL_SUMS"
 # Store package hashes separately so the kernel can verify exact staged bytes before formatting any disk.
 printf '%s\n%s\n' "$(sha256sum "$OUT/esp.spf" | cut -d ' ' -f1)" "$(sha256sum "$OUT/system.spf" | cut -d ' ' -f1)" > "$OUT/packages.sha256"
 if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
@@ -62,7 +62,7 @@ if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
   required_bytes=$((required_bytes + $(stat -c %s "$TARGET_ESP_IMG") + $(stat -c %s "$TARGET_SYSTEM_IMG") + $(stat -c %s "$INSTALL_SUMS")))
   ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))
   (( ESP_SIZE_MIB < 128 )) && ESP_SIZE_MIB=128
-  echo "Auto-sized installer ESP: ${ESP_SIZE_MIB} MiB (staged files and both SPF packages)"
+  echo "Auto-sized installer ESP: ${ESP_SIZE_MIB} MiB (staged files and both filesystem images)"
 fi
 [[ "$ESP_SIZE_MIB" =~ ^[0-9]+$ ]] && (( ESP_SIZE_MIB >= 32 && ESP_SIZE_MIB <= 1024 )) || { echo "error: required ESP exceeds supported 32..1024 MiB range; set ESP_SIZE_MIB explicitly or reduce the payload" >&2; exit 2; }
 
@@ -83,14 +83,14 @@ for entry in "$STAGE/esp"/*; do
 done
 shopt -u nullglob dotglob
 
-# The UEFI loader can only read files on its own FAT ESP. Embed both raw
-# package containers there so it can preserve them as boot modules for the
-# trusted installer session. The ISO-level copies remain for host-side tools.
+# The UEFI loader can only read files on its own FAT ESP. Embed both verified
+# filesystem images there as boot modules for the trusted native installer.
+# The ISO-level SPF copies remain for build validation and diagnostics.
 mcopy -i "$ESP_IMG" "$TARGET_ESP_IMG" ::/esp.img
 mcopy -i "$ESP_IMG" "$TARGET_SYSTEM_IMG" ::/system.img
 mcopy -i "$ESP_IMG" "$INSTALL_SUMS" ::/install.sha256
 
-# Fail early if the fallback loader and both payloads made it into the FAT image.
+# Fail early if the fallback loader and both install images made it into the FAT image.
 TMP_CHECK="$(mktemp)"
 trap 'rm -f "$TMP_CHECK"' EXIT
 mcopy -i "$ESP_IMG" ::/EFI/BOOT/BOOTX64.EFI "$TMP_CHECK"
@@ -111,13 +111,11 @@ SentinelOS V.4 [Beta] installer media
 This ISO boots the graphical SentinelOS Setup app. It carries prebuilt FAT32
 and ext4 filesystem images plus SPF build/validation packages under /packages.
 
-WARNING: Beta software. Back up important data before installing.
-The graphical installer creates GPT and copies the checksum-verified FAT32 EFI
-and ext4 system images to the selected VirtIO disk. The system image is 512 MiB
-by default; the target disk must be at least about 640 MiB. The installed ext4
-filesystem initially retains that size even if the partition is larger.
-
-WARNING: Beta software. Back up important data before installing. The selected
+WARNING: Beta software. Back up important data before installing. The graphical
+installer creates GPT and copies checksum-verified FAT32 EFI and ext4 system
+images to the selected VirtIO disk. The system image is 512 MiB by default; the
+target disk must be at least about 640 MiB. The installed ext4 filesystem initially
+retains that size even if the partition is larger. The selected
 disk is erased. A real UEFI VM install and reboot test is still required.
 EOF
 (

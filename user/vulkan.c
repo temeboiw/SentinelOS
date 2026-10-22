@@ -768,7 +768,7 @@ static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t ent
  if(!done||!def[output])return 0;*out=ids[output];return 1;
 }
 static int vk_spirv_has_implicit_texture_sample(const uint32_t *w,size_t n,uint32_t entry) {
- size_t i=5;uint32_t active=0;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;if(op==54u&&wc>=5u)active=(w[i+2]==entry);else if(op==56u)active=0;else if(active&&op==87u&&wc>=5u)return 1;i+=wc;}return 0;
+ size_t i=5;uint32_t active=0;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;if(op==54u&&wc>=5u)active=(w[i+2]==entry);else if(op==56u)active=0;else if(active&&op>=87u&&op<=97u&&wc>=5u)return 1;i+=wc;}return 0;
 }
 static uint32_t vk_spirv_main_id(const uint32_t *w,size_t n) {
  size_t i=5;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
@@ -786,7 +786,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateSampler(VkDevice d,const VkSam
  *out=0;
  if(ci->magFilter>VK_FILTER_LINEAR||ci->minFilter>VK_FILTER_LINEAR||ci->mipmapMode>1u||
     ci->addressModeU>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||ci->addressModeV>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||ci->addressModeW>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||
-    ci->addressModeU==1u||ci->addressModeV==1u||ci->addressModeW==1u||ci->anisotropyEnable||ci->compareEnable||ci->unnormalizedCoordinates)return VK_ERROR_FEATURE_NOT_PRESENT;
+    ci->addressModeU==1u||ci->addressModeV==1u||ci->addressModeW==1u||ci->anisotropyEnable||ci->compareEnable>1u||(ci->compareEnable&&ci->compareOp>7u)||ci->unnormalizedCoordinates)return VK_ERROR_FEATURE_NOT_PRESENT;
  for(unsigned i=0;i<32;i++)if(!g_samplers[i].magic){VkSamplerObj *p=&g_samplers[i];vk_zero(p,sizeof(*p));p->magic=VK_OBJECT_MAGIC;p->device=d;
   p->magFilter=ci->magFilter;p->minFilter=ci->minFilter;p->mipmapMode=ci->mipmapMode;p->addressU=ci->addressModeU;p->addressV=ci->addressModeV;p->addressW=ci->addressModeW;
   p->mipLodBias=ci->mipLodBias;p->minLod=ci->minLod;p->maxLod=ci->maxLod;*out=(VkSampler)p;return VK_SUCCESS;}
@@ -901,6 +901,7 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     executable instructions instead of silently substituting a color. */
  for(size_t i=5;i<n;){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
   if(op==71u&&wc>=4u&&w[i+1]<VK_SPIRV_MAX_IDS){if(w[i+2]==30u)g_frag_location[w[i+1]]=w[i+3];}
+  else if(op==22u&&wc==3u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_type_components[w[i+1]]=1u;
   else if(op==23u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_type_components[w[i+1]]=w[i+3];
   else if(op==32u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_pointer_type[w[i+1]]=w[i+3];
   else if(op==59u&&wc>=4u&&w[i+2]<VK_SPIRV_MAX_IDS){g_frag_storage[w[i+2]]=(uint8_t)w[i+3];g_frag_kind[w[i+2]]=1;}
@@ -960,18 +961,19 @@ static int vk_pipeline_texture(VkCmdObj *c,VkPipelineObj *pl,VkSoftTexture *out)
    if(!image_view_ok(view)||!sampler||!image_ok(view->image))continue;
    VkImage im=view->image;
    if(im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||
-      view->aspect!=VK_IMAGE_ASPECT_COLOR_BIT||im->format==VK_FORMAT_D32_SFLOAT||
+      (im->format==VK_FORMAT_D32_SFLOAT?view->aspect!=VK_IMAGE_ASPECT_DEPTH_BIT:view->aspect!=VK_IMAGE_ASPECT_COLOR_BIT)||
       (im->layout!=VK_IMAGE_LAYOUT_GENERAL&&im->layout!=value->imageLayout)||
       value->imageLayout!=VK_IMAGE_LAYOUT_GENERAL||im->size/4u>VK_MEMORY_BYTES/4u)continue;
    uint8_t *src=&im->memory->bytes[im->offset];
    for(uint64_t px=0;px<im->size/4u;px++){
-    uint8_t r,g,b,a; if(im->format==VK_FORMAT_B8G8R8A8_UNORM){b=src[px*4u];g=src[px*4u+1u];r=src[px*4u+2u];a=src[px*4u+3u];}
+    uint8_t r,g,b,a;if(im->format==VK_FORMAT_D32_SFLOAT){float z;vk_copy(&z,src+px*4u,4);r=g=b=(uint8_t)(z<=0.0f?0.0f:z>=1.0f?255.0f:z*255.0f);a=255;}
+    else if(im->format==VK_FORMAT_B8G8R8A8_UNORM){b=src[px*4u];g=src[px*4u+1u];r=src[px*4u+2u];a=src[px*4u+3u];}
     else {r=src[px*4u];g=src[px*4u+1u];b=src[px*4u+2u];a=src[px*4u+3u];}
     g_vk_texture_pixels[px]=((uint32_t)a<<24)|((uint32_t)r<<16)|((uint32_t)g<<8)|b;
    }
    out->pixels=g_vk_texture_pixels;out->width=im->width;out->height=im->height;out->stride_pixels=im->width;
    out->linear_filter=(uint8_t)(sampler->minFilter==VK_FILTER_LINEAR||sampler->magFilter==VK_FILTER_LINEAR);
-   out->repeat_u=(uint8_t)(sampler->addressU==0u);out->repeat_v=(uint8_t)(sampler->addressV==0u);
+   out->repeat_u=(uint8_t)(sampler->addressU==0u);out->repeat_v=(uint8_t)(sampler->addressV==0u);out->compare_enable=(uint8_t)sampler->compareEnable;out->compare_op=(uint8_t)sampler->compareOp;
    return 1;
   }
  }
@@ -1086,7 +1088,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkFreeDescriptorSets(VkDevice d,VkDesc
 }
 __declspec(dllexport) void VKAPI_CALL vkUpdateDescriptorSets(VkDevice d,uint32_t writeCount,const VkWriteDescriptorSet *writes,uint32_t copyCount,const void *copies) {
  if(!dev_ok(d)||copyCount||copies||(writeCount&&!writes))return;
- for(uint32_t i=0;i<writeCount;i++){const VkWriteDescriptorSet *w=&writes[i];if(!dset_ok(w->dstSet)||w->dstSet->device!=d||w->dstArrayElement||w->descriptorCount!=1||w->pTexelBufferView)continue;int bi=dsl_binding_index(w->dstSet->layout,w->dstBinding);if(bi<0)continue;VkDescriptorSetLayoutBinding *b=&w->dstSet->layout->bindings[bi];if(w->descriptorType!=b->descriptorType||!b->descriptorCount)continue;if(w->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER||w->descriptorType==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER){if(!w->pBufferInfo||w->pImageInfo)continue;const VkDescriptorBufferInfo *v=w->pBufferInfo;if(!buf_ok(v->buffer)||v->buffer->device!=d||!mem_ok(v->buffer->memory)||v->offset>v->buffer->size||!v->range||v->range>v->buffer->size-v->offset)continue;if((w->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT))||(w->descriptorType==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))continue;w->dstSet->values[bi][0].buffer=v->buffer;w->dstSet->values[bi][0].offset=v->offset;w->dstSet->values[bi][0].range=v->range;}else{if(!w->pImageInfo||w->pBufferInfo)continue;const VkDescriptorImageInfo *v=(const VkDescriptorImageInfo*)w->pImageInfo;VkDescriptorValue *dst=&w->dstSet->values[bi][0];if(w->descriptorType==VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER){if(!image_view_ok(v->imageView)||v->imageView->device!=d||!image_ok(v->imageView->image)||v->imageView->image->device!=d||!mem_ok(v->imageView->image->memory)||!(v->imageView->image->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||v->imageView->aspect!=VK_IMAGE_ASPECT_COLOR_BIT||!v->sampler)continue;int sok=0;for(unsigned si=0;si<32;si++)if(v->sampler==(VkSampler)&g_samplers[si]&&g_samplers[si].magic==VK_OBJECT_MAGIC&&g_samplers[si].device==d)sok=1;if(!sok)continue;dst->imageView=v->imageView;dst->sampler=v->sampler;dst->imageLayout=v->imageLayout;}else if(w->descriptorType==VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE){if(!image_view_ok(v->imageView)||v->imageView->device!=d||!image_ok(v->imageView->image)||v->imageView->image->device!=d||!mem_ok(v->imageView->image->memory)||!(v->imageView->image->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||v->imageView->aspect!=VK_IMAGE_ASPECT_COLOR_BIT)continue;dst->imageView=v->imageView;dst->imageLayout=v->imageLayout;}else if(w->descriptorType==VK_DESCRIPTOR_TYPE_SAMPLER){if(!v->sampler)continue;int sok=0;for(unsigned si=0;si<32;si++)if(v->sampler==(VkSampler)&g_samplers[si]&&g_samplers[si].magic==VK_OBJECT_MAGIC&&g_samplers[si].device==d)sok=1;if(!sok)continue;dst->sampler=v->sampler;}}}
+ for(uint32_t i=0;i<writeCount;i++){const VkWriteDescriptorSet *w=&writes[i];if(!dset_ok(w->dstSet)||w->dstSet->device!=d||w->dstArrayElement||w->descriptorCount!=1||w->pTexelBufferView)continue;int bi=dsl_binding_index(w->dstSet->layout,w->dstBinding);if(bi<0)continue;VkDescriptorSetLayoutBinding *b=&w->dstSet->layout->bindings[bi];if(w->descriptorType!=b->descriptorType||!b->descriptorCount)continue;if(w->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER||w->descriptorType==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER){if(!w->pBufferInfo||w->pImageInfo)continue;const VkDescriptorBufferInfo *v=w->pBufferInfo;if(!buf_ok(v->buffer)||v->buffer->device!=d||!mem_ok(v->buffer->memory)||v->offset>v->buffer->size||!v->range||v->range>v->buffer->size-v->offset)continue;if((w->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT))||(w->descriptorType==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))continue;w->dstSet->values[bi][0].buffer=v->buffer;w->dstSet->values[bi][0].offset=v->offset;w->dstSet->values[bi][0].range=v->range;}else{if(!w->pImageInfo||w->pBufferInfo)continue;const VkDescriptorImageInfo *v=(const VkDescriptorImageInfo*)w->pImageInfo;VkDescriptorValue *dst=&w->dstSet->values[bi][0];if(w->descriptorType==VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER){if(!image_view_ok(v->imageView)||v->imageView->device!=d||!image_ok(v->imageView->image)||v->imageView->image->device!=d||!mem_ok(v->imageView->image->memory)||!(v->imageView->image->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||!v->sampler)continue;if((v->imageView->image->format==VK_FORMAT_D32_SFLOAT&&v->imageView->aspect!=VK_IMAGE_ASPECT_DEPTH_BIT)||(v->imageView->image->format!=VK_FORMAT_D32_SFLOAT&&v->imageView->aspect!=VK_IMAGE_ASPECT_COLOR_BIT))continue;int sok=0;for(unsigned si=0;si<32;si++)if(v->sampler==(VkSampler)&g_samplers[si]&&g_samplers[si].magic==VK_OBJECT_MAGIC&&g_samplers[si].device==d)sok=1;if(!sok)continue;dst->imageView=v->imageView;dst->sampler=v->sampler;dst->imageLayout=v->imageLayout;}else if(w->descriptorType==VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE){if(!image_view_ok(v->imageView)||v->imageView->device!=d||!image_ok(v->imageView->image)||v->imageView->image->device!=d||!mem_ok(v->imageView->image->memory)||!(v->imageView->image->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||v->imageView->aspect!=VK_IMAGE_ASPECT_COLOR_BIT)continue;dst->imageView=v->imageView;dst->imageLayout=v->imageLayout;}else if(w->descriptorType==VK_DESCRIPTOR_TYPE_SAMPLER){if(!v->sampler)continue;int sok=0;for(unsigned si=0;si<32;si++)if(v->sampler==(VkSampler)&g_samplers[si]&&g_samplers[si].magic==VK_OBJECT_MAGIC&&g_samplers[si].device==d)sok=1;if(!sok)continue;dst->sampler=v->sampler;}}}
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer c,uint32_t point,VkPipelineLayout layout,uint32_t first,uint32_t count,const VkDescriptorSet *sets,uint32_t dynCount,const uint32_t *dynOffsets) {
  if(!cmd_ok(c)||c->state!=1||point!=VK_PIPELINE_BIND_POINT_GRAPHICS||!playout_ok(layout)||layout->device!=c->device||first>4||count>4-first||(count&&!sets)||dynCount||dynOffsets||c->count>=128)return;

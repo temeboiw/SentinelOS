@@ -1,6 +1,7 @@
 // loadufi.efi - stage 2. Loads HAL+kernel, higher-half maps, jumps to high kmain.
 #include "common.h"
 #include <Protocol/GraphicsOutput.h>
+#include <Protocol/LoadedImage.h>
 #include <Protocol/SimpleFileSystem.h>
 #include <Guid/FileInfo.h>
 #include <IndustryStandard/PeImage.h>
@@ -8,6 +9,8 @@
 #include "ext4.h"
 
 EFI_GUID gEfiGraphicsOutputProtocolGuid = {0x9042a9de,0x23dc,0x4a38,{0x96,0xfb,0x7a,0xde,0xd0,0x80,0x51,0x6a}};
+EFI_GUID gEfiLoadedImageProtocolGuid = {0x5B1B31A1,0x9562,0x11d2,{0x8E,0x3F,0x00,0xA0,0xC9,0x69,0x72,0x3B}};
+EFI_GUID gEfiSimpleFileSystemProtocolGuid = {0x964e5b22,0x6459,0x11d2,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
 
 /* EDID protocols expose the monitor's preferred timing. If EDID is absent or
  * unusable, leave the firmware-selected GOP mode unchanged. */

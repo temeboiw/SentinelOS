@@ -60,11 +60,22 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
 
     def test_corrupt_compressed_payload_is_rejected(self):
         self.build_package()
-        data = bytearray(self.package.read_bytes())
-        self.assertGreater(len(data), make_spf.HEADER.size + 8)
-        data[-5] ^= 0x40
-        self.package.write_bytes(data)
-        with self.assertRaises((ValueError, Exception)):
+        data = self.package.read_bytes()
+        magic, manifest_len, packed_len = make_spf.HEADER.unpack_from(data)
+        manifest_start = make_spf.HEADER.size
+        manifest_end = manifest_start + manifest_len
+        manifest = json.loads(data[manifest_start:manifest_end].decode("utf-8"))
+        manifest["payload_sha256"] = "0" * 64
+        changed_manifest = json.dumps(
+            manifest, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        self.assertEqual(len(changed_manifest), manifest_len)
+        self.package.write_bytes(
+            make_spf.HEADER.pack(magic, manifest_len, packed_len)
+            + changed_manifest
+            + data[manifest_end:]
+        )
+        with self.assertRaisesRegex(ValueError, "payload checksum mismatch"):
             make_spf.read_package(self.package)
 
     def test_invalid_package_header_is_rejected(self):

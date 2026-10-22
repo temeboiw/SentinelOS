@@ -82,7 +82,9 @@ static int format_fat32(u64 start,u32 total){
  for(u32 i=0;i<fats*fatsz;i++){for(int j=0;j<512;j++)s[j]=0;if(write_lba(fat0+i,s)<0)return -7;}
  for(int copy=0;copy<2;copy++){for(int j=0;j<512;j++)s[j]=0;put32(s,0x0FFFFFF8);put32(s+4,0xFFFFFFFF);put32(s+8,0x0FFFFFFF);if(write_lba(fat0+(u64)copy*fatsz,s)<0)return -8;}
  if(NtInstallerDiskIo(0,start,s)!=0)return -9;
- if(s[510]!=0x55||s[511]!=0xAA||s[82]!='F')return -10;
+ if(s[510]!=0x55||s[511]!=0xAA||s[82]!='F'||s[13]!=1||s[14]!=32||s[16]!=2||s[48]!=1||s[50]!=6)return -10;
+ if(NtInstallerDiskIo(0,start+1,s)!=0||s[0]!=0x52||s[1]!=0x52||s[2]!=0x61||s[3]!=0x41||s[510]!=0x00||s[511]!=0x00)return -11;
+ if(NtInstallerDiskIo(0,start+reserved,s)!=0||s[0]!=0xF8||s[1]!=0xFF||s[2]!=0xFF||s[3]!=0x0F)return -12;
  return 0;
 }
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){
@@ -140,7 +142,7 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<2){if(install_state==0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}}
+   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<2){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}

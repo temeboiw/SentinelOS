@@ -57,11 +57,12 @@ run_vm() {
     if [[ ! -s "$DISK" ]]; then bash "$HERE/create-test-disk.sh" "$DISK"; fi
     VNC_ADDR="${VNC_ADDR:-127.0.0.1}"
     VNC_DISPLAY="${VNC_DISPLAY:-0}"
-    echo "==> Launch interactive UEFI VM with VNC at ${VNC_ADDR}:$((5900 + VNC_DISPLAY)); serial console -> stdio"
+    echo "==> Launch interactive UEFI VM with VNC at ${VNC_ADDR}:$((5900 + VNC_DISPLAY))"
+    echo "==> QEMU serial console is attached directly to this terminal (-serial stdio); host audio disabled"
     echo "Disposable test disk: $DISK"
     echo "Connect with a VNC viewer. Stop QEMU with Ctrl+C."
     echo "VNC is unauthenticated; keep it on 127.0.0.1 unless you deliberately choose a trusted network."
-    qemu-system-x86_64 \
+    QEMU_AUDIO_DRV=none qemu-system-x86_64 \
       -machine q35,accel=tcg -cpu max -m 2048 \
       -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
       -cdrom "$ISO" -boot order=d -display none \
@@ -75,7 +76,7 @@ run_vm() {
   echo "==> Launch UEFI VM for 45 seconds; serial output -> $LOG"
   echo "This checks that QEMU/OVMF can start the ISO; it does not prove the installer UI or disk installation works."
   set +e
-  timeout --signal=TERM 45s qemu-system-x86_64 \
+  QEMU_AUDIO_DRV=none timeout --signal=TERM 45s qemu-system-x86_64 \
     -machine q35,accel=tcg -cpu max -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
     -cdrom "$ISO" -boot order=d -display none -serial "file:$LOG" \

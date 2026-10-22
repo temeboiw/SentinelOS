@@ -18,6 +18,12 @@ export EDK2=/path/to/edk2
 bash installer/build-iso.sh
 ```
 
+Create a disposable sparse 1 GiB raw disk for the installer VM (this creates a local file; it does not touch physical disks):
+
+```sh
+bash installer/create-test-disk.sh
+```
+
 This runs the isolated source build, links installer-specific `instlr.exe`, `screen.exe`, and installer `smss.exe`, creates and verifies `artifacts/esp.spf` and `artifacts/system.spf`, masters a UEFI El Torito/hybrid ISO, then smoke-checks the final ISO and package payloads. The intended output is `installer/artifacts/SentinelOS-V4-BETA.iso` with a SHA-256 sidecar.
 
 To run individual stages:
@@ -45,6 +51,14 @@ For an automated UEFI firmware launch smoke test, install `qemu-system-x86`, `ov
 bash installer/test-official.sh vm
 ```
 
+For the interactive VNC test, `vm-vnc` automatically creates and attaches `installer/artifacts/sentinel-test-disk.img` as a VirtIO block device if the image does not already exist:
+
+```sh
+bash installer/test-official.sh vm-vnc
+```
+
+Connect to `127.0.0.1:5900`. The VNC server has no authentication; keep it bound to localhost.
+
 Or run all stages in order:
 
 ```sh
@@ -65,7 +79,7 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 
 ## What is not yet a complete disk installer
 
-**This is not yet a full disk installer.** The setup UI cannot enumerate physical disks, partition or format them, or install onto a selected drive. The user syscall interface in the isolated source snapshot exposes file and directory access but no disk enumeration, raw block read/write, partition-table, or filesystem-format service for user-mode setup. Pretending this is implemented would risk data loss. The current UI therefore disables disk installation rather than issuing unverified writes.
+**This is not yet a full disk installer.** The setup UI now queries the kernel for the capacity of the first supported VirtIO block device and displays its size. The VM test mode attaches a dedicated sparse 1 GiB raw disk image. This is only device detection: sector writes, partition-table creation, filesystem formatting, package deployment to the target, and boot configuration are not implemented yet. The UI therefore does not perform installation or formatting until those write paths are implemented and validated.
 
 The host-side `installer/install_from_spf.py` tool can extract verified packages into two existing, non-overlapping mounted directories. It defaults to dry-run and requires `--apply --confirm "INSTALL SENTINELOS"` to write files; it does not create partitions, format disks, configure boot entries, or install onto raw devices. Extraction is not transactional.
 

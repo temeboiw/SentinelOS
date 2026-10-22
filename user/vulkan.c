@@ -896,9 +896,30 @@ __declspec(dllexport) void VKAPI_CALL SentinelVulkanCmdBindColorTarget(VkCommand
  if(!cmd_ok(c)||c->state!=1||!image_ok(im)||im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->count>=128)return;
  c->bound_target=im;unsigned i=c->count++;c->ops[i].op=12;c->ops[i].image=im;
 }
+/* Record one CPU-rasterized triangle per three vertices. This implements
+ * Vulkan's triangle-list draw semantics for non-indexed, single-instance
+ * draws while keeping execution bounded by the command buffer's fixed ops. */
 __declspec(dllexport) void VKAPI_CALL vkCmdDraw(VkCommandBuffer c,uint32_t vertexCount,uint32_t instanceCount,uint32_t firstVertex,uint32_t firstInstance) {
- if(!cmd_ok(c)||c->state!=1||!c->bound_pipeline||!c->bound_vertex||!c->bound_target||vertexCount!=3||instanceCount!=1||firstInstance||firstVertex>UINT32_MAX/sizeof(VkSoftVertex)||c->bound_vertex_offset>c->bound_vertex->size||((VkDeviceSize)firstVertex+3u)*sizeof(VkSoftVertex)>c->bound_vertex->size-c->bound_vertex_offset||c->count>=128)return;
- unsigned i=c->count++;c->ops[i].op=13;c->ops[i].value=firstVertex;c->ops[i].size=vertexCount;c->ops[i].a=c->bound_vertex;c->ops[i].image=c->bound_target;c->ops[i].depth_image=c->bound_depth_target;c->ops[i].offset=c->bound_vertex_offset;c->ops[i].offset2=(uintptr_t)c->bound_pipeline;
+ if(!cmd_ok(c)||c->state!=1||!c->bound_pipeline||!c->bound_vertex||!c->bound_target||
+    !vertexCount||(vertexCount%3u)!=0u||instanceCount!=1u||firstInstance||
+    c->count>128u||firstVertex>UINT32_MAX-vertexCount||
+    firstVertex>UINT32_MAX/sizeof(VkSoftVertex)||
+    c->bound_vertex_offset>c->bound_vertex->size||
+    ((VkDeviceSize)firstVertex+(VkDeviceSize)vertexCount)*sizeof(VkSoftVertex)>
+       c->bound_vertex->size-c->bound_vertex_offset||
+    vertexCount/3u>128u-c->count)return;
+ for(uint32_t v=0;v<vertexCount;v+=3u) {
+  unsigned i=c->count++;
+  vk_zero(&c->ops[i],sizeof(c->ops[i]));
+  c->ops[i].op=13;
+  c->ops[i].value=firstVertex+v;
+  c->ops[i].size=3u;
+  c->ops[i].a=c->bound_vertex;
+  c->ops[i].image=c->bound_target;
+  c->ops[i].depth_image=c->bound_depth_target;
+  c->ops[i].offset=c->bound_vertex_offset;
+  c->ops[i].offset2=(uintptr_t)c->bound_pipeline;
+ }
 }
 
 typedef struct { VkShaderModule module; VkSoftTexture *texture; } VkFragmentContext;

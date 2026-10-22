@@ -1093,11 +1093,20 @@ static void compose(void) {
         auto_clip=1;
     } else if (!u32_render_clip && !u32_force_full_compose && u32_is_desktop_window() &&
                u32_aero_bg_w == g_fw && u32_aero_bg_h == g_fh) {
-        /* After initial desktop paint, ordinary desktop updates cover the
-         * card and taskbar only, not the static wallpaper or icon area. */
+        /* When a desktop-owned app window is visible, its content updates
+         * must not repaint the whole lower desktop. Rebuild only that window's
+         * bounds; the taskbar outside this clip is persistent and unchanged. */
         u32_render_clip=1;
-        u32_clip_x0=0; u32_clip_y0=60;
-        u32_clip_x1=(int)g_fw; u32_clip_y1=(int)g_fh;
+        if (g_wnd.visible && !g_wnd.minimized && g_wnd.w>2 && g_wnd.h>2) {
+            u32_clip_x0=g_wnd.x-6; u32_clip_y0=g_wnd.y-6;
+            u32_clip_x1=g_wnd.x+g_wnd.w+10;
+            u32_clip_y1=g_wnd.y+g_wnd.h+14;
+        } else {
+            /* The welcome/search card can change while no window is open.
+             * Keep the existing safe desktop-region fallback for that case. */
+            u32_clip_x0=0; u32_clip_y0=60;
+            u32_clip_x1=(int)g_fw; u32_clip_y1=(int)g_fh;
+        }
         auto_clip=1;
     }
 

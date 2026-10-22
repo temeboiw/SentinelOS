@@ -26,7 +26,7 @@ if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
   # Size for every staged file plus both packages, with 25% headroom and
   # 16 MiB for FAT metadata/cluster slack. Do not silently truncate at 128 MiB.
   required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
-  required_bytes=$((required_bytes + $(stat -c %s "$OUT/esp.spf") + $(stat -c %s "$OUT/system.spf")))
+  required_bytes=$((required_bytes + $(stat -c %s "$OUT/esp.spf") + $(stat -c %s "$OUT/system.spf") + $(stat -c %s "$OUT/packages.sha256")))
   ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))
   (( ESP_SIZE_MIB < 128 )) && ESP_SIZE_MIB=128
   echo "Auto-sized installer ESP: ${ESP_SIZE_MIB} MiB (staged files and both SPF packages)"

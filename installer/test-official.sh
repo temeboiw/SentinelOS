@@ -48,15 +48,20 @@ run_vm() {
   fi
   if [[ "$MODE" == "vm-vnc" ]]; then
     LOG="$HERE/artifacts/qemu-uefi-vnc.log"
+    DISK="$HERE/artifacts/sentinel-test-disk.img"
+    if [[ ! -s "$DISK" ]]; then bash "$HERE/create-test-disk.sh" "$DISK"; fi
     VNC_ADDR="${VNC_ADDR:-127.0.0.1}"
     VNC_DISPLAY="${VNC_DISPLAY:-0}"
     echo "==> Launch interactive UEFI VM with VNC at ${VNC_ADDR}:$((5900 + VNC_DISPLAY))"
+    echo "Disposable test disk: $DISK"
     echo "Connect with a VNC viewer. Stop QEMU with Ctrl+C."
     echo "VNC is unauthenticated; keep it on 127.0.0.1 unless you deliberately choose a trusted network."
     qemu-system-x86_64 \
       -machine q35,accel=tcg -cpu max -m 2048 \
       -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
       -cdrom "$ISO" -boot order=d -display none \
+      -drive "if=none,id=installer-disk,format=raw,file=$DISK" \
+      -device virtio-blk-pci,drive=installer-disk \
       -vnc "${VNC_ADDR}:${VNC_DISPLAY}" -serial "file:$LOG" \
       -monitor none -no-reboot -no-shutdown
     return

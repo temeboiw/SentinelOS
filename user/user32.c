@@ -1012,6 +1012,10 @@ static void u32_draw_child_windows(void) {
         U32_CHILDWND *c=&u32_child_windows[i];
         if(!c->used||!c->visible||c->parent!=(void *)1||g_wnd.minimized)continue;
         int x=g_wnd.x+c->x,y=g_wnd.y+c->y,w=c->w,h=c->h;
+        /* Child controls are retained in their layer. A dirty repaint outside
+         * a control's bounds only needs to clear/recompose the damaged pixels;
+         * rasterizing that control again would add work without changing output. */
+        if (!u32_damage_intersects(x-1,y-1,x+w+1,y+h+1)) continue;
         if(c->id==0xF020u) {
             round_fill(x,y,w,h,5,0xFF2B83A8);
             gradient_v(x+1,y+1,w-2,11,0xFFB9F4FC,0xFF55B7D9);

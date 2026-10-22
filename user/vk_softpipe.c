@@ -89,6 +89,7 @@ static uint32_t sf_sample(const VkSoftTexture *t, float u, float v) {
     }
 }
 uint32_t vksoft_sample_texture(const VkSoftTexture *texture, float u, float v) { return sf_sample(texture, u, v); }
+uint32_t vksoft_sample_texture_bits(const VkSoftTexture *texture,uint32_t ub,uint32_t vb){union{uint32_t u;float f;}u,v;u.u=ub;v.u=vb;return sf_sample(texture,u.f,v.f);}
 uint32_t vksoft_fadd_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f+y.f;return z.u;}
 uint32_t vksoft_fsub_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f-y.f;return z.u;}
 uint32_t vksoft_fmul_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f*y.f;return z.u;}

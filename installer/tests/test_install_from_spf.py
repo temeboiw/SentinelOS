@@ -70,14 +70,14 @@ class InstallCoordinatorTests(unittest.TestCase):
         self.assertEqual(result, 0, output)
         self.assertIn("Dry run only", output)
         self.assertFalse((self.esp_target / "EFI" / "BOOT" / "BOOTX64.EFI").exists())
-        self.assertFalse((self.system_target / "System32" / "krnl.exe").exists())
+        self.assertFalse((self.system_target / "magic" / "System32" / "krnl.exe").exists())
 
     def test_apply_requires_exact_confirmation_and_writes_nothing(self):
         result, output = self.invoke("--apply", "--confirm", "INSTALL")
         self.assertEqual(result, 1)
         self.assertIn("requires --confirm", output)
         self.assertFalse((self.esp_target / "EFI" / "BOOT" / "BOOTX64.EFI").exists())
-        self.assertFalse((self.system_target / "System32" / "krnl.exe").exists())
+        self.assertFalse((self.system_target / "magic" / "System32" / "krnl.exe").exists())
 
     def test_confirmed_apply_extracts_both_packages(self):
         result, output = self.invoke("--apply", "--confirm", installer.CONFIRMATION)
@@ -87,12 +87,12 @@ class InstallCoordinatorTests(unittest.TestCase):
             b"test-efi",
         )
         self.assertEqual(
-            (self.system_target / "System32" / "krnl.exe").read_bytes(),
+            (self.system_target / "magic" / "System32" / "krnl.exe").read_bytes(),
             b"test-kernel",
         )
 
     def test_existing_file_blocks_without_overwrite(self):
-        dest = self.system_target / "System32" / "krnl.exe"
+        dest = self.system_target / "magic" / "System32" / "krnl.exe"
         dest.parent.mkdir()
         dest.write_bytes(b"keep-me")
         result, output = self.invoke("--apply", "--confirm", installer.CONFIRMATION)
@@ -102,7 +102,7 @@ class InstallCoordinatorTests(unittest.TestCase):
         self.assertFalse((self.esp_target / "EFI" / "BOOT" / "BOOTX64.EFI").exists())
 
     def test_overwrite_requires_explicit_flag(self):
-        dest = self.system_target / "System32" / "krnl.exe"
+        dest = self.system_target / "magic" / "System32" / "krnl.exe"
         dest.parent.mkdir()
         dest.write_bytes(b"old")
         result, output = self.invoke(
@@ -128,7 +128,7 @@ class InstallCoordinatorTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("expected 'esp'", output)
         self.assertFalse((self.esp_target / "EFI").exists())
-        self.assertFalse((self.system_target / "System32").exists())
+        self.assertFalse((self.system_target / "magic" / "System32").exists())
 
 
 if __name__ == "__main__":

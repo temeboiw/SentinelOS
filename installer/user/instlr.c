@@ -87,6 +87,64 @@ static int format_fat32(u64 start,u32 total){
  if(NtInstallerDiskIo(0,start+reserved,s)!=0||s[0]!=0xF8||s[1]!=0xFF||s[2]!=0xFF||s[3]!=0x0F)return -12;
  return 0;
 }
+
+static void put16(unsigned char*p,u16 v){p[0]=(unsigned char)v;p[1]=(unsigned char)(v>>8);}
+static int write_block(u64 lba,const unsigned char*b){for(int i=0;i<8;i++)if(write_lba(lba+(u64)i,b+i*512)<0)return -1;return 0;}
+static int format_ext4(u64 start,u64 sectors){
+ const u32 bpg=32768,ipg=1024,isize=256,itable_blocks=64;
+ u64 blocks=sectors/8;if(blocks<65536)return -1;
+ u32 groups=(u32)((blocks+bpg-1)/bpg);if(groups>32)return -2;
+ u32 total_inodes=groups*ipg;u32 free_blocks=0;
+ static unsigned char gd[4096];static unsigned char sb[1024];static unsigned char bm[4096];static unsigned char ibm[4096];static unsigned char blk[4096];
+ for(u32 i=0;i<sizeof(gd);i++)gd[i]=0;
+ for(u32 i=0;i<sizeof(sb);i++)sb[i]=0;
+ for(u32 g=0;g<groups;g++){
+  u64 gs=(u64)g*bpg;u32 actual=(u32)((blocks-gs)>bpg?bpg:(blocks-gs));
+  int backup=(g==0||g==1||g==3||g==5||g==7||g==9||g==25);
+  u32 reserve=backup?2:0;u32 bb=(u32)(gs+reserve),ib=bb+1,it=ib+1;
+  u32 used=reserve+2+itable_blocks+(g==0?1:0);
+  if(actual<used)return -3;
+  unsigned char*d=gd+g*32;put32(d,bb);put32(d+4,ib);put32(d+8,it);
+  put16(d+12,(u16)(actual-used));put16(d+14,(u16)(ipg-(g==0?10:0)));put16(d+16,(u16)(g==0?1:0));
+  free_blocks+=actual-used;
+  for(u32 i=0;i<sizeof(bm);i++)bm[i]=0;
+  for(u32 i=0;i<used;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));
+  for(u32 i=actual;i<bpg;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));
+  for(u32 i=0;i<sizeof(ibm);i++)ibm[i]=0;
+  if(g==0)for(u32 i=0;i<10;i++)ibm[i>>3]|=(unsigned char)(1u<<(i&7));
+  if(write_block(start/8+gs+bb,bm)<0||write_block(start/8+gs+ib,ibm)<0)return -4;
+  for(u32 i=0;i<itable_blocks;i++){for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;if(write_block(start/8+gs+it+i,blk)<0)return -5;}
+  if(g==0){
+   /* inode 2: root directory, using the extent format read by SentinelOS ext4. */
+   for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
+   unsigned char*ino=blk+isize;put16(ino,0x41ED);put32(ino+4,4096);put16(ino+26,2);put32(ino+28,8);put32(ino+32,0x80000);
+   put16(ino+40,0xF30A);put16(ino+42,1);put16(ino+44,4);put16(ino+46,0);put32(ino+52,0);put16(ino+56,1);put16(ino+58,0);put32(ino+60,gs+reserve+2+itable_blocks);
+   if(write_block(start/8+gs+it,blk)<0)return -6;
+   for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
+   put32(blk,2);put16(blk+4,12);blk[6]=1;blk[7]=2;blk[8]='.';
+   put32(blk+12,2);put16(blk+16,4084);blk[18]=2;blk[19]=2;blk[20]='.';blk[21]='.';
+   if(write_block(start/8+gs+reserve+2+itable_blocks,blk)<0)return -7;
+  }
+ }
+ put32(sb,total_inodes);put32(sb+4,(u32)blocks);put32(sb+12,free_blocks);put32(sb+16,total_inodes-10);
+ put32(sb+20,0);put32(sb+24,2);put32(sb+28,2);put32(sb+32,bpg);put32(sb+36,bpg);put32(sb+40,ipg);
+ put16(sb+56,0xEF53);put16(sb+58,1);put16(sb+60,1);put32(sb+76,1);put32(sb+84,11);put16(sb+88,isize);
+ put32(sb+92,0);put32(sb+96,0x42);put32(sb+100,0x1);put32(sb+104,0x53454E54);const char label[]="SENTINELOS";for(int i=0;i<10;i++)sb[120+i]=(unsigned char)label[i];
+ put16(sb+254,32);
+ /* Primary superblock starts 1024 bytes into the partition. */
+ for(int i=0;i<2;i++)if(write_lba(start+2+(u64)i,sb+i*512)<0)return -8;
+ /* Primary group descriptor table at block 1. */
+ for(int i=0;i<8;i++)if(write_lba(start+8+(u64)i,gd+i*512)<0)return -9;
+ /* Keep backup superblocks and descriptor tables coherent for sparse-super groups. */
+ for(u32 g=1;g<groups;g++)if(g==1||g==3||g==5||g==7||g==9||g==25){
+  u64 glba=start+(u64)g*bpg*8;
+  for(int i=0;i<2;i++)if(write_lba(glba+2+(u64)i,sb+i*512)<0)return -10;
+  for(int i=0;i<8;i++)if(write_lba(glba+8+(u64)i,gd+i*512)<0)return -11;
+ }
+ unsigned char verify[512];if(NtInstallerDiskIo(0,start+2,verify)!=0||verify[56]!=0x53||verify[57]!=0xEF)return -12;
+ if(NtInstallerDiskIo(0,start+8* (68+2),verify)!=0)return -13;
+ return 0;
+}
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){
  u32 w=b->w,h=b->h,p=b->pitch;
  for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
@@ -113,7 +171,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
-   text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
+   text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"System ext4 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
    text(f,p,w,h,x+24,y+78,"No supported VirtIO block disk was detected.",0xFF9B3B24,1);
    text(f,p,w,h,x+24,y+102,"Check that the VM has a VirtIO disk attached.",0xFF203944,1);
@@ -121,8 +179,8 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3E9EC);
    text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
   }
-  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&install_state<2?0xFF176B8C:0xFF9CAEB5);
-  text(f,p,w,h,x+pw-128,y+ph-45,install_state==2?"Formatted":install_state==1?"Format ESP":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
+  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&install_state<3?0xFF176B8C:0xFF9CAEB5);
+  text(f,p,w,h,x+pw-128,y+ph-45,install_state==3?"Formatted":install_state==2?"Format System":install_state==1?"Format ESP":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
   rect(f,p,w,h,x+24,y+ph-56,118,34,0xFF176B8C);
   text(f,p,w,h,x+57,y+ph-45,"Back",0xFFFFFFFF,1);
  }
@@ -142,7 +200,7 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<2){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}}
+   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}else if(install_state==2){NtWriteConsole("instlr: formatting system partition as ext4\n");install_state=format_ext4(264192,disk.sectors-264225)==0?3:-1;NtWriteConsole(install_state==3?"instlr: system ext4 format verified\n":"instlr: system ext4 format failed\n");}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}

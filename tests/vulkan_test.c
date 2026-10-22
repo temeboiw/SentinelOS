@@ -693,7 +693,7 @@ int main(void) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d\\n", (int)rpSubmitResult); CHECK(rpSubmitResult == VK_SUCCESS); }
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     /* The shader-driven draw must shade an interior pixel, preserve opaque
      * alpha, and leave pixels outside the triangle untouched. */

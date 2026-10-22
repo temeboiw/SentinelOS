@@ -128,7 +128,10 @@ static inline i64 NtQueryInstallerPayload(u64 package, u64 *size_out) {
 static inline i64 NtVerifyInstallerPayload(u64 package) {
     return (i64)NtSyscall6(SYS_VerifyInstallerPayload, package, 0, 0, 0, 0, 0);
 }
-static inline i64 NtInstallerInstallImage(u64 image, u64 offset, u64 bytes) {
+static inline i64 NtInstallerInstallImage(u64 image) {
+    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, 0, 4ULL * 1024ULL * 1024ULL, 0, 0, 0);
+}
+static inline i64 NtInstallerInstallImageChunk(u64 image, u64 offset, u64 bytes) {
     return (i64)NtSyscall6(SYS_InstallerInstallImage, image, offset, bytes, 0, 0, 0);
 }
 static inline i64 NtReadInstallerPayload(u64 package, u64 offset, void *buffer, u32 size) {

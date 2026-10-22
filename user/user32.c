@@ -1371,6 +1371,14 @@ static void compose_region(int x0, int y0, int x1, int y1) {
         if (ox1 > x1) x1 = ox1;
         if (oy1 > y1) y1 = oy1;
     }
+    /* Normalize damage before entering the compositor. Negative or oversized
+     * rectangles are common at screen edges during window drags; clipping once
+     * here avoids carrying invalid bounds through every drawing primitive. */
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)g_fw) x1 = (int)g_fw;
+    if (y1 > (int)g_fh) y1 = (int)g_fh;
+    if (x1 <= x0 || y1 <= y0) return;
     u32_render_clip = 1;
     u32_clip_x0 = x0; u32_clip_y0 = y0;
     u32_clip_x1 = x1; u32_clip_y1 = y1;

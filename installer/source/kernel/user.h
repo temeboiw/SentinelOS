@@ -54,6 +54,7 @@
 #define SYS_NtQueryInstallerDisk              40
 #define SYS_NtInstallerDiskIo                 41
 #define SYS_NtReadInstallerPayload              42
+#define SYS_NtQueryInstallerPayload              43
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
@@ -2592,6 +2593,22 @@ static Frame *syscall_handler(Frame *f) {
         info.present = (vb_ok && vb_capacity_sectors != 0) ? 1u : 0u;
         *(InstallerDiskInfo *)(uint64_t)f->rdi = info;
         f->rax = info.present ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtQueryInstallerPayload: {
+        if (!PspIsSystemProcess(MmCurrentProcess) || f->rdi > 1 || !f->rsi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rsi, sizeof(uint64_t), 1) || !user_bootinfo) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.spf" : "system.spf");
+        if (!package) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        *(uint64_t *)(uint64_t)f->rsi = package->size;
+        f->rax = 0;
         return f;
     }
 

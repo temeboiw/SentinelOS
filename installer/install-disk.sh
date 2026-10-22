@@ -102,8 +102,8 @@ fi
 mkfs.fat -F 32 -n SENTINEL "$ESP_PART"
 mkfs.ext4 -F -L SENTINELOS "$SYS_PART"
 mount "$ESP_PART" "$WORK/esp"
-mount "$SYS_PART" "$WORK/system"
 MOUNTED=1
+mount "$SYS_PART" "$WORK/system"
 
 python3 "$HERE/install_from_spf.py" \
   --esp-package "$ESP_PACKAGE" --system-package "$SYSTEM_PACKAGE" \

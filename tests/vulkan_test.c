@@ -661,13 +661,13 @@ int main(void) {
     VkDeviceMemory vertexMem = 0;
     CHECK(vkAllocateMemory(device, &vertexAi, 0, &vertexMem) == VK_SUCCESS);
     CHECK(vkBindBufferMemory(device, vertexBuffer, vertexMem, 0) == VK_SUCCESS);
-    VkDescriptorBufferInfo dbi = { vertexBuffer, 0, vertexReq.size };
+    VkDescriptorBufferInfo dbi = { vertexBuffer, 0, vertexCi.size };
     VkWriteDescriptorSet write = {0};
     write.dstSet = descriptorSet; write.dstBinding = 0; write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; write.pBufferInfo = &dbi;
     vkUpdateDescriptorSets(device, 1, &write, 0, 0);
     CHECK(descriptorSet->values[0][0].buffer == vertexBuffer);
-    CHECK(descriptorSet->values[0][0].range == vertexReq.size);
+    CHECK(descriptorSet->values[0][0].range == vertexCi.size);
     CHECK(vkMapMemory(device, vertexMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     VkSoftVertex shaderTri[3] = {va, vb, vc};
     vk_copy(mapped, shaderTri, sizeof(shaderTri));

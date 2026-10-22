@@ -691,7 +691,7 @@ int main(void) {
     VkDeviceMemory texMem = 0; CHECK(vkAllocateMemory(device, &texAi, 0, &texMem) == VK_SUCCESS);
     CHECK(vkBindImageMemory(device, texImage, texMem, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, texMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
-    for (unsigned ti = 0; ti < 4; ++ti) { ((uint8_t *)mapped)[ti*4] = 0; ((uint8_t *)mapped)[ti*4+1] = 0; ((uint8_t *)mapped)[ti*4+2] = 255; ((uint8_t *)mapped)[ti*4+3] = 255; }
+    for (unsigned ti = 0; ti < 4; ++ti) { ((uint8_t *)mapped)[ti*4] = 255; ((uint8_t *)mapped)[ti*4+1] = 0; ((uint8_t *)mapped)[ti*4+2] = 0; ((uint8_t *)mapped)[ti*4+3] = 255; }
     vkUnmapMemory(device, texMem);
     VkImageViewCreateInfo texViewCi = {0}; texViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; texViewCi.image = texImage;
     texViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D; texViewCi.format = texCi.format;

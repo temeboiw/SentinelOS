@@ -57,6 +57,7 @@
 #define SYS_NtReadInstallerPayload              42
 #define SYS_NtQueryInstallerPayload              43
 #define SYS_NtVerifyInstallerPayload              44
+#define SYS_NtInstallerInstallImage                 45
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
@@ -2603,8 +2604,8 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
-        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.spf" : "system.spf");
-        BootModule *checksums = PspFindModule(user_bootinfo, "packages.sha256");
+        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.img" : "system.img");
+        BootModule *checksums = PspFindModule(user_bootinfo, "install.sha256");
         if (!package || !checksums || package->size > (1ULL << 30) || checksums->size < 130) {
             f->rax = (uint64_t)-1LL;
             return f;
@@ -2662,7 +2663,7 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
-        const char *wanted = f->rdi == 0 ? "esp.spf" : "system.spf";
+        const char *wanted = f->rdi == 0 ? "esp.img" : "system.img";
         BootModule *package = PspFindModule(user_bootinfo, wanted);
         if (!package || f->rsi > package->size || f->rcx > package->size - f->rsi) {
             f->rax = (uint64_t)-1LL;
@@ -2675,6 +2676,38 @@ static Frame *syscall_handler(Frame *f) {
         }
         f->rax = f->rcx;
         return f;
+    }
+
+    case SYS_NtInstallerInstallImage: {
+        /* Only the trusted graphical setup process may deploy the immutable
+           filesystem images staged by UEFI. Their fixed destinations match
+           the GPT layout written by make_gpt(). */
+        if (!PspIsSystemProcess(MmCurrentProcess) || !user_bootinfo || f->rdi > 1 || !vb_ok) {
+            f->rax = (uint64_t)-1LL; return f;
+        }
+        BootModule *image = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.img" : "system.img");
+        uint64_t dest = f->rdi == 0 ? 2048ULL : 264192ULL;
+        if (!image || !image->phys || !image->size || (image->size & 511ULL) ||
+            image->size > (1ULL << 30) || dest >= vb_capacity_sectors ||
+            image->size / 512ULL > vb_capacity_sectors - dest) {
+            f->rax = (uint64_t)-1LL; return f;
+        }
+        const uint8_t *src = (const uint8_t *)(HHDM_BASE + image->phys);
+        uint8_t sector[512];
+        for (uint64_t off = 0; off < image->size; off += 512ULL) {
+            for (unsigned j = 0; j < 512; j++) sector[j] = src[off + j];
+            if (virtio_blk_write_sector(dest + off / 512ULL, sector) != 0) {
+                DbgPrint("installer: image write failed at LBA %llu\\n",
+                         (unsigned long long)(dest + off / 512ULL));
+                f->rax = (uint64_t)-2LL; return f;
+            }
+        }
+        /* Verify both ends of the copied image against the staged source. */
+        if (virtio_blk_read_sector(dest, sector) != 0) { f->rax=(uint64_t)-3LL; return f; }
+        for (unsigned j=0;j<512;j++) if (sector[j] != src[j]) { f->rax=(uint64_t)-4LL; return f; }
+        if (virtio_blk_read_sector(dest + image->size/512ULL - 1, sector) != 0) { f->rax=(uint64_t)-5LL; return f; }
+        for (unsigned j=0;j<512;j++) if (sector[j] != src[image->size - 512ULL + j]) { f->rax=(uint64_t)-6LL; return f; }
+        f->rax = 0; return f;
     }
 
     case SYS_NtInstallerDiskIo: {

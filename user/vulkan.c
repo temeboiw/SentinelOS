@@ -789,7 +789,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateSampler(VkDevice d,const VkSam
     ci->addressModeU==1u||ci->addressModeV==1u||ci->addressModeW==1u||ci->anisotropyEnable||ci->compareEnable>1u||(ci->compareEnable&&ci->compareOp>7u)||ci->unnormalizedCoordinates)return VK_ERROR_FEATURE_NOT_PRESENT;
  for(unsigned i=0;i<32;i++)if(!g_samplers[i].magic){VkSamplerObj *p=&g_samplers[i];vk_zero(p,sizeof(*p));p->magic=VK_OBJECT_MAGIC;p->device=d;
   p->magFilter=ci->magFilter;p->minFilter=ci->minFilter;p->mipmapMode=ci->mipmapMode;p->addressU=ci->addressModeU;p->addressV=ci->addressModeV;p->addressW=ci->addressModeW;
-  p->mipLodBias=ci->mipLodBias;p->minLod=ci->minLod;p->maxLod=ci->maxLod;*out=(VkSampler)p;return VK_SUCCESS;}
+  p->mipLodBias=ci->mipLodBias;p->minLod=ci->minLod;p->maxLod=ci->maxLod;p->compareEnable=ci->compareEnable;p->compareOp=ci->compareOp;*out=(VkSampler)p;return VK_SUCCESS;}
  return VK_ERROR_TOO_MANY_OBJECTS;
 }
 __declspec(dllexport) void VKAPI_CALL vkDestroySampler(VkDevice d,VkSampler sampler,const void *alloc) {

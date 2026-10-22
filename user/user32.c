@@ -1810,15 +1810,18 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_drag_pending_y = ny;
                         int rect[4] = { nx, ny, g_wnd.w, g_wnd.h };
                         sy3(SYS_WmRect, (u64)rect, 0, 0);
-                        /* A normal compose auto-clips to the new window bounds,
-                         * which leaves the old X position and child-button pixels
-                         * behind. Force a true full-screen layer rebuild for this
-                         * drag frame, then restore the normal clipping policy. */
-                        (void)old_x;
-                        (void)old_y;
-                        u32_force_full_compose=1;
-                        compose();
-                        u32_force_full_compose=0;
+                        /* Repaint only the union of the old and new window
+                         * bounds. The persistent desktop/background layers are
+                         * restored under the old position, and child controls are
+                         * redrawn with the parent at its new position. This avoids
+                         * rebuilding and presenting the entire screen per mouse move. */
+                        int x0=old_x<nx?old_x:nx;
+                        int y0=old_y<ny?old_y:ny;
+                        int x1=(old_x+g_wnd.w+8)>(nx+g_wnd.w+8)
+                            ?old_x+g_wnd.w+8:nx+g_wnd.w+8;
+                        int y1=(old_y+g_wnd.h+12)>(ny+g_wnd.h+12)
+                            ?old_y+g_wnd.h+12:ny+g_wnd.h+12;
+                        compose_region(x0,y0,x1,y1);
                     }
                 }
 

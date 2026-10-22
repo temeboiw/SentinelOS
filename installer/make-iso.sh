@@ -38,11 +38,21 @@ for entry in "$STAGE/esp"/*; do
 done
 shopt -u nullglob dotglob
 
-# Fail early if the fallback loader did not make it into the FAT image.
+# The UEFI loader can only read files on its own FAT ESP. Embed both raw
+# package containers there so it can preserve them as boot modules for the
+# trusted installer session. The ISO-level copies remain for host-side tools.
+mcopy -i "$ESP_IMG" "$OUT/esp.spf" ::/esp.spf
+mcopy -i "$ESP_IMG" "$OUT/system.spf" ::/system.spf
+
+# Fail early if the fallback loader and both payloads made it into the FAT image.
 TMP_CHECK="$(mktemp)"
 trap 'rm -f "$TMP_CHECK"' EXIT
 mcopy -i "$ESP_IMG" ::/EFI/BOOT/BOOTX64.EFI "$TMP_CHECK"
 [[ -s "$TMP_CHECK" ]] || { echo "error: EFI image does not contain BOOTX64.EFI" >&2; exit 4; }
+mcopy -i "$ESP_IMG" ::/esp.spf "$TMP_CHECK"
+cmp -s "$TMP_CHECK" "$OUT/esp.spf" || { echo "error: ESP SPF payload mismatch" >&2; exit 4; }
+mcopy -i "$ESP_IMG" ::/system.spf "$TMP_CHECK"
+cmp -s "$TMP_CHECK" "$OUT/system.spf" || { echo "error: system SPF payload mismatch" >&2; exit 4; }
 rm -f "$TMP_CHECK"
 trap - EXIT
 

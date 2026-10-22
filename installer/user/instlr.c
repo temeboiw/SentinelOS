@@ -20,7 +20,8 @@ static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
   else if(ch=='+') f[(u64)py*b->pitch+px]=0xFFFFFFFF;
  }
 }
-static void paint(u32*f,IFB*b,int page,int accepted,int checked){
+static void decstr(u64 value,char *out){char tmp[24];int n=0;if(!value)tmp[n++]='0';while(value&&n<(int)sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}int j=0;while(n>0)out[j++]=tmp[--n];out[j]=0;}
+static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib){
  u32 w=b->w,h=b->h,p=b->pitch;
  for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
  rect(f,p,w,h,0,0,w,52,0xFF176B8C);rect(f,p,w,h,0,0,w,3,0xFFB6F4FC);
@@ -39,11 +40,21 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked){
   rect(f,p,w,h,x+pw-142,y+ph-56,118,34,accepted?0xFF176B8C:0xFF9CAEB5);
   text(f,p,w,h,x+pw-110,y+ph-45,"Next",0xFFFFFFFF,1);
  }else{
-  text(f,p,w,h,x+24,y+78,"Disk discovery is not yet connected to the kernel.",0xFF9B3B24,1);
-  text(f,p,w,h,x+24,y+102,"No disks are listed; installation and formatting are disabled.",0xFF203944,1);
-  text(f,p,w,h,x+24,y+126,"This prevents accidental writes to an unverified device.",0xFF203944,1);
-  rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3E9EC);
-  text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
+  if(disk_present){
+   char sizebuf[24];decstr(disk_mib,sizebuf);
+   text(f,p,w,h,x+24,y+78,"A VirtIO block disk was detected.",0xFF1B6C40,1);
+   text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
+   text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
+   text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
+   rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
+   text(f,p,w,h,x+38,y+178,"Disk detected - install steps not enabled yet",0xFF1B6C40,1);
+  }else{
+   text(f,p,w,h,x+24,y+78,"No supported VirtIO block disk was detected.",0xFF9B3B24,1);
+   text(f,p,w,h,x+24,y+102,"Check that the VM has a VirtIO disk attached.",0xFF203944,1);
+   text(f,p,w,h,x+24,y+126,"No disk writes will be attempted.",0xFF203944,1);
+   rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3E9EC);
+   text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
+  }
   rect(f,p,w,h,x+pw-142,y+ph-56,118,34,0xFF9CAEB5);
   text(f,p,w,h,x+pw-124,y+ph-45,"Next",0xFFFFFFFF,1);
   rect(f,p,w,h,x+24,y+ph-56,118,34,0xFF176B8C);
@@ -56,12 +67,12 @@ void instlr_main(void){
  GfxBootInfo gfx={0};u64 gok=NtInitializeGraphics(&gfx);FBInfo f={0};(void)NtMapFramebuffer(&f);
  if(gok&&gfx.backend==2&&gfx.surface_va){f.va=gfx.surface_va;f.w=gfx.width;f.h=gfx.height;f.pitch=gfx.pitch;}
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
- f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0;
+ f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0;InstallerDiskInfo disk={0};int disk_present=(NtQueryInstallerDisk(&disk)!=0&&disk.present);u64 disk_mib=disk.sector_size?disk.sectors*disk.sector_size/(1024*1024):0;
  int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
- paint(fb,&b,page,accepted,checked);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
+ paint(fb,&b,page,accepted,checked,disk_present,disk_mib);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
   if(ev.type==2||ev.type==3){mouse_x=ev.x;mouse_y=ev.y;}
-  if(ev.type==1&&(ev.key=='\r'||ev.key=='\n')){if(page==0&&checked){page=1;NtWriteConsole("instlr: terms accepted; awaiting disk enumeration support\n");}}
+  if(ev.type==1&&(ev.key=='\r'||ev.key=='\n')){if(page==0&&checked){page=1;NtWriteConsole("instlr: terms accepted; disk query completed\n");}}
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}

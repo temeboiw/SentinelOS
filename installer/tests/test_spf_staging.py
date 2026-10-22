@@ -78,6 +78,36 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "payload checksum mismatch"):
             make_spf.read_package(self.package)
 
+
+    def test_per_file_digest_mismatch_is_rejected(self):
+        self.build_package()
+        data = self.package.read_bytes()
+        magic, manifest_len, packed_len = make_spf.HEADER.unpack_from(data)
+        manifest_start = make_spf.HEADER.size
+        manifest_end = manifest_start + manifest_len
+        manifest = json.loads(data[manifest_start:manifest_end].decode("utf-8"))
+        manifest["files"][0]["sha256"] = "0" * 64
+        changed_manifest = json.dumps(
+            manifest, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        self.assertEqual(len(changed_manifest), manifest_len)
+        self.package.write_bytes(
+            make_spf.HEADER.pack(magic, manifest_len, packed_len)
+            + changed_manifest
+            + data[manifest_end:]
+        )
+        with self.assertRaisesRegex(ValueError, "file checksum mismatch"):
+            make_spf.verify(self.package)
+
+    def test_source_symlinks_are_rejected(self):
+        link = self.source / "linked-loader"
+        try:
+            link.symlink_to(self.source / "magic" / "System32" / "hal.dll")
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation is not supported: {exc}")
+        with self.assertRaisesRegex(ValueError, "symbolic links are not allowed"):
+            make_spf.build(self.source, self.package, "esp")
+
     def test_invalid_package_header_is_rejected(self):
         self.build_package()
         data = bytearray(self.package.read_bytes())

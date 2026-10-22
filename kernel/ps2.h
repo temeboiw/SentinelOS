@@ -35,6 +35,17 @@ static void ps2_wait_read(void) {
 static void ps2_cmd(uint8_t c)  { ps2_wait_write(); ps2_outb(PS2_STAT, c); }
 static void ps2_data(uint8_t c) { ps2_wait_write(); ps2_outb(PS2_DATA, c); }
 
+static uint32_t ps2_game_mouse_delta(void) {
+    ps2_poll();
+    int32_t dx=game_mouse_dx, dy=game_mouse_dy;
+    game_mouse_dx=0; game_mouse_dy=0;
+    if(dx>32767)dx=32767;
+    if(dx< -32768)dx=-32768;
+    if(dy>32767)dy=32767;
+    if(dy< -32768)dy=-32768;
+    return ((uint32_t)(uint16_t)dx) | ((uint32_t)(uint16_t)dy<<16);
+}
+
 static void ps2_handle_byte(uint8_t b, int is_mouse) {
     if (is_mouse) {
         if (mouse_idx == 0) {
@@ -80,16 +91,6 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
 }
 
 
-static uint32_t ps2_game_mouse_delta(void) {
-    ps2_poll();
-    int32_t dx=game_mouse_dx, dy=game_mouse_dy;
-    game_mouse_dx=0; game_mouse_dy=0;
-    if(dx>32767)dx=32767;
-    if(dx< -32768)dx=-32768;
-    if(dy>32767)dy=32767;
-    if(dy< -32768)dy=-32768;
-    return ((uint32_t)(uint16_t)dx) | ((uint32_t)(uint16_t)dy<<16);
-}
 static void ps2_poll(void) {
     for (int n = 0; n < 64; n++) {
         uint8_t st = ps2_inb(PS2_STAT);

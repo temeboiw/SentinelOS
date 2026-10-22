@@ -192,7 +192,7 @@ void instlr_main(void){
        u64 total=image==0?esp_package_size:system_package_size;
        for(u64 off=0;off<total;){
         u64 chunk=total-off;if(chunk>4ULL*1024ULL*1024ULL)chunk=4ULL*1024ULL*1024ULL;
-        if((off==0?NtInstallerInstallImage(image):NtInstallerInstallImageChunk(image,off,chunk))!=0){failed=1;break;}
+        if((off==0?(image==0?NtInstallerInstallImage(0):NtInstallerInstallImage(1)):NtInstallerInstallImageChunk(image,off,chunk))!=0){failed=1;break;}
         off+=chunk;install_progress_done+=chunk;
         paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
         (void)NtFlushGraphics(0,0,f.w,f.h);

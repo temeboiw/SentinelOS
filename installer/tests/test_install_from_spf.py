@@ -93,7 +93,7 @@ class InstallCoordinatorTests(unittest.TestCase):
 
     def test_existing_file_blocks_without_overwrite(self):
         dest = self.system_target / "magic" / "System32" / "krnl.exe"
-        dest.parent.mkdir()
+        dest.parent.mkdir(parents=True)
         dest.write_bytes(b"keep-me")
         result, output = self.invoke("--apply", "--confirm", installer.CONFIRMATION)
         self.assertEqual(result, 1)

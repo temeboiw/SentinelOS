@@ -77,9 +77,11 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 - Emits `SHA256SUMS` for the embedded boot image, packages, and media README.
 - Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, and both embedded SPF packages.
 
-## What is not yet a complete disk installer
+## Installation status (work in progress)
 
-**This is not yet a full disk installer.** The setup UI now queries the kernel for the capacity of the first supported VirtIO block device and displays its size. The VM test mode attaches a dedicated sparse 1 GiB raw disk image. This is only device detection: sector writes, partition-table creation, filesystem formatting, package deployment to the target, and boot configuration are not implemented yet. The UI therefore does not perform installation or formatting until those write paths are implemented and validated.
+The setup UI detects the first supported VirtIO block disk and can now write and read back a GPT partition table on the selected disk. It creates a 64 MiB EFI System Partition and a second Linux-filesystem partition occupying the remaining usable space. The kernel exposes bounded one-sector read/write operations only to the trusted setup process; sector requests are range-checked against the reported device capacity. The GPT includes primary and backup headers and entry arrays with CRC32 checksums.
+
+**This is still not a complete OS installation.** The current UI stops after GPT creation. FAT32/ext4 formatting, copying the bootloader and SentinelOS system files to the target, configuring the installed boot path, and an end-to-end installation/reboot test remain unfinished. Do not select a disk containing data you need: choosing the partition action overwrites its partition table. Use only the disposable `sentinel-test-disk.img` during development. Do not run the VM test again until the remaining install stages are implemented and reviewed.
 
 The host-side `installer/install_from_spf.py` tool can extract verified packages into two existing, non-overlapping mounted directories. It defaults to dry-run and requires `--apply --confirm "INSTALL SENTINELOS"` to write files; it does not create partitions, format disks, configure boot entries, or install onto raw devices. Extraction is not transactional.
 

@@ -376,7 +376,15 @@ static u32 color_mix(u32 a, u32 b, unsigned int t) {
 }
 static void gradient_v(int x,int y,int w,int h,u32 top,u32 bottom) {
     if(w<=0||h<=0)return;
-    for(int yy=0;yy<h;yy++) {
+    /* Preserve the original gradient coordinate while skipping rows that
+     * cannot affect a dirty rectangle. fill() clips horizontally. */
+    int first=0,last=h;
+    if(u32_render_clip) {
+        if(y<u32_clip_y0)first=u32_clip_y0-y;
+        if(y+h>u32_clip_y1)last=u32_clip_y1-y;
+        if(first<0)first=0;if(last>h)last=h;
+    }
+    for(int yy=first;yy<last;yy++) {
         u32 c=color_mix(top,bottom,(unsigned int)(yy*255/(h>1?h-1:1)));
         fill(x,y+yy,w,1,c);
     }
@@ -384,7 +392,15 @@ static void gradient_v(int x,int y,int w,int h,u32 top,u32 bottom) {
 static void round_fill(int x,int y,int w,int h,int r,u32 c) {
     if(w<=0||h<=0)return;
     if(r>w/2)r=w/2;if(r>h/2)r=h/2;if(r<0)r=0;
-    for(int yy=0;yy<h;yy++) {
+    /* Rounded corners depend on the original shape's row, so iterate only
+     * visible rows without rebasing yy (which would change corner geometry). */
+    int first=0,last=h;
+    if(u32_render_clip) {
+        if(y<u32_clip_y0)first=u32_clip_y0-y;
+        if(y+h>u32_clip_y1)last=u32_clip_y1-y;
+        if(first<0)first=0;if(last>h)last=h;
+    }
+    for(int yy=first;yy<last;yy++) {
         int dy=yy<r?r-yy-1:(yy>=h-r?yy-(h-r):0);
         int inset=0;
         if(dy>0) {

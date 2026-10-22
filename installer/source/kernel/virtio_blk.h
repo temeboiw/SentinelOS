@@ -1,5 +1,5 @@
 #pragma once
-/* Minimal modern virtio-blk-pci – read sectors. QEMU: -device virtio-blk-pci */
+/* Minimal modern virtio-blk-pci – bounded sector reads and writes. */
 #include "serial.h"
 
 static inline void pci_outl(uint16_t p, uint32_t v) {
@@ -29,6 +29,7 @@ static uint8_t pci_cfg_read8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 #define VIRTQ_DESC_F_NEXT  1
 #define VIRTQ_DESC_F_WRITE 2
 #define VIRTIO_BLK_T_IN    0
+#define VIRTIO_BLK_T_OUT   1
 
 struct virtq_desc {
     uint64_t addr;
@@ -200,11 +201,15 @@ static int virtio_blk_init(void) {
     return -1;
 }
 
-static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
-    if (!vb_ok) return -1;
-    vb_req->type = VIRTIO_BLK_T_IN;
+static int virtio_blk_transfer_sector(uint64_t sector, void *buf512, int write) {
+    if (!vb_ok || !buf512 || sector >= vb_capacity_sectors) return -1;
+    vb_req->type = write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN;
     vb_req->reserved = 0;
     vb_req->sector = sector;
+    if (write) {
+        const uint8_t *in = (const uint8_t *)buf512;
+        for (int i = 0; i < 512; i++) vb_data[i] = in[i];
+    }
     *vb_status = 0xFF;
 
     vb_desc[0].addr = vb_req_pa;
@@ -213,7 +218,7 @@ static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
     vb_desc[0].next = 1;
     vb_desc[1].addr = vb_data_pa;
     vb_desc[1].len = 512;
-    vb_desc[1].flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    vb_desc[1].flags = VIRTQ_DESC_F_NEXT | (write ? 0 : VIRTQ_DESC_F_WRITE);
     vb_desc[1].next = 2;
     vb_desc[2].addr = vb_status_pa;
     vb_desc[2].len = 1;
@@ -231,17 +236,28 @@ static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
         *(volatile uint16_t *)(vb_notify + (uint32_t)noff * vb_notify_mult) = 0;
     }
 
+    int completed = 0;
     for (int i = 0; i < 10000000; i++) {
         if (vb_used->idx != vb_last_used) {
             vb_last_used = vb_used->idx;
+            completed = 1;
             break;
         }
         __asm__ volatile("pause");
     }
-    if (*vb_status != 0) return -1;
-    uint8_t *out = (uint8_t *)buf512;
-    for (int i = 0; i < 512; i++) out[i] = vb_data[i];
+    if (!completed || *vb_status != 0) return -1;
+    if (!write) {
+        uint8_t *out = (uint8_t *)buf512;
+        for (int i = 0; i < 512; i++) out[i] = vb_data[i];
+    }
     return 0;
+}
+
+static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
+    return virtio_blk_transfer_sector(sector, buf512, 0);
+}
+static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
+    return virtio_blk_transfer_sector(sector, (void *)buf512, 1);
 }
 
 static int blk_read(uint64_t off, void *dst, uint64_t len) {

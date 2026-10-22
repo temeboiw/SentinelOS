@@ -888,7 +888,6 @@ static uint32_t g_frag_values[VK_SPIRV_MAX_IDS][4];
 static uint8_t g_frag_defined[VK_SPIRV_MAX_IDS],g_frag_kind[VK_SPIRV_MAX_IDS],g_frag_storage[VK_SPIRV_MAX_IDS],g_frag_components[VK_SPIRV_MAX_IDS];
 static uint32_t g_frag_location[VK_SPIRV_MAX_IDS],g_frag_pointer_type[VK_SPIRV_MAX_IDS],g_frag_type_components[VK_SPIRV_MAX_IDS];
 static uint32_t g_frag_output[4];
-static union { uint32_t u; float f; } g_frag_bits_a,g_frag_bits_b,g_frag_bits_c;
 static uint32_t vk_frag_fbits(float f){union{float f;uint32_t u;}x;x.f=f;return x.u;}
 static float vk_frag_float(uint32_t u){union{float f;uint32_t u;}x;x.u=u;return x.f;}
 static uint32_t vk_frag_tex_channel_bits(uint32_t p,unsigned c){return vksoft_unorm_to_float_bits((p>>(c==0?16u:c==1?8u:c==2?0u:24u))&255u);}

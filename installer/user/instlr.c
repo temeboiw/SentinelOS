@@ -4,6 +4,8 @@
 typedef struct { int type,x,y,btn; char key; } InputEvent;
 typedef struct { u64 va; u32 w,h,pitch; } IFB;
 static int installer_payloads_ready;
+static u64 install_progress_done, install_progress_total;
+static int install_countdown = 10;
 static void rect(u32*f,u32 p,u32 w,u32 h,int x,int y,int rw,int rh,u32 c){int x2=x+rw,y2=y+rh;if(x<0)x=0;if(y<0)y=0;if(x2>(int)w)x2=w;if(y2>(int)h)y2=h;if(x>=x2||y>=y2)return;for(int yy=y;yy<y2;yy++)for(int xx=x;xx<x2;xx++)f[(u64)yy*p+xx]=c;}
 static void text(u32*f,u32 p,u32 w,u32 h,int x,int y,const char*s,u32 c,int z){for(;*s;s++,x+=8*z){unsigned char ch=(unsigned char)*s;if(ch>=128)ch='?';const unsigned char*g=font8x8_basic[ch];for(int j=0;j<8;j++)for(int i=0;i<8;i++)if(g[j]&(1u<<i))rect(f,p,w,h,x+i*z,y+j*z,z,z,c);}}
 static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
@@ -93,7 +95,23 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+126,"WARNING: all data on this disk will be erased.",0xFF203944,1);
    text(f,p,w,h,x+24,y+146,installer_payloads_ready<0?"Checking image integrity...":installer_payloads_ready?"Image integrity: SHA-256 verified":"Image integrity: failed/missing",installer_payloads_ready==1?0xFF1B6C40:installer_payloads_ready<0?0xFF174C63:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
-   text(f,p,w,h,x+38,y+178,install_state==1?"Ready to install SentinelOS":install_state==2?"Writing filesystem images":install_state==3?"Installation complete; remove media and reboot":install_state<0?"Installation failed - see setup log":"Ready to install SentinelOS",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
+   text(f,p,w,h,x+38,y+178,install_state==1?"Ready to install SentinelOS":install_state==2?"Installing SentinelOS...":install_state==3?"Installation finished. Remove USB media.":install_state<0?"Installation failed - see setup log":"Ready to install SentinelOS",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
+   if(install_state==2||install_state==3){
+    u64 pct=install_progress_total?(install_progress_done*100ULL)/install_progress_total:0;
+    if(pct>100)pct=100;
+    rect(f,p,w,h,x+24,y+220,pw-48,22,0xFFD5E0E5);
+    rect(f,p,w,h,x+24,y+220,(int)(((u64)(pw-48)*pct)/100ULL),22,0xFF1685A7);
+    char pctbuf[24];decstr(pct,pctbuf);
+    text(f,p,w,h,x+24,y+248,"Progress:",0xFF203944,1);
+    text(f,p,w,h,x+88,y+248,pctbuf,0xFF203944,1);
+    text(f,p,w,h,x+112,y+248,"%",0xFF203944,1);
+    if(install_state==3){
+      char secbuf[24];decstr((u64)install_countdown,secbuf);
+      text(f,p,w,h,x+24,y+278,"Restarting in",0xFF174C63,1);
+      text(f,p,w,h,x+128,y+278,secbuf,0xFF174C63,1);
+      text(f,p,w,h,x+144,y+278,"seconds. Remove installation media (USB).",0xFF174C63,1);
+    }
+   }
   }else{
    text(f,p,w,h,x+24,y+78,"No supported VirtIO block disk was detected.",0xFF9B3B24,1);
    text(f,p,w,h,x+24,y+102,"Check that the VM has a VirtIO disk attached.",0xFF203944,1);
@@ -137,8 +155,47 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&installer_payloads_ready&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){if(disk.sectors<264192ULL+system_package_size/512ULL+34ULL){install_state=-1;NtWriteConsole("instlr: target disk is too small for the selected system image\\n");}else if(make_gpt(disk.sectors)!=0){install_state=-1;NtWriteConsole("instlr: GPT creation failed\\n");}else{NtWriteConsole("instlr: GPT verified; deploying EFI image\\n");if(NtInstallerInstallImage(0)!=0){install_state=-1;NtWriteConsole("instlr: EFI image deployment failed\\n");}else{NtWriteConsole("instlr: EFI image read-back verified; deploying system image\\n");if(NtInstallerInstallImage(1)!=0){install_state=-1;NtWriteConsole("instlr: system image deployment failed\\n");}else{install_state=3;NtWriteConsole("instlr: both filesystem images written and verified\\n");}}}}else if(install_state<0){NtWriteConsole("instlr: retry requested; press Install OS again\\n");install_state=0;}}
+   else if(disk_present&&installer_payloads_ready&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){
+     install_state=1;install_progress_done=0;install_progress_total=esp_package_size+system_package_size;
+     paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);(void)NtFlushGraphics(0,0,f.w,f.h);
+     if(disk.sectors<264192ULL+system_package_size/512ULL+34ULL){install_state=-1;NtWriteConsole("instlr: target disk is too small for the selected system image\n");}
+     else if(make_gpt(disk.sectors)!=0){install_state=-1;NtWriteConsole("instlr: GPT creation failed\n");}
+     else {
+      NtWriteConsole("instlr: GPT verified; installing SentinelOS\n");
+      install_state=2;install_progress_done=0;
+      paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);(void)NtFlushGraphics(0,0,f.w,f.h);
+      int failed=0;
+      for(u64 image=0;image<2&&!failed;image++){
+       u64 total=image==0?esp_package_size:system_package_size;
+       for(u64 off=0;off<total;){
+        u64 chunk=total-off;if(chunk>4ULL*1024ULL*1024ULL)chunk=4ULL*1024ULL*1024ULL;
+        if(NtInstallerInstallImage(image,off,chunk)!=0){failed=1;break;}
+        off+=chunk;install_progress_done+=chunk;
+        paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
+        (void)NtFlushGraphics(0,0,f.w,f.h);
+        (void)sy3(SYS_Yield,0,0,0);
+       }
+      }
+      if(failed){install_state=-1;NtWriteConsole("instlr: disk image write or verification failed\n");}
+      else {
+       install_state=3;install_progress_done=install_progress_total;install_countdown=10;
+       NtWriteConsole("instlr: installation finished; restarting in 10 seconds\n");
+       /* Full-screen final page, with no cursor or input handling. */
+       for(int sec=10;sec>=1;sec--){
+        install_countdown=sec;
+        paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
+        (void)NtFlushGraphics(0,0,f.w,f.h);
+        u64 until=sy3(SYS_GetTickCount,0,0,0)+1000ULL;
+        while(sy3(SYS_GetTickCount,0,0,0)<until)(void)sy3(SYS_Yield,0,0,0);
+       }
+       for(u64 i=0;i<(u64)f.h*f.pitch;i++)fb[i]=0xFF000000;
+       (void)NtFlushGraphics(0,0,f.w,f.h);
+       (void)sy3(SYS_Shutdown,1,0,0);
+       for(;;)(void)sy3(SYS_Yield,0,0,0);
+      }
+     }
+    }else if(install_state<0){NtWriteConsole("instlr: retry requested; press Install OS again\n");install_state=0;}}
   }
-  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
+  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);if(install_state!=3)draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}
 }

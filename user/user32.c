@@ -151,6 +151,7 @@ static int g_search_focus;
 static char g_search_text[32];
 static int g_search_len;
 static int cur_on, cur_ox=640, cur_oy=400;
+static int u32_show_cursor_count;
 static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static int u32_is_desktop_window(void);
@@ -617,6 +618,13 @@ static unsigned int u32_auto_cursor_at(int x,int y) {
 }
 
 static void cursor_save_draw(int x, int y) {
+    /* ShowCursor(FALSE) hides the pointer for this process. Restore any
+     * previously painted pixels before returning so no cursor trail remains. */
+    if (u32_show_cursor_count < 0) {
+        if (cur_on) cursor_restore_fast();
+        cur_on=0;
+        return;
+    }
     /* CPU-rendered arrow on the actual framebuffer. Transparent pixels do
      * not touch the scene; cursor pixels never enter the GPU layer surface. */
     u32 *target=cursor_target();
@@ -2006,7 +2014,6 @@ static int u32_menu_remove(void *handle, unsigned int item, unsigned int flags, 
 }
 typedef struct { void *hdc; int erase; U32_RECT paint; int restore, inc_update; unsigned char reserved[32]; } U32_PAINTSTRUCT;
 typedef struct { unsigned int style; void *proc; int cls_extra, wnd_extra; void *instance, *icon, *cursor, *background; LPCSTR menu_name, class_name; } U32_WNDCLASSA;
-static int u32_show_cursor_count;
 static void *u32_capture;
 static void *u32_focus;
 static void *u32_active;

@@ -27,6 +27,7 @@
 #define VK_ERROR_INCOMPATIBLE_DRIVER (-9)
 #define VK_ERROR_TOO_MANY_OBJECTS (-10)
 #define VK_ERROR_FORMAT_NOT_SUPPORTED (-11)
+#define VK_ERROR_OUT_OF_POOL_MEMORY (-1000069000)
 #define VK_STRUCTURE_TYPE_APPLICATION_INFO 0
 #define VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO 1
 #define VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO 2
@@ -38,6 +39,14 @@
 #define VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO 9
 #define VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO 12
 #define VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO 14
+#define VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO 30
+#define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO 32
+#define VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO 33
+#define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO 34
+#define VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER 6u
+#define VK_DESCRIPTOR_TYPE_STORAGE_BUFFER 7u
+#define VK_SHADER_STAGE_VERTEX_BIT 1u
+#define VK_SHADER_STAGE_FRAGMENT_BIT 0x10u
 
 #define VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO 15
 #define VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO 38
@@ -131,6 +140,10 @@ typedef struct VkCmdObj *VkCommandBuffer;
 typedef struct VkFenceObj *VkFence;
 typedef struct VkSemaphoreObj *VkSemaphore;
 typedef struct VkPipelineObj *VkPipeline;
+typedef struct VkDescriptorSetLayoutObj *VkDescriptorSetLayout;
+typedef struct VkPipelineLayoutObj *VkPipelineLayout;
+typedef struct VkDescriptorPoolObj *VkDescriptorPool;
+typedef struct VkDescriptorSetObj *VkDescriptorSet;
 typedef void (VKAPI_CALL *PFN_vkVoidFunction)(void);
 typedef PFN_vkVoidFunction (VKAPI_CALL *PFN_vkGetInstanceProcAddr)(VkInstance,const char *);
 typedef PFN_vkVoidFunction (VKAPI_CALL *PFN_vkGetDeviceProcAddr)(VkDevice,const char *);
@@ -168,6 +181,14 @@ typedef struct VkPhysicalObj { uint32_t magic; VkInstance parent; } VkPhysicalOb
 typedef struct VkDeviceObj { uint32_t magic; VkPhysicalDevice physical; uint32_t queueCount; VkQueue queues[VK_MAX_QUEUES]; } VkDeviceObj;
 typedef struct VkQueueObj { uint32_t magic; VkDevice device; uint32_t family,index; } VkQueueObj;
 typedef struct VkBufferObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t usage; VkDeviceMemory memory; VkDeviceSize offset; } VkBufferObj;
+typedef struct { uint32_t binding,descriptorType,descriptorCount,stageFlags; const void *pImmutableSamplers; } VkDescriptorSetLayoutBinding;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t bindingCount; const VkDescriptorSetLayoutBinding *pBindings; } VkDescriptorSetLayoutCreateInfo;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t setLayoutCount; const VkDescriptorSetLayout *pSetLayouts; uint32_t pushConstantRangeCount; const void *pPushConstantRanges; } VkPipelineLayoutCreateInfo;
+typedef struct { uint32_t type; uint32_t descriptorCount; } VkDescriptorPoolSize;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t maxSets,poolSizeCount; const VkDescriptorPoolSize *pPoolSizes; } VkDescriptorPoolCreateInfo;
+typedef struct { VkStructureType sType; const void *pNext; VkDescriptorPool descriptorPool; uint32_t descriptorSetCount; const VkDescriptorSetLayout *pSetLayouts; } VkDescriptorSetAllocateInfo;
+typedef struct { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorBufferInfo;
+typedef struct { VkDescriptorSet dstSet; uint32_t dstBinding,dstArrayElement,descriptorCount,descriptorType; const void *pImageInfo; const VkDescriptorBufferInfo *pBufferInfo; const void *pTexelBufferView; } VkWriteDescriptorSet;
 typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; } VkImageObj;
 typedef struct VkImageViewObj { uint32_t magic; VkDevice device; VkImage image; uint32_t format; } VkImageViewObj;
 typedef struct VkRenderPassObj { uint32_t magic; VkDevice device; uint32_t format,loadOp,storeOp,initialLayout,finalLayout; } VkRenderPassObj;
@@ -182,7 +203,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; VkRend
 typedef struct { VkStructureType sType; const void *pNext; VkRenderPass renderPass; VkFramebuffer framebuffer; uint32_t renderArea_x,renderArea_y,renderArea_width,renderArea_height; uint32_t clearValueCount; const VkClearColorValue *pClearValues; } VkRenderPassBeginInfo;
 typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
 typedef struct VkPoolObj { uint32_t magic; VkDevice device; uint32_t family; } VkPoolObj;
-typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
+typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkDescriptorSet bound_sets[4]; uint32_t bound_set_count; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
 typedef struct VkFenceObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkFenceObj;
 typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkSemaphoreObj;
 #define VK_MAX_SHADER_MODULES 8
@@ -195,7 +216,18 @@ typedef struct VkShaderModuleObj *VkShaderModule;
 #define VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO 18
 #define VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO 28
 #define VK_PIPELINE_BIND_POINT_GRAPHICS 0u
-typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; } VkPipelineObj;
+typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; VkPipelineLayout layout; } VkPipelineObj;
+#define VK_MAX_DESCRIPTOR_LAYOUTS 16
+#define VK_MAX_PIPELINE_LAYOUTS 16
+#define VK_MAX_DESCRIPTOR_POOLS 8
+#define VK_MAX_DESCRIPTOR_SETS 32
+#define VK_MAX_DESCRIPTOR_BINDINGS 16
+#define VK_MAX_DESCRIPTORS_PER_BINDING 8
+typedef struct VkDescriptorSetLayoutObj { uint32_t magic; VkDevice device; uint32_t bindingCount; VkDescriptorSetLayoutBinding bindings[VK_MAX_DESCRIPTOR_BINDINGS]; } VkDescriptorSetLayoutObj;
+typedef struct VkPipelineLayoutObj { uint32_t magic; VkDevice device; uint32_t setLayoutCount; VkDescriptorSetLayout setLayouts[4]; } VkPipelineLayoutObj;
+typedef struct VkDescriptorPoolObj { uint32_t magic; VkDevice device; uint32_t maxSets,allocatedSets; uint32_t uniformCapacity,storageCapacity,uniformUsed,storageUsed; } VkDescriptorPoolObj;
+typedef struct VkDescriptorValue { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorValue;
+typedef struct VkDescriptorSetObj { uint32_t magic; VkDevice device; VkDescriptorPool pool; VkDescriptorSetLayout layout; VkDescriptorValue values[VK_MAX_DESCRIPTOR_BINDINGS][VK_MAX_DESCRIPTORS_PER_BINDING]; } VkDescriptorSetObj;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stage; VkShaderModule module; const char *pName; const void *pSpecializationInfo; } VkPipelineShaderStageCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stageCount; const VkPipelineShaderStageCreateInfo *pStages; const void *pVertexInputState,*pInputAssemblyState,*pTessellationState,*pViewportState,*pRasterizationState,*pMultisampleState,*pDepthStencilState,*pColorBlendState,*pDynamicState; void *layout; void *renderPass; uint32_t subpass; VkPipeline basePipelineHandle; int32_t basePipelineIndex; } VkGraphicsPipelineCreateInfo;
 static VkImageViewObj g_image_views[32];
@@ -203,6 +235,10 @@ static VkRenderPassObj g_render_passes[16];
 static VkFramebufferObj g_framebuffers[32];
 static VkShaderModuleObj g_shader_modules[VK_MAX_SHADER_MODULES];
 static VkPipelineObj g_pipelines[VK_MAX_PIPELINES];
+static VkDescriptorSetLayoutObj g_descriptor_layouts[VK_MAX_DESCRIPTOR_LAYOUTS];
+static VkPipelineLayoutObj g_pipeline_layouts[VK_MAX_PIPELINE_LAYOUTS];
+static VkDescriptorPoolObj g_descriptor_pools[VK_MAX_DESCRIPTOR_POOLS];
+static VkDescriptorSetObj g_descriptor_sets[VK_MAX_DESCRIPTOR_SETS];
 static VkInstanceObj g_instances[VK_MAX_INSTANCES];
 static VkPhysicalObj g_phys[VK_MAX_DEVICES];
 static VkDeviceObj g_devices[VK_MAX_DEVICES];
@@ -234,6 +270,11 @@ static int image_view_ok(VkImageView h) { for(unsigned i=0;i<32;i++)if(h==(VkIma
 static int render_pass_ok(VkRenderPass h) { for(unsigned i=0;i<16;i++)if(h==(VkRenderPass)&g_render_passes[i]&&g_render_passes[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
 static int framebuffer_ok(VkFramebuffer h) { for(unsigned i=0;i<32;i++)if(h==(VkFramebuffer)&g_framebuffers[i]&&g_framebuffers[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
 static int pipeline_ok(VkPipeline h) { for(unsigned i=0;i<VK_MAX_PIPELINES;i++)if(h==&g_pipelines[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int dsl_ok(VkDescriptorSetLayout h) { for(unsigned i=0;i<VK_MAX_DESCRIPTOR_LAYOUTS;i++)if(h==&g_descriptor_layouts[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int playout_ok(VkPipelineLayout h) { for(unsigned i=0;i<VK_MAX_PIPELINE_LAYOUTS;i++)if(h==&g_pipeline_layouts[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int dpool_ok(VkDescriptorPool h) { for(unsigned i=0;i<VK_MAX_DESCRIPTOR_POOLS;i++)if(h==&g_descriptor_pools[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int dset_ok(VkDescriptorSet h) { for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(h==&g_descriptor_sets[i]&&h->magic==VK_OBJECT_MAGIC)return 1;return 0; }
+static int dsl_binding_index(VkDescriptorSetLayout l,uint32_t binding) { if(!dsl_ok(l))return -1;for(uint32_t i=0;i<l->bindingCount;i++)if(l->bindings[i].binding==binding)return (int)i;return -1; }
 /* Bounded SPIR-V 1.0 structural validation. This verifies the instruction
  * stream before storing it; it does not claim to execute shader instructions. */
 static int vk_spirv_validate(const uint32_t *w, size_t n) {
@@ -720,7 +761,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
  for(uint32_t k=0;k<count;k++)out[k]=0;
  for(uint32_t k=0;k<count;k++){
   const VkGraphicsPipelineCreateInfo *p=&ci[k];VkShaderModule vs=0,fs=0;uint32_t ve=0,fe=0;
-  if(p->sType!=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO||p->pNext||p->flags||p->stageCount!=2||!p->pStages||!render_pass_ok((VkRenderPass)p->renderPass)||((VkRenderPass)p->renderPass)->device!=d||p->subpass||p->basePipelineHandle||p->basePipelineIndex!=-1)return VK_ERROR_FEATURE_NOT_PRESENT;
+  if(p->sType!=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO||p->pNext||p->flags||p->stageCount!=2||!p->pStages||!render_pass_ok((VkRenderPass)p->renderPass)||((VkRenderPass)p->renderPass)->device!=d||p->subpass||!playout_ok((VkPipelineLayout)p->layout)||((VkPipelineLayout)p->layout)->device!=d||p->basePipelineHandle||p->basePipelineIndex!=-1)return VK_ERROR_FEATURE_NOT_PRESENT;
   for(uint32_t j=0;j<p->stageCount;j++){
    const VkPipelineShaderStageCreateInfo *st=&p->pStages[j];
    if(st->sType!=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO||st->pNext||st->flags||!shader_ok(st->module)||st->module->device!=d||!st->pName||!vk_eq(st->pName,"main")||st->pSpecializationInfo)return VK_ERROR_INITIALIZATION_FAILED;
@@ -733,7 +774,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
   if(!vr||!fr)return VK_ERROR_FEATURE_NOT_PRESENT;
   unsigned slot;for(slot=0;slot<VK_MAX_PIPELINES;slot++)if(!g_pipelines[slot].magic)break;
   if(slot==VK_MAX_PIPELINES)return VK_ERROR_TOO_MANY_OBJECTS;
-  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;out[k]=o;
+  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;o->layout=(VkPipelineLayout)p->layout;out[k]=o;
  }
  return VK_SUCCESS;
 }
@@ -823,6 +864,64 @@ __declspec(dllexport) void VKAPI_CALL vkDestroyFence(VkDevice d,VkFence f,const 
 __declspec(dllexport) VkResult VKAPI_CALL vkGetFenceStatus(VkDevice d,VkFence f) { if(!dev_ok(d)||!fence_ok(f)||f->device!=d)return VK_ERROR_DEVICE_LOST;return f->signaled?VK_SUCCESS:VK_NOT_READY; }
 __declspec(dllexport) VkResult VKAPI_CALL vkWaitForFences(VkDevice d,uint32_t n,const VkFence *fs,VkBool32 all,uint64_t timeout) { (void)timeout;if(!dev_ok(d)||!fs||!n)return VK_ERROR_INITIALIZATION_FAILED;uint32_t signaled=0;for(uint32_t i=0;i<n;i++){if(!fence_ok(fs[i])||fs[i]->device!=d)return VK_ERROR_DEVICE_LOST;if(fs[i]->signaled)signaled++;}return (all?(signaled==n):(signaled!=0))?VK_SUCCESS:VK_TIMEOUT; }
 __declspec(dllexport) VkResult VKAPI_CALL vkResetFences(VkDevice d,uint32_t n,const VkFence *fs) { if(!dev_ok(d)||!fs)return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t i=0;i<n;i++){if(!fence_ok(fs[i])||fs[i]->device!=d)return VK_ERROR_DEVICE_LOST;fs[i]->signaled=0;}return VK_SUCCESS; }
+
+__declspec(dllexport) VkResult VKAPI_CALL vkCreateDescriptorSetLayout(VkDevice d,const VkDescriptorSetLayoutCreateInfo *ci,const void *alloc,VkDescriptorSetLayout *out) {
+ if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO||ci->pNext||ci->flags||alloc||ci->bindingCount>VK_MAX_DESCRIPTOR_BINDINGS||(ci->bindingCount&&!ci->pBindings))return VK_ERROR_INITIALIZATION_FAILED;
+ *out=0;
+ for(uint32_t i=0;i<ci->bindingCount;i++){const VkDescriptorSetLayoutBinding *b=&ci->pBindings[i];if((b->descriptorType!=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER&&b->descriptorType!=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)||!b->descriptorCount||b->descriptorCount>VK_MAX_DESCRIPTORS_PER_BINDING||!b->stageFlags||b->pImmutableSamplers)return VK_ERROR_FEATURE_NOT_PRESENT;for(uint32_t j=0;j<i;j++)if(ci->pBindings[j].binding==b->binding)return VK_ERROR_INITIALIZATION_FAILED;}
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_LAYOUTS;i++)if(!g_descriptor_layouts[i].magic){VkDescriptorSetLayoutObj *l=&g_descriptor_layouts[i];vk_zero(l,sizeof(*l));l->magic=VK_OBJECT_MAGIC;l->device=d;l->bindingCount=ci->bindingCount;for(uint32_t j=0;j<ci->bindingCount;j++)l->bindings[j]=ci->pBindings[j];*out=l;return VK_SUCCESS;}
+ return VK_ERROR_TOO_MANY_OBJECTS;
+}
+__declspec(dllexport) void VKAPI_CALL vkDestroyDescriptorSetLayout(VkDevice d,VkDescriptorSetLayout l,const void *alloc) {
+ if(alloc||!dev_ok(d)||!dsl_ok(l)||l->device!=d)return;
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].layout==l)return;
+ for(unsigned i=0;i<VK_MAX_PIPELINE_LAYOUTS;i++)if(g_pipeline_layouts[i].magic==VK_OBJECT_MAGIC)for(uint32_t j=0;j<g_pipeline_layouts[i].setLayoutCount;j++)if(g_pipeline_layouts[i].setLayouts[j]==l)return;
+ l->magic=0;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkCreatePipelineLayout(VkDevice d,const VkPipelineLayoutCreateInfo *ci,const void *alloc,VkPipelineLayout *out) {
+ if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO||ci->pNext||ci->flags||alloc||ci->setLayoutCount>4||(ci->setLayoutCount&&!ci->pSetLayouts)||ci->pushConstantRangeCount||ci->pPushConstantRanges)return VK_ERROR_FEATURE_NOT_PRESENT;
+ *out=0;for(uint32_t i=0;i<ci->setLayoutCount;i++)if(!dsl_ok(ci->pSetLayouts[i])||ci->pSetLayouts[i]->device!=d)return VK_ERROR_INITIALIZATION_FAILED;
+ for(unsigned i=0;i<VK_MAX_PIPELINE_LAYOUTS;i++)if(!g_pipeline_layouts[i].magic){VkPipelineLayoutObj *l=&g_pipeline_layouts[i];vk_zero(l,sizeof(*l));l->magic=VK_OBJECT_MAGIC;l->device=d;l->setLayoutCount=ci->setLayoutCount;for(uint32_t j=0;j<ci->setLayoutCount;j++)l->setLayouts[j]=ci->pSetLayouts[j];*out=l;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
+}
+__declspec(dllexport) void VKAPI_CALL vkDestroyPipelineLayout(VkDevice d,VkPipelineLayout l,const void *alloc) {
+ if(alloc||!dev_ok(d)||!playout_ok(l)||l->device!=d)return;for(unsigned i=0;i<VK_MAX_PIPELINES;i++)if(g_pipelines[i].magic==VK_OBJECT_MAGIC&&g_pipelines[i].layout==l)return;l->magic=0;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkCreateDescriptorPool(VkDevice d,const VkDescriptorPoolCreateInfo *ci,const void *alloc,VkDescriptorPool *out) {
+ if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO||ci->pNext||ci->flags&~1u||alloc||!ci->maxSets||ci->maxSets>VK_MAX_DESCRIPTOR_SETS||(ci->poolSizeCount&&!ci->pPoolSizes))return VK_ERROR_INITIALIZATION_FAILED;
+ uint32_t u=0,st=0;for(uint32_t i=0;i<ci->poolSizeCount;i++){if(ci->pPoolSizes[i].type==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)u+=ci->pPoolSizes[i].descriptorCount;else if(ci->pPoolSizes[i].type==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)st+=ci->pPoolSizes[i].descriptorCount;else return VK_ERROR_FEATURE_NOT_PRESENT;}
+ *out=0;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_POOLS;i++)if(!g_descriptor_pools[i].magic){VkDescriptorPoolObj *p=&g_descriptor_pools[i];vk_zero(p,sizeof(*p));p->magic=VK_OBJECT_MAGIC;p->device=d;p->maxSets=ci->maxSets;p->uniformCapacity=u;p->storageCapacity=st;*out=p;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
+}
+__declspec(dllexport) void VKAPI_CALL vkDestroyDescriptorPool(VkDevice d,VkDescriptorPool p,const void *alloc) {
+ if(alloc||!dev_ok(d)||!dpool_ok(p)||p->device!=d)return;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p)g_descriptor_sets[i].magic=0;p->magic=0;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkResetDescriptorPool(VkDevice d,VkDescriptorPool p,VkFlags flags) {
+ if(!dev_ok(d)||!dpool_ok(p)||p->device!=d||flags)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p)g_descriptor_sets[i].magic=0;p->allocatedSets=p->uniformUsed=p->storageUsed=0;return VK_SUCCESS;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice d,const VkDescriptorSetAllocateInfo *ai,VkDescriptorSet *out) {
+ if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO||ai->pNext||!dpool_ok(ai->descriptorPool)||ai->descriptorPool->device!=d||!ai->descriptorSetCount||!ai->pSetLayouts||ai->descriptorSetCount>VK_MAX_DESCRIPTOR_SETS-ai->descriptorPool->allocatedSets)return VK_ERROR_INITIALIZATION_FAILED;
+ VkDescriptorPool p=ai->descriptorPool;uint32_t needU=0,needS=0,freeN=0;for(uint32_t i=0;i<ai->descriptorSetCount;i++){if(!dsl_ok(ai->pSetLayouts[i])||ai->pSetLayouts[i]->device!=d)return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t j=0;j<ai->pSetLayouts[i]->bindingCount;j++){VkDescriptorSetLayoutBinding *b=&ai->pSetLayouts[i]->bindings[j];if(b->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)needU+=b->descriptorCount;else needS+=b->descriptorCount;}}
+ if(needU>p->uniformCapacity-p->uniformUsed||needS>p->storageCapacity-p->storageUsed)return VK_ERROR_OUT_OF_POOL_MEMORY;
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(!g_descriptor_sets[i].magic)freeN++;if(freeN<ai->descriptorSetCount)return VK_ERROR_TOO_MANY_OBJECTS;
+ uint32_t made=0;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS&&made<ai->descriptorSetCount;i++)if(!g_descriptor_sets[i].magic){VkDescriptorSetObj *set=&g_descriptor_sets[i];vk_zero(set,sizeof(*set));set->magic=VK_OBJECT_MAGIC;set->device=d;set->pool=p;set->layout=ai->pSetLayouts[made];out[made++]=set;}
+ p->allocatedSets+=ai->descriptorSetCount;p->uniformUsed+=needU;p->storageUsed+=needS;return VK_SUCCESS;
+}
+__declspec(dllexport) VkResult VKAPI_CALL vkFreeDescriptorSets(VkDevice d,VkDescriptorPool p,uint32_t count,const VkDescriptorSet *sets) {
+ if(!dev_ok(d)||!dpool_ok(p)||p->device!=d||(count&&!sets))return VK_ERROR_INITIALIZATION_FAILED;
+ for(uint32_t i=0;i<count;i++)if(!dset_ok(sets[i])||sets[i]->device!=d||sets[i]->pool!=p)return VK_ERROR_INITIALIZATION_FAILED;
+ for(uint32_t i=0;i<count;i++){VkDescriptorSet set=sets[i];for(uint32_t j=0;j<set->layout->bindingCount;j++){VkDescriptorSetLayoutBinding *b=&set->layout->bindings[j];if(b->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)p->uniformUsed-=b->descriptorCount;else p->storageUsed-=b->descriptorCount;}set->magic=0;p->allocatedSets--;}return VK_SUCCESS;
+}
+__declspec(dllexport) void VKAPI_CALL vkUpdateDescriptorSets(VkDevice d,uint32_t writeCount,const VkWriteDescriptorSet *writes,uint32_t copyCount,const void *copies) {
+ if(!dev_ok(d)||copyCount||copies||(writeCount&&!writes))return;
+ for(uint32_t i=0;i<writeCount;i++){const VkWriteDescriptorSet *w=&writes[i];if(!dset_ok(w->dstSet)||w->dstSet->device!=d||w->dstArrayElement||w->descriptorCount!=1||!w->pBufferInfo||w->pImageInfo||w->pTexelBufferView)continue;int bi=dsl_binding_index(w->dstSet->layout,w->dstBinding);if(bi<0)continue;VkDescriptorSetLayoutBinding *b=&w->dstSet->layout->bindings[bi];const VkDescriptorBufferInfo *v=w->pBufferInfo;if(w->descriptorType!=b->descriptorType||b->descriptorCount<1||!buf_ok(v->buffer)||v->buffer->device!=d||!mem_ok(v->buffer->memory)||v->offset>v->buffer->size||!v->range||v->range>v->buffer->size-v->offset)continue;if((w->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT))||(w->descriptorType==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER&&!(v->buffer->usage&VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))continue;w->dstSet->values[bi][0].buffer=v->buffer;w->dstSet->values[bi][0].offset=v->offset;w->dstSet->values[bi][0].range=v->range;}
+}
+__declspec(dllexport) void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer c,uint32_t point,VkPipelineLayout layout,uint32_t first,uint32_t count,const VkDescriptorSet *sets,uint32_t dynCount,const uint32_t *dynOffsets) {
+ if(!cmd_ok(c)||c->state!=1||point!=VK_PIPELINE_BIND_POINT_GRAPHICS||!playout_ok(layout)||layout->device!=c->device||first>4||count>4-first||(count&&!sets)||dynCount||dynOffsets||c->count>=128)return;
+ if(c->bound_pipeline&&c->bound_pipeline->layout!=layout)return;
+ for(uint32_t i=0;i<count;i++)if(!dset_ok(sets[i])||sets[i]->device!=c->device||first+i>=layout->setLayoutCount||sets[i]->layout!=layout->setLayouts[first+i])return;
+ for(uint32_t i=0;i<count;i++)c->bound_sets[first+i]=sets[i];if(c->bound_set_count<first+count)c->bound_set_count=first+count;
+ unsigned op=c->count++;c->ops[op].op=16;c->ops[op].value=first;c->ops[op].size=count;c->ops[op].offset2=(uintptr_t)layout;
+}
+
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateShaderModule(VkDevice d,const VkShaderModuleCreateInfo *ci,const void *alloc,VkShaderModule *out) {
  if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;
  *out=0;
@@ -843,14 +942,14 @@ __declspec(dllexport) void VKAPI_CALL vkDestroySemaphore(VkDevice d,VkSemaphore 
 __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice d,const char *name) {
  if(!dev_ok(d)||!name)return (PFN_vkVoidFunction)0;
 #define DPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- DPROC(vkGetDeviceProcAddr);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);
+ DPROC(vkGetDeviceProcAddr);DPROC(vkCreateDescriptorSetLayout);DPROC(vkDestroyDescriptorSetLayout);DPROC(vkCreatePipelineLayout);DPROC(vkDestroyPipelineLayout);DPROC(vkCreateDescriptorPool);DPROC(vkDestroyDescriptorPool);DPROC(vkResetDescriptorPool);DPROC(vkAllocateDescriptorSets);DPROC(vkFreeDescriptorSets);DPROC(vkUpdateDescriptorSets);DPROC(vkCmdBindDescriptorSets);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);
 #undef DPROC
  return (PFN_vkVoidFunction)0;
 }
 __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst,const char *name) {
  if(!name)return (PFN_vkVoidFunction)0;
 #define IPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- IPROC(vkGetInstanceProcAddr);IPROC(vkCreateImageView);IPROC(vkDestroyImageView);IPROC(vkCreateRenderPass);IPROC(vkDestroyRenderPass);IPROC(vkCreateFramebuffer);IPROC(vkDestroyFramebuffer);IPROC(vkCmdBeginRenderPass);IPROC(vkCmdEndRenderPass);IPROC(vkGetDeviceProcAddr);IPROC(vkEnumerateInstanceVersion);IPROC(vkEnumerateInstanceExtensionProperties);IPROC(vkEnumerateInstanceLayerProperties);IPROC(vkCreateInstance);
+ IPROC(vkGetInstanceProcAddr);IPROC(vkCreateDescriptorSetLayout);IPROC(vkDestroyDescriptorSetLayout);IPROC(vkCreatePipelineLayout);IPROC(vkDestroyPipelineLayout);IPROC(vkCreateDescriptorPool);IPROC(vkDestroyDescriptorPool);IPROC(vkResetDescriptorPool);IPROC(vkAllocateDescriptorSets);IPROC(vkFreeDescriptorSets);IPROC(vkUpdateDescriptorSets);IPROC(vkCmdBindDescriptorSets);IPROC(vkCreateImageView);IPROC(vkDestroyImageView);IPROC(vkCreateRenderPass);IPROC(vkDestroyRenderPass);IPROC(vkCreateFramebuffer);IPROC(vkDestroyFramebuffer);IPROC(vkCmdBeginRenderPass);IPROC(vkCmdEndRenderPass);IPROC(vkGetDeviceProcAddr);IPROC(vkEnumerateInstanceVersion);IPROC(vkEnumerateInstanceExtensionProperties);IPROC(vkEnumerateInstanceLayerProperties);IPROC(vkCreateInstance);
  if(!inst_ok(inst))return (PFN_vkVoidFunction)0;
  IPROC(vkDestroyInstance);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceImageFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);IPROC(vkDestroyDevice);IPROC(vkGetDeviceQueue);IPROC(vkDeviceWaitIdle);IPROC(vkQueueWaitIdle);IPROC(vkCreateBuffer);IPROC(vkDestroyBuffer);IPROC(vkGetBufferMemoryRequirements);IPROC(vkCreateImage);IPROC(vkDestroyImage);IPROC(vkGetImageMemoryRequirements);IPROC(vkBindImageMemory);IPROC(vkAllocateMemory);IPROC(vkFreeMemory);IPROC(vkBindBufferMemory);IPROC(vkMapMemory);IPROC(vkUnmapMemory);IPROC(vkFlushMappedMemoryRanges);IPROC(vkInvalidateMappedMemoryRanges);IPROC(vkCreateCommandPool);IPROC(vkResetCommandPool);IPROC(vkDestroyCommandPool);IPROC(vkAllocateCommandBuffers);IPROC(vkFreeCommandBuffers);IPROC(vkBeginCommandBuffer);IPROC(vkEndCommandBuffer);IPROC(vkResetCommandBuffer);IPROC(vkCmdFillBuffer);IPROC(vkCmdUpdateBuffer);IPROC(vkCmdCopyImage);IPROC(vkCmdCopyBuffer);IPROC(vkCmdCopyBufferToImage);IPROC(vkCmdCopyImageToBuffer);IPROC(vkCmdClearColorImage);IPROC(vkCmdPipelineBarrier);IPROC(vkQueueSubmit);IPROC(vkCreateFence);IPROC(vkDestroyFence);IPROC(vkGetFenceStatus);IPROC(vkWaitForFences);IPROC(vkResetFences);IPROC(vkCreateSemaphore);IPROC(vkDestroySemaphore);IPROC(vkCreateShaderModule);IPROC(vkDestroyShaderModule);IPROC(vkCreateGraphicsPipelines);IPROC(vkDestroyPipeline);IPROC(vkCmdBindPipeline);IPROC(vkCmdBindVertexBuffers);IPROC(vkCmdDraw);IPROC(SentinelVulkanCmdBindColorTarget);
 #undef IPROC

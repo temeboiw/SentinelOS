@@ -168,7 +168,7 @@ void instlr_main(void){
  installer_payloads_ready=esp_query&&sys_query&&
      payload_image_valid(0,esp_package_size)&&payload_image_valid(1,system_package_size)&&
      NtVerifyInstallerPayload(0)==0&&NtVerifyInstallerPayload(1)==0;
- NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\\n":"instlr: image integrity check failed; disk writes disabled\\n");
+ NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\n":"instlr: image integrity check failed; disk writes disabled\n");
  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
  draw_cursor(fb,&b,mouse_x,mouse_y);
  (void)NtFlushGraphics(0,0,f.w,f.h);

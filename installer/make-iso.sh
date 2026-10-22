@@ -19,6 +19,8 @@ need sha256sum
 
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: staged EFI/BOOT/BOOTX64.EFI missing; run build-installer.sh first" >&2; exit 3; }
 [[ -s "$OUT/esp.spf" && -s "$OUT/system.spf" ]] || { echo "error: SPF packages missing; run build-installer.sh first" >&2; exit 3; }
+# Store package hashes separately so the kernel can verify exact staged bytes before formatting any disk.
+printf '%s\n%s\n' "$(sha256sum "$OUT/esp.spf" | cut -d ' ' -f1)" "$(sha256sum "$OUT/system.spf" | cut -d ' ' -f1)" > "$OUT/packages.sha256"
 if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
   # Packages are also embedded on the FAT ESP so UEFI can preload them.
   # Size for every staged file plus both packages, with 25% headroom and
@@ -53,6 +55,7 @@ shopt -u nullglob dotglob
 # trusted installer session. The ISO-level copies remain for host-side tools.
 mcopy -i "$ESP_IMG" "$OUT/esp.spf" ::/esp.spf
 mcopy -i "$ESP_IMG" "$OUT/system.spf" ::/system.spf
+mcopy -i "$ESP_IMG" "$OUT/packages.sha256" ::/packages.sha256
 
 # Fail early if the fallback loader and both payloads made it into the FAT image.
 TMP_CHECK="$(mktemp)"
@@ -63,10 +66,12 @@ mcopy -i "$ESP_IMG" ::/esp.spf "$TMP_CHECK"
 cmp -s "$TMP_CHECK" "$OUT/esp.spf" || { echo "error: ESP SPF payload mismatch" >&2; exit 4; }
 mcopy -i "$ESP_IMG" ::/system.spf "$TMP_CHECK"
 cmp -s "$TMP_CHECK" "$OUT/system.spf" || { echo "error: system SPF payload mismatch" >&2; exit 4; }
+mcopy -i "$ESP_IMG" ::/packages.sha256 "$TMP_CHECK"
+cmp -s "$TMP_CHECK" "$OUT/packages.sha256" || { echo "error: package checksum manifest mismatch" >&2; exit 4; }
 rm -f "$TMP_CHECK"
 trap - EXIT
 
-cp "$OUT/esp.spf" "$OUT/system.spf" "$ISO_ROOT/packages/"
+cp "$OUT/esp.spf" "$OUT/system.spf" "$OUT/packages.sha256" "$ISO_ROOT/packages/"
 cat > "$ISO_ROOT/README.txt" <<'EOF'
 SentinelOS V.4 [Beta] installer media
 
@@ -81,7 +86,7 @@ implemented. Booting this media does not by itself perform a complete OS install
 EOF
 (
   cd "$ISO_ROOT"
-  sha256sum boot/esp.img packages/esp.spf packages/system.spf README.txt > SHA256SUMS
+  sha256sum boot/esp.img packages/esp.spf packages/system.spf packages/packages.sha256 README.txt > SHA256SUMS
 )
 xorriso -as mkisofs \
   -iso-level 3 -full-iso9660-filenames -R -J -V SENTINELOS_V4_BETA \

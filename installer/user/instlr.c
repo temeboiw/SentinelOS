@@ -126,6 +126,28 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
  }
  text(f,p,w,h,16,(int)h-24,"SentinelOS Setup",0xFF466571,1);
 }
+static void paint_loading(u32 *f, const IFB *b, const char *status, u32 pct) {
+ u32 w=b->w,h=b->h,p=b->pitch;
+ for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
+ rect(f,p,w,h,0,0,w,58,0xFF176B8C);
+ rect(f,p,w,h,0,0,w,3,0xFFB6F4FC);
+ text(f,p,w,h,24,19,"SentinelOS Setup",0xFFFFFFFF,2);
+ int pw=(int)w-96,ph=230;if(pw>760)pw=760;if(pw<260)pw=(int)w-32;
+ int x=((int)w-pw)/2,y=((int)h-ph)/2;
+ rect(f,p,w,h,x+5,y+7,pw,ph,0xFF9BB0B9);
+ rect(f,p,w,h,x,y,pw,ph,0xFFFFFFFF);
+ rect(f,p,w,h,x,y,pw,46,0xFFD9EEF5);
+ text(f,p,w,h,x+24,y+16,"Preparing your computer",0xFF174C63,2);
+ text(f,p,w,h,x+24,y+82,"SentinelOS Setup is starting.",0xFF203944,1);
+ text(f,p,w,h,x+24,y+110,status,0xFF174C63,1);
+ rect(f,p,w,h,x+24,y+148,pw-48,24,0xFFD5E0E5);
+ if(pct>100)pct=100;
+ rect(f,p,w,h,x+24,y+148,(int)(((u64)(pw-48)*pct)/100ULL),24,0xFF1685A7);
+ char percent[24];decstr(pct,percent);
+ text(f,p,w,h,x+24,y+184,percent,0xFF203944,1);
+ text(f,p,w,h,x+40,y+184,"%",0xFF203944,1);
+ text(f,p,w,h,16,(int)h-24,"SentinelOS",0xFF466571,1);
+}
 void instlr_main(void){
  NtWriteConsole("instlr: installer session starting\n");
  GfxBootInfo gfx={0};u64 gok=NtInitializeGraphics(&gfx);FBInfo f={0};(void)NtMapFramebuffer(&f);
@@ -135,8 +157,9 @@ void instlr_main(void){
  /* Paint immediately, before hashing the large embedded images. */
  int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
  installer_payloads_ready=-1;
- paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
- draw_cursor(fb,&b,mouse_x,mouse_y);
+ paint_loading(fb,&b,"Loading installer components...",18);
+ (void)NtFlushGraphics(0,0,f.w,f.h);
+ paint_loading(fb,&b,"Verifying installation images (SHA-256)...",42);
  (void)NtFlushGraphics(0,0,f.w,f.h);
  /* Require both embedded filesystem images and their hashes before disk writes. */
  u64 esp_package_size=0,system_package_size=0;

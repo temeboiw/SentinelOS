@@ -691,6 +691,7 @@ int main(void) {
     renderBegin.clearValueCount = 1; renderBegin.pClearValues = &drawClear;
     vkCmdBeginRenderPass(cmd, &renderBegin, 0);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+    fprintf(stderr, "depth state test=%u write=%u compare=%u bound-depth=%p op=%u\\n", (unsigned)pipeline->depth_test, (unsigned)pipeline->depth_write, (unsigned)pipeline->depth_compare, (void*)cmd->bound_depth_target, (unsigned)cmd->ops[cmd->count-2].op);
     vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d\\n", (int)rpSubmitResult); CHECK(rpSubmitResult == VK_SUCCESS); }

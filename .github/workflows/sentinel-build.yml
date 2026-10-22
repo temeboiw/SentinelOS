@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,7 +31,7 @@ jobs:
           clang -std=c11 -Wall -Wextra -Iuser user/soft3d.c tests/soft3d_test.c -o "$RUNNER_TEMP/soft3d-test"
           "$RUNNER_TEMP/soft3d-test"
       - name: Build SentinelOS
-        run: EDK2="$RUNNER_TEMP/edk2" JOBS=2 bash ./scripts/build.sh
+        run: EDK2="$RUNNER_TEMP/edk2" JOBS="$(nproc)" bash ./scripts/build.sh
       - name: Boot smoke test with VirtIO-VGA
         shell: bash
         run: |

@@ -426,6 +426,7 @@ lld -flavor link \
   /export:SentinelVulkanGpuStatus \
   /export:SentinelVulkanSubmitVirGLStream \
   /export:SentinelVulkanUploadVirGLBuffer \
+  /export:SentinelVulkanPresentVirGL \
   /export:SentinelVulkanCmdDrawTriangle \
   "/out:$SYS32/vulkan.dll" \
   "$B/obj/vulkan.o" \

@@ -158,8 +158,10 @@ static void *gfx_map_mmio(uint64_t pa, uint64_t bytes) {
     return (void *)(va + (pa - first));
 }
 /* Enumerate PCI display controllers without touching their BARs. This is
- * inventory only: it deliberately does not claim that any vendor has a
- * working Vulkan driver. Keep it separate from the active VirtIO-GPU path. */
+ * PCI inventory only: this scan identifies display-class hardware but does not
+ * initialize vendor-specific drivers. The active VirtIO-GPU/VirGL backend is
+ * detected and reported separately; it can provide 3D acceleration when the
+ * device and host configuration support VirGL. */
 static void gfx_log_display_adapters(void) {
     unsigned int found=0;
     for(uint32_t b=0;b<256;b++) {
@@ -180,7 +182,7 @@ static void gfx_log_display_adapters(void) {
                 else if(vendor==0x10DEu)name="NVIDIA";
                 else if(vendor==0x1002u || vendor==0x1022u)name="AMD";
                 else if(vendor==GFX_VIRTIO_VENDOR)name="VirtIO";
-                DbgPrint("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (inventory only; no Vulkan driver implied)\n",
+                DbgPrint("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (PCI inventory; active graphics backend reported separately)\n",
                     found,name,vendor,device,b,d,fn,base,sub);
                 found++;
             }

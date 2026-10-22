@@ -23,6 +23,7 @@ static int mouse_pkt_count;
 static volatile int32_t game_mouse_dx, game_mouse_dy;
 /* Set-1 make/break state for low-latency game controls. */
 static volatile uint8_t kbd_down[128];
+static void ps2_poll(void);
 
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++)
@@ -61,11 +62,11 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
 
         int dx = (int8_t)mouse_pkt[1];
         int dy = (int8_t)mouse_pkt[2];
-        game_mouse_dx += dx;
-        game_mouse_dy -= dy;
-        /* overflow bits */
+        /* Overflow bits invalidate the corresponding relative delta. */
         if (mouse_pkt[0] & 0x40) dx = 0;
         if (mouse_pkt[0] & 0x80) dy = 0;
+        game_mouse_dx += dx;
+        game_mouse_dy -= dy;
 
         /* VNC deltas are tiny – scale up */
         int scale = 3;

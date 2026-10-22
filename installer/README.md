@@ -58,7 +58,8 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 - Builds from the isolated `installer/source/` snapshot and leaves root-level project sources untouched.
 - Includes an installer session manager, framebuffer terms/target UI, and progress-style screen binary.
 - Packages staged EFI and system filesystem trees into separate SPF archives. SPF is a custom zlib-compressed tar format, not WIM.
-- Creates a FAT32 EFI boot image, copies the full staged EFI directory tree plus any other ESP-root files into it, and adds both SPF packages to the ISO.
+- Creates a FAT32 EFI boot image and copies the staged EFI tree plus `magic/System32` boot modules onto the ESP. This lets `loadufi.efi` load the HAL, kernel, and setup session from the ISO itself; installed-system boots still fall back to the ext4 reader when those files are not on the ESP.
+- Adds both SPF packages to the ISO.
 - Emits `SHA256SUMS` for the embedded boot image, packages, and media README.
 - Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, and both embedded SPF packages.
 

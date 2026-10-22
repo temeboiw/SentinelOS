@@ -127,6 +127,12 @@ static const char *install_payload_names[3] = { "esp.img", "system.img", "instal
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
 }
+static void say_uint(UINT64 value) {
+    CHAR16 digits[21];
+    UINTN n = 0;
+    do { digits[n++] = (CHAR16)(L'0' + value % 10); value /= 10; } while (value && n < 20);
+    while (n) { CHAR16 ch[2] = { digits[--n], 0 }; say(ch); }
+}
 static void die(const char *a, const char *b, const char *c) {
     say(L"loadufi: "); say_a(a); say_a(b); say_a(c); say(L"\r\n");
     for (;;) {}
@@ -180,6 +186,9 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
     }
     UINTN bytes = (UINTN)info->FileSize;
     bs->FreePool(info);
+    say(L"loadufi: payload bytes = ");
+    say_uint((UINT64)bytes);
+    say(L"\\r\\n");
     VOID *buffer = NULL;
     status = bs->AllocatePool(EfiLoaderData, bytes ? bytes : 1, &buffer);
     if (EFI_ERROR(status)) { handle->Close(handle); return status; }
@@ -203,6 +212,11 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
             return EFI_LOAD_ERROR;
         }
         offset += got;
+        if ((offset % (32U * 1024U * 1024U)) == 0 || offset == bytes) {
+            say(L"loadufi: file read MiB = ");
+            say_uint((UINT64)(offset / (1024U * 1024U)));
+            say(L"\\r\\n");
+        }
     }
     handle->Close(handle);
     *file = buffer; *size = bytes;

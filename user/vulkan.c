@@ -43,6 +43,9 @@
 #define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO 32
 #define VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO 33
 #define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO 34
+#define VK_DESCRIPTOR_TYPE_SAMPLER 0u
+#define VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER 1u
+#define VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE 2u
 #define VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER 6u
 #define VK_DESCRIPTOR_TYPE_STORAGE_BUFFER 7u
 #define VK_SHADER_STAGE_VERTEX_BIT 1u
@@ -197,6 +200,7 @@ typedef struct { uint32_t type; uint32_t descriptorCount; } VkDescriptorPoolSize
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t maxSets,poolSizeCount; const VkDescriptorPoolSize *pPoolSizes; } VkDescriptorPoolCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkDescriptorPool descriptorPool; uint32_t descriptorSetCount; const VkDescriptorSetLayout *pSetLayouts; } VkDescriptorSetAllocateInfo;
 typedef struct { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorBufferInfo;
+typedef struct { VkSampler sampler; VkImageView imageView; uint32_t imageLayout; } VkDescriptorImageInfo;
 typedef struct { VkDescriptorSet dstSet; uint32_t dstBinding,dstArrayElement,descriptorCount,descriptorType; const void *pImageInfo; const VkDescriptorBufferInfo *pBufferInfo; const void *pTexelBufferView; } VkWriteDescriptorSet;
 typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; } VkImageObj;
 typedef struct VkImageViewObj { uint32_t magic; VkDevice device; VkImage image; uint32_t format, aspect; } VkImageViewObj;
@@ -227,7 +231,7 @@ typedef struct VkShaderModuleObj *VkShaderModule;
 #define VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO 18
 #define VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO 28
 #define VK_PIPELINE_BIND_POINT_GRAPHICS 0u
-typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; VkPipelineLayout layout; uint8_t depth_test,depth_write; uint32_t depth_compare; } VkPipelineObj;
+typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; VkPipelineLayout layout; uint8_t depth_test,depth_write,texture_sampling; uint32_t depth_compare; } VkPipelineObj;
 #define VK_MAX_DESCRIPTOR_LAYOUTS 16
 #define VK_MAX_PIPELINE_LAYOUTS 16
 #define VK_MAX_DESCRIPTOR_POOLS 8
@@ -237,7 +241,7 @@ typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule v
 typedef struct VkDescriptorSetLayoutObj { uint32_t magic; VkDevice device; uint32_t bindingCount; VkDescriptorSetLayoutBinding bindings[VK_MAX_DESCRIPTOR_BINDINGS]; } VkDescriptorSetLayoutObj;
 typedef struct VkPipelineLayoutObj { uint32_t magic; VkDevice device; uint32_t setLayoutCount; VkDescriptorSetLayout setLayouts[4]; } VkPipelineLayoutObj;
 typedef struct VkDescriptorPoolObj { uint32_t magic; VkDevice device; uint32_t maxSets,allocatedSets; uint32_t uniformCapacity,storageCapacity,uniformUsed,storageUsed; } VkDescriptorPoolObj;
-typedef struct VkDescriptorValue { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorValue;
+typedef struct VkDescriptorValue { VkBuffer buffer; VkDeviceSize offset,range; VkImageView imageView; VkSampler sampler; uint32_t imageLayout; } VkDescriptorValue;
 typedef struct VkDescriptorSetObj { uint32_t magic; VkDevice device; VkDescriptorPool pool; VkDescriptorSetLayout layout; VkDescriptorValue values[VK_MAX_DESCRIPTOR_BINDINGS][VK_MAX_DESCRIPTORS_PER_BINDING]; } VkDescriptorSetObj;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stage; VkShaderModule module; const char *pName; const void *pSpecializationInfo; } VkPipelineShaderStageCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stageCount; const VkPipelineShaderStageCreateInfo *pStages; const void *pVertexInputState,*pInputAssemblyState,*pTessellationState,*pViewportState,*pRasterizationState,*pMultisampleState,*pDepthStencilState,*pColorBlendState,*pDynamicState; void *layout; void *renderPass; uint32_t subpass; VkPipeline basePipelineHandle; int32_t basePipelineIndex; } VkGraphicsPipelineCreateInfo;
@@ -586,7 +590,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateImage(VkDevice d,const VkImage
  if(alloc||ci->imageType!=1||!ci->extent.width||!ci->extent.height||ci->extent.depth!=1||ci->mipLevels!=1||ci->arrayLayers!=1||ci->samples!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
  if(ci->format!=VK_FORMAT_R8G8B8A8_UNORM&&ci->format!=VK_FORMAT_B8G8R8A8_UNORM&&ci->format!=VK_FORMAT_D32_SFLOAT)return VK_ERROR_FORMAT_NOT_SUPPORTED;
   if(ci->format==VK_FORMAT_D32_SFLOAT){if(!(ci->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)||(ci->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_FORMAT_NOT_SUPPORTED;}else if(ci->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)return VK_ERROR_FORMAT_NOT_SUPPORTED;
- if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
+ if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
  uint64_t bytes=(uint64_t)ci->extent.width*(uint64_t)ci->extent.height*4u;
  if(bytes>VK_MEMORY_BYTES||bytes/4u/(uint64_t)ci->extent.width!=ci->extent.height)return VK_ERROR_OUT_OF_DEVICE_MEMORY;
  for(unsigned i=0;i<32;i++)if(!g_images[i].magic){VkImageObj *im=&g_images[i];vk_zero(im,sizeof(*im));im->magic=VK_OBJECT_MAGIC;im->device=d;im->size=bytes;im->width=ci->extent.width;im->height=ci->extent.height;im->depth=1;im->format=ci->format;im->usage=ci->usage;im->tiling=ci->tiling;im->mipLevels=1;im->arrayLayers=1;im->samples=1;im->layout=ci->initialLayout;*out=(VkImage)im;return VK_SUCCESS;}
@@ -762,6 +766,9 @@ static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t ent
  }
  if(!done||!def[output])return 0;*out=ids[output];return 1;
 }
+static int vk_spirv_has_implicit_texture_sample(const uint32_t *w,size_t n,uint32_t entry) {
+ size_t i=5;uint32_t active=0;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;if(op==54u&&wc>=5u)active=(w[i+2]==entry);else if(op==56u)active=0;else if(active&&op==87u&&wc>=5u)return 1;i+=wc;}return 0;
+}
 static uint32_t vk_spirv_main_id(const uint32_t *w,size_t n) {
  size_t i=5;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
   if(op==15u&&wc>=4u){const char *name=(const char*)&w[i+3];if(name[0]=='m'&&name[1]=='a'&&name[2]=='i'&&name[3]=='n')return w[i+2];}
@@ -840,10 +847,11 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
   }
   if(!vs||!fs||!ve||!fe)return VK_ERROR_INITIALIZATION_FAILED;
   uint32_t vr=vk_spirv_last_scalar_result(vs->words,vs->wordCount,ve),fr=vk_spirv_last_scalar_result(fs->words,fs->wordCount,fe);
-  if(!vr||!fr)return VK_ERROR_FEATURE_NOT_PRESENT;
+  int texture_sampling=vk_spirv_has_implicit_texture_sample(fs->words,fs->wordCount,fe);
+  if(!vr||(!fr&&!texture_sampling))return VK_ERROR_FEATURE_NOT_PRESENT;
   unsigned slot;for(slot=0;slot<VK_MAX_PIPELINES;slot++)if(!g_pipelines[slot].magic)break;
   if(slot==VK_MAX_PIPELINES)return VK_ERROR_TOO_MANY_OBJECTS;
-  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;o->layout=(VkPipelineLayout)p->layout;o->depth_test=depth_test;o->depth_write=depth_write;o->depth_compare=depth_compare;out[k]=o;
+  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;o->layout=(VkPipelineLayout)p->layout;o->depth_test=depth_test;o->depth_write=depth_write;o->depth_compare=depth_compare;o->texture_sampling=(uint8_t)texture_sampling;out[k]=o;
  }
  return VK_SUCCESS;
 }

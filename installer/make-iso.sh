@@ -57,7 +57,7 @@ printf '%s\n%s\n' "$(sha256sum "$OUT/esp.spf" | cut -d ' ' -f1)" "$(sha256sum "$
 if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
   # Raw install images are embedded on the FAT ESP so UEFI can preload them.
   # Size for every staged file plus both packages, with 25% headroom and
-  # 16 MiB for FAT metadata/cluster slack. Do not silently truncate at 128 MiB.
+  # 16 MiB for FAT metadata/cluster slack. Do not silently truncate the image.
   required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
   required_bytes=$((required_bytes + $(stat -c %s "$TARGET_ESP_IMG") + $(stat -c %s "$TARGET_SYSTEM_IMG") + $(stat -c %s "$INSTALL_SUMS")))
   ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))

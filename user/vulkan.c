@@ -889,7 +889,6 @@ static uint8_t g_frag_defined[VK_SPIRV_MAX_IDS],g_frag_kind[VK_SPIRV_MAX_IDS],g_
 static uint32_t g_frag_location[VK_SPIRV_MAX_IDS],g_frag_pointer_type[VK_SPIRV_MAX_IDS],g_frag_type_components[VK_SPIRV_MAX_IDS];
 static uint32_t g_frag_output[4];
 static uint32_t vk_frag_fbits(float f){union{float f;uint32_t u;}x;x.f=f;return x.u;}
-static float vk_frag_float(uint32_t u){union{float f;uint32_t u;}x;x.u=u;return x.f;}
 static uint32_t vk_frag_tex_channel_bits(uint32_t p,unsigned c){return vksoft_unorm_to_float_bits((p>>(c==0?16u:c==1?8u:c==2?0u:24u))&255u);}
 static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_color){
  VkFragmentContext *ctx=(VkFragmentContext*)opaque;VkShaderModule m=ctx?ctx->module:0;
@@ -925,7 +924,7 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
    else if(op==253u&&wc==1u)break;
    else if(op==62u&&wc==3u){uint32_t ptr=w[i+1],obj=w[i+2];if(ptr>=VK_SPIRV_MAX_IDS||obj>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr]||!g_frag_defined[obj])return 0;if(g_frag_storage[ptr]==3u){for(unsigned k=0;k<4;k++)g_frag_output[k]=g_frag_values[obj][k];output_var=ptr;}}
    else if(op==61u&&wc==4u){uint32_t ptr=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||ptr>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr])return 0;
-    if(g_frag_storage[ptr]==1u){g_frag_values[rid][0]=vk_frag_fbits(in_u);g_frag_values[rid][1]=vk_frag_fbits(in_v);g_frag_values[rid][2]=0;g_frag_values[rid][3]=vk_frag_fbits(1.0f);g_frag_components[rid]=2;g_frag_defined[rid]=1;}
+    if(g_frag_storage[ptr]==1u){g_frag_values[rid][0]=vk_frag_fbits(in_u);g_frag_values[rid][1]=vk_frag_fbits(in_v);g_frag_values[rid][2]=0;g_frag_values[rid][3]=0x3f800000u;g_frag_components[rid]=2;g_frag_defined[rid]=1;}
     else if(g_frag_storage[ptr]==0u){g_frag_kind[rid]=2;g_frag_defined[rid]=1;g_frag_components[rid]=1;}
     else return 0;
    }
@@ -939,12 +938,12 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     if(projected){if(g_frag_components[coord]<3)return 0;uint32_t q=g_frag_values[coord][2];if(vksoft_float_is_zero(q))return 0;ubits=vksoft_fdiv_bits(ubits,q);vbits=vksoft_fdiv_bits(vbits,q);}
     if(op==95u){int32_t x=(int32_t)g_frag_values[coord][0],y=(int32_t)g_frag_values[coord][1];ubits=vksoft_texel_center_bits(x,ctx->texture->width);vbits=vksoft_texel_center_bits(y,ctx->texture->height);}
     if(op==89u||op==90u||op==93u||op==94u){
-     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],p=vksoft_sample_texture(ctx->texture,vk_frag_float(ubits),vk_frag_float(vbits));
-     g_frag_values[rid][0]=vk_frag_fbits(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,0),ctx->texture->compare_op)?1.0f:0.0f);g_frag_components[rid]=1;g_frag_defined[rid]=1;
+     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],p=vksoft_sample_texture_bits(ctx->texture,ubits,vbits);
+     g_frag_values[rid][0]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,0),ctx->texture->compare_op)?0x3f800000u:0u);g_frag_components[rid]=1;g_frag_defined[rid]=1;
     }else if(op==97u){
      if(wc<7u||w[i+5]>=VK_SPIRV_MAX_IDS||w[i+6]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!g_frag_defined[w[i+6]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],comp=g_frag_values[w[i+6]][0];if(comp>3u)return 0;
      uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
-     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture(ctx->texture,vk_frag_float(pu),vk_frag_float(pv));g_frag_values[rid][k]=vk_frag_fbits(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,comp),ctx->texture->compare_op)?1.0f:0.0f);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
+     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(ctx->texture,pu,pv);g_frag_values[rid][k]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,comp),ctx->texture->compare_op)?0x3f800000u:0u);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else if(op==96u){
      if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]])return 0;uint32_t comp=g_frag_values[w[i+5]][0];if(comp>3u)return 0;uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
      for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture(ctx->texture,vk_frag_float(pu),vk_frag_float(pv));g_frag_values[rid][k]=vk_frag_tex_channel_bits(p,comp);}g_frag_components[rid]=4;g_frag_defined[rid]=1;

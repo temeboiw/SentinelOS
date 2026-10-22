@@ -501,11 +501,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             install_payload_sizes[p] = 0;
             say(L"loadufi: installer package missing: ");
             say_a(install_payload_names[p]);
-            say(L"\\r\\n");
+            say(L"\r\n");
         } else {
             say(L"loadufi: staged installer package: ");
             say_a(install_payload_names[p]);
-            say(L"\\r\\n");
+            say(L"\r\n");
         }
     }
 

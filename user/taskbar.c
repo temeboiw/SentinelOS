@@ -1,7 +1,28 @@
 
 typedef unsigned int u32;
+typedef unsigned long long u64;
+typedef unsigned short u16;
 
-static const unsigned char FONT[38][7] = {
+enum { SYS_NtGetSystemTime = 23 };
+typedef struct {
+    u16 year, month, day_of_week, day, hour, minute, second, milliseconds;
+} TaskbarSystemTime;
+
+/* Query the kernel RTC through the existing system-time syscall. */
+static int taskbar_get_system_time(TaskbarSystemTime *out) {
+    u64 result;
+    __asm__ volatile(
+        "mov $23, %%rax\n"
+        "mov %[out], %%rdi\n"
+        "int $0x80\n"
+        "mov %%rax, %[result]"
+        : [result] "=r" (result)
+        : [out] "r" ((u64)out)
+        : "rax", "rdi", "memory", "cc");
+    return result == 0;
+}
+
+static const unsigned char FONT[40][7] = {
 {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
 {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},{0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
 {0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},{0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},
@@ -21,24 +42,28 @@ static const unsigned char FONT[38][7] = {
 {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},{0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
 {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
 {0,0,0,0,0,0,0},{0,0,0x04,0,0x04,0,0},
+/* '-' and '/' keep the taskbar date legible in the compact bitmap font. */
+{0,0,0x1F,0,0,0,0},{0x01,0x02,0x02,0x04,0x08,0x08,0x10},
 };
 
 #define COLOR_BG       0xFF1A1A2E
 #define COLOR_HEADER   0xFF0F3460
-#define COLOR_BAR      0xFF16213E
-#define COLOR_ACCENT   0xFFE94560
-#define COLOR_START    0xFF0F4C75
-#define COLOR_FILES    0xFF533483
-#define COLOR_SEARCH   0xFF0D1117
-#define COLOR_BORDER   0xFF3B4664
+#define COLOR_BAR      0xFF202020
+#define COLOR_ACCENT   0xFF0078D4
+#define COLOR_START    0xFF202020
+#define COLOR_FILES    0xFF2B2B2B
+#define COLOR_SEARCH   0xFF171717
+#define COLOR_BORDER   0xFF454545
 #define COLOR_WHITE    0xFFFFFFFF
-#define COLOR_MUTED    0xFFAAAAAA
+#define COLOR_MUTED    0xFFBDBDBD
 
 static int gi(char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a';
     if (c >= '0' && c <= '9') return 26 + (c - '0');
     if (c == ':') return 37;
+    if (c == '-') return 38;
+    if (c == '/') return 39;
     return 36;
 }
 
@@ -134,44 +159,52 @@ void TaskbarDraw(
         "MAGIC OS", COLOR_ACCENT
     );
 
-    /* Bottom taskbar. */
-    u32 bar_h = 56;
+    /* Windows 10-inspired taskbar: dark surface, restrained accent,
+       and a dedicated right-aligned notification/clock area. */
+    u32 bar_h = 48;
     u32 y0 = height - bar_h;
 
     fill(fb, pitch_px, 0, y0, width, bar_h, COLOR_BAR);
-    fill(fb, pitch_px, 0, y0, width, 3, COLOR_ACCENT);
+    fill(fb, pitch_px, 0, y0, width, 2, COLOR_ACCENT);
 
-    /* Start button. */
-    fill(
-        fb, pitch_px,
-        8, y0 + 10, 88, 36,
-        COLOR_START
-    );
-    draw_text(
-        fb, pitch_px, 28, y0 + 22,
-        "START", COLOR_WHITE
-    );
+    /* Start button with a four-pane Windows-style mark. */
+    fill(fb, pitch_px, 0, y0 + 2, 48, bar_h - 2, COLOR_START);
+    fill(fb, pitch_px, 14, y0 + 15, 8, 7, COLOR_WHITE);
+    fill(fb, pitch_px, 24, y0 + 14, 8, 8, COLOR_WHITE);
+    fill(fb, pitch_px, 14, y0 + 24, 8, 7, COLOR_WHITE);
+    fill(fb, pitch_px, 24, y0 + 24, 8, 7, COLOR_WHITE);
 
-    /* Files button. */
-    fill(
-        fb, pitch_px,
-        104, y0 + 10, 88, 36,
-        COLOR_FILES
-    );
-    draw_text(
-        fb, pitch_px, 122, y0 + 22,
-        "FILES", COLOR_WHITE
-    );
+    /* Files shortcut uses a quiet hover-ready surface instead of a bright tile. */
+    fill(fb, pitch_px, 48, y0 + 2, 84, bar_h - 2, COLOR_FILES);
+    draw_text(fb, pitch_px, 72, y0 + 21, "FILES", COLOR_WHITE);
 
-    /* NEW: Search bar. */
-    draw_search_bar(
-        fb, pitch_px, width, y0 + 10
-    );
+    /* Search remains fixed-width and cannot collide with the clock area. */
+    draw_search_bar(fb, pitch_px, width, y0 + 6);
 
-    /* Drive indicator. */
-    draw_text(
-        fb, pitch_px,
-        width - 60, y0 + 22,
-        "C:", COLOR_MUTED
-    );
+    /* The time and date are read from the kernel RTC, not hard-coded. */
+    fill(fb, pitch_px, width > 96 ? width - 96 : 0, y0 + 2,
+         width > 96 ? 96 : width, bar_h - 2, COLOR_SEARCH);
+    if (width >= 112) {
+        TaskbarSystemTime now;
+        char clock_text[6] = {'-', '-', ':', '-', '-', 0};
+        char date_text[11] = {'-', '-', '-', '-', '-', '-', '-', '-', '-', '-', 0};
+        if (taskbar_get_system_time(&now)) {
+            clock_text[0] = (char)('0' + (now.hour / 10) % 10);
+            clock_text[1] = (char)('0' + now.hour % 10);
+            clock_text[3] = (char)('0' + (now.minute / 10) % 10);
+            clock_text[4] = (char)('0' + now.minute % 10);
+            date_text[0] = (char)('0' + (now.year / 1000) % 10);
+            date_text[1] = (char)('0' + (now.year / 100) % 10);
+            date_text[2] = (char)('0' + (now.year / 10) % 10);
+            date_text[3] = (char)('0' + now.year % 10);
+            date_text[4] = '-';
+            date_text[5] = (char)('0' + (now.month / 10) % 10);
+            date_text[6] = (char)('0' + now.month % 10);
+            date_text[7] = '-';
+            date_text[8] = (char)('0' + (now.day / 10) % 10);
+            date_text[9] = (char)('0' + now.day % 10);
+        }
+        draw_text(fb, pitch_px, width - 42, y0 + 10, clock_text, COLOR_WHITE);
+        draw_text(fb, pitch_px, width - 68, y0 + 27, date_text, COLOR_MUTED);
+    }
 }

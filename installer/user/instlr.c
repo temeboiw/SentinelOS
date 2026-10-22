@@ -91,7 +91,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"WARNING: all data on this disk will be erased.",0xFF203944,1);
-   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Image integrity: SHA-256 verified":"Image integrity: failed/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
+   text(f,p,w,h,x+24,y+146,installer_payloads_ready<0?"Checking image integrity...":installer_payloads_ready?"Image integrity: SHA-256 verified":"Image integrity: failed/missing",installer_payloads_ready==1?0xFF1B6C40:installer_payloads_ready<0?0xFF174C63:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
    text(f,p,w,h,x+38,y+178,install_state==1?"Ready to install SentinelOS":install_state==2?"Writing filesystem images":install_state==3?"Installation complete; remove media and reboot":install_state<0?"Installation failed - see setup log":"Ready to install SentinelOS",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
@@ -114,6 +114,12 @@ void instlr_main(void){
  if(gok&&gfx.backend==2&&gfx.surface_va){f.va=gfx.surface_va;f.w=gfx.width;f.h=gfx.height;f.pitch=gfx.pitch;}
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
  f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0,install_state=0;InstallerDiskInfo disk={0};int disk_present=(NtQueryInstallerDisk(&disk)!=0&&disk.present);u64 disk_mib=disk.sector_size?disk.sectors*disk.sector_size/(1024*1024):0;
+ /* Paint immediately, before hashing the large embedded images. */
+ int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
+ installer_payloads_ready=-1;
+ paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
+ draw_cursor(fb,&b,mouse_x,mouse_y);
+ (void)NtFlushGraphics(0,0,f.w,f.h);
  /* Require both embedded filesystem images and their hashes before disk writes. */
  u64 esp_package_size=0,system_package_size=0;
  int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0;
@@ -121,9 +127,10 @@ void instlr_main(void){
  installer_payloads_ready=esp_query&&sys_query&&
      payload_image_valid(0,esp_package_size)&&payload_image_valid(1,system_package_size)&&
      NtVerifyInstallerPayload(0)==0&&NtVerifyInstallerPayload(1)==0;
- NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\n":"instlr: image integrity check failed; disk writes disabled\n");
- int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
- paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
+ NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\\n":"instlr: image integrity check failed; disk writes disabled\\n");
+ paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
+ draw_cursor(fb,&b,mouse_x,mouse_y);
+ (void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
   if(ev.type==2||ev.type==3){mouse_x=ev.x;mouse_y=ev.y;}
   if(ev.type==1&&(ev.key=='\r'||ev.key=='\n')){if(page==0&&checked){page=1;NtWriteConsole("instlr: terms accepted; disk query completed\n");}}

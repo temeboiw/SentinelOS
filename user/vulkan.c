@@ -806,7 +806,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
   if(p->sType!=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO||p->pNext||p->flags||p->stageCount!=2||!p->pStages||!render_pass_ok((VkRenderPass)p->renderPass)||((VkRenderPass)p->renderPass)->device!=d||p->subpass||!playout_ok((VkPipelineLayout)p->layout)||((VkPipelineLayout)p->layout)->device!=d||p->basePipelineHandle||p->basePipelineIndex!=-1)return VK_ERROR_FEATURE_NOT_PRESENT;
   uint8_t depth_test=0,depth_write=0;uint32_t depth_compare=1u;
    const VkPipelineDepthStencilStateCreateInfo *ds=(const VkPipelineDepthStencilStateCreateInfo*)p->pDepthStencilState;
-   if(ds){if(ds->sType!=VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO||ds->pNext||ds->flags||ds->depthBoundsTestEnable||ds->stencilTestEnable||ds->depthTestEnable>1u||ds->depthWriteEnable>1u||ds->depthCompareOp>7u)return VK_ERROR_FEATURE_NOT_PRESENT;depth_test=(uint8_t)ds->depthTestEnable;depth_write=(uint8_t)ds->depthWriteEnable;depth_compare=ds->depthCompareOp;}
+   if(ds){if(ds->sType!=VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO||ds->pNext||ds->flags||ds->depthBoundsTestEnable||ds->stencilTestEnable||ds->depthTestEnable>1u||ds->depthWriteEnable>1u||ds->depthCompareOp>7u)return VK_ERROR_FEATURE_NOT_PRESENT;depth_test=(uint8_t)ds->depthTestEnable;depth_write=(uint8_t)(ds->depthTestEnable&&ds->depthWriteEnable);depth_compare=ds->depthCompareOp;}
    if((depth_test||depth_write)&&!((VkRenderPass)p->renderPass)->has_depth)return VK_ERROR_FEATURE_NOT_PRESENT;
    for(uint32_t j=0;j<p->stageCount;j++){
    const VkPipelineShaderStageCreateInfo *st=&p->pStages[j];

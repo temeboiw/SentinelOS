@@ -89,6 +89,8 @@ The ISO and VM checks have not been run by this repository-editing session. A QE
 
 ## Regression tests
 
+The Python suite covers SPF package staging, byte-for-byte extraction, manifest/file metadata, payload-digest mismatch rejection, invalid headers, and path-traversal rejection. `test-official.sh unit` runs this suite alongside the SHA-256 known-answer test and shell syntax checks.
+
 ```sh
 python3 -m unittest discover -s installer/tests -v
 ```

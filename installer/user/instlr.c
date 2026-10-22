@@ -105,7 +105,7 @@ static int format_ext4(u64 start,u64 sectors){
   u32 used=reserve+2+itable_blocks+(g==0?1:0);
   if(actual<used)return -3;
   unsigned char*d=gd+g*32;put32(d,bb);put32(d+4,ib);put32(d+8,it);
-  put16(d+12,(u16)(actual-used));put16(d+14,(u16)(ipg-(g==0?10:0)));put16(d+16,(u16)(g==0?1:0));
+  put16(d+12,(unsigned short)(actual-used));put16(d+14,(unsigned short)(ipg-(g==0?10:0)));put16(d+16,(unsigned short)(g==0?1:0));
   free_blocks+=actual-used;
   for(u32 i=0;i<sizeof(bm);i++)bm[i]=0;
   for(u32 i=0;i<used;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));

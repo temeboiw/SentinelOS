@@ -795,8 +795,7 @@ int main(void) {
         const uint8_t *pixels = (const uint8_t *)mapped;
         const unsigned inside = (2u*8u+2u)*4u;
         const unsigned outside = (7u*8u+7u)*4u;
-        CHECK(pixels[inside] >= 40u);
-        CHECK(pixels[inside+1u] == 0u && pixels[inside+2u] == 0u);
+        CHECK(pixels[inside] == 0u && pixels[inside+1u] == 0u && pixels[inside+2u] >= 40u);
         CHECK(pixels[inside+3u] == 255u);
         CHECK(pixels[outside] == 0u && pixels[outside+1u] == 0u &&
               pixels[outside+2u] == 0u && pixels[outside+3u] == 0u);

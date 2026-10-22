@@ -887,6 +887,7 @@ typedef struct { VkShaderModule module; VkSoftTexture *texture; } VkFragmentCont
 static uint32_t g_frag_values[VK_SPIRV_MAX_IDS][4];
 static uint8_t g_frag_defined[VK_SPIRV_MAX_IDS],g_frag_kind[VK_SPIRV_MAX_IDS],g_frag_storage[VK_SPIRV_MAX_IDS],g_frag_components[VK_SPIRV_MAX_IDS];
 static uint32_t g_frag_location[VK_SPIRV_MAX_IDS],g_frag_pointer_type[VK_SPIRV_MAX_IDS],g_frag_type_components[VK_SPIRV_MAX_IDS];
+static uint8_t g_frag_ext_set_kind[VK_SPIRV_MAX_IDS];
 static uint32_t g_frag_output[4];
 static uint32_t vk_frag_fbits(float f){union{float f;uint32_t u;}x;x.f=f;return x.u;}
 static int vk_frag_nan(uint32_t x){return (x&0x7f800000u)==0x7f800000u&&(x&0x007fffffu)!=0;}
@@ -900,13 +901,14 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
  if(!m||!shader_ok(m)||!ctx->texture||!out_color)return 0;
  const uint32_t *w=m->words;size_t n=m->wordCount;uint32_t entry=vk_spirv_main_id(w,n);
  if(!entry)return 0;
- vk_zero(g_frag_values,sizeof(g_frag_values));vk_zero(g_frag_defined,sizeof(g_frag_defined));vk_zero(g_frag_kind,sizeof(g_frag_kind));vk_zero(g_frag_storage,sizeof(g_frag_storage));vk_zero(g_frag_components,sizeof(g_frag_components));vk_zero(g_frag_location,sizeof(g_frag_location));vk_zero(g_frag_pointer_type,sizeof(g_frag_pointer_type));vk_zero(g_frag_type_components,sizeof(g_frag_type_components));vk_zero(g_frag_output,sizeof(g_frag_output));
+ vk_zero(g_frag_values,sizeof(g_frag_values));vk_zero(g_frag_defined,sizeof(g_frag_defined));vk_zero(g_frag_kind,sizeof(g_frag_kind));vk_zero(g_frag_storage,sizeof(g_frag_storage));vk_zero(g_frag_components,sizeof(g_frag_components));vk_zero(g_frag_location,sizeof(g_frag_location));vk_zero(g_frag_pointer_type,sizeof(g_frag_pointer_type));vk_zero(g_frag_type_components,sizeof(g_frag_type_components));vk_zero(g_frag_ext_set_kind,sizeof(g_frag_ext_set_kind));vk_zero(g_frag_output,sizeof(g_frag_output));
  for(uint32_t id=0;id<VK_SPIRV_MAX_IDS;id++)g_frag_location[id]=0xffffffffu;
  /* Module metadata: scalar/vector types, pointer types, locations, variables,
     and constants. This small interpreter deliberately fails closed on unknown
     executable instructions instead of silently substituting a color. */
  for(size_t i=5;i<n;){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
-  if(op==71u&&wc>=4u&&w[i+1]<VK_SPIRV_MAX_IDS){if(w[i+2]==30u)g_frag_location[w[i+1]]=w[i+3];}
+  if(op==11u&&wc>=4u&&w[i+1]<VK_SPIRV_MAX_IDS){const char *ext=(const char*)&w[i+2];static const char glsl450[]="GLSL.std.450";uint32_t ok=1;for(unsigned k=0;k<sizeof(glsl450);k++)if(ext[k]!=glsl450[k]){ok=0;break;}if(ok)g_frag_ext_set_kind[w[i+1]]=1u;}
+  else if(op==71u&&wc>=4u&&w[i+1]<VK_SPIRV_MAX_IDS){if(w[i+2]==30u)g_frag_location[w[i+1]]=w[i+3];}
   else if(op==22u&&wc==3u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_type_components[w[i+1]]=1u;
   else if(op==23u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_type_components[w[i+1]]=w[i+3];
   else if(op==32u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_pointer_type[w[i+1]]=w[i+3];
@@ -973,6 +975,13 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
    }
    else if(op==81u&&wc>=5u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3],c=w[i+4];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src]||c>=g_frag_components[src])return 0;g_frag_values[rid][0]=g_frag_values[src][c];g_frag_components[rid]=1;g_frag_defined[rid]=1;}
    else if(op==82u&&wc==6u&&rid<VK_SPIRV_MAX_IDS){uint32_t obj=w[i+3],composite=w[i+4],index=w[i+5];if(obj>=VK_SPIRV_MAX_IDS||composite>=VK_SPIRV_MAX_IDS||!g_frag_defined[obj]||!g_frag_defined[composite]||index>=g_frag_components[composite]||g_frag_components[obj]!=1u)return 0;for(unsigned k=0;k<4;k++)g_frag_values[rid][k]=g_frag_values[composite][k];g_frag_values[rid][index]=g_frag_values[obj][0];g_frag_components[rid]=g_frag_components[composite];g_frag_defined[rid]=1;}
+   else if(op==12u&&wc>=6u&&rid<VK_SPIRV_MAX_IDS){uint32_t set=w[i+3],inst=w[i+4];if(set>=VK_SPIRV_MAX_IDS||!g_frag_ext_set_kind[set])return 0;uint32_t a=w[i+5];if(a>=VK_SPIRV_MAX_IDS||!g_frag_defined[a])return 0;uint32_t count=g_frag_components[a];if(!count||count>4u)return 0;
+    if(inst==4u||inst==6u){for(uint32_t k=0;k<count;k++){uint32_t x=g_frag_values[a][k];if(inst==4u)g_frag_values[rid][k]=x&0x7fffffffu;else g_frag_values[rid][k]=vk_frag_nan(x)?0u:((x&0x7fffffffu)==0u?0u:((x&0x80000000u)?0xbf800000u:0x3f800000u));}}
+    else if(inst==37u||inst==40u){if(wc<7u)return 0;uint32_t b=w[i+6];if(b>=VK_SPIRV_MAX_IDS||!g_frag_defined[b])return 0;for(uint32_t k=0;k<count;k++){uint32_t x=g_frag_values[a][k],y=g_frag_values[b][g_frag_components[b]==1?0:k];if(vk_frag_nan(x))x=y;else if(!vk_frag_nan(y)){int cmp=vksoft_float_compare_bits(x,y,inst==37u?1u:4u);if((inst==37u&&!cmp)||(inst==40u&&cmp))x=y;}g_frag_values[rid][k]=x;}}
+    else if(inst==43u){if(wc<8u)return 0;uint32_t lo=w[i+6],hi=w[i+7];if(lo>=VK_SPIRV_MAX_IDS||hi>=VK_SPIRV_MAX_IDS||!g_frag_defined[lo]||!g_frag_defined[hi])return 0;for(uint32_t k=0;k<count;k++){uint32_t x=g_frag_values[a][k],mn=g_frag_values[lo][g_frag_components[lo]==1?0:k],mx=g_frag_values[hi][g_frag_components[hi]==1?0:k];if(vksoft_float_compare_bits(x,mn,1u))x=mn;if(vksoft_float_compare_bits(x,mx,4u))x=mx;g_frag_values[rid][k]=x;}}
+    else if(inst==46u){if(wc<8u)return 0;uint32_t b=w[i+6],f=w[i+7];if(b>=VK_SPIRV_MAX_IDS||f>=VK_SPIRV_MAX_IDS||!g_frag_defined[b]||!g_frag_defined[f])return 0;for(uint32_t k=0;k<count;k++){uint32_t x=g_frag_values[a][k],y=g_frag_values[b][g_frag_components[b]==1?0:k],t=g_frag_values[f][g_frag_components[f]==1?0:k],oneMinus=vksoft_fsub_bits(0x3f800000u,t);g_frag_values[rid][k]=vksoft_fadd_bits(vksoft_fmul_bits(x,oneMinus),vksoft_fmul_bits(y,t));}}
+    else if(inst==48u){if(wc<7u)return 0;uint32_t x=w[i+6];if(x>=VK_SPIRV_MAX_IDS||!g_frag_defined[x])return 0;for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=vksoft_float_compare_bits(g_frag_values[x][g_frag_components[x]==1?0:k],g_frag_values[a][k],1u)?0u:0x3f800000u;}
+    else return 0;g_frag_components[rid]=(uint8_t)count;g_frag_defined[rid]=1;}
    else if(op==148u&&wc==5u&&rid<VK_SPIRV_MAX_IDS){uint32_t a=w[i+3],b=w[i+4];if(a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!g_frag_defined[a]||!g_frag_defined[b])return 0;uint32_t count=g_frag_components[a]<g_frag_components[b]?g_frag_components[a]:g_frag_components[b];if(count<2u||count>4u)return 0;uint32_t sum=0;for(uint32_t k=0;k<count;k++){uint32_t product=vksoft_fmul_bits(g_frag_values[a][k],g_frag_values[b][k]);sum=k?vksoft_fadd_bits(sum,product):product;}g_frag_values[rid][0]=sum;g_frag_components[rid]=1;g_frag_defined[rid]=1;}
    else if(op==83u&&wc==4u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src])return 0;for(unsigned k=0;k<4;k++)g_frag_values[rid][k]=g_frag_values[src][k];g_frag_components[rid]=g_frag_components[src];g_frag_defined[rid]=1;g_frag_kind[rid]=g_frag_kind[src];}
    else if(op==253u&&wc==1u)break;

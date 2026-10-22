@@ -109,7 +109,7 @@ static void draw_search_bar(
      * Leave room for the C: indicator at the right.
      */
     const u32 x = 204;
-    const u32 right_margin = 76;
+    const u32 right_margin = 112;
     const u32 minimum_width = 90;
     const u32 desired_width = 300;
 

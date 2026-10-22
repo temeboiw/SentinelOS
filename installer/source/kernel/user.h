@@ -260,7 +260,8 @@ static int up_pick_next(void) {
  * Ordinary user applications cannot create these processes. */
 static int PspIsSystemAppName(const char *name) {
     static const char *const names[] = {
-        "smss.exe", "bootvid.exe", "sentlogon.exe"
+        "smss.exe", "bootvid.exe", "sentlogon.exe",
+        "instlr.exe", "screen.exe"
     };
     if (!name) return 0;
     for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) {

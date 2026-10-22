@@ -27,10 +27,9 @@ jobs:
           python-version: "3.x"
       - name: Check installer shell syntax
         run: |
-          bash -n installer/install-disk.sh
           bash -n installer/build-installer.sh
           bash -n installer/make-iso.sh
           bash -n installer/check-iso.sh
           bash -n installer/test-official.sh
-      - name: Run SPF and deployment tests
+      - name: Run SPF package validation tests
         run: python3 -m unittest discover -s installer/tests -v

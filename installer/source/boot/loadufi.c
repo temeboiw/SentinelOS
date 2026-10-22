@@ -119,6 +119,10 @@ typedef struct {
 static Module mods[BOOT_MAX_MODULES];
 static int nmods;
 static EFI_HANDLE boot_image;
+/* Raw package buffers remain in EfiLoaderData until ExitBootServices. */
+static VOID *install_payloads[2];
+static UINTN install_payload_sizes[2];
+static const char *install_payload_names[2] = { "esp.spf", "system.spf" };
 
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
@@ -487,6 +491,24 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         }
     }
 
+    /* Load installer packages from the boot ESP as raw data modules. They are
+       not PE images and must not enter the PE relocation/import pipeline. */
+    for (int p = 0; p < 2; p++) {
+        const char *path[1] = { install_payload_names[p] };
+        EFI_STATUS ps = esp_load_file(path, 1, &install_payloads[p], &install_payload_sizes[p]);
+        if (EFI_ERROR(ps)) {
+            install_payloads[p] = NULL;
+            install_payload_sizes[p] = 0;
+            say(L"loadufi: installer package missing: ");
+            say_a(install_payload_names[p]);
+            say(L"\\r\\n");
+        } else {
+            say(L"loadufi: staged installer package: ");
+            say_a(install_payload_names[p]);
+            say(L"\\r\\n");
+        }
+    }
+
     for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) &&
             !streq(mods[i].name, "krnl.exe", 1)) continue;
@@ -562,7 +584,20 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         for (int k = 0; k < 32; k++) bi->modules[i].name[k] = mods[i].name[k];
     }
 
-    bi->module_count = (UINT32)nmods;
+    UINT32 boot_module_count = (UINT32)nmods;
+    for (int p = 0; p < 2 && boot_module_count < BOOT_MAX_MODULES; p++) {
+        if (!install_payloads[p] || !install_payload_sizes[p]) continue;
+        BootModule *raw = &bi->modules[boot_module_count++];
+        UINTN k = 0;
+        for (; install_payload_names[p][k] && k < sizeof(raw->name) - 1; k++)
+            raw->name[k] = install_payload_names[p][k];
+        raw->name[k] = 0;
+        raw->base = 0;
+        raw->phys = (UINT64)(UINTN)install_payloads[p];
+        raw->size = (UINT64)install_payload_sizes[p];
+        raw->entry = 0;
+    }
+    bi->module_count = boot_module_count;
 
     for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1)) continue;

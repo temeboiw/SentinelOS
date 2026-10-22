@@ -2644,7 +2644,7 @@ static Frame *syscall_handler(Frame *f) {
             f->rax = (uint64_t)-1LL;
             return f;
         }
-        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.spf" : "system.spf");
+        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.img" : "system.img");
         if (!package) {
             f->rax = (uint64_t)-1LL;
             return f;

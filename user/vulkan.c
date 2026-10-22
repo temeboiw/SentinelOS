@@ -789,9 +789,13 @@ __declspec(dllexport) void VKAPI_CALL vkDestroyFramebuffer(VkDevice d,VkFramebuf
 __declspec(dllexport) void VKAPI_CALL vkCmdBeginRenderPass(VkCommandBuffer c,const VkRenderPassBeginInfo *bi,uint32_t contents) {
  if(!cmd_ok(c)||c->state!=1||!bi||bi->sType!=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO||bi->pNext||contents>1||!render_pass_ok(bi->renderPass)||!framebuffer_ok(bi->framebuffer)||bi->framebuffer->device!=c->device||bi->framebuffer->renderPass!=bi->renderPass||bi->renderPass->device!=c->device||!bi->renderArea_width||!bi->renderArea_height||bi->renderArea_x||bi->renderArea_y||bi->renderArea_width>bi->framebuffer->width||bi->renderArea_height>bi->framebuffer->height||c->count>=128)return;
  VkImage im=bi->framebuffer->view->image;if(!image_ok(im)||!mem_ok(im->memory)||im->layout!=VK_IMAGE_LAYOUT_GENERAL)return;
+ VkImage zi=0;if(bi->renderPass->has_depth){zi=bi->framebuffer->depth_view->image;if(!image_ok(zi)||!mem_ok(zi->memory)||zi->layout!=VK_IMAGE_LAYOUT_GENERAL)return;}
  if(bi->renderPass->loadOp==VK_ATTACHMENT_LOAD_OP_CLEAR&&(!bi->pClearValues||!bi->clearValueCount))return;
- c->bound_target=im;c->active_render_final_layout=bi->renderPass->finalLayout;unsigned i=c->count++;c->ops[i].op=14;c->ops[i].image=im;c->ops[i].layout=VK_IMAGE_LAYOUT_GENERAL;c->ops[i].value=bi->renderPass->loadOp;
+ if(bi->renderPass->has_depth&&bi->renderPass->depth_load_op==VK_ATTACHMENT_LOAD_OP_CLEAR&&(!bi->pClearValues||bi->clearValueCount<2))return;
+ c->bound_target=im;c->bound_depth_target=zi;c->active_render_final_layout=bi->renderPass->finalLayout;
+ unsigned i=c->count++;c->ops[i].op=14;c->ops[i].image=im;c->ops[i].layout=VK_IMAGE_LAYOUT_GENERAL;c->ops[i].value=bi->renderPass->loadOp;
  if(bi->pClearValues)for(unsigned k=0;k<4;k++)c->ops[i].color[k]=bi->pClearValues[0].float32[k];
+ if(zi){unsigned j=c->count++;c->ops[j].op=16;c->ops[j].image=zi;c->ops[j].layout=VK_IMAGE_LAYOUT_GENERAL;c->ops[j].value=bi->renderPass->depth_load_op;if(bi->pClearValues)c->ops[j].color[0]=bi->pClearValues[1].float32[0];}
 }
 __declspec(dllexport) void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer c) { if(!cmd_ok(c)||c->state!=1||!c->bound_target||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=15;c->ops[i].image=c->bound_target;c->ops[i].layout=c->active_render_final_layout;c->bound_target=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,void *cache,uint32_t count,const VkGraphicsPipelineCreateInfo *ci,const void *alloc,VkPipeline *out) {

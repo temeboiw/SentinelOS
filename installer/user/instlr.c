@@ -194,8 +194,12 @@ void instlr_main(void){
         u64 chunk=total-off;if(chunk>4ULL*1024ULL*1024ULL)chunk=4ULL*1024ULL*1024ULL;
         if((off==0?(image==0?NtInstallerInstallImage(0):NtInstallerInstallImage(1)):NtInstallerInstallImageChunk(image,off,chunk))!=0){failed=1;break;}
         off+=chunk;install_progress_done+=chunk;
-        paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
-        (void)NtFlushGraphics(0,0,f.w,f.h);
+        /* A full 1280x800 repaint after every 4 MiB chunk costs more CPU than
+           the UI needs. Refresh every 32 MiB and at each image boundary. */
+        if ((off % (32ULL*1024ULL*1024ULL))==0 || off==total) {
+         paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
+         (void)NtFlushGraphics(0,0,f.w,f.h);
+        }
         (void)sy3(SYS_Yield,0,0,0);
        }
       }

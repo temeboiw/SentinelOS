@@ -130,6 +130,11 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symbolic links are not allowed"):
             make_spf.build(self.source, self.package, "esp")
 
+    def test_boot_layout_check_rejects_missing_kernel(self):
+        self.build_package()
+        with self.assertRaisesRegex(ValueError, "missing boot-critical path"):
+            make_spf.verify(self.package, expected_kind="esp", require_boot_layout=True)
+
     def test_expected_package_kind_is_enforced(self):
         self.build_package()
         make_spf.verify(self.package, expected_kind="esp")

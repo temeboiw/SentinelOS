@@ -114,7 +114,7 @@ void instlr_main(void){
  if(gok&&gfx.backend==2&&gfx.surface_va){f.va=gfx.surface_va;f.w=gfx.width;f.h=gfx.height;f.pitch=gfx.pitch;}
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
  f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0,install_state=0;InstallerDiskInfo disk={0};int disk_present=(NtQueryInstallerDisk(&disk)!=0&&disk.present);u64 disk_mib=disk.sector_size?disk.sectors*disk.sector_size/(1024*1024):0;
- /* Require both embedded package containers before permitting destructive disk work. */
+ /* Require both embedded filesystem images and their hashes before disk writes. */
  u64 esp_package_size=0,system_package_size=0;
  int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0;
  int sys_query=NtQueryInstallerPayload(1,&system_package_size)==0;

@@ -52,6 +52,7 @@
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
 #define SYS_NtQueryInstallerDisk              40
+#define SYS_NtInstallerDiskIo                 41
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
@@ -2590,6 +2591,24 @@ static Frame *syscall_handler(Frame *f) {
         info.present = (vb_ok && vb_capacity_sectors != 0) ? 1u : 0u;
         *(InstallerDiskInfo *)(uint64_t)f->rdi = info;
         f->rax = info.present ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtInstallerDiskIo: {
+        /* Raw disk writes are deliberately restricted to the trusted setup app.
+           The caller may access one sector at a time; bounds are enforced here. */
+        if (!PspIsSystemProcess(MmCurrentProcess) || !vb_ok ||
+            f->rsi >= vb_capacity_sectors || !f->rdx ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdx, 512, f->rdi == 1)) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        if (f->rdi == 0)
+            f->rax = virtio_blk_read_sector(f->rsi, (void *)(uint64_t)f->rdx) == 0 ? 0 : (uint64_t)-1LL;
+        else if (f->rdi == 1)
+            f->rax = virtio_blk_write_sector(f->rsi, (const void *)(uint64_t)f->rdx) == 0 ? 0 : (uint64_t)-1LL;
+        else
+            f->rax = (uint64_t)-1LL;
         return f;
     }
 

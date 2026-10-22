@@ -770,6 +770,10 @@ int main(void) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
     CHECK(cmd->bound_sets[0] == descriptorSet);
+    VkSoftTexture directTexture; CHECK(vk_pipeline_texture(cmd, pipeline, &directTexture));
+    VkFragmentContext directFragment = { fragmentShader, &directTexture };
+    uint32_t directFragmentColor = 0; CHECK(vk_fragment_execute(&directFragment, 0.0f, 0.0f, &directFragmentColor));
+    CHECK(directFragmentColor == 0xffff0000u);
     VkDeviceSize vertexOffset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &vertexOffset);
     VkClearColorValue drawClear = {{0.0f, 0.0f, 0.0f, 0.0f}};

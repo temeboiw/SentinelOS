@@ -66,6 +66,9 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
             DbgPrint("ps2: mouse pkt#%d dx=%d dy=%d -> (%d,%d)\n",
                      mouse_pkt_count, dx, dy, mouse_x, mouse_y);
     } else {
+        /* Record both make and break codes while retaining text-input bytes. */
+        if (b < 0x80) kbd_down[b] = 1;
+        else kbd_down[b & 0x7Fu] = 0;
         kbd_buf[kbd_w++ % 64] = b;
         mouse_idx = 0; /* resync mouse if stream mixed */
     }
@@ -127,6 +130,19 @@ static int ps2_init(void) {
 }
 
 static int kbd_shift, kbd_caps;
+/* Set-1 make/break state for low-latency game controls. */
+static volatile uint8_t kbd_down[128];
+static uint32_t ps2_game_key_state(void) {
+    ps2_poll();
+    kbd_r = kbd_w;
+    uint32_t state = 0;
+    if (kbd_down[0x11]) state |= 1u << 0; /* W */
+    if (kbd_down[0x1E]) state |= 1u << 1; /* A */
+    if (kbd_down[0x1F]) state |= 1u << 2; /* S */
+    if (kbd_down[0x20]) state |= 1u << 3; /* D */
+    if (kbd_down[0x01]) state |= 1u << 4; /* Escape */
+    return state;
+}
 
 /* Finnish PC layout, PS/2 Set-1 scancodes. Finnish letters use Latin-1
  * bytes because the current user input ABI carries one byte per key. */

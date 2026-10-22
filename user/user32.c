@@ -829,29 +829,34 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
                 visible_layers[visible_layer_count++]=layer->pixels;
         }
     }
-    for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
-        u32 at=(u32)y*g_fw+(u32)x;
-        u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
-
-        /*
-         * The layer arrays belong to this USER32 process, but scanout is
-         * shared. Only the Desktop process may rebuild pixels from its
-         * wallpaper/desktop/taskbar layers. An ordinary app must preserve the
-         * already-composited desktop and blend only its own window surface.
-         * Never seed a private app buffer from scanout or replay its private
-         * copy of the desktop over other processes' pixels.
-         */
-        u32 c;
-        if(desktop_owner) {
-            c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
-                ? u32_aero_bg_cache[at] : 0xFF000000u;
-            for(unsigned int li=0;li<visible_layer_count;li++)
-                c=u32_alpha_over(c,visible_layers[li][at]);
-        } else {
-            c=*dst;
-            c=u32_alpha_over(c,u32_window_layer[at]);
+    for(int y=y0;y<y1;y++) {
+        /* Advance row pointers once; avoid repeated stride multiplication in
+         * the inner pixel loop, which is the compositor's hottest path. */
+        u32 at=(u32)y*g_fw+(u32)x0;
+        u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x0];
+        u32 *window_row=&u32_window_layer[at];
+        u32 *background_row=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
+            ? &u32_aero_bg_cache[at] : 0;
+        u32 *layer_row[U32_LAYER_SURFACE_COUNT];
+        for(unsigned int li=0;li<visible_layer_count;li++)
+            layer_row[li]=&visible_layers[li][at];
+        for(int x=x0;x<x1;x++,dst++,at++,window_row++) {
+            /*
+             * Only the desktop owner may rebuild pixels from its wallpaper
+             * and desktop surfaces. Other processes preserve shared scanout
+             * and blend only their own window surface.
+             */
+            u32 c;
+            if(desktop_owner) {
+                c=background_row?*background_row++:0xFF000000u;
+                for(unsigned int li=0;li<visible_layer_count;li++)
+                    c=u32_alpha_over(c,*layer_row[li]++);
+            } else {
+                c=*dst;
+                c=u32_alpha_over(c,*window_row);
+            }
+            *dst=c;
         }
-        *dst=c;
     }
     u32_flush_graphics(x0,y0,x1-x0,y1-y0);
 }

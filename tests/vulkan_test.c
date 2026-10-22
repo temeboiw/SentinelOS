@@ -684,7 +684,7 @@ int main(void) {
     texCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; texCi.imageType = 1;
     texCi.format = VK_FORMAT_R8G8B8A8_UNORM; texCi.extent.width = 2; texCi.extent.height = 2; texCi.extent.depth = 1;
     texCi.mipLevels = 1; texCi.arrayLayers = 1; texCi.samples = 1; texCi.tiling = 1;
-    texCi.usage = VK_IMAGE_USAGE_SAMPLED_BIT; texCi.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+    texCi.usage = VK_IMAGE_USAGE_SAMPLED_BIT; texCi.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkImage texImage = 0; CHECK(vkCreateImage(device, &texCi, 0, &texImage) == VK_SUCCESS);
     VkMemoryRequirements texReq; vkGetImageMemoryRequirements(device, texImage, &texReq);
     VkMemoryAllocateInfo texAi = {0}; texAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; texAi.allocationSize = texReq.size; texAi.memoryTypeIndex = 0;
@@ -756,7 +756,7 @@ int main(void) {
     vkUpdateDescriptorSets(device, 1, &write, 0, 0);
     CHECK(descriptorSet->values[0][0].buffer == vertexBuffer);
     CHECK(descriptorSet->values[0][0].range == vertexCi.size);
-    VkDescriptorImageInfo texInfo = { texSampler, texView, VK_IMAGE_LAYOUT_GENERAL };
+    VkDescriptorImageInfo texInfo = { texSampler, texView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkWriteDescriptorSet texWrite = {0}; texWrite.dstSet = descriptorSet; texWrite.dstBinding = 1;
     texWrite.descriptorCount = 1; texWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; texWrite.pImageInfo = &texInfo;
     vkUpdateDescriptorSets(device, 1, &texWrite, 0, 0);

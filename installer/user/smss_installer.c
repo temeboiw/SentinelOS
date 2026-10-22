@@ -1,0 +1,2 @@
+#include "ntdll_user.h"
+void smss_main(void){NtWriteConsole("smss: SentinelOS installer session manager\n");char name[]={'i','n','s','t','l','r','.','e','x','e',0};if((u64)NtCreateProcess(name)==(u64)-1){NtWriteConsole("smss: unable to start instlr.exe\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}NtWriteConsole("smss: installer started; session manager staying alive\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}

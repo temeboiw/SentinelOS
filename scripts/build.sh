@@ -128,7 +128,7 @@ run_cc() {
   while IFS= read -r line; do
     # Clang prints one quoted command per line. Match an actual cc1 token,
     # not incidental text, and skip all ld/lld commands and linker flags.
-    [[ "$line" =~ (^|[[:space:]])-cc1([[:space:]]|$) ]] || continue
+    [[ "$line" == *'"-cc1"'* ]] || continue
     command_line="$(printf '%s\n' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
     [[ "$command_line" == *"--hash-style"* || "$command_line" == *"--build-id"* ||
        "$command_line" == *"--eh-frame-hdr"* || "$command_line" == *"elf_x86_64"* ]] && {

@@ -297,6 +297,9 @@ extern "C" void maze_mainCRTStartup() {
         (void)syscall3(SYS_YIELD,0,0,0);
     }
 game_exit:
+    /* Do not leave the desktop pointer clipped/hidden after the game exits. */
+    if(clip_cursor) (void)clip_cursor(nullptr);
+    if(show_cursor) { for(int i=0;i<8;i++) if(show_cursor(1)>=0) break; }
     (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0);
     for(;;)__asm__ volatile("pause");
 }

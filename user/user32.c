@@ -412,12 +412,22 @@ static void round_fill(int x,int y,int w,int h,int r,u32 c) {
 }
 static void aero_desktop(void) {
     gradient_v(0,0,(int)g_fw,(int)g_fh,0xFFDDF7FC,0xFF3C9DC5);
-    /* Soft, layered water/sky ribbons; each row is clipped by putpx/fill. */
+    /* Soft, layered water/sky ribbons. Preserve each wave's absolute X so a
+     * clipped repaint matches the cached full wallpaper exactly. */
     int h=(int)g_fh,w=(int)g_fw;
     int base=h*2/3;
-    for(int x=0;x<w;x++) {
-        int wave1=base+(x-w/2)*(x-w/2)/(w>0?w*14:1);
-        int wave2=base+28+(x-w/2)*(x-w/2)/(w>0?w*19:1);
+    int first_x=0,last_x=w;
+    if(u32_render_clip) {
+        if(first_x<u32_clip_x0)first_x=u32_clip_x0;
+        if(last_x>u32_clip_x1)last_x=u32_clip_x1;
+        if(first_x<0)first_x=0;
+        if(last_x>w)last_x=w;
+    }
+    for(int x=first_x;x<last_x;x++) {
+        int dx=x-w/2;
+        int curve=dx*dx;
+        int wave1=base+curve/(w>0?w*14:1);
+        int wave2=base+28+curve/(w>0?w*19:1);
         if(wave1>=0&&wave1<h)fill(x,wave1,1,h-wave1,color_mix(0xFF80D5E9,0xFF2B8CB9,(unsigned int)(wave1*100/(h?h:1))));
         if(wave2>=0&&wave2<h)fill(x,wave2,1,h-wave2,0x302E9DC2);
     }

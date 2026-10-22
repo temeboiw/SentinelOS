@@ -122,7 +122,7 @@ static EFI_HANDLE boot_image;
 /* Raw package buffers remain in EfiLoaderData until ExitBootServices. */
 static VOID *install_payloads[3];
 static UINTN install_payload_sizes[3];
-static const char *install_payload_names[3] = { "esp.spf", "system.spf", "packages.sha256" };
+static const char *install_payload_names[3] = { "esp.img", "system.img", "install.sha256" };
 
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
@@ -499,7 +499,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         if (EFI_ERROR(ps)) {
             install_payloads[p] = NULL;
             install_payload_sizes[p] = 0;
-            say(L"loadufi: installer package missing: ");
+            say(L"loadufi: installer image/checksum missing: ");
             say_a(install_payload_names[p]);
             say(L"\r\n");
         } else {
@@ -526,7 +526,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
                 bs->FreePool(install_payloads[p]);
                 install_payloads[p] = (VOID *)(UINTN)low;
             }
-            say(L"loadufi: staged installer package: ");
+            say(L"loadufi: staged installer image/checksum: ");
             say_a(install_payload_names[p]);
             say(L"\r\n");
         }

@@ -48,7 +48,7 @@ mcopy -i "$TMP/esp.img" ::/packages.sha256 "$TMP/esp-packages.sha256"
 cmp -s "$TMP/packages.sha256" "$TMP/esp-packages.sha256" || { echo "error: ESP and ISO package checksum manifests differ" >&2; exit 6; }
 [[ "$(sed -n "1p" "$TMP/packages.sha256")" == "$(sha256sum "$TMP/esp.spf" | cut -d " " -f1)" ]] || { echo "error: esp.spf SHA-256 mismatch" >&2; exit 6; }
 [[ "$(sed -n "2p" "$TMP/packages.sha256")" == "$(sha256sum "$TMP/system.spf" | cut -d " " -f1)" ]] || { echo "error: system.spf SHA-256 mismatch" >&2; exit 6; }
-python3 "$HERE/make_spf.py" verify "$TMP/esp.spf"
-python3 "$HERE/make_spf.py" verify "$TMP/system.spf"
+python3 "$HERE/make_spf.py" verify "$TMP/esp.spf" --kind esp
+python3 "$HERE/make_spf.py" verify "$TMP/system.spf" --kind system
 echo "PASS: ISO checksum, UEFI boot entry, fallback loader, both SPF packages, and their embedded SHA-256 manifest verified."
 echo "Note: this smoke test does not replace booting the ISO in a UEFI virtual machine."

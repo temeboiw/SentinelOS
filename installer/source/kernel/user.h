@@ -2700,19 +2700,20 @@ static Frame *syscall_handler(Frame *f) {
         const uint8_t *src = (const uint8_t *)(HHDM_BASE + image->phys);
         uint8_t sector[512];
         if ((off % (32ULL * 1024ULL * 1024ULL)) == 0) {
-            DbgPrint("installer: image %llu write progress %llu/%llu MiB\n",
+            DbgPrint("installer: image %llu write progress %llu/%llu MiB\\n",
                      (unsigned long long)f->rdi,
                      (unsigned long long)(off / (1024ULL * 1024ULL)),
                      (unsigned long long)(image->size / (1024ULL * 1024ULL)));
         }
-        for (uint64_t pos = off; pos < off + bytes; pos += 512ULL) {
-            for (unsigned j = 0; j < 512; j++) sector[j] = src[pos + j];
-            if (virtio_blk_write_sector(dest + pos / 512ULL, sector) != 0) {
-                DbgPrint("installer: image %llu write failed at LBA %llu\n",
-                         (unsigned long long)f->rdi,
-                         (unsigned long long)(dest + pos / 512ULL));
-                f->rax = (uint64_t)-2LL; return f;
-            }
+        /* The embedded image is physically contiguous. DMA it directly in one
+           request per 4 MiB chunk rather than issuing 8,192 sector requests
+           and copying each sector through a tiny bounce buffer. */
+        if (virtio_blk_write_buffer(dest + off / 512ULL,
+                                    image->phys + off, (uint32_t)bytes) != 0) {
+            DbgPrint("installer: image %llu write failed at LBA %llu\\n",
+                     (unsigned long long)f->rdi,
+                     (unsigned long long)(dest + off / 512ULL));
+            f->rax = (uint64_t)-2LL; return f;
         }
         if (off + bytes == image->size) {
             /* Verify first and last sectors only after the final chunk. */

@@ -95,6 +95,23 @@ static const int diry[4]={-1,0,1,0};
 static int blocked(int x,int y) {
     return x<0||x>=MW||y<0||y>=MH||maze[y][x]=='#';
 }
+static u64 read_tsc() {
+    u32 lo,hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((u64)hi<<32)|lo;
+}
+static u64 tsc_frequency() {
+    u32 a,b,c,d;
+    u64 hz=0;
+    __asm__ volatile("cpuid" : "=a"(a),"=b"(b),"=c"(c),"=d"(d) : "a"(0x15),"c"(0));
+    if(a&&b&&c) hz=((u64)c*b)/a;
+    if(!hz) {
+        __asm__ volatile("cpuid" : "=a"(a),"=b"(b),"=c"(c),"=d"(d) : "a"(0x16),"c"(0));
+        if(a) hz=(u64)a*1000000ULL;
+    }
+    /* Conservative fallback for virtual CPUs that omit TSC frequency leaves. */
+    return hz?hz:1000000000ULL;
+}
 static u32 rgb(u32 r,u32 g,u32 b) { return 0xff000000u|(r<<16)|(g<<8)|b; }
 static void put_pixel(int x,int y,u32 c) {
     if(pixels&&x>=0&&y>=0&&(u32)x<screen_w&&(u32)y<screen_h)
@@ -228,8 +245,11 @@ extern "C" void maze_mainCRTStartup() {
     print(vulkan_available?"maze.exe: Vulkan loader found; current 3D scene uses software fallback\n":
                            "maze.exe: Vulkan loader unavailable; software fallback selected\n");
     Message msg{};
-    u32 last_frame=(u32)syscall3(SYS_GET_TICK_COUNT,0,0,0);
-    u32 last_step=last_frame;
+    u64 hz=tsc_frequency();
+    u64 frame_cycles=hz/60ULL;
+    u64 step_cycles=hz/9ULL;
+    u64 last_frame=read_tsc();
+    u64 last_step=last_frame;
     for(;;) {
         /* Poll messages without blocking the simulation thread. */
         while(peek_message(&msg,nullptr,0,0,1)) {
@@ -241,12 +261,12 @@ extern "C" void maze_mainCRTStartup() {
 
         /* A make/break-aware kernel state keeps movement continuous while
          * a physical key is held, without depending on keyboard typematic. */
-        u32 now=(u32)syscall3(SYS_GET_TICK_COUNT,0,0,0);
-        if((u32)(now-last_frame)>=16u) {
-            last_frame=now; /* 60 Hz simulation cadence */
+        u64 now=read_tsc();
+        if(now-last_frame>=frame_cycles) {
+            last_frame=now; /* 60 Hz input/simulation polling cadence */
             u64 keys=syscall3(SYS_GAME_KEY_STATE,0,0,0);
             if(keys&(1u<<4)) goto game_exit;
-            if((u32)(now-last_step)>=115u) {
+            if(now-last_step>=step_cycles) {
                 int forward=0,strafe=0;
                 if(keys&(1u<<0)) forward=1;
                 else if(keys&(1u<<2)) forward=-1;

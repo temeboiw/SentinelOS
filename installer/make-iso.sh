@@ -7,7 +7,7 @@ OUT="$HERE/artifacts"
 ISO_ROOT="$HERE/iso-root"
 ISO="$OUT/SentinelOS-V4-BETA.iso"
 ESP_IMG="$ISO_ROOT/boot/esp.img"
-ESP_SIZE_MIB="${ESP_SIZE_MIB:-128}"
+ESP_SIZE_MIB="${ESP_SIZE_MIB:-auto}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: required tool not found: $1" >&2; exit 2; }; }
 need xorriso
@@ -19,7 +19,17 @@ need sha256sum
 
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: staged EFI/BOOT/BOOTX64.EFI missing; run build-installer.sh first" >&2; exit 3; }
 [[ -s "$OUT/esp.spf" && -s "$OUT/system.spf" ]] || { echo "error: SPF packages missing; run build-installer.sh first" >&2; exit 3; }
-[[ "$ESP_SIZE_MIB" =~ ^[0-9]+$ ]] && (( ESP_SIZE_MIB >= 32 && ESP_SIZE_MIB <= 1024 )) || { echo "error: ESP_SIZE_MIB must be 32..1024" >&2; exit 2; }
+if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
+  # Packages are also embedded on the FAT ESP so UEFI can preload them.
+  # Size for every staged file plus both packages, with 25% headroom and
+  # 16 MiB for FAT metadata/cluster slack. Do not silently truncate at 128 MiB.
+  required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
+  required_bytes=$((required_bytes + $(stat -c %s "$OUT/esp.spf") + $(stat -c %s "$OUT/system.spf")))
+  ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))
+  (( ESP_SIZE_MIB < 128 )) && ESP_SIZE_MIB=128
+  echo "Auto-sized installer ESP: ${ESP_SIZE_MIB} MiB (staged files and both SPF packages)"
+fi
+[[ "$ESP_SIZE_MIB" =~ ^[0-9]+$ ]] && (( ESP_SIZE_MIB >= 32 && ESP_SIZE_MIB <= 1024 )) || { echo "error: required ESP exceeds supported 32..1024 MiB range; set ESP_SIZE_MIB explicitly or reduce the payload" >&2; exit 2; }
 
 rm -rf "$ISO_ROOT"
 mkdir -p "$ISO_ROOT/boot" "$ISO_ROOT/packages" "$OUT"

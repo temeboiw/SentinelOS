@@ -99,6 +99,28 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "file checksum mismatch"):
             make_spf.verify(self.package)
 
+    def test_extract_rejects_manifest_file_hash_before_writing(self):
+        self.build_package()
+        data = self.package.read_bytes()
+        magic, manifest_len, packed_len = make_spf.HEADER.unpack_from(data)
+        manifest_start = make_spf.HEADER.size
+        manifest_end = manifest_start + manifest_len
+        manifest = json.loads(data[manifest_start:manifest_end].decode("utf-8"))
+        manifest["files"][0]["sha256"] = "0" * 64
+        changed_manifest = json.dumps(
+            manifest, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        self.assertEqual(len(changed_manifest), manifest_len)
+        self.package.write_bytes(
+            make_spf.HEADER.pack(magic, manifest_len, packed_len)
+            + changed_manifest
+            + data[manifest_end:]
+        )
+        target = self.root / "must-stay-absent"
+        with self.assertRaisesRegex(ValueError, "file checksum mismatch"):
+            make_spf.extract(self.package, target)
+        self.assertFalse(target.exists(), "failed verification must not create destination")
+
     def test_source_symlinks_are_rejected(self):
         link = self.source / "linked-loader"
         try:

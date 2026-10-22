@@ -186,9 +186,6 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
     }
     UINTN bytes = (UINTN)info->FileSize;
     bs->FreePool(info);
-    say(L"loadufi: payload bytes = ");
-    say_uint((UINT64)bytes);
-    say(L"\r\n");
     VOID *buffer = NULL;
     status = bs->AllocatePool(EfiLoaderData, bytes ? bytes : 1, &buffer);
     if (EFI_ERROR(status)) { handle->Close(handle); return status; }
@@ -213,9 +210,20 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
         }
         offset += got;
         if ((offset % (32U * 1024U * 1024U)) == 0 || offset == bytes) {
-            say(L"loadufi: file read MiB = ");
+            UINTN percent = bytes ? (offset * 100U) / bytes : 100U;
+            UINTN filled = (percent * 30U) / 100U;
+            say(L"\\rloadufi: [");
+            for (UINTN bar = 0; bar < 30; ++bar)
+                serial_putc(bar < filled ? '#' : '-');
+            say(L"] ");
+            say_uint((UINT64)percent);
+            say(L"% ");
             say_uint((UINT64)(offset / (1024U * 1024U)));
-            say(L"\r\n");
+            say(L"/");
+            say_uint((UINT64)((bytes + 1048575U) / 1048576U));
+            say(L" MiB");
+            if (offset == bytes) say(L" complete");
+            if (offset == bytes) say(L"\\r\\n");
         }
     }
     handle->Close(handle);

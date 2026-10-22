@@ -22,13 +22,10 @@ static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
  }
 }
 static u64 read_be64(const unsigned char*p){u64 v=0;for(int i=0;i<8;i++)v=(v<<8)|p[i];return v;}
-static int payload_header_valid(u64 package,u64 total){
- unsigned char h[24];if(total<24||NtReadInstallerPayload(package,0,h,sizeof(h))!=(i64)sizeof(h))return 0;
- const char magic[]="SENTSPF1";for(int i=0;i<8;i++)if(h[i]!=(unsigned char)magic[i])return 0;
- u64 manifest=read_be64(h+8),packed=read_be64(h+16);
- if(manifest>16ULL*1024*1024||packed>1024ULL*1024*1024)return 0;
- if(manifest>total-24||packed!=total-24-manifest)return 0;
- return 1;
+static int payload_image_valid(u64 image,u64 total){
+ if((total&511ULL)!=0)return 0;
+ if(image==0)return total==128ULL*1024*1024;
+ return image==1&&total>=512ULL*1024*1024&&total<=1024ULL*1024*1024;
 }
 static void decstr(u64 value,char *out){char tmp[24];int n=0;if(!value)tmp[n++]='0';while(value&&n<(int)sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}int j=0;while(n>0)out[j++]=tmp[--n];out[j]=0;}
 static u32 crc32_bytes(const unsigned char *p,u32 n){u32 c=0xFFFFFFFFu;for(u32 i=0;i<n;i++){c^=p[i];for(int b=0;b<8;b++)c=(c>>1)^((0u-(c&1u))&0xEDB88320u);}return ~c;}
@@ -37,7 +34,7 @@ static void put64(unsigned char*p,u64 v){put32(p,(u32)v);put32(p+4,(u32)(v>>32))
 static void put_guid(unsigned char*p,const unsigned char*g){for(int i=0;i<16;i++)p[i]=g[i];}
 static int write_lba(u64 lba,const unsigned char*sector){unsigned char copy[512];for(int i=0;i<512;i++)copy[i]=sector[i];return NtInstallerDiskIo(1,lba,copy)==0?0:-1;}
 static int make_gpt(u64 sectors){
- if(sectors<262144ULL)return -1;
+ if(sectors<1312802ULL)return -1;
  const u64 esp_first=2048,esp_count=262144,sys_first=esp_first+esp_count,backup=sectors-1,usable_last=sectors-34;
  if(sys_first>=usable_last)return -2;
  static const unsigned char efi_type[16]={0x28,0x73,0x2A,0xC1,0x1F,0xF8,0xD2,0x11,0xBA,0x4B,0x00,0xA0,0xC9,0x3E,0xC9,0x3B};
@@ -182,7 +179,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
    text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Payload integrity: SHA-256 verified":"Payload integrity: failed/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
-   text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"Partitions formatted; OS deployment is not implemented":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
+   text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"Installation complete; remove media and reboot":install_state<0?"Installation failed - see setup log":"Ready to install SentinelOS",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
    text(f,p,w,h,x+24,y+78,"No supported VirtIO block disk was detected.",0xFF9B3B24,1);
    text(f,p,w,h,x+24,y+102,"Check that the VM has a VirtIO disk attached.",0xFF203944,1);
@@ -191,7 +188,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
   }
   rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&installer_payloads_ready&&install_state<3?0xFF176B8C:0xFF9CAEB5);
-  text(f,p,w,h,x+pw-128,y+ph-45,install_state==3?"Not Ready":install_state==2?"Format System":install_state==1?"Format ESP":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
+  text(f,p,w,h,x+pw-128,y+ph-45,install_state==3?"Installed":install_state<0?"Retry":"Install OS",0xFFFFFFFF,1);
   rect(f,p,w,h,x+24,y+ph-56,118,34,0xFF176B8C);
   text(f,p,w,h,x+57,y+ph-45,"Back",0xFFFFFFFF,1);
  }
@@ -208,9 +205,9 @@ void instlr_main(void){
  int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0;
  int sys_query=NtQueryInstallerPayload(1,&system_package_size)==0;
  installer_payloads_ready=esp_query&&sys_query&&
-     payload_header_valid(0,esp_package_size)&&payload_header_valid(1,system_package_size)&&
+     payload_image_valid(0,esp_package_size)&&payload_image_valid(1,system_package_size)&&
      NtVerifyInstallerPayload(0)==0&&NtVerifyInstallerPayload(1)==0;
- NtWriteConsole(installer_payloads_ready?"instlr: package headers and SHA-256 verified\n":"instlr: package integrity check failed; disk writes disabled\n");
+ NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\n":"instlr: image integrity check failed; disk writes disabled\n");
  int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
@@ -219,7 +216,7 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&installer_payloads_ready&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}else if(install_state==2){NtWriteConsole("instlr: formatting system partition as ext4\n");install_state=format_ext4(264192,disk.sectors-264225)==0?3:-1;NtWriteConsole(install_state==3?"instlr: system ext4 format verified\n":"instlr: system ext4 format failed\n");}}
+   else if(disk_present&&installer_payloads_ready&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){NtWriteConsole("instlr: creating GPT on selected disk\\n");if(make_gpt(disk.sectors)!=0){install_state=-1;NtWriteConsole("instlr: GPT creation failed\\n");}else{NtWriteConsole("instlr: GPT verified; deploying EFI image\\n");if(NtInstallerInstallImage(0)!=0){install_state=-1;NtWriteConsole("instlr: EFI image deployment failed\\n");}else{NtWriteConsole("instlr: EFI image read-back verified; deploying system image\\n");if(NtInstallerInstallImage(1)!=0){install_state=-1;NtWriteConsole("instlr: system image deployment failed\\n");}else{install_state=3;NtWriteConsole("instlr: both filesystem images written and verified\\n");}}}}else if(install_state<0){NtWriteConsole("instlr: retry requested; press Install OS again\\n");install_state=0;}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}

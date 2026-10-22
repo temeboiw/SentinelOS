@@ -34,7 +34,7 @@ bash installer/make-iso.sh
 bash installer/check-iso.sh
 ```
 
-ISO mastering requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). The default EFI image is 128 MiB; set `ESP_SIZE_MIB=256` before running `make-iso.sh` to enlarge it (allowed range 32–1024 MiB). Set `JOBS=2` to limit build parallelism on low-memory hosts.
+ISO mastering requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). The EFI image auto-sizes to the staged ESP files plus both embedded SPF packages, with additional free-space headroom (supported range 128–1024 MiB by default). Set `ESP_SIZE_MIB=256` before running `make-iso.sh` to override the automatic size; values must be 32–1024 MiB. Set `JOBS=2` to limit build parallelism on low-memory hosts.
 
 ## Official pre-release test procedure
 
@@ -79,7 +79,7 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 
 ## Installation status (work in progress)
 
-The setup UI detects the first supported VirtIO block disk, writes GPT primary/backup metadata, formats the 128 MiB EFI partition as FAT32, and formats the system partition with a minimal ext4 layout (superblock, group descriptors, bitmaps, inode tables, and root directory). Both formatters perform basic read-back checks. The kernel exposes bounded one-sector read/write operations only to the trusted setup process; requests are range-checked against the reported device capacity. The UEFI loader now also stages `esp.spf` and `system.spf` from the ESP as raw boot modules, and a trusted-only syscall exposes bounded 64 KiB reads to the setup app. `make-iso.sh` embeds and byte-compares both package files inside the ESP as well as keeping the host-side ISO copies.
+The setup UI detects the first supported VirtIO block disk, writes GPT primary/backup metadata, formats the 128 MiB EFI partition as FAT32, and formats the system partition with a minimal ext4 layout (superblock, group descriptors, bitmaps, inode tables, and root directory). Both formatters perform basic read-back checks. The kernel exposes bounded one-sector read/write operations only to the trusted setup process; requests are range-checked against the reported device capacity. The UEFI loader now also stages `esp.spf` and `system.spf` from the ESP as raw boot modules, and a trusted-only syscall exposes bounded 64 KiB reads to the setup app. `make-iso.sh` embeds and byte-compares both package files inside the ESP as well as keeping the host-side ISO copies. The ISO builder estimates the required FAT ESP capacity from the staged tree and package sizes instead of assuming 128 MiB will always be enough.
 
 **This is still not a complete OS installation.** The system filesystem currently contains only an empty root directory; SentinelOS boot/system files are not copied to the target. Installed boot configuration and an end-to-end installation/reboot test remain unfinished. The installer UI stops after filesystem formatting. Do not select a disk containing data you need: partitioning overwrites its partition table and formatting destroys data in both target partitions. Use only the disposable `sentinel-test-disk.img` during development. Do not run the VM test again until payload deployment and the remaining install stages are implemented and reviewed.
 

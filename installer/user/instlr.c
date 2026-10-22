@@ -20,7 +20,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked){
   text(f,p,w,h,x+24,y+152,"Back up important files before installation.",0xFF203944,1);
   rect(f,p,w,h,x+24,y+ph-94,24,24,checked?0xFF147BA2:0xFFFFFFFF);rect(f,p,w,h,x+24,y+ph-94,24,2,0xFF4D7787);
   if(checked){text(f,p,w,h,x+28,y+ph-90,"X",0xFFFFFFFF,1);}
-  text(f,p,w,h,x+58,y+ph-91,"I accept the terms",0xFF203944,1);
+  text(f,p,w,h,x+58,y+ph-91,"I WANT TO INSTALL THE OS",0xFF203944,1);
   rect(f,p,w,h,x+pw-142,y+ph-56,118,34,accepted?0xFF176B8C:0xFF9CAEB5);
   text(f,p,w,h,x+pw-110,y+ph-45,"Next",0xFFFFFFFF,1);
  }else{

@@ -144,6 +144,77 @@ def verify(path: Path) -> None:
     print(f"OK: {path} ({meta['kind']}, {len(expected)} files, {meta['uncompressed_bytes']} bytes raw)")
 
 
+def extract(path: Path, target: Path, overwrite: bool = False) -> None:
+    """Extract a verified SPF to an already-mounted partition directory."""
+    meta, raw = read_package(path)
+    if meta.get("format") != "Sentinel Package File" or meta.get("version") != 1:
+        raise ValueError("unsupported SPF manifest format/version")
+    target.mkdir(parents=True, exist_ok=True)
+    target = target.resolve(strict=True)
+    if not target.is_dir():
+        raise ValueError(f"target is not a directory: {target}")
+    expected = {}
+    for row in meta.get("files", []):
+        name = safe_rel(row["path"])
+        if name in expected:
+            raise ValueError(f"duplicate manifest path: {name}")
+        expected[name] = row
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tf:
+        members = {}
+        for member in tf:
+            name = safe_rel(member.name)
+            if name in members:
+                raise ValueError(f"duplicate archive path: {name}")
+            if not (member.isfile() or member.isdir()):
+                raise ValueError(f"unsupported archive member: {name}")
+            members[name] = member
+        if {n for n, m in members.items() if m.isfile()} != set(expected):
+            raise ValueError("manifest/archive file list mismatch")
+        # Preflight all paths/conflicts before writing any files.
+        for name, member in members.items():
+            dest = target.joinpath(*PurePosixPath(name).parts)
+            parent = dest.parent
+            while parent != target:
+                if target not in parent.parents:
+                    raise ValueError(f"destination escapes target: {name}")
+                if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+                    raise ValueError(f"unsafe destination parent: {parent}")
+                parent = parent.parent
+            if dest.is_symlink():
+                raise ValueError(f"refusing symlink destination: {name}")
+            if dest.exists():
+                if member.isdir() and dest.is_dir():
+                    continue
+                if not overwrite:
+                    raise FileExistsError(f"destination exists (use --overwrite): {dest}")
+                if member.isdir() != dest.is_dir():
+                    raise ValueError(f"destination type mismatch: {dest}")
+        for name, member in members.items():
+            dest = target.joinpath(*PurePosixPath(name).parts)
+            if member.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+                continue
+            src = tf.extractfile(member)
+            if src is None:
+                raise ValueError(f"cannot read archive member: {name}")
+            data = src.read()
+            row = expected[name]
+            if len(data) != row.get("size") or hashlib.sha256(data).hexdigest() != row.get("sha256"):
+                raise ValueError(f"file checksum mismatch: {name}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + ".spf-tmp")
+            try:
+                with tmp.open("wb") as out:
+                    out.write(data)
+                    out.flush()
+                    os.fsync(out.fileno())
+                os.replace(tmp, dest)
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
+    print(f"Extracted {path} ({meta.get('kind', 'unknown')}) to {target}: {len(expected)} files")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="command", required=True)
@@ -153,6 +224,10 @@ def main() -> int:
     b.add_argument("--output-dir", type=Path, default=Path("installer"))
     v = sub.add_parser("verify", help="verify package header, payload and per-file hashes")
     v.add_argument("package", type=Path)
+    e = sub.add_parser("extract", help="extract an SPF to an already-mounted partition directory")
+    e.add_argument("package", type=Path)
+    e.add_argument("--target-root", type=Path, required=True, help="mounted ESP or system partition directory; raw devices are not supported")
+    e.add_argument("--overwrite", action="store_true", help="replace existing files after validation")
     i = sub.add_parser("info", help="print package manifest")
     i.add_argument("package", type=Path)
     args = ap.parse_args()
@@ -162,6 +237,8 @@ def main() -> int:
             build(args.system_root, args.output_dir / "system.spf", "system")
         elif args.command == "verify":
             verify(args.package)
+        elif args.command == "extract":
+            extract(args.package, args.target_root, args.overwrite)
         else:
             meta, _ = read_package(args.package)
             print(json.dumps(meta, indent=2))

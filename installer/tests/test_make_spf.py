@@ -66,6 +66,25 @@ class SPFTests(unittest.TestCase):
             with self.assertRaises((ValueError, zlib.error)):
                 spf.verify(package)
 
+    def test_rejects_inconsistent_manifest_file_count(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            source = base / "source"
+            source.mkdir()
+            (source / "file").write_bytes(b"content")
+            package = base / "data.spf"
+            spf.build(source, package, "system")
+            data = bytearray(package.read_bytes())
+            _, meta_len, packed_len = spf.HEADER.unpack(data[:spf.HEADER.size])
+            start = spf.HEADER.size
+            manifest = json.loads(data[start:start + meta_len])
+            manifest["file_count"] += 1
+            meta = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+            packed = bytes(data[start + meta_len:start + meta_len + packed_len])
+            package.write_bytes(spf.HEADER.pack(spf.MAGIC, len(meta), len(packed)) + meta + packed)
+            with self.assertRaisesRegex(ValueError, "file_count mismatch"):
+                spf.verify(package)
+
     def test_rejects_traversal_path_before_writing(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

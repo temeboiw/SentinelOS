@@ -97,6 +97,41 @@ def build(root: Path, output: Path, kind: str) -> None:
     print(f"{output}: {len(files)} files, {len(raw)} -> {len(packed)} bytes")
 
 
+def validate_manifest(meta) -> None:
+    """Reject malformed or internally inconsistent SPF metadata before use."""
+    if not isinstance(meta, dict):
+        raise ValueError("SPF manifest must be a JSON object")
+    if meta.get("format") != "Sentinel Package File" or meta.get("version") != 1:
+        raise ValueError("unsupported SPF manifest format/version")
+    if meta.get("kind") not in ("esp", "system"):
+        raise ValueError("SPF kind must be 'esp' or 'system'")
+    if meta.get("compression") != "zlib" or meta.get("archive") != "tar":
+        raise ValueError("unsupported SPF compression or archive")
+    files = meta.get("files")
+    if not isinstance(files, list):
+        raise ValueError("SPF manifest files must be a list")
+    if type(meta.get("file_count")) is not int or meta["file_count"] != len(files):
+        raise ValueError("SPF manifest file_count mismatch")
+    if type(meta.get("uncompressed_bytes")) is not int or meta["uncompressed_bytes"] < 0:
+        raise ValueError("invalid SPF uncompressed_bytes")
+    digest = meta.get("payload_sha256")
+    if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("invalid SPF payload_sha256")
+    seen = set()
+    for row in files:
+        if not isinstance(row, dict):
+            raise ValueError("SPF file entry must be an object")
+        name = safe_rel(row.get("path", ""))
+        if name in seen:
+            raise ValueError(f"duplicate manifest path: {name}")
+        seen.add(name)
+        if type(row.get("size")) is not int or row["size"] < 0:
+            raise ValueError(f"invalid file size: {name}")
+        digest = row.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError(f"invalid file SHA-256: {name}")
+
+
 def read_package(path: Path):
     with path.open("rb") as f:
         head = f.read(HEADER.size)
@@ -112,10 +147,11 @@ def read_package(path: Path):
         if len(meta_raw) != meta_len or len(packed) != packed_len or f.read(1):
             raise ValueError("truncated package or unexpected trailing bytes")
     meta = json.loads(meta_raw.decode("utf-8"))
+    validate_manifest(meta)
     raw = zlib.decompress(packed)
     if hashlib.sha256(raw).hexdigest() != meta.get("payload_sha256"):
         raise ValueError("payload checksum mismatch")
-    if len(raw) != meta.get("uncompressed_bytes"):
+    if len(raw) != meta["uncompressed_bytes"]:
         raise ValueError("payload size mismatch")
     return meta, raw
 

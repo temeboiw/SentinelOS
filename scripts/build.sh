@@ -110,31 +110,41 @@ find_llvm_tool() {
 CLANG_BIN="$(find_llvm_tool CLANG_BIN)"
 CLANGXX_BIN="$(find_llvm_tool CLANGXX_BIN)"
 LLD_BIN="$(find_llvm_tool LLD_BIN)"
-# Termux/proot: the clang driver re-execs itself via /proc/self/exe, which is
-# proot here. Ask the driver for its job list (-###) and run the -cc1 jobs
-# directly with the real clang binary instead.
+# Termux/proot workaround: ask the real Clang driver for its job plan,
+# then execute only the cc1 compile command. Do not use eval on arbitrary
+# driver output and never run the host linker from this workaround.
 run_cc() {
-  local drv="$1" out line
+  local drv="$1" out line command_line
   shift
-  # This workaround is only for compile-only calls. Passing a full driver
-  # plan through clang can accidentally feed host linker flags (for example
-  # --hash-style=gnu and elf_x86_64) back to clang as if they were compile
-  # arguments. Host-side executable tests use HOST_CC instead.
-  local compile_only=0 arg
+  local compile_only=0 arg found=0
   for arg in "$@"; do
     case "$arg" in -c|-S|-E) compile_only=1 ;; esac
   done
   if (( compile_only == 0 )); then
-    echo "error: run_cc only supports compile-only Clang invocations; use HOST_CC for host executables" >&2
+    echo "error: internal PE Clang wrapper received a link action; use the host compiler for native executables" >&2
     return 2
   fi
   out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
   while IFS= read -r line; do
-    # Only execute Clang's cc1 compile job, never the host linker job.
-    [[ "$line" == *"-cc1"* ]] || continue
-    line="$(printf '%s' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
-    eval "$line" </dev/null || return 1
+    # Clang prints one quoted command per line. Match an actual cc1 token,
+    # not incidental text, and skip all ld/lld commands and linker flags.
+    [[ "$line" =~ (^|[[:space:]])-cc1([[:space:]]|$) ]] || continue
+    command_line="$(printf '%s\n' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
+    [[ "$command_line" == *"--hash-style"* || "$command_line" == *"--build-id"* ||
+       "$command_line" == *"--eh-frame-hdr"* || "$command_line" == *"elf_x86_64"* ]] && {
+      echo "error: refusing to pass host linker flags to Clang cc1: $command_line" >&2
+      return 2
+    }
+    found=1
+    # shellcheck disable=SC2086
+    eval "$command_line" </dev/null || return 1
   done <<<"$out"
+  if (( found == 0 )); then
+    printf 'error: no Clang cc1 compile command found for: %q ' "$drv" >&2
+    printf '%q ' "$@" >&2
+    printf '\nClang driver output was:\n%s\n' "$out" >&2
+    return 1
+  fi
 }
 clang()   { run_cc "$CLANG_BIN" "$@"; }
 clang++() { run_cc "$CLANGXX_BIN" "$@"; }

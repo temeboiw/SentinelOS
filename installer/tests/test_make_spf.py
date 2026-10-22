@@ -113,6 +113,37 @@ class SPFTests(unittest.TestCase):
                 spf.extract(package, target)
             self.assertFalse((base / "escape.txt").exists())
 
+    def test_rejects_decompression_bomb_above_declared_size(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            raw = b"A" * (1024 * 1024)
+            manifest = {
+                "format": "Sentinel Package File", "version": 1, "kind": "system",
+                "compression": "zlib", "archive": "tar", "file_count": 0,
+                "uncompressed_bytes": 8,
+                "payload_sha256": hashlib.sha256(raw).hexdigest(),
+                "files": [],
+            }
+            meta = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+            packed = zlib.compress(raw)
+            package = base / "oversized.spf"
+            package.write_bytes(spf.HEADER.pack(spf.MAGIC, len(meta), len(packed)) + meta + packed)
+            with self.assertRaisesRegex(ValueError, "exceeds declared size"):
+                spf.read_package(package)
+
+    def test_rejects_package_with_trailing_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            source = base / "source"
+            source.mkdir()
+            (source / "file").write_bytes(b"content")
+            package = base / "data.spf"
+            spf.build(source, package, "system")
+            with package.open("ab") as f:
+                f.write(b"trailing")
+            with self.assertRaisesRegex(ValueError, "invalid SPF lengths"):
+                spf.read_package(package)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

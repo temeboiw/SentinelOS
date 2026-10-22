@@ -28,6 +28,9 @@ import zlib
 MAGIC = b"SENTSPF1"
 HEADER = struct.Struct(">8sQQ")
 CHUNK = 1024 * 1024
+MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+MAX_COMPRESSED_BYTES = 1024 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def sha256_file(path: Path) -> str:
@@ -114,6 +117,8 @@ def validate_manifest(meta) -> None:
         raise ValueError("SPF manifest file_count mismatch")
     if type(meta.get("uncompressed_bytes")) is not int or meta["uncompressed_bytes"] < 0:
         raise ValueError("invalid SPF uncompressed_bytes")
+    if meta["uncompressed_bytes"] > MAX_UNCOMPRESSED_BYTES:
+        raise ValueError("SPF uncompressed payload exceeds the configured safety limit")
     digest = meta.get("payload_sha256")
     if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
         raise ValueError("invalid SPF payload_sha256")
@@ -140,15 +145,27 @@ def read_package(path: Path):
         magic, meta_len, packed_len = HEADER.unpack(head)
         if magic != MAGIC:
             raise ValueError("not a Sentinel SPF v1 package")
-        if meta_len > 64 * 1024 * 1024 or packed_len > path.stat().st_size:
+        file_size = path.stat().st_size
+        if (meta_len > MAX_MANIFEST_BYTES or packed_len > MAX_COMPRESSED_BYTES
+                or meta_len + packed_len != file_size - HEADER.size):
             raise ValueError("invalid SPF lengths")
         meta_raw = f.read(meta_len)
         packed = f.read(packed_len)
-        if len(meta_raw) != meta_len or len(packed) != packed_len or f.read(1):
-            raise ValueError("truncated package or unexpected trailing bytes")
+        if len(meta_raw) != meta_len or len(packed) != packed_len:
+            raise ValueError("truncated SPF package")
     meta = json.loads(meta_raw.decode("utf-8"))
     validate_manifest(meta)
-    raw = zlib.decompress(packed)
+    # Bound output to the manifest's declared size plus one byte. This prevents
+    # a tiny compressed package from expanding without limit in memory.
+    declared_size = meta["uncompressed_bytes"]
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(packed, declared_size + 1)
+    if len(raw) > declared_size or decompressor.unconsumed_tail:
+        raise ValueError("SPF decompressed payload exceeds declared size")
+    if not decompressor.eof:
+        raise ValueError("truncated or oversized SPF compressed payload")
+    if decompressor.unused_data:
+        raise ValueError("unexpected data after SPF compressed stream")
     if hashlib.sha256(raw).hexdigest() != meta.get("payload_sha256"):
         raise ValueError("payload checksum mismatch")
     if len(raw) != meta["uncompressed_bytes"]:

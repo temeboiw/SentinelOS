@@ -37,6 +37,7 @@ using GetMessageA_t=BOOL(*)(void*,void*,u32,u32);
 using TranslateMessage_t=BOOL(*)(const void*);
 using DispatchMessageA_t=long long(*)(const void*);
 using UpdateWindow_t=BOOL(*)(void*);
+using ShowCursor_t=int(*)(BOOL);
 using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,void**);
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
@@ -188,6 +189,7 @@ extern "C" void maze_mainCRTStartup() {
 
     auto create_window=(CreateWindowExA_t)get_proc("user32.dll","CreateWindowExA");
     auto show_window=(ShowWindow_t)get_proc("user32.dll","ShowWindow");
+    auto show_cursor=(ShowCursor_t)get_proc("user32.dll","ShowCursor");
     update_window=(UpdateWindow_t)get_proc("user32.dll","UpdateWindow");
     auto get_message=(GetMessageA_t)get_proc("user32.dll","GetMessageA");
     auto translate=(TranslateMessage_t)get_proc("user32.dll","TranslateMessage");
@@ -202,6 +204,12 @@ extern "C" void maze_mainCRTStartup() {
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
     (void)show_window(window_handle,1);
+    /* Hide the desktop pointer while the fixed-camera game is active. */
+    if(show_cursor) {
+        for(int i=0;i<8;i++) {
+            if(show_cursor(0)<0) break;
+        }
+    }
     if(update_window)(void)update_window(window_handle);
 
     GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;
@@ -218,17 +226,19 @@ extern "C" void maze_mainCRTStartup() {
     Message msg{};
     for(;;) {
         if(!get_message(&msg,nullptr,0,0)) break;
+        /* Consume game keys before dispatching the message to USER32. */
+        if(msg.message==0x0010||msg.message==0x0012)break;
+        if(msg.message==0x0100) {
+            switch((u32)msg.wParam) {
+              case 0x57: case 0x77: move_relative(1,0); break;  /* W: forward */
+              case 0x53: case 0x73: move_relative(-1,0); break; /* S: backward */
+              case 0x41: case 0x61: move_relative(0,-1); break; /* A: strafe left */
+              case 0x44: case 0x64: move_relative(0,1); break;  /* D: strafe right */
+              case 0x1b: (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0); for(;;)__asm__ volatile("pause");
+            }
+        }
         if(translate)(void)translate(&msg);
         (void)dispatch(&msg);
-        if(msg.message==0x0010||msg.message==0x0012)break;
-        if(msg.message!=0x0100)continue;
-        switch((u32)msg.wParam) {
-          case 0x57: case 0x77: move_relative(1,0); break;  /* W: forward */
-          case 0x53: case 0x73: move_relative(-1,0); break; /* S: backward */
-          case 0x41: case 0x61: move_relative(0,-1); break; /* A: strafe left */
-          case 0x44: case 0x64: move_relative(0,1); break;  /* D: strafe right */
-          case 0x1b: (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0); for(;;)__asm__ volatile("pause");
-        }
     }
     (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0);
     for(;;)__asm__ volatile("pause");

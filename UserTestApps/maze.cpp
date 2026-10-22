@@ -42,10 +42,11 @@ using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
 
+/* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
+   followed by message, then naturally aligned WPARAM/LPARAM fields. */
 struct Message {
-    void *hwnd;
+    u32 hwnd;
     u32 message;
-    u32 _padding;
     u64 wParam;
     long long lParam;
     u32 time;

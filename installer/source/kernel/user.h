@@ -13,6 +13,7 @@
 #include "wm.h"
 #include "ntabi.h"
 #include "gfx.h"
+#include "virtio_blk.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1

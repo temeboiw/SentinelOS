@@ -103,7 +103,7 @@ class InstallCoordinatorTests(unittest.TestCase):
 
     def test_overwrite_requires_explicit_flag(self):
         dest = self.system_target / "magic" / "System32" / "krnl.exe"
-        dest.parent.mkdir()
+        dest.parent.mkdir(parents=True)
         dest.write_bytes(b"old")
         result, output = self.invoke(
             "--apply", "--confirm", installer.CONFIRMATION, "--overwrite"

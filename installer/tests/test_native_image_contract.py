@@ -56,6 +56,11 @@ class NativeInstallerContractTests(unittest.TestCase):
         self.assertIn("total==128ULL*1024*1024", UI)
         self.assertIn("total>=512ULL*1024*1024", UI)
 
+    def test_user_wrapper_exports_the_installer_image_syscall(self):
+        self.assertIn("SYS_InstallerInstallImage = 45", NTDLL)
+        self.assertIn("NtInstallerInstallImage(u64 image)", NTDLL)
+        self.assertIn("NtSyscall6(SYS_InstallerInstallImage, image", NTDLL)
+
     def test_ui_verifies_before_install_and_deploys_both_images(self):
         ready = UI[UI.index("installer_payloads_ready=esp_query"):]
         self.assertIn("NtVerifyInstallerPayload(0)==0", ready)

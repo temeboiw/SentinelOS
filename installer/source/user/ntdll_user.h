@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42, SYS_QueryInstallerPayload = 43
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -123,7 +123,7 @@ static inline u64 NtGetProcAddress(const char *dll, const char *fn) {
 /* NT-style APIs implemented by the new, stable syscall range. */
 /* package: 0=esp.spf, 1=system.spf; metadata/read requests are trusted-only. */
 static inline i64 NtQueryInstallerPayload(u64 package, u64 *size_out) {
-    return (i64)NtSyscall6(43, package, (u64)size_out, 0, 0, 0, 0);
+    return (i64)NtSyscall6(SYS_QueryInstallerPayload, package, (u64)size_out, 0, 0, 0, 0);
 }
 static inline i64 NtReadInstallerPayload(u64 package, u64 offset, void *buffer, u32 size) {
     return (i64)NtSyscall6(SYS_ReadInstallerPayload, package, offset, (u64)buffer, size, 0, 0);

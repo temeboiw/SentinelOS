@@ -47,6 +47,33 @@ int main(void) {
     fails += check(color[4 * 16 + 4] == 0xff00ff00u,
                    "nearer triangle replaces fragment");
 
+    /* Vulkan-style depth comparison modes: less/equal, always, never, greater. */
+    target.depth_compare = 1u; /* LESS_OR_EQUAL */
+    depth[4 * 16 + 4] = 0.2f;
+    a.z=b.z=c.z=0.2f; a.r=0; a.g=0; a.b=1;
+    (void)vksoft_triangle(&target,&a,&b,&c,0);
+    fails += check(color[4 * 16 + 4] == 0xff0000ffu,
+                   "less-or-equal accepts equal depth");
+    target.depth_compare = 4u; /* GREATER */
+    depth[4 * 16 + 4] = 0.1f;
+    a.z=b.z=c.z=0.5f; a.r=1; a.g=1; a.b=0;
+    (void)vksoft_triangle(&target,&a,&b,&c,0);
+    fails += check(color[4 * 16 + 4] == 0xffffff00u,
+                   "greater depth comparison accepts farther value");
+    target.depth_compare = 2u; /* ALWAYS */
+    depth[4 * 16 + 4] = 0.1f;
+    a.z=b.z=c.z=0.5f; a.r=0; a.g=1; a.b=1;
+    (void)vksoft_triangle(&target,&a,&b,&c,0);
+    fails += check(color[4 * 16 + 4] == 0xff00ffffu,
+                   "always depth comparison accepts fragment");
+    target.depth_compare = 3u; /* NEVER */
+    depth[4 * 16 + 4] = 1.0f;
+    a.z=b.z=c.z=0.1f; a.r=1; a.g=0; a.b=1;
+    (void)vksoft_triangle(&target,&a,&b,&c,0);
+    fails += check(color[4 * 16 + 4] == 0xff00ffffu,
+                   "never depth comparison rejects fragment");
+    target.depth_compare = 0u;
+
     vksoft_clear(&target, 0xff000000u, 1.0f);
     a.x=2; a.y=2; a.z=0.5f; a.r=1; a.g=0; a.b=0; a.a=1; a.inv_w=1.0f;
     b.x=14; b.y=2; b.z=0.5f; b.r=0; b.g=0; b.b=0; b.a=1; b.inv_w=0.25f;

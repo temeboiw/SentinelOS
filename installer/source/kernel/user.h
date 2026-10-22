@@ -2655,7 +2655,7 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtReadInstallerPayload: {
-        /* Only the trusted setup process can read the immutable package buffers
+        /* Only the trusted setup process can read immutable installer image buffers
            staged by the UEFI loader. Chunks are capped to bound kernel work. */
         if (!PspIsSystemProcess(MmCurrentProcess) || f->rdi > 1 ||
             !user_bootinfo || f->rcx > 65536ULL ||

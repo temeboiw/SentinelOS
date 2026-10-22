@@ -503,6 +503,29 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             say_a(install_payload_names[p]);
             say(L"\r\n");
         } else {
+            /* The kernel's current HHDM covers physical memory below 4 GiB.
+               Keep the raw package buffers in that mapped range explicitly. */
+            UINT64 end = (UINT64)(UINTN)install_payloads[p] +
+                         (UINT64)install_payload_sizes[p];
+            if (end > (4ULL << 30)) {
+                EFI_PHYSICAL_ADDRESS low = 0xFFFFFFFFULL;
+                UINTN pages = EFI_SIZE_TO_PAGES(install_payload_sizes[p]);
+                EFI_STATUS low_status = pages ? bs->AllocatePages(
+                    AllocateMaxAddress, EfiLoaderData, pages, &low) : EFI_OUT_OF_RESOURCES;
+                if (EFI_ERROR(low_status)) {
+                    bs->FreePool(install_payloads[p]);
+                    install_payloads[p] = NULL;
+                    install_payload_sizes[p] = 0;
+                    say(L"loadufi: cannot stage package below 4 GiB: ");
+                    say_a(install_payload_names[p]);
+                    say(L"\r\n");
+                    continue;
+                }
+                memcpy((VOID *)(UINTN)low, install_payloads[p],
+                       install_payload_sizes[p]);
+                bs->FreePool(install_payloads[p]);
+                install_payloads[p] = (VOID *)(UINTN)low;
+            }
             say(L"loadufi: staged installer package: ");
             say_a(install_payload_names[p]);
             say(L"\r\n");

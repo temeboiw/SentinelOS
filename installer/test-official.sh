@@ -14,6 +14,12 @@ run_unit() {
   need python3
   echo "==> Python installer regression tests"
   (cd "$ROOT" && python3 -m unittest discover -s installer/tests -v)
+  need clang
+  echo "==> SHA-256 implementation known-answer tests"
+  SHA_TEST_DIR="$(mktemp -d)"
+  clang -std=c11 -Wall -Wextra -Werror -I"$HERE/source/kernel" "$HERE/tests/test_sha256.c" -o "$SHA_TEST_DIR/test_sha256"
+  "$SHA_TEST_DIR/test_sha256"
+  rm -rf "$SHA_TEST_DIR"
   echo "==> Shell syntax checks"
   bash -n "$HERE/build-installer.sh" "$HERE/build-iso.sh" "$HERE/make-iso.sh" "$HERE/check-iso.sh" "$HERE/test-official.sh" "$HERE/create-test-disk.sh"
   echo "PASS: unit tests and shell syntax"

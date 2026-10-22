@@ -1008,6 +1008,16 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     else if(inst==66u||inst==69u){uint32_t sum=0;for(uint32_t k=0;k<count;k++){uint32_t sq=vksoft_fmul_bits(g_frag_values[a][k],g_frag_values[a][k]);sum=k?vksoft_fadd_bits(sum,sq):sq;}uint32_t len=vk_frag_sqrt_bits(sum);if(inst==66u){g_frag_values[rid][0]=len;count=1;}else{if(vksoft_float_is_zero(len))return 0;for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=vksoft_fdiv_bits(g_frag_values[a][k],len);}}
     else if(inst==67u){if(wc<7u)return 0;uint32_t b=w[i+6];if(b>=VK_SPIRV_MAX_IDS||!g_frag_defined[b])return 0;uint32_t bc=g_frag_components[b],vc=count;if(!bc||!vc||bc>4u||vc>4u||bc!=vc)return 0;uint32_t sum=0;for(uint32_t k=0;k<vc;k++){uint32_t d=vksoft_fsub_bits(g_frag_values[a][k],g_frag_values[b][k]),sq=vksoft_fmul_bits(d,d);sum=k?vksoft_fadd_bits(sum,sq):sq;}g_frag_values[rid][0]=vk_frag_sqrt_bits(sum);count=1;}
     else if(inst==68u){if(wc<7u||count!=3u||g_frag_components[a]!=3u)return 0;uint32_t b=w[i+6];if(b>=VK_SPIRV_MAX_IDS||!g_frag_defined[b]||g_frag_components[b]!=3u)return 0;uint32_t ax=g_frag_values[a][0],ay=g_frag_values[a][1],az=g_frag_values[a][2],bx=g_frag_values[b][0],by=g_frag_values[b][1],bz=g_frag_values[b][2];g_frag_values[rid][0]=vksoft_fsub_bits(vksoft_fmul_bits(ay,bz),vksoft_fmul_bits(az,by));g_frag_values[rid][1]=vksoft_fsub_bits(vksoft_fmul_bits(az,bx),vksoft_fmul_bits(ax,bz));g_frag_values[rid][2]=vksoft_fsub_bits(vksoft_fmul_bits(ax,by),vksoft_fmul_bits(ay,bx));count=3u;}
+    else if(inst==72u){ /* GLSL.std.450 Refract(I, N, eta) */
+     if(wc<8u)return 0;uint32_t normal=w[i+6],etaId=w[i+7];if(normal>=VK_SPIRV_MAX_IDS||etaId>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal]||!g_frag_defined[etaId])return 0;
+     uint32_t nc=g_frag_components[normal];if(count<2u||count>4u||nc!=count||g_frag_components[etaId]!=1u)return 0;
+     uint32_t dot=0;for(uint32_t k=0;k<count;k++){uint32_t p=vksoft_fmul_bits(g_frag_values[normal][k],g_frag_values[a][k]);dot=k?vksoft_fadd_bits(dot,p):p;}
+     uint32_t eta=g_frag_values[etaId][0],eta2=vksoft_fmul_bits(eta,eta),dot2=vksoft_fmul_bits(dot,dot);
+     uint32_t kterm=vksoft_fsub_bits(0x3f800000u,vksoft_fmul_bits(eta2,vksoft_fsub_bits(0x3f800000u,dot2)));
+     if(vksoft_float_compare_bits(kterm,0u,1u)){for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=0u;}
+     else {uint32_t root=vk_frag_sqrt_bits(kterm),factor=vksoft_fadd_bits(vksoft_fmul_bits(eta,dot),root);
+      for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=vksoft_fsub_bits(vksoft_fmul_bits(eta,g_frag_values[a][k]),vksoft_fmul_bits(factor,g_frag_values[normal][k]));}
+    }
     else if(inst==71u){ /* GLSL.std.450 Reflect(I, N) = I - 2*dot(N,I)*N */
      if(wc<7u)return 0;uint32_t normal=w[i+6];if(normal>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal])return 0;
      uint32_t nc=g_frag_components[normal];if(count<2u||count>4u||nc!=count)return 0;

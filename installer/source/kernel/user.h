@@ -50,6 +50,9 @@
 #define SYS_NtUploadVirGLBuffer            36
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
+#define SYS_NtQueryInstallerDisk              40
+
+typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -2575,9 +2578,19 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = 0;
         return f;
 
-    case 40:
-        f->rax = (uint64_t)-1LL;
+    case SYS_NtQueryInstallerDisk: {
+        if (!f->rdi || !MmValidateUserRange(MmCurrentProcess, f->rdi, sizeof(InstallerDiskInfo), 1)) {
+            f->rax = 0;
+            return f;
+        }
+        InstallerDiskInfo info = {0};
+        info.sector_size = 512;
+        info.sectors = vb_capacity_sectors;
+        info.present = (vb_ok && vb_capacity_sectors != 0) ? 1u : 0u;
+        *(InstallerDiskInfo *)(uint64_t)f->rdi = info;
+        f->rax = info.present ? 1 : 0;
         return f;
+    }
 
     default:
         if (f->rax >= 0x1000 && f->rax <= 0x10FF)

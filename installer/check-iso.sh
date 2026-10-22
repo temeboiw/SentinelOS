@@ -33,7 +33,8 @@ echo "==> Extract boot image and package payloads for validation"
 if ! xorriso -osirrox on -indev "$ISO" \
     -extract /boot/esp.img "$TMP/esp.img" \
     -extract /packages/esp.spf "$TMP/esp.spf" \
-    -extract /packages/system.spf "$TMP/system.spf" >"$TMP/extract.log" 2>&1; then
+    -extract /packages/system.spf "$TMP/system.spf" \
+    -extract /packages/packages.sha256 "$TMP/packages.sha256" >"$TMP/extract.log" 2>&1; then
   cat "$TMP/extract.log" >&2
   exit 5
 fi
@@ -43,7 +44,11 @@ fi
 }
 mcopy -i "$TMP/esp.img" ::/EFI/BOOT/BOOTX64.EFI "$TMP/BOOTX64.EFI"
 [[ -s "$TMP/BOOTX64.EFI" ]] || { echo "error: boot image has no BOOTX64.EFI" >&2; exit 6; }
+mcopy -i "$TMP/esp.img" ::/packages.sha256 "$TMP/esp-packages.sha256"
+cmp -s "$TMP/packages.sha256" "$TMP/esp-packages.sha256" || { echo "error: ESP and ISO package checksum manifests differ" >&2; exit 6; }
+[[ "$(sed -n "1p" "$TMP/packages.sha256")" == "$(sha256sum "$TMP/esp.spf" | cut -d " " -f1)" ]] || { echo "error: esp.spf SHA-256 mismatch" >&2; exit 6; }
+[[ "$(sed -n "2p" "$TMP/packages.sha256")" == "$(sha256sum "$TMP/system.spf" | cut -d " " -f1)" ]] || { echo "error: system.spf SHA-256 mismatch" >&2; exit 6; }
 python3 "$HERE/make_spf.py" verify "$TMP/esp.spf"
 python3 "$HERE/make_spf.py" verify "$TMP/system.spf"
-echo "PASS: ISO checksum, UEFI boot entry, fallback loader, and both SPF packages verified."
+echo "PASS: ISO checksum, UEFI boot entry, fallback loader, both SPF packages, and their embedded SHA-256 manifest verified."
 echo "Note: this smoke test does not replace booting the ISO in a UEFI virtual machine."

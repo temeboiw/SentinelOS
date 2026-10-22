@@ -23,6 +23,7 @@ typedef struct {
     uint8_t depth_write;
     uint8_t blend_src_alpha;
     uint8_t color_write;
+    uint8_t depth_compare; /* 0 less, 1 less/equal, 2 always, 3 never, 4 greater */
 } VkSoftTarget;
 
 typedef struct {

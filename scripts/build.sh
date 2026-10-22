@@ -137,7 +137,7 @@ run_cc() {
     # Clang prints one quoted command per line. Match an actual cc1 token,
     # not incidental text, and skip all ld/lld commands and linker flags.
     [[ "$line" == *'"-cc1"'* ]] || continue
-    command_line="$(printf '%s\n' "$line" | sed -E "s|^[[:space:]]*(\\"[^\\"]*\\"|[^[:space:]]+)|\\"$drv\\"|")"
+    command_line="$(printf '%s\n' "$line" | sed -E "s#^[[:space:]]*(\"[^\"]*\"|[^[:space:]]+)#\"$drv\"#")"
     [[ "$command_line" == *"--hash-style"* || "$command_line" == *"--build-id"* ||
        "$command_line" == *"--eh-frame-hdr"* || "$command_line" == *"elf_x86_64"* ]] && {
       echo "error: refusing to pass host linker flags to Clang cc1: $command_line" >&2

@@ -5,6 +5,21 @@ typedef struct { int type,x,y,btn; char key; } InputEvent;
 typedef struct { u64 va; u32 w,h,pitch; } IFB;
 static void rect(u32*f,u32 p,u32 w,u32 h,int x,int y,int rw,int rh,u32 c){int x2=x+rw,y2=y+rh;if(x<0)x=0;if(y<0)y=0;if(x2>(int)w)x2=w;if(y2>(int)h)y2=h;if(x>=x2||y>=y2)return;for(int yy=y;yy<y2;yy++)for(int xx=x;xx<x2;xx++)f[(u64)yy*p+xx]=c;}
 static void text(u32*f,u32 p,u32 w,u32 h,int x,int y,const char*s,u32 c,int z){for(;*s;s++,x+=8*z){unsigned char ch=(unsigned char)*s;if(ch>=128)ch='?';const unsigned char*g=font8x8_basic[ch];for(int j=0;j<8;j++)for(int i=0;i<8;i++)if(g[j]&(1u<<i))rect(f,p,w,h,x+i*z,y+j*z,z,z,c);}}
+static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
+ static const char shape[16][17] = {
+  "*...............","**..............","*+*.............","*++*............",
+  "*+++*...........","*++++*..........","*+++++*.........","*++++++*........",
+  "*++++***........","*++*+*..........","*+*.*+*.........","**..*+*..........",
+  "....*+*..........",".....*+*.........",".....***.........","................"
+ };
+ for(int y=0;y<16;y++) for(int x=0;x<16;x++) {
+  int px=mx+x,py=my+y;
+  if(px<0||py<0||px>=(int)b->w||py>=(int)b->h) continue;
+  char ch=shape[y][x];
+  if(ch=='*') f[(u64)py*b->pitch+px]=0xFF10212A;
+  else if(ch=='+') f[(u64)py*b->pitch+px]=0xFFFFFFFF;
+ }
+}
 static void paint(u32*f,IFB*b,int page,int accepted,int checked){
  u32 w=b->w,h=b->h,p=b->pitch;
  for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
@@ -42,13 +57,15 @@ void instlr_main(void){
  if(gok&&gfx.backend==2&&gfx.surface_va){f.va=gfx.surface_va;f.w=gfx.width;f.h=gfx.height;f.pitch=gfx.pitch;}
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
  f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0;
- paint(fb,&b,page,accepted,checked);(void)NtFlushGraphics(0,0,f.w,f.h);
+ int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
+ paint(fb,&b,page,accepted,checked);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
+  if(ev.type==2||ev.type==3){mouse_x=ev.x;mouse_y=ev.y;}
   if(ev.type==1&&(ev.key=='\r'||ev.key=='\n')){if(page==0&&checked){page=1;NtWriteConsole("instlr: terms accepted; awaiting disk enumeration support\n");}}
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
   }
-  paint(fb,&b,page,accepted,checked);(void)NtFlushGraphics(0,0,f.w,f.h);
+  paint(fb,&b,page,accepted,checked);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}
 }

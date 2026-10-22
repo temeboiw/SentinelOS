@@ -97,6 +97,10 @@
 #define VK_IMAGE_USAGE_TRANSFER_DST_BIT 2u
 #define VK_IMAGE_USAGE_SAMPLED_BIT 4u
 #define VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT 0x10u
+#define VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT 0x20u
+#define VK_FORMAT_D32_SFLOAT 126u
+#define VK_IMAGE_ASPECT_DEPTH_BIT 2u
+#define VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO 25
 #define VK_IMAGE_USAGE_STORAGE_BIT 8u
 #define VK_IMAGE_ASPECT_COLOR_BIT 1u
 #define VK_IMAGE_LAYOUT_GENERAL 1u
@@ -190,9 +194,9 @@ typedef struct { VkStructureType sType; const void *pNext; VkDescriptorPool desc
 typedef struct { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorBufferInfo;
 typedef struct { VkDescriptorSet dstSet; uint32_t dstBinding,dstArrayElement,descriptorCount,descriptorType; const void *pImageInfo; const VkDescriptorBufferInfo *pBufferInfo; const void *pTexelBufferView; } VkWriteDescriptorSet;
 typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; } VkImageObj;
-typedef struct VkImageViewObj { uint32_t magic; VkDevice device; VkImage image; uint32_t format; } VkImageViewObj;
-typedef struct VkRenderPassObj { uint32_t magic; VkDevice device; uint32_t format,loadOp,storeOp,initialLayout,finalLayout; } VkRenderPassObj;
-typedef struct VkFramebufferObj { uint32_t magic; VkDevice device; VkRenderPass renderPass; VkImageView view; uint32_t width,height; } VkFramebufferObj;
+typedef struct VkImageViewObj { uint32_t magic; VkDevice device; VkImage image; uint32_t format, aspect; } VkImageViewObj;
+typedef struct VkRenderPassObj { uint32_t magic; VkDevice device; uint32_t format,loadOp,storeOp,initialLayout,finalLayout; uint8_t has_depth; uint32_t depth_format,depth_load_op,depth_store_op,depth_initial_layout,depth_final_layout; } VkRenderPassObj;
+typedef struct VkFramebufferObj { uint32_t magic; VkDevice device; VkRenderPass renderPass; VkImageView view,depth_view; uint32_t width,height; } VkFramebufferObj;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; VkImage image; uint32_t viewType,format; struct { uint32_t r,g,b,a; } components; VkImageSubresourceRange subresourceRange; } VkImageViewCreateInfo;
 typedef struct { uint32_t flags,format,samples,loadOp,storeOp,stencilLoadOp,stencilStoreOp,initialLayout,finalLayout; } VkAttachmentDescription;
 typedef struct { uint32_t attachment,layout; } VkAttachmentReference;
@@ -203,7 +207,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; VkRend
 typedef struct { VkStructureType sType; const void *pNext; VkRenderPass renderPass; VkFramebuffer framebuffer; uint32_t renderArea_x,renderArea_y,renderArea_width,renderArea_height; uint32_t clearValueCount; const VkClearColorValue *pClearValues; } VkRenderPassBeginInfo;
 typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
 typedef struct VkPoolObj { uint32_t magic; VkDevice device; uint32_t family; } VkPoolObj;
-typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkDescriptorSet bound_sets[4]; uint32_t bound_set_count; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
+typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkDescriptorSet bound_sets[4]; uint32_t bound_set_count; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target,bound_depth_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; VkImage depth_image; float color[4]; uint8_t data[256]; } ops[128]; } VkCmdObj;
 typedef struct VkFenceObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkFenceObj;
 typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkSemaphoreObj;
 #define VK_MAX_SHADER_MODULES 8
@@ -216,7 +220,7 @@ typedef struct VkShaderModuleObj *VkShaderModule;
 #define VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO 18
 #define VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO 28
 #define VK_PIPELINE_BIND_POINT_GRAPHICS 0u
-typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; VkPipelineLayout layout; } VkPipelineObj;
+typedef struct VkPipelineObj { uint32_t magic; VkDevice device; VkShaderModule vertex, fragment; uint32_t vertex_result, fragment_result; VkPipelineLayout layout; uint8_t depth_test,depth_write; uint32_t depth_compare; } VkPipelineObj;
 #define VK_MAX_DESCRIPTOR_LAYOUTS 16
 #define VK_MAX_PIPELINE_LAYOUTS 16
 #define VK_MAX_DESCRIPTOR_POOLS 8
@@ -230,6 +234,8 @@ typedef struct VkDescriptorValue { VkBuffer buffer; VkDeviceSize offset,range; }
 typedef struct VkDescriptorSetObj { uint32_t magic; VkDevice device; VkDescriptorPool pool; VkDescriptorSetLayout layout; VkDescriptorValue values[VK_MAX_DESCRIPTOR_BINDINGS][VK_MAX_DESCRIPTORS_PER_BINDING]; } VkDescriptorSetObj;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stage; VkShaderModule module; const char *pName; const void *pSpecializationInfo; } VkPipelineShaderStageCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t stageCount; const VkPipelineShaderStageCreateInfo *pStages; const void *pVertexInputState,*pInputAssemblyState,*pTessellationState,*pViewportState,*pRasterizationState,*pMultisampleState,*pDepthStencilState,*pColorBlendState,*pDynamicState; void *layout; void *renderPass; uint32_t subpass; VkPipeline basePipelineHandle; int32_t basePipelineIndex; } VkGraphicsPipelineCreateInfo;
+typedef struct { uint32_t failOp,passOp,depthFailOp,compareOp,compareMask,writeMask,reference; } VkStencilOpState;
+typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t depthTestEnable,depthWriteEnable,depthCompareOp,depthBoundsTestEnable,stencilTestEnable; VkStencilOpState front,back; float minDepthBounds,maxDepthBounds; } VkPipelineDepthStencilStateCreateInfo;
 static VkImageViewObj g_image_views[32];
 static VkRenderPassObj g_render_passes[16];
 static VkFramebufferObj g_framebuffers[32];

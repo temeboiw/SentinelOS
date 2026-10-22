@@ -45,6 +45,28 @@ int main(void) {
     vkGetDeviceQueue(device, 0, 0, &queue);
     CHECK(queue != 0);
 
+    /* Sampler handles are real device-owned objects. This first bounded
+       slice accepts nearest/linear filtering and repeat/clamp-to-edge only. */
+    VkSamplerCreateInfo samplerCi = {0};
+    samplerCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerCi.magFilter = VK_FILTER_LINEAR;
+    samplerCi.minFilter = VK_FILTER_NEAREST;
+    samplerCi.mipmapMode = 0;
+    samplerCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCi.maxAnisotropy = 1.0f;
+    VkSampler sampler = 0;
+    CHECK(vkCreateSampler(device, &samplerCi, 0, &sampler) == VK_SUCCESS);
+    CHECK(sampler != 0 && sampler->magic == VK_OBJECT_MAGIC && sampler->device == device);
+    VkSamplerCreateInfo unsupportedSamplerCi = samplerCi;
+    unsupportedSamplerCi.anisotropyEnable = 1;
+    VkSampler rejectedSampler = 0;
+    CHECK(vkCreateSampler(device, &unsupportedSamplerCi, 0, &rejectedSampler) == VK_ERROR_FEATURE_NOT_PRESENT);
+    CHECK(rejectedSampler == 0);
+    vkDestroySampler(device, sampler, 0);
+    CHECK(sampler->magic == 0);
+
     /* Structural SPIR-V validation: a minimal vertex entry point. */
     const uint32_t shader_words[] = {
         0x07230203u, 0x00010000u, 0u, 6u, 0u,

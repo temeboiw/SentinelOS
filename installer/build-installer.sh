@@ -5,7 +5,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$HERE/source"; B="$SRC/build"; SYS32="$B/rootfs/magic/System32"
 STAGE="$HERE/staging"; OUT="$HERE/artifacts"
 if [[ ! -f "$SRC/scripts/build.sh" ]]; then echo "error: isolated source snapshot missing" >&2; exit 2; fi
-python3 - "$SRC/scripts/build.sh" <<'PY'
+# Patch a disposable sibling script so the committed isolated snapshot stays pristine.
+BUILD_SCRIPT="$SRC/scripts/.build-installer.generated.sh"
+trap 'rm -f "$BUILD_SCRIPT"' EXIT
+cp "$SRC/scripts/build.sh" "$BUILD_SCRIPT"
+python3 - "$BUILD_SCRIPT" <<'PY'
 import pathlib,sys
 p=pathlib.Path(sys.argv[1]);s=p.read_text()
 s=s.replace('  UserTestApps/game.cpp \\\n  UserTestApps/maze.cpp \\\n','')
@@ -14,7 +18,7 @@ end=s.find('echo "==> Checking required images',start)
 if start>=0 and end>start:s=s[:start]+s[end:]
 p.write_text(s)
 PY
-bash "$SRC/scripts/build.sh" "$@"
+bash "$BUILD_SCRIPT" "$@"
 # Build installer-only native applications using the same PE ABI and user headers.
 USER_CFLAGS=(-target x86_64-windows-gnu -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mno-stack-arg-probe -mgeneral-regs-only -O2 -Wall -I"$SRC/user" -I"$SRC/shared")
 CLANG_BIN="${CLANG_BIN:-$(command -v clang)}"

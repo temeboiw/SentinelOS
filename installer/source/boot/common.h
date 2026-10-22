@@ -32,9 +32,9 @@ static void serial_init(void) {
 }
 static void serial_putc(char c) {
     serial_init();
-    if (c == '\\n') {
+    if (c == '\n') {
         while (!(serial_in8(0x3FD) & 0x20)) {}
-        serial_out8(0x3F8, '\\r');
+        serial_out8(0x3F8, '\r');
     }
     while (!(serial_in8(0x3FD) & 0x20)) {}
     serial_out8(0x3F8, (UINT8)c);

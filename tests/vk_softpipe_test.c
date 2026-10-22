@@ -20,6 +20,7 @@ int main(void) {
     target.depth = depth;
     target.width = target.height = target.stride_pixels = 16;
     target.depth_test = target.depth_write = target.color_write = 1;
+    target.depth_compare = 1u; /* Vulkan VK_COMPARE_OP_LESS */
 
     vksoft_clear(&target, 0xff102030u, 1.0f);
     fails += check(color[0] == 0xff102030u && depth[0] == 1.0f,

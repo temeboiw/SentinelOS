@@ -914,14 +914,19 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
  /* Execute the selected entry function at this pixel. Input vec2 values are
     the rasterizer's perspective-correct interpolated UV; arithmetic is shader
     arithmetic, so computed/scaled/offset UVs affect the actual image sample. */
- uint32_t active=0,steps=0,output_var=0;
- for(size_t i=5;i<n;){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
+ uint32_t active=0,steps=0,output_var=0,current_label=0,predecessor_label=0;
+ size_t i=5;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
   if(op==54u&&wc>=5u)active=(w[i+2]==entry);
   else if(active&&op==56u)break;
   else if(active){
    uint32_t rid=wc>=3u?w[i+2]:0u;
    if(++steps>2048u)return 0;
-   if(op==248u||op==247u||op==246u||op==0u){}
+   if(op==248u&&wc==2u){current_label=w[i+1];}
+   else if(op==245u&&wc>=5u&&rid<VK_SPIRV_MAX_IDS){uint32_t chosen=0;for(uint32_t p=3u;p+1u<wc;p+=2u){if(w[i+p+1u]==predecessor_label){chosen=w[i+p];break;}}if(!chosen||chosen>=VK_SPIRV_MAX_IDS||!g_frag_defined[chosen])return 0;for(unsigned k=0;k<4;k++)g_frag_values[rid][k]=g_frag_values[chosen][k];g_frag_components[rid]=g_frag_components[chosen];g_frag_defined[rid]=1;g_frag_kind[rid]=g_frag_kind[chosen];}
+   else if(op==249u&&wc==2u){size_t target=vk_spirv_find_label(w,n,entry,w[i+1]);if(target>=n)return 0;predecessor_label=current_label;i=target;continue;}
+   else if(op==250u&&wc>=4u){uint32_t cond=w[i+1];if(cond>=VK_SPIRV_MAX_IDS||!g_frag_defined[cond])return 0;uint32_t label=g_frag_values[cond][0]?w[i+2]:w[i+3];size_t target=vk_spirv_find_label(w,n,entry,label);if(target>=n)return 0;predecessor_label=current_label;i=target;continue;}
+   else if(op==251u&&wc>=3u){uint32_t sel=w[i+1],label=w[i+2];if(sel>=VK_SPIRV_MAX_IDS||!g_frag_defined[sel])return 0;for(uint32_t p=3u;p+1u<wc;p+=2u)if(g_frag_values[sel][0]==w[i+p]){label=w[i+p+1u];break;}size_t target=vk_spirv_find_label(w,n,entry,label);if(target>=n)return 0;predecessor_label=current_label;i=target;continue;}
+   else if(op==247u||op==246u||op==0u){}
    else if(op==253u&&wc==1u)break;
    else if(op==62u&&wc==3u){uint32_t ptr=w[i+1],obj=w[i+2];if(ptr>=VK_SPIRV_MAX_IDS||obj>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr]||!g_frag_defined[obj])return 0;if(g_frag_storage[ptr]==3u){for(unsigned k=0;k<4;k++)g_frag_output[k]=g_frag_values[obj][k];output_var=ptr;}}
    else if(op==61u&&wc==4u){uint32_t ptr=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||ptr>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr])return 0;

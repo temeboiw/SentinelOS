@@ -49,6 +49,7 @@
 #define SYS_NtPresent3D                   35
 #define SYS_NtUploadVirGLBuffer            36
 #define SYS_NtGetGameKeyState               38
+#define SYS_NtGetGameMouseDelta              39
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -2187,6 +2188,16 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         f->rax = addr;
+        return f;
+    }
+
+    case SYS_NtGetGameMouseDelta: {
+        if (!MmCurrentProcess || MmCurrentProcess == PspSystemProcess ||
+            wm_get_active_pid() != (int)MmCurrentProcess->Pid) {
+            f->rax = 0;
+            return f;
+        }
+        f->rax = ps2_game_mouse_delta();
         return f;
     }
 

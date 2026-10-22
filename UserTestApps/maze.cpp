@@ -38,9 +38,10 @@ using PeekMessageA_t=BOOL(*)(void*,void*,u32,u32,u32);
 using TranslateMessage_t=BOOL(*)(const void*);
 using DispatchMessageA_t=long long(*)(const void*);
 using UpdateWindow_t=BOOL(*)(void*);
+struct ClipRect { int left,top,right,bottom; };
 using ShowCursor_t=int(*)(BOOL);
 using SetCursorPos_t=BOOL(*)(int,int);
-using ClipCursor_t=BOOL(*)(const Rect*);
+using ClipCursor_t=BOOL(*)(const ClipRect*);
 using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,void**);
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
@@ -239,7 +240,7 @@ extern "C" void maze_mainCRTStartup() {
         }
     }
     /* Confine pointer to the screen while the game owns mouse-look. */
-    if(clip_cursor) { Rect clip={0,0,1280,800}; (void)clip_cursor(&clip); }
+    if(clip_cursor) { ClipRect clip={0,0,1280,800}; (void)clip_cursor(&clip); }
     if(update_window)(void)update_window(window_handle);
 
     GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;

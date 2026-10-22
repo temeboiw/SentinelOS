@@ -36,6 +36,7 @@ typedef struct {
 
 typedef int (*VkSoftFragmentShader)(void *context, float u, float v, uint32_t *argb);
 uint32_t vksoft_sample_texture(const VkSoftTexture *texture, float u, float v);
+uint32_t vksoft_sample_texture_bits(const VkSoftTexture *texture, uint32_t u_bits, uint32_t v_bits);
 void vksoft_clear(VkSoftTarget *t, uint32_t argb, float depth);
 int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                     const VkSoftVertex *b, const VkSoftVertex *c,

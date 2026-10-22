@@ -571,12 +571,21 @@ static SentinelGfxBootInfo g_virgl_info;
 static uint32_t g_virgl_init_state;
 static uint32_t g_virgl_last_submit_ok;
 static uint64_t sentinel_syscall2(uint64_t number,uint64_t arg0,uint64_t arg1) {
+#if defined(__x86_64__) || defined(_M_X64)
  uint64_t result;
  __asm__ volatile("syscall"
    : "=a"(result)
    : "a"(number),"D"(arg0),"S"(arg1)
    : "rcx","r11","memory");
  return result;
+#else
+ /* The SentinelOS syscall ABI is x86-64 only. Host-side tests may compile
+  * this file on other architectures; do not issue a foreign host syscall. */
+ (void)number;
+ (void)arg0;
+ (void)arg1;
+ return 0;
+#endif
 }
 static int sentinel_virgl_init(void) {
  if(g_virgl_init_state)return g_virgl_init_state==1;

@@ -36,7 +36,7 @@ jobs:
       - name: Install native installer build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld nasm qemu-system-x86 ovmf dosfstools mtools e2fsprogs xorriso
+          sudo apt-get install -y clang lld nasm qemu-utils qemu-system-x86 ovmf dosfstools mtools e2fsprogs fdisk xorriso
       - name: Fetch EDK2 headers
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Build native installer and ISO

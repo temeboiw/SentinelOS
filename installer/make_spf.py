@@ -200,7 +200,11 @@ def verify(path: Path, expected_kind: str | None = None) -> None:
 
 
 def extract(path: Path, target: Path, overwrite: bool = False) -> None:
-    """Extract a verified SPF to an already-mounted partition directory."""
+    """Extract a fully verified SPF to an existing or new directory tree."""
+    # Verify every manifest entry and archive member before creating directories
+    # or changing any destination file. Payload SHA-256 alone does not prove the
+    # archive's file list agrees with the per-file manifest.
+    verify(path)
     meta, raw = read_package(path)
     if meta.get("format") != "Sentinel Package File" or meta.get("version") != 1:
         raise ValueError("unsupported SPF manifest format/version")

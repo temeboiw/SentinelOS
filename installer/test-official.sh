@@ -68,7 +68,7 @@ run_vm() {
       -cdrom "$ISO" -boot order=d -display none \
       -drive "if=none,id=installer-disk,format=raw,file=$DISK" \
       -device virtio-blk-pci,drive=installer-disk \
-      -vnc "${VNC_ADDR}:${VNC_DISPLAY}" -serial "file:$LOG" \
+      -vnc "${VNC_ADDR}:${VNC_DISPLAY}" -serial stdio \
       -monitor none -no-reboot -no-shutdown
     return
   fi

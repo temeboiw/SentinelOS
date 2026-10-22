@@ -140,7 +140,7 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                 uint8_t cmp = t->depth_compare;
                 if ((cmp == 0u && !(z < old_z)) ||
                     (cmp == 1u && !(z <= old_z)) ||
-                    (cmp == 2u) || (cmp == 3u && z != old_z) ||
+                    (cmp == 3u) ||
                     (cmp == 4u && !(z > old_z))) continue;
             }
             /* Perspective-correct varyings when clip-space reciprocal W

@@ -1,6 +1,8 @@
 // loadufi.efi - stage 2. Loads HAL+kernel, higher-half maps, jumps to high kmain.
 #include "common.h"
 #include <Protocol/GraphicsOutput.h>
+#include <Protocol/SimpleFileSystem.h>
+#include <Guid/FileInfo.h>
 #include <IndustryStandard/PeImage.h>
 #include "bootinfo.h"
 #include "ext4.h"
@@ -112,6 +114,7 @@ typedef struct {
 
 static Module mods[BOOT_MAX_MODULES];
 static int nmods;
+static EFI_HANDLE boot_image;
 
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
@@ -125,6 +128,68 @@ static int streq(const char *a, const char *b, int nocase) {
     for (; *a && *b; a++, b++)
         if ((nocase ? lc(*a) : *a) != (nocase ? lc(*b) : *b)) return 0;
     return *a == *b;
+}
+
+/* Installer media stores boot-critical PE images on its FAT ESP. Prefer
+ * that self-contained source, then fall back to the installed ext4 volume. */
+static EFI_STATUS esp_load_file(const char *const *parts, int depth,
+                                VOID **file, UINTN *size) {
+    EFI_LOADED_IMAGE_PROTOCOL *loaded = NULL;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *sfs = NULL;
+    EFI_FILE_PROTOCOL *root = NULL, *handle = NULL;
+    EFI_STATUS status = bs->HandleProtocol(boot_image,
+        &gEfiLoadedImageProtocolGuid, (VOID **)&loaded);
+    if (EFI_ERROR(status) || !loaded || !loaded->DeviceHandle) return EFI_NOT_FOUND;
+    status = bs->HandleProtocol(loaded->DeviceHandle,
+        &gEfiSimpleFileSystemProtocolGuid, (VOID **)&sfs);
+    if (EFI_ERROR(status) || !sfs) return EFI_NOT_FOUND;
+    status = sfs->OpenVolume(sfs, &root);
+    if (EFI_ERROR(status) || !root) return EFI_NOT_FOUND;
+
+    CHAR16 path[256]; UINTN p = 0;
+    path[p++] = L'\\';
+    for (int k = 0; k < depth; k++) {
+        for (const char *c = parts[k]; *c && p + 2 < sizeof(path)/sizeof(path[0]); c++)
+            path[p++] = (CHAR16)(*c == '/' ? '\\' : (UINT8)*c);
+        if (k + 1 < depth) path[p++] = L'\\';
+    }
+    path[p] = 0;
+    status = root->Open(root, &handle, path, EFI_FILE_MODE_READ, 0);
+    root->Close(root);
+    if (EFI_ERROR(status) || !handle) return EFI_NOT_FOUND;
+
+    UINTN info_size = 0;
+    status = handle->GetInfo(handle, &gEfiFileInfoGuid, &info_size, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL || info_size < sizeof(EFI_FILE_INFO)) {
+        handle->Close(handle); return EFI_LOAD_ERROR;
+    }
+    EFI_FILE_INFO *info = NULL;
+    status = bs->AllocatePool(EfiLoaderData, info_size, (VOID **)&info);
+    if (EFI_ERROR(status)) { handle->Close(handle); return status; }
+    status = handle->GetInfo(handle, &gEfiFileInfoGuid, &info_size, info);
+    if (EFI_ERROR(status) || info->FileSize > (UINT64)(~(UINTN)0)) {
+        bs->FreePool(info); handle->Close(handle); return EFI_LOAD_ERROR;
+    }
+    UINTN bytes = (UINTN)info->FileSize;
+    bs->FreePool(info);
+    VOID *buffer = NULL;
+    status = bs->AllocatePool(EfiLoaderData, bytes ? bytes : 1, &buffer);
+    if (EFI_ERROR(status)) { handle->Close(handle); return status; }
+    UINTN got = bytes;
+    status = handle->Read(handle, &got, buffer);
+    handle->Close(handle);
+    if (EFI_ERROR(status) || got != bytes) {
+        bs->FreePool(buffer); return EFI_LOAD_ERROR;
+    }
+    *file = buffer; *size = bytes;
+    return EFI_SUCCESS;
+}
+
+static EFI_STATUS os_load_file(const char *const *parts, int depth,
+                               VOID **file, UINTN *size) {
+    EFI_STATUS status = esp_load_file(parts, depth, file, size);
+    if (!EFI_ERROR(status)) return status;
+    return ext_load_file(parts, depth, file, size);
 }
 
 static EFI_STATUS map_image(VOID *file, Module *m) {
@@ -183,7 +248,7 @@ static EFI_STATUS map_image(VOID *file, Module *m) {
 static Module *load_module(const char *name) {
     const char *path[3] = { "magic", "System32", name };
     VOID *file; UINTN fsize;
-    if (EFI_ERROR(ext_load_file(path, 3, &file, &fsize)))
+    if (EFI_ERROR(os_load_file(path, 3, &file, &fsize)))
         die("cannot read magic/System32/", name, "");
     if (nmods >= BOOT_MAX_MODULES) die("too many modules", "", "");
     Module *m = &mods[nmods];
@@ -364,6 +429,7 @@ static void resolve_imports_hh(int mi) {
 }
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
+    boot_image = image;
     st = sys; bs = sys->BootServices;
     say(L"loadufi: loading hal.dll and krnl.exe\r\n");
 
@@ -389,7 +455,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         for (int u = 0; u < nusers; u++) {
             const char *path[3] = { "magic", "System32", users[u] };
             VOID *file; UINTN fsize;
-            EFI_STATUS st2 = ext_load_file(path, 3, &file, &fsize);
+            EFI_STATUS st2 = os_load_file(path, 3, &file, &fsize);
             if (EFI_ERROR(st2)) {
                 say(L"loadufi: missing user image ");
                 say_a(users[u]);

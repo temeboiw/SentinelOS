@@ -24,6 +24,7 @@ need sha256sum
 # support or a host shell at install time.
 need truncate
 need mkfs.ext4
+need debugfs
 need mcopy
 need mmd
 TARGET_ESP_IMG="$OUT/esp.img"
@@ -45,7 +46,7 @@ for entry in "$STAGE/esp"/*; do
 done
 shopt -u nullglob dotglob
 truncate -s "$((SYSTEM_IMAGE_SIZE_MIB * 1024 * 1024))" "$TARGET_SYSTEM_IMG"
-mkfs.ext4 -F -q -L SENTINELOS -d "$STAGE/system" "$TARGET_SYSTEM_IMG"
+mkfs.ext4 -F -q -L SENTINELOS -O extents,^64bit,^metadata_csum,^dir_index,^has_journal -E lazy_itable_init=0 -d "$STAGE/system" "$TARGET_SYSTEM_IMG"
 # Verify critical files directly from the image before it can be embedded.
 for f in magic/System32/hal.dll magic/System32/krnl.exe magic/System32/smss.exe magic/System32/instlr.exe; do
   debugfs -R "stat /$f" "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:' || { echo "error: system image is missing /$f" >&2; exit 4; }
@@ -54,7 +55,7 @@ printf '%s\\n%s\\n' "$(sha256sum "$TARGET_ESP_IMG" | cut -d ' ' -f1)" "$(sha256s
 # Store package hashes separately so the kernel can verify exact staged bytes before formatting any disk.
 printf '%s\n%s\n' "$(sha256sum "$OUT/esp.spf" | cut -d ' ' -f1)" "$(sha256sum "$OUT/system.spf" | cut -d ' ' -f1)" > "$OUT/packages.sha256"
 if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
-  # Packages are also embedded on the FAT ESP so UEFI can preload them.
+  # Raw install images are embedded on the FAT ESP so UEFI can preload them.
   # Size for every staged file plus both packages, with 25% headroom and
   # 16 MiB for FAT metadata/cluster slack. Do not silently truncate at 128 MiB.
   required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
@@ -107,14 +108,17 @@ cp "$OUT/esp.spf" "$OUT/system.spf" "$TARGET_ESP_IMG" "$TARGET_SYSTEM_IMG" "$INS
 cat > "$ISO_ROOT/README.txt" <<'EOF'
 SentinelOS V.4 [Beta] installer media
 
-This ISO contains a UEFI El Torito boot image and Sentinel Package File
-payloads under /packages. SPF files are package archives, not disk images.
+This ISO boots the graphical SentinelOS Setup app. It carries prebuilt FAT32
+and ext4 filesystem images plus SPF build/validation packages under /packages.
 
 WARNING: Beta software. Back up important data before installing.
-The installer can create GPT partitions and format the EFI partition as FAT32
-and the system partition with a minimal ext4 filesystem. OS file deployment,
-installed boot configuration, and end-to-end installed-system boot are not yet
-implemented. Booting this media does not by itself perform a complete OS installation.
+The graphical installer creates GPT and copies the checksum-verified FAT32 EFI
+and ext4 system images to the selected VirtIO disk. The system image is 512 MiB
+by default; the target disk must be at least about 640 MiB. The installed ext4
+filesystem initially retains that size even if the partition is larger.
+
+WARNING: Beta software. Back up important data before installing. The selected
+disk is erased. A real UEFI VM install and reboot test is still required.
 EOF
 (
   cd "$ISO_ROOT"

@@ -198,6 +198,7 @@ static void *u32_child_create(LPCSTR cls,LPCSTR title,u32 ex,u32 style,int x,int
 static void u32_child_destroy_all(void *parent) {
     for(int i=0;i<64;i++)if(u32_child_windows[i].used&&u32_child_windows[i].parent==parent)u32_child_windows[i].used=0;
 }
+static int u32_damage_intersects(int x0, int y0, int x1, int y1);
 static void u32_draw_child_windows(void);
 static MSG u32_msg_queue[32];
 static unsigned int u32_msg_head, u32_msg_count;

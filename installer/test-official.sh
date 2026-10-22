@@ -6,8 +6,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 MODE="${1:-all}"
 case "$MODE" in
-  all|unit|iso|vm) ;;
-  *) echo "usage: $0 [all|unit|iso|vm]" >&2; exit 2 ;;
+  all|unit|iso|vm|vm-vnc) ;;
+  *) echo "usage: $0 [all|unit|iso|vm|vm-vnc]" >&2; exit 2 ;;
 esac
 need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: required command not found: $1" >&2; exit 2; }; }
 run_unit() {
@@ -46,6 +46,21 @@ run_vm() {
     echo "ERROR: UEFI firmware not found; install ovmf (Debian/Ubuntu)." >&2
     exit 2
   fi
+  if [[ "$MODE" == "vm-vnc" ]]; then
+    LOG="$HERE/artifacts/qemu-uefi-vnc.log"
+    VNC_ADDR="${VNC_ADDR:-127.0.0.1}"
+    VNC_DISPLAY="${VNC_DISPLAY:-0}"
+    echo "==> Launch interactive UEFI VM with VNC at ${VNC_ADDR}:$((5900 + VNC_DISPLAY))"
+    echo "Connect with a VNC viewer. Stop QEMU with Ctrl+C."
+    echo "VNC is unauthenticated; keep it on 127.0.0.1 unless you deliberately choose a trusted network."
+    qemu-system-x86_64 \
+      -machine q35,accel=tcg -cpu max -m 2048 \
+      -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
+      -cdrom "$ISO" -boot order=d -display none \
+      -vnc "${VNC_ADDR}:${VNC_DISPLAY}" -serial "file:$LOG" \
+      -monitor none -no-reboot -no-shutdown
+    return
+  fi
   LOG="$HERE/artifacts/qemu-uefi-smoke.log"
   echo "==> Launch UEFI VM for 45 seconds; serial output -> $LOG"
   echo "This checks that QEMU/OVMF can start the ISO; it does not prove the installer UI or disk installation works."
@@ -64,11 +79,11 @@ run_vm() {
   fi
   echo "QEMU ran until the smoke-test timeout. Inspect the display manually with a graphical VM run before calling this a successful boot test."
   echo "Serial log: $LOG"
-}
+}}
 case "$MODE" in
   unit) run_unit ;;
   iso) run_unit; run_iso ;;
-  vm) run_vm ;;
+  vm|vm-vnc) run_vm ;;
   all) run_unit; run_iso; run_vm ;;
 esac
 echo "Requested validation stages completed."

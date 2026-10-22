@@ -46,3 +46,7 @@ jobs:
           EDK2="$RUNNER_TEMP/edk2" bash installer/build-installer.sh
           bash installer/make-iso.sh
           bash installer/check-iso.sh
+      - name: Boot installer ISO and verify setup process loads
+        run: |
+          bash installer/test-official.sh vm
+          grep -F 'user: private image instlr.exe' installer/artifacts/qemu-uefi-smoke.log

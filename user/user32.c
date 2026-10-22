@@ -1029,6 +1029,12 @@ static void u32_draw_child_windows(void) {
     }
 }
 
+static int u32_damage_intersects(int x0, int y0, int x1, int y1) {
+    if (!u32_render_clip) return 1;
+    return x1 > u32_clip_x0 && x0 < u32_clip_x1 &&
+           y1 > u32_clip_y0 && y0 < u32_clip_y1;
+}
+
 static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
@@ -1190,14 +1196,17 @@ static void compose(void) {
     }
 
     if(layered){g_front=u32_desktop_layer;g_pitch=g_fw;u32_clear_layer(u32_desktop_layer);}
-    /* Floating glass identity plaque. */
-    round_fill(12,10,182,45,9,0xAFFFFFFF);
-    round_fill(14,12,178,41,8,0xEAFBFFFF);
-    fill(22,13,162,1,0xFFFFFFFF);
-    draw_text(24, 17, "SentinelOS", 0xFF1C6587);
-    draw_text(24, 33, "A calmer desktop", 0xFF477F95);
+    /* Skip fixed desktop artwork entirely when a dirty repaint cannot touch it. */
+    if (u32_damage_intersects(12,10,194,55)) {
+        /* Floating glass identity plaque. */
+        round_fill(12,10,182,45,9,0xAFFFFFFF);
+        round_fill(14,12,178,41,8,0xEAFBFFFF);
+        fill(22,13,162,1,0xFFFFFFFF);
+        draw_text(24, 17, "SentinelOS", 0xFF1C6587);
+        draw_text(24, 33, "A calmer desktop", 0xFF477F95);
+    }
 
-    {
+    if (u32_damage_intersects(31,72,122,147)) {
         int ix = 36, iy = 72, s = 48;
 
         round_fill(ix + 5, iy + 7, s, s, 10, 0x66324D67);
@@ -1211,7 +1220,8 @@ static void compose(void) {
     }
 
     /* Desktop welcome/search card, populated by explorer.exe through TextOutA. */
-    if (!g_wnd.visible && !u32_suppress_desktop_card) {
+    if (!g_wnd.visible && !u32_suppress_desktop_card &&
+        u32_damage_intersects(132,72,526,230)) {
         int cx=132, cy=72, cw=390, ch=158;
         round_fill(cx+4,cy+7,cw,ch,13,0x55314F62);
         round_fill(cx,cy,cw,ch,13,0xBFFFFFFF);
@@ -1254,6 +1264,12 @@ static void compose(void) {
             int tx = x + 14;
             int ty = y + 44 + i * 16;
             u32 ic = 0;
+
+            /* Most dirty rectangles only touch a few text rows. Avoid scanning
+             * and decoding every line when its glyphs cannot reach this region. */
+            if (u32_render_clip &&
+                (ty + 12 <= u32_clip_y0 || ty >= u32_clip_y1))
+                continue;
 
             if (s[0] == '[' && s[1] == 'D' && s[2] == 'I')
                 ic = COL_WARN;

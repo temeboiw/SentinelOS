@@ -800,7 +800,11 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
  for(uint32_t k=0;k<count;k++){
   const VkGraphicsPipelineCreateInfo *p=&ci[k];VkShaderModule vs=0,fs=0;uint32_t ve=0,fe=0;
   if(p->sType!=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO||p->pNext||p->flags||p->stageCount!=2||!p->pStages||!render_pass_ok((VkRenderPass)p->renderPass)||((VkRenderPass)p->renderPass)->device!=d||p->subpass||!playout_ok((VkPipelineLayout)p->layout)||((VkPipelineLayout)p->layout)->device!=d||p->basePipelineHandle||p->basePipelineIndex!=-1)return VK_ERROR_FEATURE_NOT_PRESENT;
-  for(uint32_t j=0;j<p->stageCount;j++){
+  uint8_t depth_test=0,depth_write=0;uint32_t depth_compare=1u;
+   const VkPipelineDepthStencilStateCreateInfo *ds=(const VkPipelineDepthStencilStateCreateInfo*)p->pDepthStencilState;
+   if(ds){if(ds->sType!=VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO||ds->pNext||ds->flags||ds->depthBoundsTestEnable||ds->stencilTestEnable||ds->depthTestEnable>1u||ds->depthWriteEnable>1u||ds->depthCompareOp>7u)return VK_ERROR_FEATURE_NOT_PRESENT;depth_test=(uint8_t)ds->depthTestEnable;depth_write=(uint8_t)ds->depthWriteEnable;depth_compare=ds->depthCompareOp;}
+   if((depth_test||depth_write)&&!((VkRenderPass)p->renderPass)->has_depth)return VK_ERROR_FEATURE_NOT_PRESENT;
+   for(uint32_t j=0;j<p->stageCount;j++){
    const VkPipelineShaderStageCreateInfo *st=&p->pStages[j];
    if(st->sType!=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO||st->pNext||st->flags||!shader_ok(st->module)||st->module->device!=d||!st->pName||!vk_eq(st->pName,"main")||st->pSpecializationInfo)return VK_ERROR_INITIALIZATION_FAILED;
    if(st->stage==1u){if(vs)return VK_ERROR_FEATURE_NOT_PRESENT;vs=st->module;ve=vk_spirv_main_id(vs->words,vs->wordCount);}
@@ -812,7 +816,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateGraphicsPipelines(VkDevice d,v
   if(!vr||!fr)return VK_ERROR_FEATURE_NOT_PRESENT;
   unsigned slot;for(slot=0;slot<VK_MAX_PIPELINES;slot++)if(!g_pipelines[slot].magic)break;
   if(slot==VK_MAX_PIPELINES)return VK_ERROR_TOO_MANY_OBJECTS;
-  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;o->layout=(VkPipelineLayout)p->layout;out[k]=o;
+  VkPipelineObj *o=&g_pipelines[slot];vk_zero(o,sizeof(*o));o->magic=VK_OBJECT_MAGIC;o->device=d;o->vertex=vs;o->fragment=fs;o->vertex_result=vr;o->fragment_result=fr;o->layout=(VkPipelineLayout)p->layout;o->depth_test=depth_test;o->depth_write=depth_write;o->depth_compare=depth_compare;out[k]=o;
  }
  return VK_SUCCESS;
 }

@@ -121,7 +121,7 @@ static inline u64 NtGetProcAddress(const char *dll, const char *fn) {
 }
 
 /* NT-style APIs implemented by the new, stable syscall range. */
-/* package: 0=esp.spf, 1=system.spf; metadata/read requests are trusted-only. */
+/* image: 0=esp.img, 1=system.img; metadata/read requests are trusted-only. */
 static inline i64 NtQueryInstallerPayload(u64 package, u64 *size_out) {
     return (i64)NtSyscall6(SYS_QueryInstallerPayload, package, (u64)size_out, 0, 0, 0, 0);
 }

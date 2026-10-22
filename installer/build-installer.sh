@@ -34,6 +34,11 @@ LLD_BIN="${LLD_BIN:-$(command -v lld)}"
 for f in "$SYS32/instlr.exe" "$SYS32/screen.exe" "$SYS32/smss.exe"; do [[ -s "$f" ]] || { echo "error: installer image missing: $f" >&2; exit 3; }; done
 rm -rf "$STAGE"; mkdir -p "$STAGE/esp" "$STAGE/system" "$OUT"
 cp -a "$B/esp/." "$STAGE/esp/"; cp -a "$B/rootfs/." "$STAGE/system/"
+# The installed-system loader reads modules from ext4, but an installer ISO has
+# no installed ext4 volume yet. Mirror the built System32 tree onto the ESP so
+# loadufi can boot directly from removable media using its SimpleFileSystem path.
+mkdir -p "$STAGE/esp/magic"
+cp -a "$STAGE/system/magic/System32" "$STAGE/esp/magic/"
 rm -f "$STAGE/system/game.exe" "$STAGE/system/maze.exe"
 rm -rf "$STAGE/system/UserTestApps" "$STAGE/system/games" "$STAGE/system/tests"
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: BOOTX64.EFI missing" >&2; exit 4; }

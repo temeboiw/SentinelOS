@@ -14,7 +14,16 @@ int main(void) {
     ici.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ici.pApplicationInfo = &app;
     VkInstance instance = 0;
+    /* Global commands are available without an instance; all instance/device
+       commands must stay hidden until a valid instance is supplied. */
+    CHECK(vkGetInstanceProcAddr(0, "vkCreateInstance") != 0);
+    CHECK(vkGetInstanceProcAddr(0, "vkEnumerateInstanceVersion") != 0);
+    CHECK(vkGetInstanceProcAddr(0, "vkEnumeratePhysicalDevices") == 0);
+    CHECK(vkGetInstanceProcAddr(0, "vkCmdDraw") == 0);
+    CHECK(vkGetInstanceProcAddr(0, "not_a_vulkan_command") == 0);
     CHECK(vkCreateInstance(&ici, 0, &instance) == VK_SUCCESS);
+    CHECK(vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices") != 0);
+    CHECK(vkGetInstanceProcAddr(instance, "vkCmdDraw") != 0);
     uint32_t count = 0;
     CHECK(vkEnumeratePhysicalDevices(instance, &count, 0) == VK_SUCCESS && count == 1);
     VkPhysicalDevice physical = 0;
@@ -44,6 +53,10 @@ int main(void) {
     VkQueue queue = 0;
     vkGetDeviceQueue(device, 0, 0, &queue);
     CHECK(queue != 0);
+    CHECK(vkGetDeviceProcAddr(device, "vkCreateGraphicsPipelines") != 0);
+    CHECK(vkGetDeviceProcAddr(device, "vkCmdDraw") != 0);
+    CHECK(vkGetDeviceProcAddr(device, "vkGetDeviceProcAddr") != 0);
+    CHECK(vkGetDeviceProcAddr(device, "not_a_vulkan_command") == 0);
 
     /* Sampler handles are real device-owned objects. This first bounded
        slice accepts nearest/linear filtering and repeat/clamp-to-edge only. */

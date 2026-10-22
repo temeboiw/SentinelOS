@@ -1,0 +1,36 @@
+name: SentinelOS installer validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer-validation.yml"
+  pull_request:
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Check installer shell syntax
+        run: |
+          bash -n installer/install-disk.sh
+          bash -n installer/build-installer.sh
+          bash -n installer/make-iso.sh
+          bash -n installer/check-iso.sh
+          bash -n installer/test-official.sh
+      - name: Run SPF and deployment tests
+        run: python3 -m unittest discover -s installer/tests -v

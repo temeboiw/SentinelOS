@@ -260,6 +260,52 @@ static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
     return virtio_blk_transfer_sector(sector, (void *)buf512, 1);
 }
 
+/* Fast contiguous DMA write: one virtio request for many sectors.
+   data_pa must be the physical address of a contiguous, sector-aligned buffer. */
+static int virtio_blk_write_buffer(uint64_t sector, uint64_t data_pa, uint32_t bytes) {
+    if (!vb_ok || !data_pa || !bytes || (bytes & 511u) ||
+        bytes > (4u * 1024u * 1024u) ||
+        sector >= vb_capacity_sectors ||
+        (uint64_t)(bytes / 512u) > vb_capacity_sectors - sector)
+        return -1;
+
+    vb_req->type = VIRTIO_BLK_T_OUT;
+    vb_req->reserved = 0;
+    vb_req->sector = sector;
+    *vb_status = 0xFF;
+
+    vb_desc[0].addr = vb_req_pa;
+    vb_desc[0].len = 16;
+    vb_desc[0].flags = VIRTQ_DESC_F_NEXT;
+    vb_desc[0].next = 1;
+    vb_desc[1].addr = data_pa;
+    vb_desc[1].len = bytes;
+    vb_desc[1].flags = VIRTQ_DESC_F_NEXT;
+    vb_desc[1].next = 2;
+    vb_desc[2].addr = vb_status_pa;
+    vb_desc[2].len = 1;
+    vb_desc[2].flags = VIRTQ_DESC_F_WRITE;
+    vb_desc[2].next = 0;
+
+    uint16_t a = vb_avail_idx;
+    vb_avail->ring[a % vb_qsize] = 0;
+    __asm__ volatile("sfence" ::: "memory");
+    vb_avail->idx = ++vb_avail_idx;
+    __asm__ volatile("sfence" ::: "memory");
+    if (vb_notify && vb_common) {
+        uint16_t noff = *(volatile uint16_t *)(vb_common + 30);
+        *(volatile uint16_t *)(vb_notify + (uint32_t)noff * vb_notify_mult) = 0;
+    }
+    for (int i = 0; i < 10000000; i++) {
+        if (vb_used->idx != vb_last_used) {
+            vb_last_used = vb_used->idx;
+            return *vb_status == 0 ? 0 : -1;
+        }
+        __asm__ volatile("pause");
+    }
+    return -1;
+}
+
 static int blk_read(uint64_t off, void *dst, uint64_t len) {
     uint8_t sec[512];
     uint8_t *out = (uint8_t *)dst;

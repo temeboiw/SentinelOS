@@ -13,6 +13,10 @@ on:
       - "user/vk_softpipe.h"
       - "tests/vk_softpipe_test.c"
       - ".github/workflows/vulkan-softpipe.yml"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   softpipe:
     runs-on: ubuntu-latest

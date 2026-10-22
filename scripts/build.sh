@@ -163,7 +163,8 @@ for src in \
   user/fileexplorer.c \
   user/cmd.c \
   user/msiexec.c \
-  UserTestApps/game.cpp
+  UserTestApps/game.cpp \
+  UserTestApps/maze.cpp
 do
   if [[ ! -f "$ROOT/$src" ]]; then
     echo "FATAL: required source file missing: $src"
@@ -1720,6 +1721,24 @@ if [[ ! -s "$B/rootfs/game.exe" ]]; then
 fi
 
 ls -lh "$B/rootfs/game.exe"
+
+echo "  -> maze.exe (3D maze prototype; Vulkan runtime probe + software fallback)"
+
+clang++ "${USER_CXXFLAGS[@]}" \
+  -c "$ROOT/UserTestApps/maze.cpp" \
+  -o "$B/obj/maze.o"
+
+lld -flavor link \
+  /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
+  /fixed:no /base:0x42100000 \
+  "/out:$B/rootfs/maze.exe" \
+  "$B/obj/maze.o"
+
+if [[ ! -s "$B/rootfs/maze.exe" ]]; then
+  echo "FATAL: maze.exe was not produced"
+  exit 1
+fi
+ls -lh "$B/rootfs/maze.exe"
 
 echo "==> Checking required images"
 

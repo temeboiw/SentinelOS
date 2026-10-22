@@ -131,9 +131,13 @@ int main(void) {
     CHECK(vk_spirv_validate(branch_words, sizeof(branch_words)/4u));
     CHECK(vk_spirv_execute_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
     CHECK(executed == 42u);
+    CHECK(vk_spirv_execute_pipeline_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 42u);
     /* Change the true condition constant to zero and verify the other Phi input. */
     branch_words[22] = 0u;
     CHECK(vk_spirv_execute_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
+    CHECK(executed == 99u);
+    CHECK(vk_spirv_execute_pipeline_u32(branch_words, sizeof(branch_words)/4u, 3u, 9u, &executed));
     CHECK(executed == 99u);
 
     /* Signed negate, logical-not and bitwise-not scalar instructions. */

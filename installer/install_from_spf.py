@@ -42,8 +42,8 @@ def preflight(esp_package: Path, system_package: Path,
         raise ValueError("ESP and system targets must be distinct, non-overlapping directories")
 
     # Verify full package contents and hashes before any destination is changed.
-    make_spf.verify(esp_package)
-    make_spf.verify(system_package)
+    make_spf.verify(esp_package, expected_kind="esp", require_boot_layout=True)
+    make_spf.verify(system_package, expected_kind="system", require_boot_layout=True)
 
     for target, meta, label in ((esp, esp_meta, "ESP"), (system, system_meta, "system")):
         for row in meta["files"]:

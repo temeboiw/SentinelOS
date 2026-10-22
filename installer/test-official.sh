@@ -15,7 +15,7 @@ run_unit() {
   echo "==> Python installer regression tests"
   (cd "$ROOT" && python3 -m unittest discover -s installer/tests -v)
   echo "==> Shell syntax checks"
-  bash -n "$HERE/build-installer.sh" "$HERE/build-iso.sh" "$HERE/make-iso.sh" "$HERE/check-iso.sh" "$HERE/test-official.sh"
+  bash -n "$HERE/build-installer.sh" "$HERE/build-iso.sh" "$HERE/make-iso.sh" "$HERE/check-iso.sh" "$HERE/test-official.sh" "$HERE/create-test-disk.sh"
   echo "PASS: unit tests and shell syntax"
 }
 run_iso() {

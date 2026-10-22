@@ -246,6 +246,11 @@ typedef struct {
 } U32_RENDER_STATS;
 static U32_RENDER_STATS u32_render_stats;
 static u64 u32_compose_sample_frames;
+/* DrawTaskbar is a common clock/menu update path. Mark it so an already
+ * published desktop can update only the taskbar layer instead of resubmitting
+ * unchanged wallpaper, desktop icons/card, and window pixels. */
+static int u32_taskbar_only_compose;
+static int u32_taskbar_menu_was_open;
 static u64 u32_rdtsc(void) {
     u32 lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
@@ -1275,6 +1280,11 @@ static void compose(void) {
             U32_PRESENT_LAYER a;
             a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);a.width=g_fw;a.height=g_fh;
             if(u32_is_desktop_window()) {
+                /* A taskbar-only pass is safe only after the kernel has the
+                 * persistent background. On the first frame, publish every
+                 * layer so boot/login pixels cannot be left underneath. */
+                int taskbar_only_present =
+                    u32_taskbar_only_compose && u32_shared_background_published;
                 if(!u32_shared_background_published) {
                     a.layer=0;a.pixels=(u64)u32_aero_bg_cache;
                     a.x=0;a.y=0;a.w=g_fw;a.h=g_fh;
@@ -1282,9 +1292,12 @@ static void compose(void) {
                     a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);a.h=(u32)(py1-py0);
                 }
                 /* Wallpaper is immutable after its first full publish. Do not
-                 * copy the same background buffer on every ordinary repaint. */
-                a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-                a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                 * copy the same background buffer on every ordinary repaint.
+                 * Clock and Start-menu updates touch only the taskbar surface. */
+                if(!taskbar_only_present) {
+                    a.layer=1;a.pixels=(u64)u32_desktop_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                    a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+                }
                 a.layer=3;a.pixels=(u64)u32_taskbar_layer;
                 (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 u32_taskbar_dirty=0;
@@ -2016,7 +2029,37 @@ BOOL ExitWindowsEx(u32 flags, u32 reason) {
 
 __attribute__((dllexport))
 void DrawTaskbar(void) {
+    /* Clock refreshes and Start-menu toggles are frequent, small updates.
+     * Clip to the taskbar plus the old/new menu footprint; the taskbar layer
+     * is presented alone when the shared desktop background is established. */
+    if(!u32_is_desktop_window() || !g_fw || !g_fh ||
+       u32_force_full_compose || u32_render_clip) {
+        compose();
+        return;
+    }
+
+    int old_clip=u32_render_clip;
+    int old_x0=u32_clip_x0, old_y0=u32_clip_y0;
+    int old_x1=u32_clip_x1, old_y1=u32_clip_y1;
+    int h=(int)g_fh, ty=h-48;
+    if(ty<0)ty=0;
+    int y0=ty;
+    if(g_menu || u32_taskbar_menu_was_open) {
+        int menu_y=ty-146;
+        if(menu_y<0)menu_y=0;
+        if(menu_y<y0)y0=menu_y;
+    }
+
+    u32_render_clip=1;
+    u32_clip_x0=0; u32_clip_y0=y0;
+    u32_clip_x1=(int)g_fw; u32_clip_y1=h;
+    u32_taskbar_only_compose=1;
     compose();
+    u32_taskbar_only_compose=0;
+    u32_taskbar_menu_was_open=g_menu!=0;
+    u32_render_clip=old_clip;
+    u32_clip_x0=old_x0; u32_clip_y0=old_y0;
+    u32_clip_x1=old_x1; u32_clip_y1=old_y1;
 }
 
 /* Batch startup UI mutations into one final framebuffer composition. */

@@ -2695,6 +2695,11 @@ static Frame *syscall_handler(Frame *f) {
         const uint8_t *src = (const uint8_t *)(HHDM_BASE + image->phys);
         uint8_t sector[512];
         for (uint64_t off = 0; off < image->size; off += 512ULL) {
+            if ((off % (32ULL * 1024 * 1024)) == 0)
+                DbgPrint("installer: image %llu write progress %llu/%llu MiB\n",
+                         (unsigned long long)f->rdi,
+                         (unsigned long long)(off / (1024ULL * 1024)),
+                         (unsigned long long)(image->size / (1024ULL * 1024)));
             for (unsigned j = 0; j < 512; j++) sector[j] = src[off + j];
             if (virtio_blk_write_sector(dest + off / 512ULL, sector) != 0) {
                 DbgPrint("installer: image write failed at LBA %llu\\n",

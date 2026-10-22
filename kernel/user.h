@@ -2265,7 +2265,13 @@ static Frame *syscall_handler(Frame *f) {
 
         char k = 0;
 
-        if (ps2_read_key(&k)) {
+        /*
+         * Keyboard bytes are shared by all user processes. Only the active
+         * window may consume them; otherwise Explorer's message pump can eat
+         * WASD/Escape before a foreground game ever sees the key.
+         */
+        int active_input_pid = wm_get_active_pid();
+        if ((!active_input_pid || active_input_pid == mepid) && ps2_read_key(&k)) {
             out->type = 1;
             out->key = k;
             out->x = mouse_x;

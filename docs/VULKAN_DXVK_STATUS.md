@@ -47,6 +47,22 @@ extensions are rejected rather than falsely advertised. The CPU runtime is not
 wired to the existing VirtIO-GPU/VirGL renderer and does not provide native
 Intel/AMD/NVIDIA Vulkan drivers.
 
+## VirGL transport bridge (2026-10-22)
+
+The runtime now exposes SentinelOS-specific transport entry points:
+`SentinelVulkanGpuStatus`, `SentinelVulkanSubmitVirGLStream`,
+`SentinelVulkanUploadVirGLBuffer`, and `SentinelVulkanPresentVirGL`.
+They call the existing kernel graphics initialization, bounded VirGL command
+submission, shared-buffer upload, and target-presentation syscalls. The PE build
+exports these symbols and the runtime's procedure lookup returns them.
+
+This is a transport integration step, **not yet a Vulkan-to-VirGL renderer**.
+The raw submission entry point accepts already encoded VirGL/Gallium commands;
+it does not translate `vkQueueSubmit`, Vulkan pipelines, SPIR-V shaders, or
+`vkCmdDraw` into GPU commands. The ordinary Vulkan path remains CPU-backed.
+No successful in-guest GPU-rendered frame has been verified from this change.
+The bridge therefore does not establish Vulkan conformance or DXVK compatibility.
+
 ## DXVK
 
 DXVK is not integrated yet. It requires a substantially more complete Vulkan

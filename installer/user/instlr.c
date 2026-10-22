@@ -21,6 +21,15 @@ static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
   else if(ch=='+') f[(u64)py*b->pitch+px]=0xFFFFFFFF;
  }
 }
+static u64 read_be64(const unsigned char*p){u64 v=0;for(int i=0;i<8;i++)v=(v<<8)|p[i];return v;}
+static int payload_header_valid(u64 package,u64 total){
+ unsigned char h[24];if(total<24||NtReadInstallerPayload(package,0,h,sizeof(h))!=(i64)sizeof(h))return 0;
+ const char magic[]="SENTSPF1";for(int i=0;i<8;i++)if(h[i]!=(unsigned char)magic[i])return 0;
+ u64 manifest=read_be64(h+8),packed=read_be64(h+16);
+ if(manifest>16ULL*1024*1024||packed>1024ULL*1024*1024)return 0;
+ if(manifest>total-24||packed!=total-24-manifest)return 0;
+ return 1;
+}
 static void decstr(u64 value,char *out){char tmp[24];int n=0;if(!value)tmp[n++]='0';while(value&&n<(int)sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}int j=0;while(n>0)out[j++]=tmp[--n];out[j]=0;}
 static u32 crc32_bytes(const unsigned char *p,u32 n){u32 c=0xFFFFFFFFu;for(u32 i=0;i<n;i++){c^=p[i];for(int b=0;b<8;b++)c=(c>>1)^((0u-(c&1u))&0xEDB88320u);}return ~c;}
 static void put32(unsigned char*p,u32 v){p[0]=(unsigned char)v;p[1]=(unsigned char)(v>>8);p[2]=(unsigned char)(v>>16);p[3]=(unsigned char)(v>>24);}
@@ -171,7 +180,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
-   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Install payloads: available":"Install payloads: missing/invalid",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
+   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Payload package headers: valid":"Payload package headers: invalid/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
    text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"System ext4 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
@@ -195,14 +204,11 @@ void instlr_main(void){
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
  f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0,install_state=0;InstallerDiskInfo disk={0};int disk_present=(NtQueryInstallerDisk(&disk)!=0&&disk.present);u64 disk_mib=disk.sector_size?disk.sectors*disk.sector_size/(1024*1024):0;
  /* Require both embedded package containers before permitting destructive disk work. */
- u64 esp_package_size=0,system_package_size=0;unsigned char package_magic[8];
- int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0&&esp_package_size>=24;
- int sys_query=NtQueryInstallerPayload(1,&system_package_size)==0&&system_package_size>=24;
- int esp_magic_ok=esp_query&&NtReadInstallerPayload(0,0,package_magic,8)==8;
- if(esp_magic_ok){const char want[]="SENTSPF1";for(int i=0;i<8;i++)if(package_magic[i]!=(unsigned char)want[i])esp_magic_ok=0;}
- int sys_magic_ok=sys_query&&NtReadInstallerPayload(1,0,package_magic,8)==8;
- if(sys_magic_ok){const char want[]="SENTSPF1";for(int i=0;i<8;i++)if(package_magic[i]!=(unsigned char)want[i])sys_magic_ok=0;}
- installer_payloads_ready=esp_magic_ok&&sys_magic_ok;
+ u64 esp_package_size=0,system_package_size=0;
+ int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0;
+ int sys_query=NtQueryInstallerPayload(1,&system_package_size)==0;
+ installer_payloads_ready=esp_query&&sys_query&&
+     payload_header_valid(0,esp_package_size)&&payload_header_valid(1,system_package_size);
  NtWriteConsole(installer_payloads_ready?"instlr: both package payloads detected\n":"instlr: package payload missing or invalid; disk writes disabled\n");
  int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);

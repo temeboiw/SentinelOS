@@ -108,6 +108,12 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symbolic links are not allowed"):
             make_spf.build(self.source, self.package, "esp")
 
+    def test_expected_package_kind_is_enforced(self):
+        self.build_package()
+        make_spf.verify(self.package, expected_kind="esp")
+        with self.assertRaisesRegex(ValueError, "SPF kind mismatch"):
+            make_spf.verify(self.package, expected_kind="system")
+
     def test_invalid_package_header_is_rejected(self):
         self.build_package()
         data = bytearray(self.package.read_bytes())

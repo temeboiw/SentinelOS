@@ -31,6 +31,7 @@ typedef struct {
     uint32_t width, height, stride_pixels;
     uint8_t linear_filter;
     uint8_t repeat_u, repeat_v;
+    uint8_t compare_enable, compare_op;
 } VkSoftTexture;
 
 typedef int (*VkSoftFragmentShader)(void *context, float u, float v, uint32_t *argb);

@@ -443,6 +443,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     {
         static const char *users[] = {
             "smss.exe",
+            "instlr.exe",
+            "screen.exe",
             "bootvid.exe",
             "sentlogon.exe",
             "explorer.exe",

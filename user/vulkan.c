@@ -761,7 +761,7 @@ static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t ent
      default:return 0;
     }ids[r]=v;def[r]=1;
    }
-   else if(op!=14u&&op!=15u&&op!=17u&&op!=19u&&op!=20u&&op!=21u&&op!=22u&&op!=23u&&op!=24u&&op!=25u&&op!=26u&&op!=27u&&op!=28u&&op!=29u&&op!=30u&&op!=31u&&op!=32u&&op!=33u&&op!=39u&&op!=43u&&op!=54u&&op!=55u&&op!=56u&&op!=248u)return 0;
+   else if(op!=14u&&op!=15u&&op!=17u&&op!=19u&&op!=20u&&op!=21u&&op!=22u&&op!=23u&&op!=24u&&op!=25u&&op!=26u&&op!=27u&&op!=28u&&op!=29u&&op!=30u&&op!=31u&&op!=32u&&op!=33u&&op!=39u&&op!=43u&&op!=54u&&op!=55u&&op!=56u&&op!=87u&&op!=248u)return 0;
   }
   i+=wc;
  }

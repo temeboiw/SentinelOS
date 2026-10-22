@@ -576,8 +576,9 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateImage(VkDevice d,const VkImage
  if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;
  *out=0;
  if(alloc||ci->imageType!=1||!ci->extent.width||!ci->extent.height||ci->extent.depth!=1||ci->mipLevels!=1||ci->arrayLayers!=1||ci->samples!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
- if(ci->format!=VK_FORMAT_R8G8B8A8_UNORM&&ci->format!=VK_FORMAT_B8G8R8A8_UNORM)return VK_ERROR_FORMAT_NOT_SUPPORTED;
- if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
+ if(ci->format!=VK_FORMAT_R8G8B8A8_UNORM&&ci->format!=VK_FORMAT_B8G8R8A8_UNORM&&ci->format!=VK_FORMAT_D32_SFLOAT)return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  if(ci->format==VK_FORMAT_D32_SFLOAT){if(!(ci->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)||(ci->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_FORMAT_NOT_SUPPORTED;}else if(ci->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)return VK_ERROR_FORMAT_NOT_SUPPORTED;
+ if(ci->tiling>1||(ci->usage&~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))||!ci->usage)return VK_ERROR_FEATURE_NOT_PRESENT;
  uint64_t bytes=(uint64_t)ci->extent.width*(uint64_t)ci->extent.height*4u;
  if(bytes>VK_MEMORY_BYTES||bytes/4u/(uint64_t)ci->extent.width!=ci->extent.height)return VK_ERROR_OUT_OF_DEVICE_MEMORY;
  for(unsigned i=0;i<32;i++)if(!g_images[i].magic){VkImageObj *im=&g_images[i];vk_zero(im,sizeof(*im));im->magic=VK_OBJECT_MAGIC;im->device=d;im->size=bytes;im->width=ci->extent.width;im->height=ci->extent.height;im->depth=1;im->format=ci->format;im->usage=ci->usage;im->tiling=ci->tiling;im->mipLevels=1;im->arrayLayers=1;im->samples=1;im->layout=ci->initialLayout;*out=(VkImage)im;return VK_SUCCESS;}
@@ -761,8 +762,8 @@ static uint32_t vk_spirv_main_id(const uint32_t *w,size_t n) {
 
 /* Bounded standard Vulkan single-color render-pass/framebuffer path. */
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateImageView(VkDevice d,const VkImageViewCreateInfo *ci,const void *alloc,VkImageView *out) {
- if(!dev_ok(d)||!ci||!out||alloc||ci->sType!=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO||ci->pNext||ci->flags||ci->viewType!=VK_IMAGE_VIEW_TYPE_2D||!image_ok(ci->image)||ci->image->device!=d||ci->format!=ci->image->format||ci->subresourceRange.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||ci->subresourceRange.baseMipLevel||ci->subresourceRange.levelCount!=1||ci->subresourceRange.baseArrayLayer||ci->subresourceRange.layerCount!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
- *out=0;for(unsigned i=0;i<32;i++)if(!g_image_views[i].magic){VkImageViewObj *v=&g_image_views[i];vk_zero(v,sizeof(*v));v->magic=VK_OBJECT_MAGIC;v->device=d;v->image=ci->image;v->format=ci->format;*out=(VkImageView)v;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
+ if(!dev_ok(d)||!ci||!out||alloc||ci->sType!=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO||ci->pNext||ci->flags||ci->viewType!=VK_IMAGE_VIEW_TYPE_2D||!image_ok(ci->image)||ci->image->device!=d||ci->format!=ci->image->format||ci->subresourceRange.aspectMask!=(ci->format==VK_FORMAT_D32_SFLOAT?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT)||ci->subresourceRange.baseMipLevel||ci->subresourceRange.levelCount!=1||ci->subresourceRange.baseArrayLayer||ci->subresourceRange.layerCount!=1)return VK_ERROR_FEATURE_NOT_PRESENT;
+ *out=0;for(unsigned i=0;i<32;i++)if(!g_image_views[i].magic){VkImageViewObj *v=&g_image_views[i];vk_zero(v,sizeof(*v));v->magic=VK_OBJECT_MAGIC;v->device=d;v->image=ci->image;v->format=ci->format;v->aspect=ci->subresourceRange.aspectMask;*out=(VkImageView)v;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
 }
 __declspec(dllexport) void VKAPI_CALL vkDestroyImageView(VkDevice d,VkImageView v,const void *alloc) { if(alloc||!dev_ok(d)||!image_view_ok(v)||v->device!=d)return;for(unsigned i=0;i<32;i++)if(g_framebuffers[i].magic==VK_OBJECT_MAGIC&&g_framebuffers[i].view==v)return;v->magic=0; }
 __declspec(dllexport) VkResult VKAPI_CALL vkCreateRenderPass(VkDevice d,const VkRenderPassCreateInfo *ci,const void *alloc,VkRenderPass *out) {

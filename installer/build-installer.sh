@@ -47,6 +47,6 @@ rm -rf "$STAGE/system/UserTestApps" "$STAGE/system/games" "$STAGE/system/tests"
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: BOOTX64.EFI missing" >&2; exit 4; }
 [[ -s "$STAGE/system/magic/System32/krnl.exe" ]] || { echo "error: krnl.exe missing" >&2; exit 4; }
 python3 "$HERE/make_spf.py" build --esp-root "$STAGE/esp" --system-root "$STAGE/system" --output-dir "$OUT"
-python3 "$HERE/make_spf.py" verify "$OUT/esp.spf"
-python3 "$HERE/make_spf.py" verify "$OUT/system.spf"
+python3 "$HERE/make_spf.py" verify "$OUT/esp.spf" --kind esp --require-boot-layout
+python3 "$HERE/make_spf.py" verify "$OUT/system.spf" --kind system --require-boot-layout
 echo "Installer binaries and SPF payloads built. Run make-iso.sh to master the ISO."

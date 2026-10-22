@@ -34,8 +34,13 @@ class InstallCoordinatorTests(unittest.TestCase):
         (self.esp_source / "EFI").mkdir()
         (self.esp_source / "EFI" / "BOOT").mkdir()
         (self.esp_source / "EFI" / "BOOT" / "BOOTX64.EFI").write_bytes(b"test-efi")
-        (self.system_source / "System32").mkdir()
-        (self.system_source / "System32" / "krnl.exe").write_bytes(b"test-kernel")
+        (self.esp_source / "magic" / "System32").mkdir(parents=True)
+        (self.esp_source / "magic" / "System32" / "hal.dll").write_bytes(b"test-hal")
+        (self.esp_source / "magic" / "System32" / "krnl.exe").write_bytes(b"test-kernel")
+        (self.system_source / "magic" / "System32").mkdir(parents=True)
+        (self.system_source / "magic" / "System32" / "hal.dll").write_bytes(b"test-hal")
+        (self.system_source / "magic" / "System32" / "krnl.exe").write_bytes(b"test-kernel")
+        (self.system_source / "magic" / "System32" / "smss.exe").write_bytes(b"test-smss")
         self.esp_package = self.base / "esp.spf"
         self.system_package = self.base / "system.spf"
         spf.build(self.esp_source, self.esp_package, "esp")

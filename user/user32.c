@@ -2033,7 +2033,9 @@ void DrawTaskbar(void) {
      * Clip to the taskbar plus the old/new menu footprint; the taskbar layer
      * is presented alone when the shared desktop background is established. */
     if(!u32_is_desktop_window() || !g_fw || !g_fh ||
-       u32_force_full_compose || u32_render_clip) {
+       u32_force_full_compose || u32_render_clip ||
+       (g_gpu_surface && !u32_shared_background_published) ||
+       u32_aero_bg_w!=g_fw || u32_aero_bg_h!=g_fh) {
         compose();
         return;
     }

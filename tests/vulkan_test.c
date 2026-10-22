@@ -567,7 +567,7 @@ int main(void) {
     SentinelVulkanCmdDrawTriangle(cmd, drawImage, &va, &vb, &vc);
     CHECK(((VkCmdObj *)cmd)->count == 1);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
+    { VkResult drawSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "render-pass draw submit result=%d\\n", (int)drawSubmitResult); CHECK(drawSubmitResult == VK_SUCCESS); }
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+2u] == 255);
     CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255);

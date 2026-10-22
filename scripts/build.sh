@@ -116,9 +116,22 @@ LLD_BIN="$(find_llvm_tool LLD_BIN)"
 run_cc() {
   local drv="$1" out line
   shift
+  # This workaround is only for compile-only calls. Passing a full driver
+  # plan through clang can accidentally feed host linker flags (for example
+  # --hash-style=gnu and elf_x86_64) back to clang as if they were compile
+  # arguments. Host-side executable tests use HOST_CC instead.
+  local compile_only=0 arg
+  for arg in "$@"; do
+    case "$arg" in -c|-S|-E) compile_only=1 ;; esac
+  done
+  if (( compile_only == 0 )); then
+    echo "error: run_cc only supports compile-only Clang invocations; use HOST_CC for host executables" >&2
+    return 2
+  fi
   out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
   while IFS= read -r line; do
-    [[ "$line" == \ \"* ]] || continue
+    # Only execute Clang's cc1 compile job, never the host linker job.
+    [[ "$line" == *"-cc1"* ]] || continue
     line="$(printf '%s' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
     eval "$line" </dev/null || return 1
   done <<<"$out"
@@ -409,7 +422,12 @@ cp "$SYS32/vulkan.dll" "$SYS32/vulkan-1.dll"
 echo "  -> Vulkan CPU runtime regression tests"
 # Compile the host-side test against the actual implementation sources. This
 # exercises the software runtime independently of the freestanding PE build.
-clang -fdeclspec -O2 -Wall \
+# This is a native host test, not a PE object. Use the host C compiler
+# directly; the Clang wrapper above intentionally executes compile-only cc1
+# jobs and must not reinterpret GNU ld flags as compiler arguments.
+HOST_CC="${HOST_CC:-cc}"
+need "$HOST_CC"
+"$HOST_CC" -O2 -Wall \
   "$ROOT/tests/vulkan_test.c" \
   -o "$B/vulkan_test"
 "$B/vulkan_test"

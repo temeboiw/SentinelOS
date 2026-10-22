@@ -20,6 +20,7 @@ static uint8_t mouse_pkt[3];
 static int mouse_idx;
 static int ps2_ready;
 static int mouse_pkt_count;
+static volatile int32_t game_mouse_dx, game_mouse_dy;
 /* Set-1 make/break state for low-latency game controls. */
 static volatile uint8_t kbd_down[128];
 
@@ -49,6 +50,8 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
 
         int dx = (int8_t)mouse_pkt[1];
         int dy = (int8_t)mouse_pkt[2];
+        game_mouse_dx += dx;
+        game_mouse_dy -= dy;
         /* overflow bits */
         if (mouse_pkt[0] & 0x40) dx = 0;
         if (mouse_pkt[0] & 0x80) dy = 0;
@@ -76,6 +79,17 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
     }
 }
 
+
+static uint32_t ps2_game_mouse_delta(void) {
+    ps2_poll();
+    int32_t dx=game_mouse_dx, dy=game_mouse_dy;
+    game_mouse_dx=0; game_mouse_dy=0;
+    if(dx>32767)dx=32767;
+    if(dx< -32768)dx=-32768;
+    if(dy>32767)dy=32767;
+    if(dy< -32768)dy=-32768;
+    return ((uint32_t)(uint16_t)dx) | ((uint32_t)(uint16_t)dy<<16);
+}
 static void ps2_poll(void) {
     for (int n = 0; n < 64; n++) {
         uint8_t st = ps2_inb(PS2_STAT);

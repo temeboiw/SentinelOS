@@ -41,7 +41,15 @@ using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
 
-struct Message { u32 hwnd,message; u64 wParam; long long lParam; u32 time; int x,y; };
+struct Message {
+    void *hwnd;
+    u32 message;
+    u32 _padding;
+    u64 wParam;
+    long long lParam;
+    u32 time;
+    int x, y;
+};
 struct SurfaceInfo { u64 va; u32 w,h,pitch; };
 struct GraphicsBootInfo {
     u32 size,version,backend,capabilities,width,height,pitch;
@@ -183,7 +191,7 @@ extern "C" void maze_mainCRTStartup() {
         print("maze.exe: required USER32 functions missing\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
-    window_handle=create_window(0,"SentinelMaze3D","SentinelOS - 3D Maze",0,70,50,900,620,0,0,0,0);
+    window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x00CF0000u,70,50,900,620,0,0,0,0);
     if(!window_handle) {
         print("maze.exe: window creation failed\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");

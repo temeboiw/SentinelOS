@@ -33,8 +33,13 @@ typedef struct {
     uint8_t repeat_u, repeat_v;
 } VkSoftTexture;
 
+typedef int (*VkSoftFragmentShader)(void *context, float u, float v, uint32_t *argb);
+uint32_t vksoft_sample_texture(const VkSoftTexture *texture, float u, float v);
 void vksoft_clear(VkSoftTarget *t, uint32_t argb, float depth);
 int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                     const VkSoftVertex *b, const VkSoftVertex *c,
                     const VkSoftTexture *tex);
+int vksoft_triangle_fragment(VkSoftTarget *t, const VkSoftVertex *a,
+                    const VkSoftVertex *b, const VkSoftVertex *c,
+                    VkSoftFragmentShader shader, void *context);
 #endif

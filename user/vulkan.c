@@ -778,8 +778,7 @@ __declspec(dllexport) VkResult VKAPI_CALL vkCreateSampler(VkDevice d,const VkSam
  *out=0;
  if(ci->magFilter>VK_FILTER_LINEAR||ci->minFilter>VK_FILTER_LINEAR||ci->mipmapMode>1u||
     ci->addressModeU>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||ci->addressModeV>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||ci->addressModeW>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE||
-    ci->addressModeU==1u||ci->addressModeV==1u||ci->addressModeW==1u||ci->anisotropyEnable||ci->compareEnable||ci->unnormalizedCoordinates||
-    ci->minLod>ci->maxLod)return VK_ERROR_FEATURE_NOT_PRESENT;
+    ci->addressModeU==1u||ci->addressModeV==1u||ci->addressModeW==1u||ci->anisotropyEnable||ci->compareEnable||ci->unnormalizedCoordinates)return VK_ERROR_FEATURE_NOT_PRESENT;
  for(unsigned i=0;i<32;i++)if(!g_samplers[i].magic){VkSamplerObj *p=&g_samplers[i];vk_zero(p,sizeof(*p));p->magic=VK_OBJECT_MAGIC;p->device=d;
   p->magFilter=ci->magFilter;p->minFilter=ci->minFilter;p->mipmapMode=ci->mipmapMode;p->addressU=ci->addressModeU;p->addressV=ci->addressModeV;p->addressW=ci->addressModeW;
   p->mipLodBias=ci->mipLodBias;p->minLod=ci->minLod;p->maxLod=ci->maxLod;*out=(VkSampler)p;return VK_SUCCESS;}

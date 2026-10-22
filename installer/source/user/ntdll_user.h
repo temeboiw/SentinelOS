@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -54,6 +54,10 @@ typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
 typedef struct { u64 sectors; u32 sector_size, present; } InstallerDiskInfo;
 static inline u64 NtQueryInstallerDisk(InstallerDiskInfo *out) { return sy3(SYS_QueryInstallerDisk, (u64)out, 0, 0); }
 static inline i64 NtInstallerDiskIo(u64 write, u64 sector, void *buffer) { return (i64)sy3(SYS_InstallerDiskIo, write, sector, (u64)buffer); }
+/* package: 0=esp.spf, 1=system.spf; copies at most 64 KiB per call */
+static inline i64 NtReadInstallerPayload(u64 package, u64 offset, void *buffer, u32 size) {
+    return (i64)NtSyscall6(SYS_ReadInstallerPayload, package, offset, (u64)buffer, size, 0, 0);
+}
 typedef struct {
     u32 size, version, backend, capabilities;
     u32 width, height, pitch;

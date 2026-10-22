@@ -298,6 +298,29 @@ int main(void) {
     CHECK(vk_spirv_execute_u32(float_words, sizeof(float_words)/4u, 3u, 25u, &executed));
     CHECK(executed == 3u); /* SConvert 32-bit bit-preserving form */
 
+    /* Function-local scalar memory: OpVariable, OpStore and OpLoad. */
+    const uint32_t local_memory_words[] = {
+        0x07230203u, 0x00010000u, 0u, 12u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (4u<<16)|15u, 0u, 3u, 0x6e69616du,
+        (2u<<16)|19u, 2u,
+        (3u<<16)|33u, 4u, 2u,
+        (4u<<16)|43u, 2u, 5u, 40u,
+        (4u<<16)|43u, 2u, 6u, 2u,
+        (5u<<16)|54u, 2u, 3u, 0u, 4u,
+        (2u<<16)|248u, 8u,
+        (4u<<16)|59u, 2u, 9u, 7u,
+        (3u<<16)|62u, 9u, 5u,
+        (4u<<16)|61u, 2u, 10u, 9u,
+        (5u<<16)|128u, 2u, 11u, 10u, 6u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    CHECK(vk_spirv_validate(local_memory_words, sizeof(local_memory_words)/4u));
+    CHECK(vk_spirv_execute_u32(local_memory_words, sizeof(local_memory_words)/4u, 3u, 11u, &executed));
+    CHECK(executed == 42u);
+
     /* Synchronous binary semaphore signal/wait behavior. */
     VkSemaphoreCreateInfo semci = {0};
     semci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

@@ -637,19 +637,43 @@ int main(void) {
     smci.pCode = exec_words;
     VkShaderModule vertexShader = 0, fragmentShader = 0;
     CHECK(vkCreateShaderModule(device, &smci, 0, &vertexShader) == VK_SUCCESS);
-    /* Add OpImageSampleImplicitLod to the fragment entry. The bounded software
-       pipeline resolves this instruction against the bound image-sampler descriptor. */
-    uint32_t texture_shader_words[sizeof(exec_words)/sizeof(exec_words[0]) + 5u];
-    uint32_t exec_word_count = (uint32_t)(sizeof(exec_words)/sizeof(exec_words[0]));
-    for (uint32_t wi = 0; wi < exec_word_count - 2u; ++wi) texture_shader_words[wi] = exec_words[wi];
-    texture_shader_words[3] = 14u;
-    uint32_t tex_sample_at = exec_word_count - 2u;
-    texture_shader_words[tex_sample_at++] = (5u<<16)|87u;
-    texture_shader_words[tex_sample_at++] = 2u; texture_shader_words[tex_sample_at++] = 13u;
-    texture_shader_words[tex_sample_at++] = 11u; texture_shader_words[tex_sample_at++] = 10u;
-    texture_shader_words[tex_sample_at++] = exec_words[exec_word_count - 2u];
-    texture_shader_words[tex_sample_at++] = exec_words[exec_word_count - 1u];
-    smci.codeSize = sizeof(texture_shader_words); smci.pCode = texture_shader_words;
+    /* Valid fragment SPIR-V: load interpolated UV and combined sampler,
+       apply a shader-side UV operation, sample the image, and store vec4 output. */
+    const uint32_t texture_fragment_words[] = {
+        0x07230203u, 0x00010000u, 0u, 23u, 0u,
+        (2u<<16)|17u, 1u,
+        (3u<<16)|14u, 0u, 1u,
+        (7u<<16)|15u, 4u, 14u, 0x6e69616du, 11u, 12u, 13u,
+        (4u<<16)|71u, 11u, 30u, 0u,
+        (4u<<16)|71u, 12u, 34u, 0u,
+        (4u<<16)|71u, 12u, 33u, 1u,
+        (4u<<16)|71u, 13u, 30u, 0u,
+        (2u<<16)|19u, 1u,
+        (3u<<16)|33u, 2u, 1u,
+        (3u<<16)|22u, 3u, 32u,
+        (4u<<16)|23u, 4u, 3u, 2u,
+        (4u<<16)|23u, 5u, 3u, 4u,
+        (9u<<16)|25u, 6u, 3u, 1u, 0u, 0u, 0u, 1u, 0u,
+        (3u<<16)|27u, 7u, 6u,
+        (4u<<16)|32u, 8u, 1u, 4u,
+        (4u<<16)|32u, 9u, 0u, 7u,
+        (4u<<16)|32u, 10u, 3u, 5u,
+        (4u<<16)|59u, 8u, 11u, 1u,
+        (4u<<16)|59u, 9u, 12u, 0u,
+        (4u<<16)|59u, 10u, 13u, 3u,
+        (4u<<16)|43u, 3u, 20u, 0u,
+        (4u<<16)|44u, 4u, 19u, 20u,
+        (5u<<16)|54u, 1u, 14u, 0u, 2u,
+        (2u<<16)|248u, 15u,
+        (4u<<16)|61u, 4u, 16u, 11u,
+        (4u<<16)|61u, 7u, 17u, 12u,
+        (5u<<16)|129u, 4u, 21u, 16u, 19u,
+        (5u<<16)|87u, 5u, 22u, 17u, 21u,
+        (3u<<16)|62u, 13u, 22u,
+        (1u<<16)|253u,
+        (1u<<16)|56u
+    };
+    smci.codeSize = sizeof(texture_fragment_words); smci.pCode = texture_fragment_words;
     CHECK(vkCreateShaderModule(device, &smci, 0, &fragmentShader) == VK_SUCCESS);
     VkPipelineShaderStageCreateInfo stages[2] = {{0}};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;

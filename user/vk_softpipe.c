@@ -135,7 +135,14 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
             z = wa * a->z + wb * b->z + wc * c->z;
             if (!(z >= 0.0f && z <= 1.0f)) continue;
             at = (size_t)y * t->stride_pixels + (uint32_t)x;
-            if (t->depth_test && t->depth && z > t->depth[at]) continue;
+            if (t->depth_test && t->depth) {
+                float old_z = t->depth[at];
+                uint8_t cmp = t->depth_compare;
+                if ((cmp == 0u && !(z < old_z)) ||
+                    (cmp == 1u && !(z <= old_z)) ||
+                    (cmp == 2u) || (cmp == 3u && z != old_z) ||
+                    (cmp == 4u && !(z > old_z))) continue;
+            }
             /* Perspective-correct varyings when clip-space reciprocal W
              * is supplied; retain affine behavior for legacy callers that
              * leave all inv_w values zero. Depth remains screen-linear. */

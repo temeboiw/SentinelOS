@@ -130,6 +130,19 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symbolic links are not allowed"):
             make_spf.build(self.source, self.package, "esp")
 
+    def test_boot_layout_check_accepts_complete_esp_and_system_packages(self):
+        (self.source / "magic" / "System32" / "krnl.exe").write_bytes(b"kernel-test-payload")
+        self.build_package()
+        make_spf.verify(self.package, expected_kind="esp", require_boot_layout=True)
+
+        system = self.root / "system"
+        (system / "magic" / "System32").mkdir(parents=True)
+        for name, data in (("hal.dll", b"hal"), ("krnl.exe", b"kernel"), ("smss.exe", b"session")):
+            (system / "magic" / "System32" / name).write_bytes(data)
+        system_package = self.root / "system.spf"
+        make_spf.build(system, system_package, "system")
+        make_spf.verify(system_package, expected_kind="system", require_boot_layout=True)
+
     def test_boot_layout_check_rejects_missing_kernel(self):
         self.build_package()
         with self.assertRaisesRegex(ValueError, "missing boot-critical path"):

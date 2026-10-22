@@ -229,6 +229,34 @@ static U32_FEEDBACK_SETTING u32_feedback_settings[16];
 typedef struct { void *parent; unsigned int id,value; int checked,used; char text[128]; } U32_DLGCTRL;
 static U32_DLGCTRL u32_dlgctrl[32];
 static U32_DLGCTRL *u32_dlgctrl_get(void *parent,unsigned int id,int create){int free_slot=-1;for(int i=0;i<32;i++){if(u32_dlgctrl[i].used&&u32_dlgctrl[i].parent==parent&&u32_dlgctrl[i].id==id)return &u32_dlgctrl[i];if(!u32_dlgctrl[i].used&&free_slot<0)free_slot=i;}if(create&&free_slot>=0){U32_DLGCTRL *c=&u32_dlgctrl[free_slot];c->used=1;c->parent=parent;c->id=id;c->value=0;c->checked=0;c->text[0]=0;return c;}return 0;}
+/* Renderer telemetry for Phase 1. These counters measure actual USER32
+ * composition work (not monitor refresh/vblank); they let Task Manager and
+ * graphics tests distinguish redraw pressure from presentation limits. */
+typedef struct {
+    u64 compose_calls;
+    u64 full_composes;
+    u64 clipped_composes;
+    u64 dirty_pixels;
+    u64 gpu_flush_calls;
+    u64 last_compose_cycles;
+    u64 max_compose_cycles;
+    u64 compose_fps;
+    u64 sample_tick_ms;
+    u64 sample_frames;
+} U32_RENDER_STATS;
+static U32_RENDER_STATS u32_render_stats;
+static u64 u32_compose_sample_frames;
+static u64 u32_rdtsc(void) {
+    u32 lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((u64)hi << 32) | lo;
+}
+__attribute__((dllexport)) BOOL GetSentinelRenderStats(U32_RENDER_STATS *out) {
+    if (!out) return 0;
+    *out = u32_render_stats;
+    return 1;
+}
+
 static unsigned int u32_caret_blink=530;
 static int u32_clip_left,u32_clip_top,u32_clip_right,u32_clip_bottom,u32_clip_active;
 static struct {void *hwnd;char name[48];void *data;int used;} u32_props[32];
@@ -714,6 +742,7 @@ static void u32_flush_raw(int x, int y, int w, int h) {
     if (x1<=x0 || y1<=y0) return;
     GfxRect rect={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
     (void)sy3(SYS_FlushGraphics,(u64)&rect,0,0);
+    u32_render_stats.gpu_flush_calls++;
 }
 
 static void u32_flush_graphics(int x, int y, int w, int h) {
@@ -999,6 +1028,20 @@ static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
     if (!g_front) return;
+    u64 compose_start_cycles=u32_rdtsc();
+    u32_render_stats.compose_calls++;
+    if (u32_render_clip) u32_render_stats.clipped_composes++;
+    else u32_render_stats.full_composes++;
+    u64 sample_now=u32_tick_now();
+    if (sample_now && !u32_render_stats.sample_tick_ms)
+        u32_render_stats.sample_tick_ms=sample_now;
+    if (sample_now && u32_render_stats.sample_tick_ms &&
+        sample_now-u32_render_stats.sample_tick_ms>=1000ULL) {
+        u32_render_stats.compose_fps=u32_compose_sample_frames;
+        u32_compose_sample_frames=0;
+        u32_render_stats.sample_tick_ms=sample_now;
+    }
+    u32_compose_sample_frames++;
 
     /* A shared-scanout repaint must remove the previous CPU cursor before
      * any window layer is submitted. Otherwise a partial kernel composition
@@ -1283,6 +1326,15 @@ static void compose(void) {
         u32_clip_x0=force_saved_x0; u32_clip_y0=force_saved_y0;
         u32_clip_x1=force_saved_x1; u32_clip_y1=force_saved_y1;
     }
+    u64 compose_end_cycles=u32_rdtsc();
+    u32_render_stats.last_compose_cycles=compose_end_cycles-compose_start_cycles;
+    if (u32_render_stats.last_compose_cycles>u32_render_stats.max_compose_cycles)
+        u32_render_stats.max_compose_cycles=u32_render_stats.last_compose_cycles;
+    u64 dx0=layer_x0<0?0:(u64)layer_x0, dy0=layer_y0<0?0:(u64)layer_y0;
+    u64 dx1=layer_x1>(int)g_fw?g_fw:(u64)layer_x1;
+    u64 dy1=layer_y1>(int)g_fh?g_fh:(u64)layer_y1;
+    if (dx1>dx0 && dy1>dy0)
+        u32_render_stats.dirty_pixels+=(dx1-dx0)*(dy1-dy0);
 }
 
 /* Recompose only a damaged screen rectangle. The static Aero wallpaper is

@@ -39,6 +39,9 @@ cp -a "$B/esp/." "$STAGE/esp/"; cp -a "$B/rootfs/." "$STAGE/system/"
 # loadufi can boot directly from removable media using its SimpleFileSystem path.
 mkdir -p "$STAGE/esp/magic"
 cp -a "$STAGE/system/magic/System32" "$STAGE/esp/magic/"
+for f in hal.dll krnl.exe smss.exe instlr.exe; do
+  [[ -s "$STAGE/esp/magic/System32/$f" ]] || { echo "error: installer ESP is missing boot image $f" >&2; exit 4; }
+done
 rm -f "$STAGE/system/game.exe" "$STAGE/system/maze.exe"
 rm -rf "$STAGE/system/UserTestApps" "$STAGE/system/games" "$STAGE/system/tests"
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: BOOTX64.EFI missing" >&2; exit 4; }

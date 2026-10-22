@@ -1252,9 +1252,54 @@ __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice
 __declspec(dllexport) PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst,const char *name) {
  if(!name)return (PFN_vkVoidFunction)0;
 #define IPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- IPROC(vkGetInstanceProcAddr);IPROC(vkCreateDescriptorSetLayout);IPROC(vkDestroyDescriptorSetLayout);IPROC(vkCreatePipelineLayout);IPROC(vkDestroyPipelineLayout);IPROC(vkCreateDescriptorPool);IPROC(vkDestroyDescriptorPool);IPROC(vkResetDescriptorPool);IPROC(vkAllocateDescriptorSets);IPROC(vkFreeDescriptorSets);IPROC(vkUpdateDescriptorSets);IPROC(vkCmdBindDescriptorSets);IPROC(vkCreateImageView);IPROC(vkDestroyImageView);IPROC(vkCreateRenderPass);IPROC(vkDestroyRenderPass);IPROC(vkCreateFramebuffer);IPROC(vkDestroyFramebuffer);IPROC(vkCmdBeginRenderPass);IPROC(vkCmdEndRenderPass);IPROC(vkGetDeviceProcAddr);IPROC(vkEnumerateInstanceVersion);IPROC(vkEnumerateInstanceExtensionProperties);IPROC(vkEnumerateInstanceLayerProperties);IPROC(vkCreateInstance);
+
+ /* A null instance is only valid for global commands. Do not expose
+  * instance/device commands until the caller supplies a live instance. */
+ IPROC(vkGetInstanceProcAddr);
+ IPROC(vkEnumerateInstanceVersion);
+ IPROC(vkEnumerateInstanceExtensionProperties);
+ IPROC(vkEnumerateInstanceLayerProperties);
+ IPROC(vkCreateInstance);
  if(!inst_ok(inst))return (PFN_vkVoidFunction)0;
- IPROC(vkDestroyInstance);IPROC(vkCreateSampler);IPROC(vkDestroySampler);IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);IPROC(vkGetPhysicalDeviceImageFormatProperties);IPROC(vkGetPhysicalDeviceQueueFamilyProperties);IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);IPROC(vkDestroyDevice);IPROC(vkGetDeviceQueue);IPROC(vkDeviceWaitIdle);IPROC(vkQueueWaitIdle);IPROC(vkCreateBuffer);IPROC(vkDestroyBuffer);IPROC(vkGetBufferMemoryRequirements);IPROC(vkCreateImage);IPROC(vkDestroyImage);IPROC(vkGetImageMemoryRequirements);IPROC(vkBindImageMemory);IPROC(vkAllocateMemory);IPROC(vkFreeMemory);IPROC(vkBindBufferMemory);IPROC(vkMapMemory);IPROC(vkUnmapMemory);IPROC(vkFlushMappedMemoryRanges);IPROC(vkInvalidateMappedMemoryRanges);IPROC(vkCreateCommandPool);IPROC(vkResetCommandPool);IPROC(vkDestroyCommandPool);IPROC(vkAllocateCommandBuffers);IPROC(vkFreeCommandBuffers);IPROC(vkBeginCommandBuffer);IPROC(vkEndCommandBuffer);IPROC(vkResetCommandBuffer);IPROC(vkCmdFillBuffer);IPROC(vkCmdUpdateBuffer);IPROC(vkCmdCopyImage);IPROC(vkCmdCopyBuffer);IPROC(vkCmdCopyBufferToImage);IPROC(vkCmdCopyImageToBuffer);IPROC(vkCmdClearColorImage);IPROC(vkCmdPipelineBarrier);IPROC(vkQueueSubmit);IPROC(vkCreateFence);IPROC(vkDestroyFence);IPROC(vkGetFenceStatus);IPROC(vkWaitForFences);IPROC(vkResetFences);IPROC(vkCreateSemaphore);IPROC(vkDestroySemaphore);IPROC(vkCreateShaderModule);IPROC(vkDestroyShaderModule);IPROC(vkCreateGraphicsPipelines);IPROC(vkDestroyPipeline);IPROC(vkCmdBindPipeline);IPROC(vkCmdBindVertexBuffers);IPROC(vkCmdDraw);IPROC(SentinelVulkanCmdBindColorTarget);
+
+ IPROC(vkDestroyInstance);
+ IPROC(vkGetDeviceProcAddr);
+ IPROC(vkCreateDescriptorSetLayout);IPROC(vkDestroyDescriptorSetLayout);
+ IPROC(vkCreatePipelineLayout);IPROC(vkDestroyPipelineLayout);
+ IPROC(vkCreateDescriptorPool);IPROC(vkDestroyDescriptorPool);
+ IPROC(vkResetDescriptorPool);IPROC(vkAllocateDescriptorSets);
+ IPROC(vkFreeDescriptorSets);IPROC(vkUpdateDescriptorSets);
+ IPROC(vkCmdBindDescriptorSets);IPROC(vkCreateImageView);
+ IPROC(vkDestroyImageView);IPROC(vkCreateRenderPass);
+ IPROC(vkDestroyRenderPass);IPROC(vkCreateFramebuffer);
+ IPROC(vkDestroyFramebuffer);IPROC(vkCmdBeginRenderPass);
+ IPROC(vkCmdEndRenderPass);IPROC(vkCreateSampler);IPROC(vkDestroySampler);
+ IPROC(vkEnumeratePhysicalDevices);IPROC(vkGetPhysicalDeviceProperties);
+ IPROC(vkGetPhysicalDeviceFeatures);IPROC(vkGetPhysicalDeviceFormatProperties);
+ IPROC(vkGetPhysicalDeviceImageFormatProperties);
+ IPROC(vkGetPhysicalDeviceQueueFamilyProperties);
+ IPROC(vkGetPhysicalDeviceMemoryProperties);IPROC(vkCreateDevice);
+ IPROC(vkDestroyDevice);IPROC(vkGetDeviceQueue);IPROC(vkDeviceWaitIdle);
+ IPROC(vkQueueWaitIdle);IPROC(vkCreateBuffer);IPROC(vkDestroyBuffer);
+ IPROC(vkGetBufferMemoryRequirements);IPROC(vkCreateImage);
+ IPROC(vkDestroyImage);IPROC(vkGetImageMemoryRequirements);
+ IPROC(vkBindImageMemory);IPROC(vkAllocateMemory);IPROC(vkFreeMemory);
+ IPROC(vkBindBufferMemory);IPROC(vkMapMemory);IPROC(vkUnmapMemory);
+ IPROC(vkFlushMappedMemoryRanges);IPROC(vkInvalidateMappedMemoryRanges);
+ IPROC(vkCreateCommandPool);IPROC(vkResetCommandPool);
+ IPROC(vkDestroyCommandPool);IPROC(vkAllocateCommandBuffers);
+ IPROC(vkFreeCommandBuffers);IPROC(vkBeginCommandBuffer);
+ IPROC(vkEndCommandBuffer);IPROC(vkResetCommandBuffer);
+ IPROC(vkCmdFillBuffer);IPROC(vkCmdUpdateBuffer);IPROC(vkCmdCopyImage);
+ IPROC(vkCmdCopyBuffer);IPROC(vkCmdCopyBufferToImage);
+ IPROC(vkCmdCopyImageToBuffer);IPROC(vkCmdClearColorImage);
+ IPROC(vkCmdPipelineBarrier);IPROC(vkQueueSubmit);IPROC(vkCreateFence);
+ IPROC(vkDestroyFence);IPROC(vkGetFenceStatus);IPROC(vkWaitForFences);
+ IPROC(vkResetFences);IPROC(vkCreateSemaphore);IPROC(vkDestroySemaphore);
+ IPROC(vkCreateShaderModule);IPROC(vkDestroyShaderModule);
+ IPROC(vkCreateGraphicsPipelines);IPROC(vkDestroyPipeline);
+ IPROC(vkCmdBindPipeline);IPROC(vkCmdBindVertexBuffers);IPROC(vkCmdDraw);
+ IPROC(SentinelVulkanCmdBindColorTarget);
 #undef IPROC
  return (PFN_vkVoidFunction)0;
 }

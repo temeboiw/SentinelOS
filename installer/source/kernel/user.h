@@ -2599,7 +2599,7 @@ static Frame *syscall_handler(Frame *f) {
            The caller may access one sector at a time; bounds are enforced here. */
         if (!PspIsSystemProcess(MmCurrentProcess) || !vb_ok ||
             f->rsi >= vb_capacity_sectors || !f->rdx ||
-            !MmValidateUserRange(MmCurrentProcess, f->rdx, 512, f->rdi == 1)) {
+            !MmValidateUserRange(MmCurrentProcess, f->rdx, 512, f->rdi == 0)) {
             f->rax = (uint64_t)-1LL;
             return f;
         }

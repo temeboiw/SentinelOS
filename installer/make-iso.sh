@@ -31,7 +31,7 @@ TARGET_SYSTEM_IMG="$OUT/system.img"
 INSTALL_SUMS="$OUT/install.sha256"
 ESP_IMAGE_SIZE_MIB="${INSTALL_ESP_SIZE_MIB:-128}"
 SYSTEM_IMAGE_SIZE_MIB="${INSTALL_SYSTEM_SIZE_MIB:-512}"
-[[ "$ESP_IMAGE_SIZE_MIB" =~ ^[0-9]+$ ]] && (( ESP_IMAGE_SIZE_MIB >= 128 && ESP_IMAGE_SIZE_MIB <= 512 )) || { echo "error: INSTALL_ESP_SIZE_MIB must be 128..512" >&2; exit 2; }
+[[ "$ESP_IMAGE_SIZE_MIB" == "128" ]] || { echo "error: INSTALL_ESP_SIZE_MIB must be exactly 128 to match the native installer GPT layout" >&2; exit 2; }
 [[ "$SYSTEM_IMAGE_SIZE_MIB" =~ ^[0-9]+$ ]] && (( SYSTEM_IMAGE_SIZE_MIB >= 512 && SYSTEM_IMAGE_SIZE_MIB <= 1024 )) || { echo "error: INSTALL_SYSTEM_SIZE_MIB must be 512..1024" >&2; exit 2; }
 rm -f "$TARGET_ESP_IMG" "$TARGET_SYSTEM_IMG"
 dd if=/dev/zero of="$TARGET_ESP_IMG" bs=1M count="$ESP_IMAGE_SIZE_MIB" status=none

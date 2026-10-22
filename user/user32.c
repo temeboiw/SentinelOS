@@ -818,6 +818,17 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
 
     u32_layers_rebuild();
     int desktop_owner=u32_is_desktop_window();
+    /* Filter the stable layer descriptors once per rectangle, not once per
+     * pixel. This keeps visibility/pointer checks out of the hot inner loop. */
+    u32 *visible_layers[U32_LAYER_SURFACE_COUNT];
+    unsigned int visible_layer_count=0;
+    if(desktop_owner) {
+        for(unsigned int li=0;li<u32_layer_stack_count;li++) {
+            U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
+            if(layer->visible&&layer->pixels)
+                visible_layers[visible_layer_count++]=layer->pixels;
+        }
+    }
     for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
         u32 at=(u32)y*g_fw+(u32)x;
         u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x];
@@ -834,11 +845,8 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
         if(desktop_owner) {
             c=(u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
                 ? u32_aero_bg_cache[at] : 0xFF000000u;
-            for(unsigned int li=0;li<u32_layer_stack_count;li++) {
-                U32_LAYER_SURFACE *layer=&u32_layer_stack[li];
-                if(layer->visible&&layer->pixels)
-                    c=u32_alpha_over(c,layer->pixels[at]);
-            }
+            for(unsigned int li=0;li<visible_layer_count;li++)
+                c=u32_alpha_over(c,visible_layers[li][at]);
         } else {
             c=*dst;
             c=u32_alpha_over(c,u32_window_layer[at]);

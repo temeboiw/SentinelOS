@@ -124,6 +124,14 @@ run_cc() {
     echo "error: internal PE Clang wrapper received a link action; use the host compiler for native executables" >&2
     return 2
   fi
+  # Integrated-assembler inputs emit -cc1as, not -cc1. Run the real Clang
+  # driver directly for compile-only assembly so objects such as the SMP
+  # trampoline are actually produced; this still cannot invoke a linker.
+  for arg in "$@"; do
+    case "$arg" in
+      *.S|*.s|*.asm) "$drv" "$@"; return $? ;;
+    esac
+  done
   out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
   while IFS= read -r line; do
     # Clang prints one quoted command per line. Match an actual cc1 token,

@@ -567,7 +567,7 @@ int main(void) {
     SentinelVulkanCmdDrawTriangle(cmd, drawImage, &va, &vb, &vc);
     CHECK(((VkCmdObj *)cmd)->count == 1);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    { VkResult drawSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "render-pass draw submit result=%d\\n", (int)drawSubmitResult); CHECK(drawSubmitResult == VK_SUCCESS); }
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+2u] == 255);
     CHECK(((uint8_t *)mapped)[(2u*8u+2u)*4u+3u] == 255);
@@ -691,10 +691,10 @@ int main(void) {
     renderBegin.clearValueCount = 1; renderBegin.pClearValues = &drawClear;
     vkCmdBeginRenderPass(cmd, &renderBegin, 0);
     vkCmdDraw(cmd, 3, 1, 0, 0);
-    fprintf(stderr, "depth state test=%u write=%u compare=%u bound-depth=%p op=%u count=%u state=%u pipeline=%p vertex=%p target=%p offset=%llu vbsize=%llu\\n", (unsigned)pipeline->depth_test, (unsigned)pipeline->depth_write, (unsigned)pipeline->depth_compare, (void*)cmd->bound_depth_target, (unsigned)cmd->ops[cmd->count-2].op, (unsigned)cmd->count, (unsigned)cmd->state, (void*)cmd->bound_pipeline, (void*)cmd->bound_vertex, (void*)cmd->bound_target, (unsigned long long)cmd->bound_vertex_offset, (unsigned long long)(cmd->bound_vertex?cmd->bound_vertex->size:0));
+
     vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d debug=%u\\n", (int)rpSubmitResult, (unsigned)g_vk_debug); CHECK(rpSubmitResult == VK_SUCCESS); }
+    CHECK(vkQueueSubmit(queue, 1, &si, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     /* The shader-driven draw must shade an interior pixel, preserve opaque
      * alpha, and leave pixels outside the triangle untouched. */

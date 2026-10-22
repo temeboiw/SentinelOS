@@ -28,7 +28,7 @@ static void put_guid(unsigned char*p,const unsigned char*g){for(int i=0;i<16;i++
 static int write_lba(u64 lba,const unsigned char*sector){unsigned char copy[512];for(int i=0;i<512;i++)copy[i]=sector[i];return NtInstallerDiskIo(1,lba,copy)==0?0:-1;}
 static int make_gpt(u64 sectors){
  if(sectors<262144ULL)return -1;
- const u64 esp_first=2048,esp_count=131072,sys_first=esp_first+esp_count,backup=sectors-1,usable_last=sectors-34;
+ const u64 esp_first=2048,esp_count=262144,sys_first=esp_first+esp_count,backup=sectors-1,usable_last=sectors-34;
  if(sys_first>=usable_last)return -2;
  static const unsigned char efi_type[16]={0x28,0x73,0x2A,0xC1,0x1F,0xF8,0xD2,0x11,0xBA,0x4B,0x00,0xA0,0xC9,0x3E,0xC9,0x3B};
  static const unsigned char linux_type[16]={0xAF,0x3D,0xC6,0x0F,0x83,0x84,0x72,0x47,0x8E,0x79,0x3D,0x69,0xD8,0x47,0x7D,0xE4};
@@ -59,6 +59,32 @@ static int make_gpt(u64 sectors){
  if(sector[0]!='E'||sector[1]!='F'||sector[2]!='I'||sector[3]!=' '||sector[4]!='P'||sector[5]!='A'||sector[6]!='R'||sector[7]!='T')return -8;
  return 0;
 }
+
+static int format_fat32(u64 start,u32 total){
+ if(total<131072u)return -1;
+ const u32 reserved=32,fats=2,spc=1;
+ u32 fatsz=1;
+ for(int i=0;i<8;i++){u32 clusters=(total-reserved-fats*fatsz)/spc;u32 need=(clusters+2+127)/128;if(need==fatsz)break;fatsz=need;}
+ if(reserved+fats*fatsz>=total)return -2;
+ u32 clusters=(total-reserved-fats*fatsz)/spc;
+ unsigned char s[512];for(int i=0;i<512;i++)s[i]=0;
+ s[0]=0xEB;s[1]=0x58;s[2]=0x90;
+ const char oem[]="SENTOSFAT";for(int i=0;i<8;i++)s[3+i]=(unsigned char)oem[i];
+ s[11]=0;s[12]=2;s[13]=1;s[14]=32;s[16]=2;s[21]=0xF8;s[24]=63;s[26]=255;
+ put32(s+28,(u32)start);put32(s+32,total);put32(s+36,fatsz);put32(s+44,2);s[48]=1;s[50]=6;s[64]=0x80;s[66]=0x29;put32(s+67,0x53454E54);
+ const char label[]="SENTINELOSF";for(int i=0;i<11;i++)s[71+i]=(unsigned char)label[i];
+ const char fs[]="FAT32   ";for(int i=0;i<8;i++)s[82+i]=(unsigned char)fs[i];s[510]=0x55;s[511]=0xAA;
+ if(write_lba(start,s)<0)return -3;if(write_lba(start+6,s)<0)return -4;
+ for(int i=0;i<512;i++)s[i]=0;put32(s,0x41615252);put32(s+484,0x61417272);put32(s+488,clusters-1);put32(s+492,3);put32(s+508,0xAA550000);
+ if(write_lba(start+1,s)<0||write_lba(start+7,s)<0)return -5;
+ for(u32 i=0;i<reserved;i++){if(i==0||i==1||i==6||i==7)continue;for(int j=0;j<512;j++)s[j]=0;if(write_lba(start+i,s)<0)return -6;}
+ u64 fat0=start+reserved;
+ for(u32 i=0;i<fats*fatsz;i++){for(int j=0;j<512;j++)s[j]=0;if(write_lba(fat0+i,s)<0)return -7;}
+ for(int copy=0;copy<2;copy++){for(int j=0;j<512;j++)s[j]=0;put32(s,0x0FFFFFF8);put32(s+4,0xFFFFFFFF);put32(s+8,0x0FFFFFFF);if(write_lba(fat0+(u64)copy*fatsz,s)<0)return -8;}
+ if(NtInstallerDiskIo(0,start,s)!=0)return -9;
+ if(s[510]!=0x55||s[511]!=0xAA||s[82]!='F')return -10;
+ return 0;
+}
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){
  u32 w=b->w,h=b->h,p=b->pitch;
  for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
@@ -85,7 +111,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
-   text(f,p,w,h,x+38,y+178,install_state==1?"GPT partitions created; filesystem step pending":install_state<0?"Partition write failed - check disk and reboot":"Ready to partition the selected disk",install_state==1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
+   text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
    text(f,p,w,h,x+24,y+78,"No supported VirtIO block disk was detected.",0xFF9B3B24,1);
    text(f,p,w,h,x+24,y+102,"Check that the VM has a VirtIO disk attached.",0xFF203944,1);
@@ -93,8 +119,8 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3E9EC);
    text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
   }
-  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&install_state==0?0xFF176B8C:0xFF9CAEB5);
-  text(f,p,w,h,x+pw-128,y+ph-45,install_state==1?"Created":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
+  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&install_state<2?0xFF176B8C:0xFF9CAEB5);
+  text(f,p,w,h,x+pw-128,y+ph-45,install_state==2?"Formatted":install_state==1?"Format ESP":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
   rect(f,p,w,h,x+24,y+ph-56,118,34,0xFF176B8C);
   text(f,p,w,h,x+57,y+ph-45,"Back",0xFFFFFFFF,1);
  }
@@ -114,7 +140,7 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state!=1){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}
+   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<2){if(install_state==0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}

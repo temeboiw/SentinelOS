@@ -21,7 +21,6 @@ static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
   else if(ch=='+') f[(u64)py*b->pitch+px]=0xFFFFFFFF;
  }
 }
-static u64 read_be64(const unsigned char*p){u64 v=0;for(int i=0;i<8;i++)v=(v<<8)|p[i];return v;}
 static int payload_image_valid(u64 image,u64 total){
  if((total&511ULL)!=0)return 0;
  if(image==0)return total==128ULL*1024*1024;
@@ -67,91 +66,6 @@ static int make_gpt(u64 sectors){
  return 0;
 }
 
-static int format_fat32(u64 start,u32 total){
- if(total<131072u)return -1;
- const u32 reserved=32,fats=2,spc=1;
- u32 fatsz=1;
- for(int i=0;i<8;i++){u32 clusters=(total-reserved-fats*fatsz)/spc;u32 need=(clusters+2+127)/128;if(need==fatsz)break;fatsz=need;}
- if(reserved+fats*fatsz>=total)return -2;
- u32 clusters=(total-reserved-fats*fatsz)/spc;
- unsigned char s[512];for(int i=0;i<512;i++)s[i]=0;
- s[0]=0xEB;s[1]=0x58;s[2]=0x90;
- const char oem[]="SENTOSFAT";for(int i=0;i<8;i++)s[3+i]=(unsigned char)oem[i];
- s[11]=0;s[12]=2;s[13]=1;s[14]=32;s[16]=2;s[21]=0xF8;s[24]=63;s[26]=255;
- put32(s+28,(u32)start);put32(s+32,total);put32(s+36,fatsz);put32(s+44,2);s[48]=1;s[50]=6;s[64]=0x80;s[66]=0x29;put32(s+67,0x53454E54);
- const char label[]="SENTINELOSF";for(int i=0;i<11;i++)s[71+i]=(unsigned char)label[i];
- const char fs[]="FAT32   ";for(int i=0;i<8;i++)s[82+i]=(unsigned char)fs[i];s[510]=0x55;s[511]=0xAA;
- if(write_lba(start,s)<0)return -3;if(write_lba(start+6,s)<0)return -4;
- for(int i=0;i<512;i++)s[i]=0;put32(s,0x41615252);put32(s+484,0x61417272);put32(s+488,clusters-1);put32(s+492,3);put32(s+508,0xAA550000);
- if(write_lba(start+1,s)<0||write_lba(start+7,s)<0)return -5;
- for(u32 i=0;i<reserved;i++){if(i==0||i==1||i==6||i==7)continue;for(int j=0;j<512;j++)s[j]=0;if(write_lba(start+i,s)<0)return -6;}
- u64 fat0=start+reserved;
- for(u32 i=0;i<fats*fatsz;i++){for(int j=0;j<512;j++)s[j]=0;if(write_lba(fat0+i,s)<0)return -7;}
- for(int copy=0;copy<2;copy++){for(int j=0;j<512;j++)s[j]=0;put32(s,0x0FFFFFF8);put32(s+4,0xFFFFFFFF);put32(s+8,0x0FFFFFFF);if(write_lba(fat0+(u64)copy*fatsz,s)<0)return -8;}
- if(NtInstallerDiskIo(0,start,s)!=0)return -9;
- if(s[510]!=0x55||s[511]!=0xAA||s[82]!='F'||s[13]!=1||s[14]!=32||s[16]!=2||s[48]!=1||s[50]!=6)return -10;
- if(NtInstallerDiskIo(0,start+1,s)!=0||s[0]!=0x52||s[1]!=0x52||s[2]!=0x61||s[3]!=0x41||s[510]!=0x00||s[511]!=0x00)return -11;
- if(NtInstallerDiskIo(0,start+reserved,s)!=0||s[0]!=0xF8||s[1]!=0xFF||s[2]!=0xFF||s[3]!=0x0F)return -12;
- return 0;
-}
-
-static void put16(unsigned char*p,unsigned short v){p[0]=(unsigned char)v;p[1]=(unsigned char)(v>>8);}
-static int write_block(u64 block,const unsigned char*b){for(int i=0;i<8;i++)if(write_lba(block*8+(u64)i,b+i*512)<0)return -1;return 0;}
-static int format_ext4(u64 start,u64 sectors){
- const u32 bpg=32768,ipg=1024,isize=256,itable_blocks=64;
- u64 blocks=sectors/8;if(blocks<65536)return -1;
- u32 groups=(u32)((blocks+bpg-1)/bpg);if(groups>32)return -2;
- u32 total_inodes=groups*ipg;u32 free_blocks=0;
- static unsigned char gd[4096];static unsigned char sb[1024];static unsigned char bm[4096];static unsigned char ibm[4096];static unsigned char blk[4096];
- for(u32 i=0;i<sizeof(gd);i++)gd[i]=0;
- for(u32 i=0;i<sizeof(sb);i++)sb[i]=0;
- for(u32 g=0;g<groups;g++){
-  u64 gs=(u64)g*bpg;u32 actual=(u32)((blocks-gs)>bpg?bpg:(blocks-gs));
-  int backup=(g==0||g==1||g==3||g==5||g==7||g==9||g==25);
-  u32 reserve=backup?2:0;u32 bb=(u32)(gs+reserve),ib=bb+1,it=ib+1;
-  u32 used=reserve+2+itable_blocks+(g==0?1:0);
-  if(actual<used)return -3;
-  unsigned char*d=gd+g*32;put32(d,bb);put32(d+4,ib);put32(d+8,it);
-  put16(d+12,(unsigned short)(actual-used));put16(d+14,(unsigned short)(ipg-(g==0?10:0)));put16(d+16,(unsigned short)(g==0?1:0));
-  free_blocks+=actual-used;
-  for(u32 i=0;i<sizeof(bm);i++)bm[i]=0;
-  for(u32 i=0;i<used;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));
-  for(u32 i=actual;i<bpg;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));
-  for(u32 i=0;i<sizeof(ibm);i++)ibm[i]=0;
-  if(g==0)for(u32 i=0;i<10;i++)ibm[i>>3]|=(unsigned char)(1u<<(i&7));
-  if(write_block(start/8+bb,bm)<0||write_block(start/8+ib,ibm)<0)return -4;
-  for(u32 i=0;i<itable_blocks;i++){for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;if(write_block(start/8+it+i,blk)<0)return -5;}
-  if(g==0){
-   /* inode 2: root directory, using the extent format read by SentinelOS ext4. */
-   for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
-   unsigned char*ino=blk+isize;put16(ino,0x41ED);put32(ino+4,4096);put16(ino+26,2);put32(ino+28,8);put32(ino+32,0x80000);
-   put16(ino+40,0xF30A);put16(ino+42,1);put16(ino+44,4);put16(ino+46,0);put32(ino+52,0);put16(ino+56,1);put16(ino+58,0);put32(ino+60,gs+reserve+2+itable_blocks);
-   if(write_block(start/8+it,blk)<0)return -6;
-   for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
-   put32(blk,2);put16(blk+4,12);blk[6]=1;blk[7]=2;blk[8]='.';
-   put32(blk+12,2);put16(blk+16,4084);blk[18]=2;blk[19]=2;blk[20]='.';blk[21]='.';
-   if(write_block(start/8+gs+reserve+2+itable_blocks,blk)<0)return -7;
-  }
- }
- put32(sb,total_inodes);put32(sb+4,(u32)blocks);put32(sb+12,free_blocks);put32(sb+16,total_inodes-10);
- put32(sb+20,0);put32(sb+24,2);put32(sb+28,2);put32(sb+32,bpg);put32(sb+36,bpg);put32(sb+40,ipg);
- put16(sb+56,0xEF53);put16(sb+58,1);put16(sb+60,1);put32(sb+76,1);put32(sb+84,11);put16(sb+88,isize);
- put32(sb+92,0);put32(sb+96,0x42);put32(sb+100,0x1);put32(sb+104,0x53454E54);const char label[]="SENTINELOS";for(int i=0;i<10;i++)sb[120+i]=(unsigned char)label[i];
- put16(sb+254,32);
- /* Primary superblock starts 1024 bytes into the partition. */
- for(int i=0;i<2;i++)if(write_lba(start+2+(u64)i,sb+i*512)<0)return -8;
- /* Primary group descriptor table at block 1. */
- for(int i=0;i<8;i++)if(write_lba(start+8+(u64)i,gd+i*512)<0)return -9;
- /* Keep backup superblocks and descriptor tables coherent for sparse-super groups. */
- for(u32 g=1;g<groups;g++)if(g==1||g==3||g==5||g==7||g==9||g==25){
-  u64 glba=start+(u64)g*bpg*8;
-  for(int i=0;i<2;i++)if(write_lba(glba+2+(u64)i,sb+i*512)<0)return -10;
-  for(int i=0;i<8;i++)if(write_lba(glba+8+(u64)i,gd+i*512)<0)return -11;
- }
- unsigned char verify[512];if(NtInstallerDiskIo(0,start+2,verify)!=0||verify[56]!=0x53||verify[57]!=0xEF)return -12;
- if(NtInstallerDiskIo(0,start+8*68,verify)!=0||verify[0]!=2||verify[8]!='.'||verify[20]!='.')return -13;
- return 0;
-}
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){
  u32 w=b->w,h=b->h,p=b->pitch;
  for(u32 y=0;y<h;y++){u32 c=0xFFEDF7FA-(y%16);for(u32 x=0;x<w;x++)f[(u64)y*p+x]=c;}
@@ -173,11 +87,11 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
  }else{
   if(disk_present){
    char sizebuf[24];decstr(disk_mib,sizebuf);
-   text(f,p,w,h,x+24,y+78,"A VirtIO block disk was detected.",0xFF1B6C40,1);
+   text(f,p,w,h,x+24,y+78,"Detected install target: VirtIO block disk.",0xFF1B6C40,1);
    text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
-   text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
-   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Payload integrity: SHA-256 verified":"Payload integrity: failed/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
+   text(f,p,w,h,x+24,y+126,"WARNING: all data on this disk will be erased.",0xFF203944,1);
+   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Image integrity: SHA-256 verified":"Image integrity: failed/missing",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
    text(f,p,w,h,x+38,y+178,install_state==1?"Ready to install SentinelOS":install_state==2?"Writing filesystem images":install_state==3?"Installation complete; remove media and reboot":install_state<0?"Installation failed - see setup log":"Ready to install SentinelOS",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{

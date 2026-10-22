@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42, SYS_QueryInstallerPayload = 43, SYS_VerifyInstallerPayload = 44, SYS_InstallerInstallImage = 45
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42, SYS_QueryInstallerPayload = 43, SYS_VerifyInstallerPayload = 44, SYS_InstallerInstallImage = 45, SYS_GetTickCount = 24
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -128,8 +128,8 @@ static inline i64 NtQueryInstallerPayload(u64 package, u64 *size_out) {
 static inline i64 NtVerifyInstallerPayload(u64 package) {
     return (i64)NtSyscall6(SYS_VerifyInstallerPayload, package, 0, 0, 0, 0, 0);
 }
-static inline i64 NtInstallerInstallImage(u64 image) {
-    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, 0, 0, 0, 0, 0);
+static inline i64 NtInstallerInstallImage(u64 image, u64 offset, u64 bytes) {
+    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, offset, bytes, 0, 0, 0);
 }
 static inline i64 NtReadInstallerPayload(u64 package, u64 offset, void *buffer, u32 size) {
     return (i64)NtSyscall6(SYS_ReadInstallerPayload, package, offset, (u64)buffer, size, 0, 0);

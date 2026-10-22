@@ -53,6 +53,7 @@
 #define SYS_NtGetGameMouseDelta              39
 #define SYS_NtQueryInstallerDisk              40
 #define SYS_NtInstallerDiskIo                 41
+#define SYS_NtReadInstallerPayload              42
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
@@ -2591,6 +2592,30 @@ static Frame *syscall_handler(Frame *f) {
         info.present = (vb_ok && vb_capacity_sectors != 0) ? 1u : 0u;
         *(InstallerDiskInfo *)(uint64_t)f->rdi = info;
         f->rax = info.present ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtReadInstallerPayload: {
+        /* Only the trusted setup process can read the immutable package buffers
+           staged by the UEFI loader. Chunks are capped to bound kernel work. */
+        if (!PspIsSystemProcess(MmCurrentProcess) || f->rdi > 1 ||
+            !user_bootinfo || f->rcx > 65536ULL ||
+            (f->rcx && (!f->rdx || !MmValidateUserRange(MmCurrentProcess, f->rdx, f->rcx, 1)))) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        const char *wanted = f->rdi == 0 ? "esp.spf" : "system.spf";
+        BootModule *package = PspFindModule(user_bootinfo, wanted);
+        if (!package || f->rsi > package->size || f->rcx > package->size - f->rsi) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        if (f->rcx) {
+            const uint8_t *src = (const uint8_t *)(HHDM_BASE + package->phys + f->rsi);
+            uint8_t *dst = (uint8_t *)(uint64_t)f->rdx;
+            for (uint64_t i = 0; i < f->rcx; i++) dst[i] = src[i];
+        }
+        f->rax = f->rcx;
         return f;
     }
 

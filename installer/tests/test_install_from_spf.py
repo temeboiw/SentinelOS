@@ -120,6 +120,19 @@ class InstallCoordinatorTests(unittest.TestCase):
         self.assertIn("non-overlapping", output)
         self.assertFalse((self.esp_target / "EFI").exists())
 
+    def test_incomplete_boot_payload_rejected_before_writing(self):
+        incomplete = self.base / "incomplete-esp-source"
+        (incomplete / "EFI" / "BOOT").mkdir(parents=True)
+        (incomplete / "EFI" / "BOOT" / "BOOTX64.EFI").write_bytes(b"test-efi")
+        package = self.base / "incomplete-esp.spf"
+        spf.build(incomplete, package, "esp")
+        self.esp_package = package
+        result, output = self.invoke("--apply", "--confirm", installer.CONFIRMATION)
+        self.assertEqual(result, 1)
+        self.assertIn("missing boot-critical path", output)
+        self.assertFalse((self.esp_target / "EFI").exists())
+        self.assertFalse((self.system_target / "magic").exists())
+
     def test_wrong_package_kind_rejected_before_writing(self):
         wrong_esp = self.base / "wrong-esp.spf"
         spf.build(self.system_source, wrong_esp, "system")

@@ -36,7 +36,7 @@ static void u32_wide_to_ansi(char *out, unsigned int cap, const unsigned short *
 static const char *u32_clip_lookup(unsigned int format);
 
 enum {
-    SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10,
+    SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
     SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37
@@ -55,6 +55,14 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
         : [n]"r"(n), [a]"r"(a), [b]"r"(b), [c]"r"(c)
         : "rax","rdi","rsi","rdx","memory","cc");
     return r;
+}
+
+typedef struct {
+    WORD year, month, day_of_week, day, hour, minute, second, milliseconds;
+} U32_SYSTEM_TIME;
+
+static int u32_get_system_time(U32_SYSTEM_TIME *out) {
+    return sy3(SYS_GetSystemTime, (u64)out, 0, 0) == 0;
 }
 
 typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
@@ -863,46 +871,65 @@ static void submit_search(void) {
 static void draw_taskbar(void) {
     int h = (int)g_fh;
     int w = (int)g_fw;
-    int ty = h - 44;
+    int ty = h - 48;
+    if (ty < 0) ty = 0;
 
-    gradient_v(0,ty,w,44,0xFF9BE5F3,0xFF246F91);
-    fill(0,ty,w,1,0xFFFFFFFF);
-    fill(0,ty+1,w,1,0xFFB9F4FC);
-    fill(0,ty+43,w,1,0xFF164E6A);
+    /* Flat Windows 10-inspired taskbar. Keep the clock zone reserved before
+       laying out app buttons so labels never draw underneath the date/time. */
+    fill(0, ty, w, h - ty, 0xFF202020);
+    fill(0, ty, w, 2, 0xFF0078D4);
 
-    round_fill(8,ty+5,70,34,10,0xFF187FA6);
-    gradient_v(10,ty+6,66,16,0xFFB5F6FF,0xFF43B5D6);
-    round_fill(12,ty+9,62,26,8,0xFF1687AE);
-    draw_text(22, ty + 14, "Start", 0xFFFFFFFF);
+    /* Start button and four-pane mark. */
+    fill(0, ty + 2, 48, h - ty - 2, 0xFF181818);
+    fill(14,ty+15,8,7,0xFFFFFFFF); fill(24,ty+14,8,8,0xFFFFFFFF);
+    fill(14,ty+24,8,7,0xFFFFFFFF); fill(24,ty+24,8,7,0xFFFFFFFF);
+
+    /* A subtle separator distinguishes the running-app area. */
+    fill(48,ty+8,1,h-ty-16,0xFF383838);
 
     g_tb_n = 0;
-    int ax = 90;
-
+    int ax = 54;
+    int right_limit = w - 108;
     for (int i = 0; i < 8; i++) {
         char name[40];
         int minv = 0;
-
-        u64 pid = sy3(
-            SYS_WmQuery, (u64)i, (u64)name, (u64)&minv
-        );
-
+        u64 pid = sy3(SYS_WmQuery, (u64)i, (u64)name, (u64)&minv);
         if (!pid) break;
-
         g_tb_pids[g_tb_n++] = (int)pid;
 
         int bw = 110;
-        round_fill(ax,ty+6,bw,32,7,minv?0xFF397E9B:0xFF165D7C);
-        gradient_v(ax+1,ty+7,bw-2,14,
-                    minv?0xFFB2EAF5:0xFF75D4E8,
-                    minv?0xFF7ABCD0:0xFF2E91B4);
-        if (!minv) fill(ax+8,ty+35,bw-16,2,0xFFB9F8FF);
-        draw_text(ax + 9, ty + 12,name[0]?name:"App",0xFFFFFFFF);
-
-        ax += bw + 6;
-        if (ax > w - 80) break;
+        if (ax + bw > right_limit) break;
+        fill(ax, ty + 2, bw, h - ty - 2, minv ? 0xFF252525 : 0xFF303030);
+        if (!minv) fill(ax + 10, ty + 2, bw - 20, 2, 0xFF0078D4);
+        draw_text(ax + 9, ty + 19, name[0] ? name : "App", 0xFFFFFFFF);
+        ax += bw + 2;
     }
 
-    draw_text(w - 48, ty + 16, "C:", COL_MUTED);
+    /* Clock and date come from the RTC-backed kernel system-time service. */
+    fill(w > 100 ? w - 100 : 0, ty + 2, w > 100 ? 100 : w, h - ty - 2, 0xFF202020);
+    if (w >= 108) {
+        U32_SYSTEM_TIME now;
+        char clock_text[6] = {'-', '-', ':', '-', '-', 0};
+        char date_text[11] = {'-', '-', '-', '-', '-', '-', '-', '-', '-', '-', 0};
+        if (u32_get_system_time(&now)) {
+            clock_text[0] = (char)('0' + (now.hour / 10) % 10);
+            clock_text[1] = (char)('0' + now.hour % 10);
+            clock_text[3] = (char)('0' + (now.minute / 10) % 10);
+            clock_text[4] = (char)('0' + now.minute % 10);
+            date_text[0] = (char)('0' + (now.year / 1000) % 10);
+            date_text[1] = (char)('0' + (now.year / 100) % 10);
+            date_text[2] = (char)('0' + (now.year / 10) % 10);
+            date_text[3] = (char)('0' + now.year % 10);
+            date_text[4] = '-';
+            date_text[5] = (char)('0' + (now.month / 10) % 10);
+            date_text[6] = (char)('0' + now.month % 10);
+            date_text[7] = '-';
+            date_text[8] = (char)('0' + (now.day / 10) % 10);
+            date_text[9] = (char)('0' + now.day % 10);
+        }
+        draw_text(w - 40, ty + 10, clock_text, 0xFFFFFFFF);
+        draw_text(w - 68, ty + 29, date_text, 0xFFBDBDBD);
+    }
 
     if (g_menu) {
         int mw = 190;

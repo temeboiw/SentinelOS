@@ -3,7 +3,9 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: required tool not found: $1" >&2; exit 2; }; }
-for tool in python3 xorriso mkfs.vfat mcopy mmd sha256sum; do need "$tool"; done
+# Check the full native-host toolchain up front instead of failing halfway
+# through the nested OS image build.
+for tool in clang clang++ lld python3 xorriso qemu-img sfdisk mkfs.vfat mke2fs mcopy mmd dd sha256sum; do need "$tool"; done
 
 echo "==> Build installer binaries and SPF packages"
 bash "$HERE/build-installer.sh"

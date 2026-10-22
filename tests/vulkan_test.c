@@ -694,7 +694,7 @@ int main(void) {
     fprintf(stderr, "depth state test=%u write=%u compare=%u bound-depth=%p op=%u\\n", (unsigned)pipeline->depth_test, (unsigned)pipeline->depth_write, (unsigned)pipeline->depth_compare, (void*)cmd->bound_depth_target, (unsigned)cmd->ops[cmd->count-2].op);
     vkCmdEndRenderPass(cmd);
     CHECK(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-    { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d\\n", (int)rpSubmitResult); CHECK(rpSubmitResult == VK_SUCCESS); }
+    { VkResult rpSubmitResult=vkQueueSubmit(queue, 1, &si, 0); fprintf(stderr, "framebuffer render-pass submit result=%d debug=%u\\n", (int)rpSubmitResult, (unsigned)g_vk_debug); CHECK(rpSubmitResult == VK_SUCCESS); }
     CHECK(vkMapMemory(device, drawMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     /* The shader-driven draw must shade an interior pixel, preserve opaque
      * alpha, and leave pixels outside the triangle untouched. */

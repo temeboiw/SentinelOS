@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-#define BOOT_MAX_MODULES 16
+#define BOOT_MAX_MODULES 20
 
 typedef struct {
     char     name[32];

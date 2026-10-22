@@ -1277,7 +1277,17 @@ static void compose(void) {
     }
 
     if(layered){g_front=u32_taskbar_layer;g_pitch=g_fw;u32_clear_layer(u32_taskbar_layer);}
-    draw_taskbar();
+    /* Window text/animation updates above the taskbar should not rasterize
+     * the entire Start/taskbar UI on every composition. Draw it only for a
+     * full frame or when the dirty rectangle actually reaches the taskbar.
+     * The layer is still cleared inside the damaged rectangle, so transparent
+     * taskbar-layer pixels remain correct for windows overlapping its edge. */
+    int taskbar_top=(int)g_fh-48;
+    if(taskbar_top<0)taskbar_top=0;
+    int taskbar_in_damage=!u32_render_clip ||
+        (u32_clip_y1>taskbar_top && u32_clip_y0<(int)g_fh &&
+         u32_clip_x1>0 && u32_clip_x0<(int)g_fw);
+    if(taskbar_in_damage) draw_taskbar();
     if(u32_render_clip){layer_x0=u32_clip_x0;layer_y0=u32_clip_y0;layer_x1=u32_clip_x1;layer_y1=u32_clip_y1;}
     if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;if(!g_gpu_surface)u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
     if(layered&&g_gpu_surface) {

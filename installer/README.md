@@ -67,6 +67,29 @@ bash installer/test-official.sh all
 
 The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-uefi-smoke.log`. It is a launch smoke test, **not** proof that the UI completed boot; use a graphical VM session to confirm the setup screen. Run this on a native Linux x86-64 host. Android/Termux's Clang targets Android ARM64 and must not be used as the host compiler for this build.
 
+## Deploy to a dedicated disk (host-side fallback)
+
+The in-OS setup application currently partitions and formats the disk but does
+not yet write the package file tree. For an actual deployment test in the
+meantime, `install-disk.sh` performs the full host-side disk pipeline on a
+dedicated Linux block device: validates both SPF packages, creates GPT with a
+128 MiB FAT32 EFI partition and an ext4 system partition, extracts the verified
+packages, then checks the UEFI fallback loader and required system files.
+
+**This destroys all data on the target disk. Use a disposable virtual disk only.**
+Build packages first, identify the virtual disk carefully, then run:
+
+```sh
+sudo bash installer/install-disk.sh --target /dev/vdX --confirm "ERASE /dev/vdX"
+```
+
+Replace `/dev/vdX` with the exact whole-disk device shown by `lsblk`. The
+script refuses mounted devices and requires the confirmation string to match
+the target. It requires `sgdisk`, `partprobe`, `udevadm`, `mkfs.fat`,
+`mkfs.ext4`, and standard mount utilities. It does not run automatically from
+the in-OS setup UI and is not a substitute for testing that UI's deployment
+engine. Successful file checks are not proof of a successful UEFI boot.
+
 ## Included media
 
 - Builds from the isolated `installer/source/` snapshot and leaves root-level project sources untouched.

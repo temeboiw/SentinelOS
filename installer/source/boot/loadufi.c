@@ -197,7 +197,7 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
                 if (k) say(L"\\");
                 say_a(parts[k]);
             }
-            say(L"\\r\\n");
+            say(L"\r\n");
             handle->Close(handle);
             bs->FreePool(buffer);
             return EFI_LOAD_ERROR;
@@ -513,7 +513,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         const char *path[1] = { install_payload_names[p] };
         say(L"loadufi: staging installer payload: ");
         say_a(install_payload_names[p]);
-        say(L"\\r\\n");
+        say(L"\r\n");
         EFI_STATUS ps = esp_load_file(path, 1, &install_payloads[p], &install_payload_sizes[p]);
         if (EFI_ERROR(ps)) {
             install_payloads[p] = NULL;

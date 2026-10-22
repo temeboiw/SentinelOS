@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Master a UEFI-bootable hybrid ISO from already-built installer staging data.
+# Master a UEFI-bootable hybrid ISO from built installer staging data.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 STAGE="$HERE/staging"
@@ -26,21 +26,36 @@ mkdir -p "$ISO_ROOT/boot" "$ISO_ROOT/packages" "$OUT"
 dd if=/dev/zero of="$ESP_IMG" bs=1M count="$ESP_SIZE_MIB" status=none
 mkfs.vfat -F 32 -n SENTINEL "$ESP_IMG" >/dev/null
 mmd -i "$ESP_IMG" ::/EFI
-mcopy -s -i "$ESP_IMG" "$STAGE/esp/EFI/BOOT" ::/EFI/
-# Preserve the complete staged ESP tree, not only the default fallback loader.
-if [[ -d "$STAGE/esp/EFI/Microsoft" ]]; then
-  mcopy -s -i "$ESP_IMG" "$STAGE/esp/EFI/Microsoft" ::/EFI/
-fi
+
+# Copy every staged EFI vendor directory and any additional ESP-root files.
+shopt -s nullglob dotglob
+for entry in "$STAGE/esp/EFI"/*; do
+  mcopy -s -i "$ESP_IMG" "$entry" ::/EFI/
+done
+for entry in "$STAGE/esp"/*; do
+  [[ "${entry##*/}" == "EFI" ]] && continue
+  mcopy -s -i "$ESP_IMG" "$entry" ::/
+done
+shopt -u nullglob dotglob
+
+# Fail early if the fallback loader did not make it into the FAT image.
+TMP_CHECK="$(mktemp)"
+trap 'rm -f "$TMP_CHECK"' EXIT
+mcopy -i "$ESP_IMG" ::/EFI/BOOT/BOOTX64.EFI "$TMP_CHECK"
+[[ -s "$TMP_CHECK" ]] || { echo "error: EFI image does not contain BOOTX64.EFI" >&2; exit 4; }
+rm -f "$TMP_CHECK"
+trap - EXIT
+
 cp "$OUT/esp.spf" "$OUT/system.spf" "$ISO_ROOT/packages/"
 cat > "$ISO_ROOT/README.txt" <<'EOF'
 SentinelOS V.4 [Beta] installer media
 
-This ISO contains a UEFI El Torito boot image and the Sentinel Package File
+This ISO contains a UEFI El Torito boot image and Sentinel Package File
 payloads under /packages. SPF files are package archives, not disk images.
 
 WARNING: Beta software. Back up important data before installing.
-The current installer UI does not yet partition or format disks. Do not assume
-that selecting or booting this media performs a complete OS installation.
+The current installer UI does not yet partition or format disks. Booting this
+media does not by itself perform a complete OS installation.
 EOF
 (
   cd "$ISO_ROOT"
@@ -52,6 +67,11 @@ xorriso -as mkisofs \
   -eltorito-alt-boot -e boot/esp.img -no-emul-boot -isohybrid-gpt-basdat \
   "$ISO_ROOT"
 xorriso -indev "$ISO" -report_el_torito plain
-sha256sum "$ISO" > "$ISO.sha256"
+# Write a portable checksum containing only the ISO's filename, not this
+# machine's absolute build path.
+(
+  cd "$OUT"
+  sha256sum "$(basename "$ISO")" > "$(basename "$ISO").sha256"
+)
 echo "Created $ISO"
 echo "ISO SHA-256: $(cut -d ' ' -f 1 "$ISO.sha256")"

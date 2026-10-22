@@ -2,54 +2,53 @@
 
 All installer-specific code and generated output stays under `installer/`; the original root-level source files are not edited.
 
-## Build
+## One-command ISO build
+
+Install the host tools (Debian/Ubuntu):
+
+```sh
+apt install clang lld llvm python3 xorriso dosfstools mtools
+```
+
+Then from the repository root run:
+
+```sh
+bash installer/build-iso.sh
+```
+
+This runs the isolated source build, links installer-specific `instlr.exe`, `screen.exe`, and installer `smss.exe`, creates and verifies `artifacts/esp.spf` and `artifacts/system.spf`, masters a UEFI El Torito/hybrid ISO, then smoke-checks the final ISO and package payloads. The final image is `installer/artifacts/SentinelOS-V4-BETA.iso`; its portable checksum is `installer/artifacts/SentinelOS-V4-BETA.iso.sha256`.
+
+To run individual stages:
 
 ```sh
 bash installer/build-installer.sh
+bash installer/make-iso.sh
+bash installer/check-iso.sh
 ```
 
-The script builds from the isolated `installer/source/` snapshot, excludes game/test app compilation from the copied build script, then links installer-specific `instlr.exe`, `screen.exe`, and installer `smss.exe`. It stages real outputs and creates/verifies `artifacts/esp.spf` and `artifacts/system.spf`. Then run `bash installer/make-iso.sh` to master `installer/artifacts/SentinelOS-V4-BETA.iso`.
+ISO mastering requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). The default EFI image is 128 MiB; set `ESP_SIZE_MIB=256` before running `make-iso.sh` to enlarge it (allowed range 32–1024 MiB). Set `JOBS=2` to limit build parallelism on low-memory hosts.
 
-## Current implementation boundary
+## What the installer currently does
 
-- `instlr.exe` is a framebuffer-based terms/target-selection UI and starts directly from installer SMSS rather than Winlogon/Explorer/taskbar.
-- `make_spf.py build` packages ESP/system partition directory trees into `esp.spf` and `system.spf`. `make_spf.py extract` verifies an SPF and extracts files into an already-mounted partition directory; it does not mount, format, or write raw disk devices. The target page intentionally reports disk enumeration as unavailable. Next/format/install remain disabled because the kernel currently exposes no verified disk enumeration/partition-format service to this installer. It does not pretend a disk is detected and does not format anything.
-- `screen.exe` is the full-screen progress-style spinner for the later installation phase, but installation orchestration does not yet launch it.
-- SPF is a custom zlib/tar format, not WIM-compatible. Example: `python3 installer/make_spf.py extract installer/artifacts/system.spf --target-root /mnt/sentinel-system`. Add `--overwrite` only when deliberately replacing files.
-- Real disk enumeration, partition creation, FAT32/ext4 formatting, and the in-OS installation path still need implementation and VM testing. ISO mastering is provided separately by `make-iso.sh`; it requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). It creates a UEFI El Torito/hybrid ISO with a FAT32 EFI boot image and both SPF packages. The ISO has not yet been built or boot-tested in a VM.
+- Builds from the isolated `installer/source/` snapshot and leaves root-level project sources untouched.
+- Includes an installer session manager, a framebuffer-based terms/target-selection UI, and a progress-style screen binary.
+- Packages the staged EFI and system filesystem trees into separate SPF archives. SPF is a custom zlib-compressed tar format, not WIM.
+- Creates a FAT32 EFI boot image and copies the full staged EFI directory tree plus any other ESP-root files into it.
+- Places both SPF packages in the ISO and emits `SHA256SUMS` for the embedded boot image, packages, and media README.
+- Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, and both embedded SPF packages.
 
+## Important implementation boundary
 
-## SPF regression tests
+**This is a bootable-media pipeline, not yet a complete disk installer.** The installer UI reports disk enumeration as unavailable. The current kernel does not expose a verified disk enumeration/partition-format service to the installer, so no real disk is listed, partitioned, formatted, or modified. The progress screen is not yet wired into a real installation flow. ISO mastering and its host-side validation are implemented, but the ISO must still be built on the user's machine and boot-tested in a UEFI VM before it can be described as working.
 
-Run the standalone Python tests (no third-party packages required):
+`installer/make_spf.py extract` writes only into an existing mounted directory; it does not mount, format, or write raw disk devices. The host-side `installer/install_from_spf.py` coordinator defaults to dry-run and requires `--apply --confirm "INSTALL SENTINELOS"` to extract onto two existing, non-overlapping target directories. Extraction is not transactional and the utility is not wired into the booted installer UI.
+
+## Regression tests
+
+Run the standalone Python tests:
 
 ```sh
 python3 -m unittest discover -s installer/tests -v
 ```
 
-The tests cover a package round-trip, overwrite protection, payload corruption, and path traversal rejection. They exercise the host-side package utility, not the in-kernel disk or filesystem drivers.
-
-## Safe host-side package installation coordinator
-
-`installer/install_from_spf.py` coordinates the two packages against **already-mounted, existing directories**. It never mounts, partitions, formats, or writes raw disks. It defaults to a dry run:
-
-```sh
-python3 installer/install_from_spf.py \
-  --esp-package installer/artifacts/esp.spf \
-  --system-package installer/artifacts/system.spf \
-  --esp-target /mnt/sentinel-esp \
-  --system-target /mnt/sentinel-system
-```
-
-Only after reviewing the targets should an operator apply it, with the exact confirmation phrase:
-
-```sh
-python3 installer/install_from_spf.py \
-  --esp-package installer/artifacts/esp.spf \
-  --system-package installer/artifacts/system.spf \
-  --esp-target /mnt/sentinel-esp \
-  --system-target /mnt/sentinel-system \
-  --apply --confirm "INSTALL SENTINELOS"
-```
-
-Existing files are protected by default; `--overwrite` is a separate opt-in. The coordinator checks both package kinds, verifies package hashes, rejects overlapping target directories and preflights destination paths before writing. Extraction of two filesystems is not transactional: a power loss or I/O error can leave a partial installation. This host utility is not yet wired into the booted installer UI and does not perform disk enumeration, partitioning, formatting, or bootloader installation.
+These exercise host-side SPF packaging and coordinator behavior; they do not test the kernel's disk drivers or replace a UEFI VM boot test.

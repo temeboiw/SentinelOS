@@ -79,7 +79,7 @@ run_vm() {
   fi
   echo "QEMU ran until the smoke-test timeout. Inspect the display manually with a graphical VM run before calling this a successful boot test."
   echo "Serial log: $LOG"
-}}
+}
 case "$MODE" in
   unit) run_unit ;;
   iso) run_unit; run_iso ;;

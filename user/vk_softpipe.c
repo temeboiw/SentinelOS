@@ -88,6 +88,7 @@ static uint32_t sf_sample(const VkSoftTexture *t, float u, float v) {
         return sf_pack(out[0], out[1], out[2], out[3]);
     }
 }
+uint32_t vksoft_sample_texture(const VkSoftTexture *texture, float u, float v) { return sf_sample(texture, u, v); }
 void vksoft_clear(VkSoftTarget *t, uint32_t argb, float depth) {
     if (!t || !t->width || !t->height ||
         t->width > t->stride_pixels || t->stride_pixels > 32768u ||
@@ -98,9 +99,9 @@ void vksoft_clear(VkSoftTarget *t, uint32_t argb, float depth) {
     if (t->depth)
         for (size_t i = 0; i < count; ++i) t->depth[i] = depth;
 }
-int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
+static int sf_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                     const VkSoftVertex *b, const VkSoftVertex *c,
-                    const VkSoftTexture *tex) {
+                    const VkSoftTexture *tex, VkSoftFragmentShader shader, void *shader_context) {
     float area, minx, miny, maxx, maxy;
     int x0, y0, x1, y1, drawn = 0;
     if (!t || !a || !b || !c || !t->width || !t->height ||
@@ -169,7 +170,7 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                     al = wa*a->a + wb*b->a + wc*c->a;
                 }
             }
-            if (tex && tex->pixels) {
+            {
                 float u = wa*a->u + wb*b->u + wc*c->u;
                 float v = wa*a->v + wb*b->v + wc*c->v;
                 float iw = wa*a->inv_w + wb*b->inv_w + wc*c->inv_w;
@@ -177,11 +178,17 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
                     u = (wa*a->u*a->inv_w + wb*b->u*b->inv_w + wc*c->u*c->inv_w) / iw;
                     v = (wa*a->v*a->inv_w + wb*b->v*b->inv_w + wc*c->v*c->inv_w) / iw;
                 }
-                uint32_t q = sf_sample(tex, u, v);
-                r *= sf_chan(q, 16); g *= sf_chan(q, 8);
-                bl *= sf_chan(q, 0); al *= sf_chan(q, 24);
+                if (shader) {
+                    if (!shader(shader_context, u, v, &src)) continue;
+                } else {
+                    if (tex && tex->pixels) {
+                        uint32_t q = sf_sample(tex, u, v);
+                        r *= sf_chan(q, 16); g *= sf_chan(q, 8);
+                        bl *= sf_chan(q, 0); al *= sf_chan(q, 24);
+                    }
+                    src = sf_pack(r, g, bl, al);
+                }
             }
-            src = sf_pack(r, g, bl, al);
             if (t->color && t->color_write) {
                 if (t->blend_src_alpha) {
                     uint32_t dst = t->color[at];
@@ -199,3 +206,6 @@ int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a,
     }
     return drawn;
 }
+
+int vksoft_triangle(VkSoftTarget *t, const VkSoftVertex *a, const VkSoftVertex *b, const VkSoftVertex *c, const VkSoftTexture *tex) { return sf_triangle(t,a,b,c,tex,0,0); }
+int vksoft_triangle_fragment(VkSoftTarget *t, const VkSoftVertex *a, const VkSoftVertex *b, const VkSoftVertex *c, VkSoftFragmentShader shader, void *context) { if(!shader)return -1; return sf_triangle(t,a,b,c,0,shader,context); }

@@ -20,6 +20,8 @@ static uint8_t mouse_pkt[3];
 static int mouse_idx;
 static int ps2_ready;
 static int mouse_pkt_count;
+/* Set-1 make/break state for low-latency game controls. */
+static volatile uint8_t kbd_down[128];
 
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++)
@@ -130,8 +132,6 @@ static int ps2_init(void) {
 }
 
 static int kbd_shift, kbd_caps;
-/* Set-1 make/break state for low-latency game controls. */
-static volatile uint8_t kbd_down[128];
 static uint32_t ps2_game_key_state(void) {
     ps2_poll();
     kbd_r = kbd_w;

@@ -1,0 +1,28 @@
+name: Vulkan software rasterizer
+on:
+  push:
+    branches: [main]
+    paths:
+      - "user/vk_softpipe.c"
+      - "user/vk_softpipe.h"
+      - "tests/vk_softpipe_test.c"
+      - ".github/workflows/vulkan-softpipe.yml"
+  pull_request:
+    paths:
+      - "user/vk_softpipe.c"
+      - "user/vk_softpipe.h"
+      - "tests/vk_softpipe_test.c"
+      - ".github/workflows/vulkan-softpipe.yml"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  softpipe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build rasterizer tests
+        run: cc -std=c11 -O2 -Wall -Wextra -Werror user/vk_softpipe.c tests/vk_softpipe_test.c -o vk-softpipe-test
+      - name: Run rasterizer tests
+        run: ./vk-softpipe-test

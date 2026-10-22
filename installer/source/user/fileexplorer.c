@@ -1,0 +1,347 @@
+/* File Explorer – modern list; click row = list index (not TextOut line) */
+typedef unsigned long long u64;
+typedef unsigned int DWORD;
+typedef int BOOL;
+typedef const char *LPCSTR;
+
+enum { SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12 };
+
+static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
+    u64 r;
+    __asm__ volatile(
+        "mov %[n], %%rax\nmov %[a], %%rdi\nmov %[b], %%rsi\nmov %[c], %%rdx\nint $0x80\nmov %%rax, %[r]"
+        : [r]"=r"(r) : [n]"r"(n),[a]"r"(a),[b]"r"(b),[c]"r"(c)
+        : "rax","rdi","rsi","rdx","memory","cc");
+    return r;
+}
+static void *gpa(const char *dll, const char *fn) {
+    return (void *)sy3(SYS_GetProc, (u64)dll, (u64)fn, 0);
+}
+static void print(const char *s) {
+    u64 n = 0; while (s[n]) n++;
+    sy3(SYS_Write, 1, (u64)s, n);
+}
+
+typedef void *(*CreateWindowExA_t)(DWORD, LPCSTR, LPCSTR, DWORD, int, int, int, int, void *, void *, void *, void *);
+typedef BOOL (*ShowWindow_t)(void *, int);
+typedef BOOL (*UpdateWindow_t)(void *);
+typedef BOOL (*TextOutA_t)(void *, int, int, LPCSTR, int);
+typedef BOOL (*GetMessageA_t)(void *, void *, DWORD, DWORD);
+typedef BOOL (*TranslateMessage_t)(const void *);
+typedef long long (*DispatchMessageA_t)(const void *);
+typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
+typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
+typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
+typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
+typedef BOOL (*GetWindowRect_t)(void *, void *);
+typedef void (*BeginRedrawBatch_t)(void);
+typedef void (*EndRedrawBatch_t)(void);
+typedef struct { int left, top, right, bottom; } FE_RECT;
+
+
+typedef struct {
+    DWORD hwnd, message;
+    unsigned long long wParam;
+    long long lParam;
+    DWORD time;
+    int x, y;
+} MSG;
+
+#define MAX_ENT 256
+#define VISIBLE_ROWS 28
+static char g_names[MAX_ENT][256];
+static int g_isdir[MAX_ENT];
+static int g_count;
+static char g_path[128];
+static int g_win_y = 40; /* must match CreateWindowEx y */
+static int g_last_file_row = -1;
+static int g_hover_row = -1;
+static int g_scroll = 0;
+static void *g_window;
+
+static int ends_with(const char *n, const char *ext);
+
+/* Draw one visible row and invalidate only that row. */
+static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visible) {
+    if (visible < 0 || visible >= VISIBLE_ROWS) return;
+    int i = g_scroll + visible;
+    char line[80];
+    int p = 0;
+    if (i >= g_count) {
+        line[0]=' '; line[1]=0;
+    } else {
+        line[p++] = (i == g_hover_row) ? '>' : ' ';
+        if (g_isdir[i]) {
+            line[p++]='['; line[p++]='D'; line[p++]='I'; line[p++]='R'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".exe")) {
+            line[p++]='['; line[p++]='E'; line[p++]='X'; line[p++]='E'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".dll")) {
+            line[p++]='['; line[p++]='D'; line[p++]='L'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
+        } else if (ends_with(g_names[i], ".msi")) {
+            line[p++]='['; line[p++]='M'; line[p++]='S'; line[p++]='I'; line[p++]=']'; line[p++]=' ';
+        } else {
+            line[p++]='['; line[p++]='F'; line[p++]='I'; line[p++]='L'; line[p++]=']'; line[p++]=' ';
+        }
+        for (int j = 0; g_names[i][j] && p < 78; j++) line[p++] = g_names[i][j];
+        line[p] = 0;
+    }
+    pText(g_window, 0, 2 + visible, line, -1);
+    if (pInv) {
+        FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
+                          760, 44 + (3 + visible) * 16 };
+        pInv(g_window, &dirty, 0);
+    }
+}
+
+static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
+    pText(g_window, 0, 0, g_path, -1);
+    pText(g_window, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
+    for (int visible = 0; visible < VISIBLE_ROWS; visible++)
+        draw_visible_row(pText, 0, visible);
+    if (pInv) {
+        FE_RECT dirty = { 0, 0, 760, 520 };
+        pInv(g_window, &dirty, 1);
+    }
+}
+
+static void path_init(void) {
+    g_path[0]='C'; g_path[1]=':'; g_path[2]='\\'; g_path[3]=0;
+}
+static int ends_with(const char *n, const char *ext) {
+    int i = 0, j = 0;
+    while (n[i]) i++;
+    while (ext[j]) j++;
+    if (i < j) return 0;
+    for (int k = 0; k < j; k++) {
+        char a = n[i - j + k], b = ext[k];
+        if (a >= 'A' && a <= 'Z') a += 32;
+        if (b >= 'A' && b <= 'Z') b += 32;
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
+    g_count = 0;
+    g_hover_row = -1;
+    g_scroll = 0;
+
+    /* Always provide a parent-directory entry, even if the VFS omits it. */
+    g_names[g_count][0] = '.';
+    g_names[g_count][1] = '.';
+    g_names[g_count][2] = 0;
+    g_isdir[g_count++] = 1;
+
+    for (DWORD i = 0; i < MAX_ENT - 1 && g_count < MAX_ENT; i++) {
+        char name[256];
+        name[0] = 0;
+        DWORD t = pQuery(i, name, 256);
+        /* QueryDirectoryA returns 0 at end, 1 for a file, and 2 for a directory. */
+        if (t == 0) break;
+
+        /* Avoid duplicate parent entries if the filesystem supplies one. */
+        if (name[0] == '.' && name[1] == '.' && !name[2]) continue;
+
+        int k = 0;
+        for (; name[k] && k < 255; k++) g_names[g_count][k] = name[k];
+        g_names[g_count][k] = 0;
+        /* Trust the filesystem's entry type; names without extensions are files too. */
+        g_isdir[g_count] = (t == 2);
+        g_count++;
+    }
+
+    /* TextOut lines: 0=path 1=hint 2..=entries => click row = line - 2. */
+    draw_rows(pText, pInv);
+}
+
+void mainCRTStartup(void) {
+    char k32[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+    char u32[] = {'u','s','e','r','3','2','.','d','l','l',0};
+
+    QueryDirectoryA_t pQuery = (QueryDirectoryA_t)gpa(k32, "QueryDirectoryA");
+    SetCurrentDirectoryA_t pChdir = (SetCurrentDirectoryA_t)gpa(k32, "SetCurrentDirectoryA");
+    CreateWindowExA_t pCreate = (CreateWindowExA_t)gpa(u32, "CreateWindowExA");
+    ShowWindow_t pShow = (ShowWindow_t)gpa(u32, "ShowWindow");
+    UpdateWindow_t pUpdate = (UpdateWindow_t)gpa(u32, "UpdateWindow");
+    TextOutA_t pText = (TextOutA_t)gpa(u32, "TextOutA");
+    GetMessageA_t pGetMsg = (GetMessageA_t)gpa(u32, "GetMessageA");
+    TranslateMessage_t pTrans = (TranslateMessage_t)gpa(u32, "TranslateMessage");
+    DispatchMessageA_t pDisp = (DispatchMessageA_t)gpa(u32, "DispatchMessageA");
+    MessageBoxA_t pMsgBox = (MessageBoxA_t)gpa(u32, "MessageBoxA");
+    InvalidateRect_t pInv = (InvalidateRect_t)gpa(u32, "InvalidateRect");
+    GetWindowRect_t pGetWindowRect = (GetWindowRect_t)gpa(u32, "GetWindowRect");
+    BeginRedrawBatch_t pBeginBatch = (BeginRedrawBatch_t)gpa(u32, "BeginRedrawBatch");
+    EndRedrawBatch_t pEndBatch = (EndRedrawBatch_t)gpa(u32, "EndRedrawBatch");
+
+    if (!pQuery || !pCreate || !pShow || !pText || !pGetMsg) {
+        print("fileexplorer: missing API\n");
+        for (;;) __asm__ volatile("pause");
+    }
+
+    path_init();
+    print("fileexplorer: create window\n");
+    g_win_y = 40;
+    if (pBeginBatch) pBeginBatch();
+    g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
+    if (pShow) pShow(g_window, 1);
+    reload(pQuery, pText, pInv);
+    if (pUpdate) pUpdate(g_window);
+    if (pEndBatch) pEndBatch();
+    print("fileexplorer: ready\n");
+
+    MSG msg;
+    for (;;) {
+        if (!pGetMsg(&msg, 0, 0, 0)) continue;
+        if (pTrans) pTrans(&msg);
+        if (pDisp) pDisp(&msg);
+
+        /* Mouse coordinates are screen-space. Never keep using the startup Y
+         * after the user moves the window; ask USER32 for its live rectangle. */
+        if (pGetWindowRect) {
+            FE_RECT live_rect;
+            if (pGetWindowRect(g_window, &live_rect)) g_win_y = live_rect.top;
+        }
+
+        /*
+         * Mouse move: update a fixed-width hover marker. The marker occupies
+         * a reserved character, so row text and controls never jump sideways.
+         */
+        if (msg.message == 0x0200) {
+            int line = (msg.y - (g_win_y + 44)) / 16;
+            int row = line - 2;
+            if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= g_count) row = -1;
+            else row += g_scroll;
+            if (row != g_hover_row) {
+                int old_row = g_hover_row;
+                g_hover_row = row;
+
+                /* Update both backing text lines first, then repaint once.
+                 * Two immediate invalidations made the intermediate state
+                 * visible as a blank/flashing marker. */
+                if (old_row >= g_scroll && old_row < g_scroll + VISIBLE_ROWS)
+                    draw_visible_row(pText, 0, old_row - g_scroll);
+                if (row >= g_scroll && row < g_scroll + VISIBLE_ROWS)
+                    draw_visible_row(pText, 0, row - g_scroll);
+
+                int first = old_row, last = row;
+                if (first < 0 || first < g_scroll || first >= g_scroll + VISIBLE_ROWS) first = row;
+                if (last < 0 || last < g_scroll || last >= g_scroll + VISIBLE_ROWS) last = old_row;
+                if (first >= g_scroll && first < g_scroll + VISIBLE_ROWS &&
+                    last >= g_scroll && last < g_scroll + VISIBLE_ROWS) {
+                    if (first > last) { int tmp=first; first=last; last=tmp; }
+                    FE_RECT dirty = { 0, 44 + (2 + first - g_scroll) * 16,
+                                      760, 44 + (3 + last - g_scroll) * 16 };
+                    if (pInv) pInv(g_window, &dirty, 0);
+                } else if (row >= g_scroll && row < g_scroll + VISIBLE_ROWS) {
+                    FE_RECT dirty = { 0, 44 + (2 + row - g_scroll) * 16,
+                                      760, 44 + (3 + row - g_scroll) * 16 };
+                    if (pInv) pInv(g_window, &dirty, 0);
+                }
+            }
+        }
+
+        /* Mouse wheel and arrow/Page keys scroll the visible directory rows. */
+        if (msg.message == 0x020A) {
+            int delta = (int)((msg.wParam >> 16) & 0xFFFF);
+            if (delta & 0x8000) delta -= 0x10000;
+            if (delta > 0) g_scroll -= 3;
+            else if (delta < 0) g_scroll += 3;
+            if (g_scroll < 0) g_scroll = 0;
+            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            g_hover_row = -1;
+            draw_rows(pText, pInv);
+        }
+        if (msg.message == 0x0100) {
+            if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
+            if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;
+            if (msg.wParam == 0x21) g_scroll -= VISIBLE_ROWS;
+            if (msg.wParam == 0x22) g_scroll += VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
+            if (g_scroll < 0) g_scroll = 0;
+            g_hover_row = -1;
+            draw_rows(pText, pInv);
+        }
+
+        if (msg.message == 0x0201) {
+            /*
+             * user32 draws line i at: wnd_y + 44 + i*16
+             * lines 0,1 = path/hint; entries start at line 2
+             * => entry_index = line - 2
+             */
+            int line = (msg.y - (g_win_y + 44)) / 16;
+            int row = line - 2;
+            if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
+                row += g_scroll;
+                print("fileexplorer: click ");
+                print(g_names[row]);
+                print("\n");
+                if (g_isdir[row]) {
+                    g_last_file_row = -1;
+                    int ok = 0;
+                    if (pChdir) ok = pChdir(g_names[row]);
+                    if (!ok) ok = (sy3(SYS_Chdir, (u64)g_names[row], 0, 0) == 0);
+                    if (ok) {
+                        if (g_names[row][0]=='.' && g_names[row][1]=='.' && !g_names[row][2]) {
+                            int n = 0; while (g_path[n]) n++;
+                            if (n > 3) {
+                                n--; while (n > 2 && g_path[n] != '\\') n--;
+                                if (g_path[n]=='\\') n++;
+                                g_path[n] = 0;
+                                if (n <= 3) path_init();
+                            }
+                        } else {
+                            int n = 0; while (g_path[n]) n++;
+                            if (n > 0 && g_path[n-1] != '\\') g_path[n++] = '\\';
+                            for (int k = 0; g_names[row][k] && n < 120; k++)
+                                g_path[n++] = g_names[row][k];
+                            g_path[n] = 0;
+                        }
+                        print("fileexplorer: now ");
+                        print(g_path);
+                        print("\n");
+                        reload(pQuery, pText, pInv);
+                    } else {
+                        print("fileexplorer: chdir failed\n");
+                    }
+                } else {
+                    int double_click = (g_last_file_row == row);
+                    g_last_file_row = row;
+
+                    if (double_click && ends_with(g_names[row], ".exe")) {
+                        unsigned long long pid = sy3(
+                            SYS_CreateProcess, (u64)g_names[row], 0, 0);
+                        if ((long long)pid < 0 || pid == 0) {
+                            print("fileexplorer: disk executable launch failed: ");
+                            print(g_names[row]);
+                            print("\n");
+                            if (pMsgBox) pMsgBox(0,
+                                "This EXE could not be loaded. Check the disk path and PE compatibility.",
+                                "Cannot launch executable", 0);
+                        }
+                        g_last_file_row = -1;
+                    } else if (double_click && ends_with(g_names[row], ".msi")) {
+                        static char msiexec_name[] = "msiexec.exe";
+                        unsigned long long pid = sy3(
+                            SYS_CreateProcess, (u64)msiexec_name,
+                            (u64)g_names[row], 0);
+                        if ((long long)pid < 0 || pid == 0) {
+                            print("fileexplorer: msiexec.exe is not loaded\n");
+                            if (pMsgBox) pMsgBox(0,
+                                "MSI package inspection is not available yet.",
+                                "Windows Installer", 0);
+                        }
+                        g_last_file_row = -1;
+                    } else if (double_click) {
+                        if (pMsgBox) pMsgBox(0, g_names[row],
+                            ends_with(g_names[row], ".dll") ?
+                            "DLL library (not directly executable)" :
+                            "File", 0);
+                        g_last_file_row = -1;
+                    }
+                }
+            }
+        }
+    }
+}

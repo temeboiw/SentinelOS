@@ -23,7 +23,7 @@ typedef struct {
     uint8_t depth_write;
     uint8_t blend_src_alpha;
     uint8_t color_write;
-    uint8_t depth_compare; /* 0 less, 1 less/equal, 2 always, 3 never, 4 greater */
+    uint8_t depth_compare; /* Vulkan VkCompareOp: 0 NEVER, 1 LESS, 2 EQUAL, 3 LEQUAL, 4 GREATER, 5 NE, 6 GE, 7 ALWAYS */
 } VkSoftTarget;
 
 typedef struct {

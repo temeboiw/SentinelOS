@@ -54,8 +54,10 @@ This ISO contains a UEFI El Torito boot image and Sentinel Package File
 payloads under /packages. SPF files are package archives, not disk images.
 
 WARNING: Beta software. Back up important data before installing.
-The current installer UI does not yet partition or format disks. Booting this
-media does not by itself perform a complete OS installation.
+The installer can create GPT partitions and format the EFI partition as FAT32.
+The system partition formatting, OS file deployment, boot configuration, and
+end-to-end installed-system boot are not yet implemented. Booting this media
+does not by itself perform a complete OS installation.
 EOF
 (
   cd "$ISO_ROOT"

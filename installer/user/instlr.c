@@ -88,8 +88,8 @@ static int format_fat32(u64 start,u32 total){
  return 0;
 }
 
-static void put16(unsigned char*p,u16 v){p[0]=(unsigned char)v;p[1]=(unsigned char)(v>>8);}
-static int write_block(u64 lba,const unsigned char*b){for(int i=0;i<8;i++)if(write_lba(lba+(u64)i,b+i*512)<0)return -1;return 0;}
+static void put16(unsigned char*p,unsigned short v){p[0]=(unsigned char)v;p[1]=(unsigned char)(v>>8);}
+static int write_block(u64 block,const unsigned char*b){for(int i=0;i<8;i++)if(write_lba(block*8+(u64)i,b+i*512)<0)return -1;return 0;}
 static int format_ext4(u64 start,u64 sectors){
  const u32 bpg=32768,ipg=1024,isize=256,itable_blocks=64;
  u64 blocks=sectors/8;if(blocks<65536)return -1;
@@ -112,14 +112,14 @@ static int format_ext4(u64 start,u64 sectors){
   for(u32 i=actual;i<bpg;i++)bm[i>>3]|=(unsigned char)(1u<<(i&7));
   for(u32 i=0;i<sizeof(ibm);i++)ibm[i]=0;
   if(g==0)for(u32 i=0;i<10;i++)ibm[i>>3]|=(unsigned char)(1u<<(i&7));
-  if(write_block(start/8+gs+bb,bm)<0||write_block(start/8+gs+ib,ibm)<0)return -4;
-  for(u32 i=0;i<itable_blocks;i++){for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;if(write_block(start/8+gs+it+i,blk)<0)return -5;}
+  if(write_block(start/8+bb,bm)<0||write_block(start/8+ib,ibm)<0)return -4;
+  for(u32 i=0;i<itable_blocks;i++){for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;if(write_block(start/8+it+i,blk)<0)return -5;}
   if(g==0){
    /* inode 2: root directory, using the extent format read by SentinelOS ext4. */
    for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
    unsigned char*ino=blk+isize;put16(ino,0x41ED);put32(ino+4,4096);put16(ino+26,2);put32(ino+28,8);put32(ino+32,0x80000);
    put16(ino+40,0xF30A);put16(ino+42,1);put16(ino+44,4);put16(ino+46,0);put32(ino+52,0);put16(ino+56,1);put16(ino+58,0);put32(ino+60,gs+reserve+2+itable_blocks);
-   if(write_block(start/8+gs+it,blk)<0)return -6;
+   if(write_block(start/8+it,blk)<0)return -6;
    for(u32 j=0;j<sizeof(blk);j++)blk[j]=0;
    put32(blk,2);put16(blk+4,12);blk[6]=1;blk[7]=2;blk[8]='.';
    put32(blk+12,2);put16(blk+16,4084);blk[18]=2;blk[19]=2;blk[20]='.';blk[21]='.';
@@ -142,7 +142,7 @@ static int format_ext4(u64 start,u64 sectors){
   for(int i=0;i<8;i++)if(write_lba(glba+8+(u64)i,gd+i*512)<0)return -11;
  }
  unsigned char verify[512];if(NtInstallerDiskIo(0,start+2,verify)!=0||verify[56]!=0x53||verify[57]!=0xEF)return -12;
- if(NtInstallerDiskIo(0,start+8* (68+2),verify)!=0)return -13;
+ if(NtInstallerDiskIo(0,start+8*68,verify)!=0)return -13;
  return 0;
 }
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){

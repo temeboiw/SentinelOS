@@ -661,7 +661,7 @@ int main(void) {
         (4u<<16)|59u, 8u, 11u, 1u,
         (4u<<16)|59u, 9u, 12u, 0u,
         (4u<<16)|59u, 10u, 13u, 3u,
-        (4u<<16)|43u, 3u, 20u, 0u,
+        (4u<<16)|43u, 3u, 20u, 0x3f000000u,
         (4u<<16)|44u, 4u, 19u, 20u,
         (5u<<16)|54u, 1u, 14u, 0u, 2u,
         (2u<<16)|248u, 15u,
@@ -691,7 +691,7 @@ int main(void) {
     VkDeviceMemory texMem = 0; CHECK(vkAllocateMemory(device, &texAi, 0, &texMem) == VK_SUCCESS);
     CHECK(vkBindImageMemory(device, texImage, texMem, 0) == VK_SUCCESS);
     CHECK(vkMapMemory(device, texMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
-    for (unsigned ti = 0; ti < 4; ++ti) { ((uint8_t *)mapped)[ti*4] = 255; ((uint8_t *)mapped)[ti*4+1] = 0; ((uint8_t *)mapped)[ti*4+2] = 0; ((uint8_t *)mapped)[ti*4+3] = 255; }
+    for (unsigned ti = 0; ti < 4; ++ti) { uint8_t *tp=(uint8_t *)mapped+ti*4; tp[0]=0; tp[1]=0; tp[2]=255; tp[3]=255; } ((uint8_t *)mapped)[12]=255; ((uint8_t *)mapped)[13]=0; ((uint8_t *)mapped)[14]=0; ((uint8_t *)mapped)[15]=255;
     vkUnmapMemory(device, texMem);
     VkImageViewCreateInfo texViewCi = {0}; texViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; texViewCi.image = texImage;
     texViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D; texViewCi.format = texCi.format;

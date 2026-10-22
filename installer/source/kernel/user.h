@@ -14,6 +14,7 @@
 #include "ntabi.h"
 #include "gfx.h"
 #include "virtio_blk.h"
+#include "sha256.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -55,6 +56,7 @@
 #define SYS_NtInstallerDiskIo                 41
 #define SYS_NtReadInstallerPayload              42
 #define SYS_NtQueryInstallerPayload              43
+#define SYS_NtVerifyInstallerPayload              44
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 
@@ -2593,6 +2595,45 @@ static Frame *syscall_handler(Frame *f) {
         info.present = (vb_ok && vb_capacity_sectors != 0) ? 1u : 0u;
         *(InstallerDiskInfo *)(uint64_t)f->rdi = info;
         f->rax = info.present ? 1 : 0;
+        return f;
+    }
+
+    case SYS_NtVerifyInstallerPayload: {
+        if (!PspIsSystemProcess(MmCurrentProcess) || f->rdi > 1 || !user_bootinfo) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        BootModule *package = PspFindModule(user_bootinfo, f->rdi == 0 ? "esp.spf" : "system.spf");
+        BootModule *checksums = PspFindModule(user_bootinfo, "packages.sha256");
+        if (!package || !checksums || package->size > (1ULL << 30) || checksums->size < 130) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        const uint8_t *manifest = (const uint8_t *)(HHDM_BASE + checksums->phys);
+        const uint8_t *expected = manifest + (f->rdi ? 65 : 0);
+        if (manifest[64] != '\n' || manifest[129] != '\n') {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        for (unsigned i = 0; i < 64; i++) {
+            uint8_t c = expected[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                f->rax = (uint64_t)-1LL;
+                return f;
+            }
+        }
+        uint8_t digest[32];
+        const uint8_t *bytes = (const uint8_t *)(HHDM_BASE + package->phys);
+        sentinel_sha256(bytes, package->size, digest);
+        static const char hex[] = "0123456789abcdef";
+        for (unsigned i = 0; i < 32; i++) {
+            if (expected[i*2] != (uint8_t)hex[digest[i] >> 4] ||
+                expected[i*2+1] != (uint8_t)hex[digest[i] & 15]) {
+                f->rax = (uint64_t)-2LL;
+                return f;
+            }
+        }
+        f->rax = 0;
         return f;
     }
 

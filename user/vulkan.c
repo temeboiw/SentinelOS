@@ -13,7 +13,7 @@
 
 #define VKAPI_CALL __attribute__((ms_abi))
 #if defined(_WIN32) || defined(_WIN64)
-#define VKAPI_EXPORT VKAPI_EXPORT
+#define VKAPI_EXPORT __declspec(dllexport)
 #elif defined(__GNUC__) || defined(__clang__)
 #define VKAPI_EXPORT __attribute__((visibility("default")))
 #else

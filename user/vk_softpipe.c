@@ -89,6 +89,16 @@ static uint32_t sf_sample(const VkSoftTexture *t, float u, float v) {
     }
 }
 uint32_t vksoft_sample_texture(const VkSoftTexture *texture, float u, float v) { return sf_sample(texture, u, v); }
+uint32_t vksoft_fadd_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f+y.f;return z.u;}
+uint32_t vksoft_fsub_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f-y.f;return z.u;}
+uint32_t vksoft_fmul_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;z.f=x.f*y.f;return z.u;}
+uint32_t vksoft_fdiv_bits(uint32_t a,uint32_t b){union{uint32_t u;float f;}x,y,z;x.u=a;y.u=b;if(y.f==0.0f)return 0x7fc00000u;z.f=x.f/y.f;return z.u;}
+uint32_t vksoft_uint_to_float_bits(uint32_t value){union{uint32_t u;float f;}x;x.f=(float)value;return x.u;}
+uint32_t vksoft_unorm_to_float_bits(uint32_t value){union{uint32_t u;float f;}x;x.f=(float)(value&255u)*(1.0f/255.0f);return x.u;}
+uint8_t vksoft_float_to_u8(uint32_t bits){union{uint32_t u;float f;}x;x.u=bits;return sf_u8(x.f);}
+int vksoft_float_compare_bits(uint32_t a,uint32_t b,uint32_t op){union{uint32_t u;float f;}x,y;x.u=a;y.u=b;switch(op){case 0:return 0;case 1:return x.f<y.f;case 2:return x.f==y.f;case 3:return x.f<=y.f;case 4:return x.f>y.f;case 5:return x.f!=y.f;case 6:return x.f>=y.f;case 7:return 1;default:return 0;}}
+int vksoft_float_is_zero(uint32_t bits){return (bits&0x7fffffffu)==0u;}
+uint32_t vksoft_texel_center_bits(int32_t coord,uint32_t size){union{uint32_t u;float f;}x;x.f=((float)coord+0.5f)/(float)(size?size:1u);return x.u;}
 void vksoft_clear(VkSoftTarget *t, uint32_t argb, float depth) {
     if (!t || !t->width || !t->height ||
         t->width > t->stride_pixels || t->stride_pixels > 32768u ||

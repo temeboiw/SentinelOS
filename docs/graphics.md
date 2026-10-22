@@ -2,7 +2,7 @@
 
 ## VM configuration
 
-The normal QEMU configuration uses **virtio-vga** for the primary display. The kernel initializes the VirtIO-GPU control queue and 2D scanout during **bootvid.exe**, while preserving the firmware framebuffer when device initialization fails.
+The normal QEMU configuration uses **virtio-vga** for the primary display. The kernel initializes the VirtIO-GPU control queue and 2D scanout during **bootvid.exe**, while preserving the firmware framebuffer when device initialization fails. When QEMU VirGL is enabled and context setup succeeds, SentinelOS also exposes a VirGL 3D command-submission and presentation path. This is a GPU-accelerated graphics backend, not yet a complete Vulkan driver or a Vulkan-conformant implementation.
 
 For hosts with QEMU's GTK OpenGL support, opt in to the VirGL-capable device:
 

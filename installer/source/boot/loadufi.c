@@ -120,9 +120,9 @@ static Module mods[BOOT_MAX_MODULES];
 static int nmods;
 static EFI_HANDLE boot_image;
 /* Raw package buffers remain in EfiLoaderData until ExitBootServices. */
-static VOID *install_payloads[2];
-static UINTN install_payload_sizes[2];
-static const char *install_payload_names[2] = { "esp.spf", "system.spf" };
+static VOID *install_payloads[3];
+static UINTN install_payload_sizes[3];
+static const char *install_payload_names[3] = { "esp.spf", "system.spf", "packages.sha256" };
 
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
@@ -493,7 +493,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
     /* Load installer packages from the boot ESP as raw data modules. They are
        not PE images and must not enter the PE relocation/import pipeline. */
-    for (int p = 0; p < 2; p++) {
+    for (int p = 0; p < 3; p++) {
         const char *path[1] = { install_payload_names[p] };
         EFI_STATUS ps = esp_load_file(path, 1, &install_payloads[p], &install_payload_sizes[p]);
         if (EFI_ERROR(ps)) {
@@ -608,7 +608,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
 
     UINT32 boot_module_count = (UINT32)nmods;
-    for (int p = 0; p < 2 && boot_module_count < BOOT_MAX_MODULES; p++) {
+    for (int p = 0; p < 3 && boot_module_count < BOOT_MAX_MODULES; p++) {
         if (!install_payloads[p] || !install_payload_sizes[p]) continue;
         BootModule *raw = &bi->modules[boot_module_count++];
         UINTN k = 0;

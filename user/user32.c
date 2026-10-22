@@ -887,8 +887,11 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
         return;
     }
     if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
-    for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++)
-        g_scanout[(u32)y*g_scan_pitch+(u32)x]=u32_aero_bg_cache[(u32)y*g_fw+(u32)x];
+    for(int y=y0;y<y1;y++) {
+        u32 *dst=&g_scanout[(u32)y*g_scan_pitch+(u32)x0];
+        const u32 *src=&u32_aero_bg_cache[(u32)y*g_fw+(u32)x0];
+        for(int x=x0;x<x1;x++)*dst++=*src++;
+    }
     u32_composite_layers(x0,y0,x1,y1);
 }
 

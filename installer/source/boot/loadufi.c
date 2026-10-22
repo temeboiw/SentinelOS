@@ -183,12 +183,28 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
     VOID *buffer = NULL;
     status = bs->AllocatePool(EfiLoaderData, bytes ? bytes : 1, &buffer);
     if (EFI_ERROR(status)) { handle->Close(handle); return status; }
-    UINTN got = bytes;
-    status = handle->Read(handle, &got, buffer);
-    handle->Close(handle);
-    if (EFI_ERROR(status) || got != bytes) {
-        bs->FreePool(buffer); return EFI_LOAD_ERROR;
+    /* Read in bounded chunks. Some UEFI FAT drivers stall or fail on a
+       single Read request for the very large embedded disk images. */
+    UINTN offset = 0;
+    const UINTN chunk_limit = 1024U * 1024U;
+    while (offset < bytes) {
+        UINTN got = bytes - offset;
+        if (got > chunk_limit) got = chunk_limit;
+        status = handle->Read(handle, &got, (UINT8 *)buffer + offset);
+        if (EFI_ERROR(status) || got == 0 || got > bytes - offset) {
+            say(L"loadufi: file read failed or stopped early: ");
+            for (int k = 0; k < depth; k++) {
+                if (k) say(L"\\");
+                say_a(parts[k]);
+            }
+            say(L"\\r\\n");
+            handle->Close(handle);
+            bs->FreePool(buffer);
+            return EFI_LOAD_ERROR;
+        }
+        offset += got;
     }
+    handle->Close(handle);
     *file = buffer; *size = bytes;
     return EFI_SUCCESS;
 }
@@ -495,6 +511,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
        not PE images and must not enter the PE relocation/import pipeline. */
     for (int p = 0; p < 3; p++) {
         const char *path[1] = { install_payload_names[p] };
+        say(L"loadufi: staging installer payload: ");
+        say_a(install_payload_names[p]);
+        say(L"\\r\\n");
         EFI_STATUS ps = esp_load_file(path, 1, &install_payloads[p], &install_payload_sizes[p]);
         if (EFI_ERROR(ps)) {
             install_payloads[p] = NULL;

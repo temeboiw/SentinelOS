@@ -111,6 +111,7 @@
 #define VK_IMAGE_USAGE_STORAGE_BIT 8u
 #define VK_IMAGE_ASPECT_COLOR_BIT 1u
 #define VK_IMAGE_LAYOUT_GENERAL 1u
+#define VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL 5u
 #define VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL 7u
 #define VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL 6u
 #define VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT 1u
@@ -682,9 +683,10 @@ __declspec(dllexport) void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer c,uin
   if(b->sType!=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER||b->pNext||!image_ok(b->image)||b->image->device!=c->device)return;
   if(b->srcQueueFamilyIndex!=0xFFFFFFFFu||b->dstQueueFamilyIndex!=0xFFFFFFFFu)return;
   if(b->subresourceRange.aspectMask!=VK_IMAGE_ASPECT_COLOR_BIT||b->subresourceRange.baseMipLevel||b->subresourceRange.levelCount!=1||b->subresourceRange.baseArrayLayer||b->subresourceRange.layerCount!=1)return;
-  if((b->oldLayout!=0&&b->oldLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)||(b->newLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))return;
+  if((b->oldLayout!=0&&b->oldLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->oldLayout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->oldLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)||(b->newLayout!=VK_IMAGE_LAYOUT_GENERAL&&b->newLayout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&b->newLayout!=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))return;
   if(b->oldLayout==b->newLayout)return;
   if(b->newLayout==VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL&&!(b->image->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT))return;
+   if(b->newLayout==VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL&&!(b->image->usage&VK_IMAGE_USAGE_SAMPLED_BIT))return;
   if(b->newLayout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL&&!(b->image->usage&VK_IMAGE_USAGE_TRANSFER_DST_BIT))return;
  }
  for(uint32_t j=0;j<imageCount;j++){
@@ -983,8 +985,8 @@ static int vk_pipeline_texture(VkCmdObj *c,VkPipelineObj *pl,VkSoftTexture *out)
    VkImage im=view->image;
    if(im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||
       (im->format==VK_FORMAT_D32_SFLOAT?view->aspect!=VK_IMAGE_ASPECT_DEPTH_BIT:view->aspect!=VK_IMAGE_ASPECT_COLOR_BIT)||
-      (im->layout!=VK_IMAGE_LAYOUT_GENERAL&&im->layout!=value->imageLayout)||
-      value->imageLayout!=VK_IMAGE_LAYOUT_GENERAL||im->size/4u>VK_MEMORY_BYTES/4u)continue;
+      (im->layout!=VK_IMAGE_LAYOUT_GENERAL&&im->layout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)||
+      (value->imageLayout!=VK_IMAGE_LAYOUT_GENERAL&&value->imageLayout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)||im->layout!=value->imageLayout||im->size/4u>VK_MEMORY_BYTES/4u)continue;
    uint8_t *src=&im->memory->bytes[im->offset];
    for(uint64_t px=0;px<im->size/4u;px++){
     uint8_t r,g,b,a;if(im->format==VK_FORMAT_D32_SFLOAT){float z;vk_copy(&z,src+px*4u,4);r=g=b=(uint8_t)(z<=0.0f?0.0f:z>=1.0f?255.0f:z*255.0f);a=255;}

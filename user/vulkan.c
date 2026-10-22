@@ -881,6 +881,73 @@ __declspec(dllexport) void VKAPI_CALL vkCmdDraw(VkCommandBuffer c,uint32_t verte
  unsigned i=c->count++;c->ops[i].op=13;c->ops[i].value=firstVertex;c->ops[i].size=vertexCount;c->ops[i].a=c->bound_vertex;c->ops[i].image=c->bound_target;c->ops[i].depth_image=c->bound_depth_target;c->ops[i].offset=c->bound_vertex_offset;c->ops[i].offset2=(uintptr_t)c->bound_pipeline;
 }
 
+typedef struct { VkShaderModule module; VkSoftTexture *texture; } VkFragmentContext;
+static uint32_t g_frag_values[VK_SPIRV_MAX_IDS][4];
+static uint8_t g_frag_defined[VK_SPIRV_MAX_IDS],g_frag_kind[VK_SPIRV_MAX_IDS],g_frag_storage[VK_SPIRV_MAX_IDS],g_frag_components[VK_SPIRV_MAX_IDS];
+static uint32_t g_frag_location[VK_SPIRV_MAX_IDS],g_frag_pointer_type[VK_SPIRV_MAX_IDS],g_frag_type_components[VK_SPIRV_MAX_IDS];
+static uint32_t g_frag_output[4];
+static union { uint32_t u; float f; } g_frag_bits_a,g_frag_bits_b,g_frag_bits_c;
+static uint32_t vk_frag_fbits(float f){union{float f;uint32_t u;}x;x.f=f;return x.u;}
+static float vk_frag_float(uint32_t u){union{float f;uint32_t u;}x;x.u=u;return x.f;}
+static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_color){
+ VkFragmentContext *ctx=(VkFragmentContext*)opaque;VkShaderModule m=ctx?ctx->module:0;
+ if(!m||!shader_ok(m)||!ctx->texture||!out_color)return 0;
+ const uint32_t *w=m->words;size_t n=m->wordCount;uint32_t entry=vk_spirv_main_id(w,n);
+ if(!entry)return 0;
+ vk_zero(g_frag_values,sizeof(g_frag_values));vk_zero(g_frag_defined,sizeof(g_frag_defined));vk_zero(g_frag_kind,sizeof(g_frag_kind));vk_zero(g_frag_storage,sizeof(g_frag_storage));vk_zero(g_frag_components,sizeof(g_frag_components));vk_zero(g_frag_location,sizeof(g_frag_location));vk_zero(g_frag_pointer_type,sizeof(g_frag_pointer_type));vk_zero(g_frag_type_components,sizeof(g_frag_type_components));vk_zero(g_frag_output,sizeof(g_frag_output));
+ for(uint32_t id=0;id<VK_SPIRV_MAX_IDS;id++)g_frag_location[id]=0xffffffffu;
+ /* Module metadata: scalar/vector types, pointer types, locations, variables,
+    and constants. This small interpreter deliberately fails closed on unknown
+    executable instructions instead of silently substituting a color. */
+ for(size_t i=5;i<n;){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
+  if(op==71u&&wc>=4u&&w[i+1]<VK_SPIRV_MAX_IDS){if(w[i+2]==30u)g_frag_location[w[i+1]]=w[i+3];}
+  else if(op==23u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_type_components[w[i+1]]=w[i+3];
+  else if(op==32u&&wc==4u&&w[i+1]<VK_SPIRV_MAX_IDS)g_frag_pointer_type[w[i+1]]=w[i+3];
+  else if(op==59u&&wc>=4u&&w[i+2]<VK_SPIRV_MAX_IDS){g_frag_storage[w[i+2]]=(uint8_t)w[i+3];g_frag_kind[w[i+2]]=1;}
+  else if(op==43u&&wc==4u&&w[i+2]<VK_SPIRV_MAX_IDS){g_frag_values[w[i+2]][0]=w[i+3];g_frag_defined[w[i+2]]=1;g_frag_components[w[i+2]]=1;}
+  else if(op==44u&&wc>=4u&&w[i+2]<VK_SPIRV_MAX_IDS){uint32_t id=w[i+2],count=wc-3u;if(count>4u)return 0;for(uint32_t k=0;k<count;k++){if(w[i+3u+k]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+3u+k]])return 0;g_frag_values[id][k]=g_frag_values[w[i+3u+k]][0];}g_frag_defined[id]=1;g_frag_components[id]=(uint8_t)count;}
+  i+=wc;
+ }
+ /* Execute the selected entry function at this pixel. Input vec2 values are
+    the rasterizer's perspective-correct interpolated UV; arithmetic is shader
+    arithmetic, so computed/scaled/offset UVs affect the actual image sample. */
+ uint32_t active=0,steps=0,output_var=0;uint32_t output_type[VK_SPIRV_MAX_IDS];vk_zero(output_type,sizeof(output_type));
+ for(size_t i=5;i<n;){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;
+  if(op==59u&&wc>=4u&&w[i+2]<VK_SPIRV_MAX_IDS)output_type[w[i+2]]=w[i+1];
+  if(op==54u&&wc>=5u)active=(w[i+2]==entry);
+  else if(active&&op==56u)break;
+  else if(active){
+   uint32_t rt=wc>=2u?w[i+1]:0u,rid=wc>=3u?w[i+2]:0u;
+   if(++steps>2048u)return 0;
+   if(op==248u||op==247u||op==246u||op==0u){}
+   else if(op==253u&&wc==1u)break;
+   else if(op==62u&&wc==3u){uint32_t ptr=w[i+1],obj=w[i+2];if(ptr>=VK_SPIRV_MAX_IDS||obj>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr]||!g_frag_defined[obj])return 0;if(g_frag_storage[ptr]==3u){for(unsigned k=0;k<4;k++)g_frag_output[k]=g_frag_values[obj][k];output_var=ptr;}}
+   else if(op==61u&&wc==4u){uint32_t ptr=w[i+3];if(rid>=VK_SPIRV_MAX_IDS||ptr>=VK_SPIRV_MAX_IDS||!g_frag_kind[ptr])return 0;
+    if(g_frag_storage[ptr]==1u){g_frag_values[rid][0]=vk_frag_fbits(in_u);g_frag_values[rid][1]=vk_frag_fbits(in_v);g_frag_values[rid][2]=0;g_frag_values[rid][3]=vk_frag_fbits(1.0f);g_frag_components[rid]=2;g_frag_defined[rid]=1;}
+    else if(g_frag_storage[ptr]==0u){g_frag_kind[rid]=2;g_frag_defined[rid]=1;g_frag_components[rid]=1;}
+    else return 0;
+   }
+   else if(op==80u&&wc>=4u&&rid<VK_SPIRV_MAX_IDS){uint32_t count=wc-3u;if(count>4u)return 0;for(uint32_t k=0;k<count;k++){uint32_t src=w[i+3u+k];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src])return 0;g_frag_values[rid][k]=g_frag_values[src][0];}g_frag_components[rid]=(uint8_t)count;g_frag_defined[rid]=1;}
+   else if(op==79u&&wc>=6u&&rid<VK_SPIRV_MAX_IDS){uint32_t a=w[i+3],b=w[i+4],count=wc-5u;if(a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!g_frag_defined[a]||!g_frag_defined[b]||count>4u)return 0;for(uint32_t k=0;k<count;k++){uint32_t c=w[i+5u+k];if(c>=8u)return 0;g_frag_values[rid][k]=c<4u?g_frag_values[a][c]:g_frag_values[b][c-4u];}g_frag_components[rid]=(uint8_t)count;g_frag_defined[rid]=1;}
+   else if((op==129u||op==131u||op==133u||op==136u)&&wc==5u&&rid<VK_SPIRV_MAX_IDS){uint32_t a=w[i+3],b=w[i+4];if(a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!g_frag_defined[a]||!g_frag_defined[b])return 0;uint32_t count=g_frag_components[a]>g_frag_components[b]?g_frag_components[a]:g_frag_components[b];if(!count)count=1;if(count>4u)return 0;for(uint32_t k=0;k<count;k++){float x=vk_frag_float(g_frag_values[a][g_frag_components[a]==1?0:k]),y=vk_frag_float(g_frag_values[b][g_frag_components[b]==1?0:k]);if(op==129u)x+=y;else if(op==131u)x-=y;else if(op==133u)x*=y;else {if(y==0.0f)return 0;x/=y;}g_frag_values[rid][k]=vk_frag_fbits(x);}g_frag_components[rid]=(uint8_t)count;g_frag_defined[rid]=1;}
+   else if(op==86u&&wc==5u&&rid<VK_SPIRV_MAX_IDS){uint32_t image=w[i+3],sampler=w[i+4];if(image>=VK_SPIRV_MAX_IDS||sampler>=VK_SPIRV_MAX_IDS||!g_frag_defined[image]||!g_frag_defined[sampler])return 0;g_frag_kind[rid]=2;g_frag_defined[rid]=1;}
+   else if(op>=87u&&op<=94u&&wc>=5u&&rid<VK_SPIRV_MAX_IDS){uint32_t sampled=w[i+3],coord=w[i+4];if(sampled>=VK_SPIRV_MAX_IDS||coord>=VK_SPIRV_MAX_IDS||!g_frag_defined[sampled]||g_frag_kind[sampled]!=2||!g_frag_defined[coord]||g_frag_components[coord]<2)return 0;float u=vk_frag_float(g_frag_values[coord][0]),v=vk_frag_float(g_frag_values[coord][1]);if(op==91u||op==92u||op==93u||op==94u){if(g_frag_components[coord]<3)return 0;float q=vk_frag_float(g_frag_values[coord][2]);if(q==0.0f)return 0;u/=q;v/=q;}uint32_t p=vksoft_sample_texture(ctx->texture,u,v);g_frag_values[rid][0]=vk_frag_fbits((float)((p>>16)&255u)/255.0f);g_frag_values[rid][1]=vk_frag_fbits((float)((p>>8)&255u)/255.0f);g_frag_values[rid][2]=vk_frag_fbits((float)(p&255u)/255.0f);g_frag_values[rid][3]=vk_frag_fbits((float)((p>>24)&255u)/255.0f);g_frag_components[rid]=4;g_frag_defined[rid]=1;}
+   else if(op==81u&&wc>=5u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3],c=w[i+4];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src]||c>=g_frag_components[src])return 0;g_frag_values[rid][0]=g_frag_values[src][c];g_frag_components[rid]=1;g_frag_defined[rid]=1;}
+   else if(op==83u&&wc==4u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src])return 0;for(unsigned k=0;k<4;k++)g_frag_values[rid][k]=g_frag_values[src][k];g_frag_components[rid]=g_frag_components[src];g_frag_defined[rid]=1;g_frag_kind[rid]=g_frag_kind[src];}
+   else if(op==253u&&wc==1u)break;
+   else if(op==14u||op==15u||op==17u||op==19u||op==20u||op==21u||op==22u||op==23u||op==25u||op==26u||op==27u||op==28u||op==29u||op==30u||op==32u||op==33u||op==43u||op==44u||op==54u||op==55u||op==56u||op==59u||op==71u||op==72u){}
+   else return 0;
+  }
+  i+=wc;
+ }
+ if(!output_var)return 0;
+ *out_color=((uint32_t)(vk_frag_float(g_frag_output[3])*255.0f+0.5f)<<24)|
+            ((uint32_t)(vk_frag_float(g_frag_output[0])*255.0f+0.5f)<<16)|
+            ((uint32_t)(vk_frag_float(g_frag_output[1])*255.0f+0.5f)<<8)|
+            (uint32_t)(vk_frag_float(g_frag_output[2])*255.0f+0.5f);
+ return 1;
+}
+
 /* Resolve the first bound combined-image-sampler descriptor into a
  * tightly packed ARGB texture for the bounded software rasterizer. */
 static int vk_pipeline_texture(VkCmdObj *c,VkPipelineObj *pl,VkSoftTexture *out) {

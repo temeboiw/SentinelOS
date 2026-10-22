@@ -555,6 +555,7 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
 #define SENTINEL_SYS_NT_INITIALIZE_GRAPHICS 32u
 #define SENTINEL_SYS_NT_SUBMIT_3D 34u
 #define SENTINEL_SYS_NT_UPLOAD_VIRGL_BUFFER 36u
+#define SENTINEL_SYS_NT_PRESENT_3D 35u
 #define SENTINEL_GFX_CAP_ACCEL_3D (1u << 4)
 #define SENTINEL_VIRGL_BUFFER_CAP (1024u * 1024u)
 #define SENTINEL_VIRGL_STREAM_MAX 4064u
@@ -614,6 +615,12 @@ VKAPI_EXPORT VkResult VKAPI_CALL SentinelVulkanSubmitVirGLStream(
  uint64_t ok=sentinel_syscall2(SENTINEL_SYS_NT_SUBMIT_3D,
    (uint64_t)(uintptr_t)words,byte_count);
  g_virgl_last_submit_ok=ok?1u:0u;
+ return ok?VK_SUCCESS:VK_ERROR_DEVICE_LOST;
+}
+/* Present the kernel's active VirGL target. This is not Vulkan swapchain support. */
+VKAPI_EXPORT VkResult VKAPI_CALL SentinelVulkanPresentVirGL(void) {
+ if(!sentinel_virgl_init())return VK_ERROR_FEATURE_NOT_PRESENT;
+ uint64_t ok=sentinel_syscall2(SENTINEL_SYS_NT_PRESENT_3D,0,0);
  return ok?VK_SUCCESS:VK_ERROR_DEVICE_LOST;
 }
 /* Upload bytes from the kernel-mapped VirGL buffer after the caller fills it. */
@@ -1330,7 +1337,7 @@ VKAPI_EXPORT void VKAPI_CALL vkDestroySemaphore(VkDevice d,VkSemaphore s,const v
 VKAPI_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice d,const char *name) {
  if(!dev_ok(d)||!name)return (PFN_vkVoidFunction)0;
 #define DPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- DPROC(vkGetDeviceProcAddr);DPROC(vkCreateSampler);DPROC(vkDestroySampler);DPROC(vkCreateDescriptorSetLayout);DPROC(vkDestroyDescriptorSetLayout);DPROC(vkCreatePipelineLayout);DPROC(vkDestroyPipelineLayout);DPROC(vkCreateDescriptorPool);DPROC(vkDestroyDescriptorPool);DPROC(vkResetDescriptorPool);DPROC(vkAllocateDescriptorSets);DPROC(vkFreeDescriptorSets);DPROC(vkUpdateDescriptorSets);DPROC(vkCmdBindDescriptorSets);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);DPROC(SentinelVulkanGpuStatus);DPROC(SentinelVulkanSubmitVirGLStream);DPROC(SentinelVulkanUploadVirGLBuffer);
+ DPROC(vkGetDeviceProcAddr);DPROC(vkCreateSampler);DPROC(vkDestroySampler);DPROC(vkCreateDescriptorSetLayout);DPROC(vkDestroyDescriptorSetLayout);DPROC(vkCreatePipelineLayout);DPROC(vkDestroyPipelineLayout);DPROC(vkCreateDescriptorPool);DPROC(vkDestroyDescriptorPool);DPROC(vkResetDescriptorPool);DPROC(vkAllocateDescriptorSets);DPROC(vkFreeDescriptorSets);DPROC(vkUpdateDescriptorSets);DPROC(vkCmdBindDescriptorSets);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);DPROC(SentinelVulkanGpuStatus);DPROC(SentinelVulkanSubmitVirGLStream);DPROC(SentinelVulkanUploadVirGLBuffer);DPROC(SentinelVulkanPresentVirGL);
 #undef DPROC
  return (PFN_vkVoidFunction)0;
 }
@@ -1384,7 +1391,7 @@ VKAPI_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst
  IPROC(vkCreateShaderModule);IPROC(vkDestroyShaderModule);
  IPROC(vkCreateGraphicsPipelines);IPROC(vkDestroyPipeline);
  IPROC(vkCmdBindPipeline);IPROC(vkCmdBindVertexBuffers);IPROC(vkCmdDraw);
- IPROC(SentinelVulkanCmdBindColorTarget);IPROC(SentinelVulkanGpuStatus);IPROC(SentinelVulkanSubmitVirGLStream);IPROC(SentinelVulkanUploadVirGLBuffer);
+ IPROC(SentinelVulkanCmdBindColorTarget);IPROC(SentinelVulkanGpuStatus);IPROC(SentinelVulkanSubmitVirGLStream);IPROC(SentinelVulkanUploadVirGLBuffer);IPROC(SentinelVulkanPresentVirGL);
 #undef IPROC
  return (PFN_vkVoidFunction)0;
 }

@@ -405,6 +405,15 @@ lld -flavor link \
   "$B/obj/vk_softpipe.o"
 cp "$SYS32/vulkan.dll" "$SYS32/vulkan-1.dll"
 
+echo "  -> Vulkan CPU runtime regression tests"
+# Compile the host-side test against the actual implementation sources. This
+# exercises the software runtime independently of the freestanding PE build.
+clang -fdeclspec -O2 -Wall \
+  "$ROOT/tests/vulkan_test.c" \
+  -o "$B/vulkan_test"
+"$B/vulkan_test"
+
+
 echo "  -> bootvid.exe"
 
 clang "${USER_CFLAGS[@]}" \

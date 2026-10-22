@@ -940,15 +940,15 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     if(op==89u||op==90u||op==93u||op==94u){
      if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],p=vksoft_sample_texture_bits(ctx->texture,ubits,vbits);
      g_frag_values[rid][0]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,0),ctx->texture->compare_op)?0x3f800000u:0u);g_frag_components[rid]=1;g_frag_defined[rid]=1;
-    }else if(op==97u){
+    }else if(op==97u){ VkSoftTexture gatherTexture=*ctx->texture;gatherTexture.linear_filter=0;
      if(wc<7u||w[i+5]>=VK_SPIRV_MAX_IDS||w[i+6]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!g_frag_defined[w[i+6]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],comp=g_frag_values[w[i+6]][0];if(comp>3u)return 0;
      uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
-     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(ctx->texture,pu,pv);g_frag_values[rid][k]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,comp),ctx->texture->compare_op)?0x3f800000u:0u);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
-    }else if(op==96u){
+     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(&gatherTexture,pu,pv);g_frag_values[rid][k]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,comp),ctx->texture->compare_op)?0x3f800000u:0u);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
+    }else if(op==96u){ VkSoftTexture gatherTexture=*ctx->texture;gatherTexture.linear_filter=0;
      if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]])return 0;uint32_t comp=g_frag_values[w[i+5]][0];if(comp>3u)return 0;uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
-     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(ctx->texture,pu,pv);g_frag_values[rid][k]=vk_frag_tex_channel_bits(p,comp);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
+     for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(&gatherTexture,pu,pv);g_frag_values[rid][k]=vk_frag_tex_channel_bits(p,comp);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else{
-     uint32_t p=vksoft_sample_texture_bits(ctx->texture,ubits,vbits);g_frag_values[rid][0]=vk_frag_tex_channel_bits(p,0);g_frag_values[rid][1]=vk_frag_tex_channel_bits(p,1);g_frag_values[rid][2]=vk_frag_tex_channel_bits(p,2);g_frag_values[rid][3]=vk_frag_tex_channel_bits(p,3);g_frag_components[rid]=4;g_frag_defined[rid]=1;
+     VkSoftTexture fetchTexture=*ctx->texture;if(op==95u)fetchTexture.linear_filter=0;uint32_t p=vksoft_sample_texture_bits(&fetchTexture,ubits,vbits);g_frag_values[rid][0]=vk_frag_tex_channel_bits(p,0);g_frag_values[rid][1]=vk_frag_tex_channel_bits(p,1);g_frag_values[rid][2]=vk_frag_tex_channel_bits(p,2);g_frag_values[rid][3]=vk_frag_tex_channel_bits(p,3);g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }
    }
    else if(op==81u&&wc>=5u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3],c=w[i+4];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src]||c>=g_frag_components[src])return 0;g_frag_values[rid][0]=g_frag_values[src][c];g_frag_components[rid]=1;g_frag_defined[rid]=1;}

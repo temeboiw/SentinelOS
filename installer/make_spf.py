@@ -173,8 +173,10 @@ def read_package(path: Path):
     return meta, raw
 
 
-def verify(path: Path) -> None:
+def verify(path: Path, expected_kind: str | None = None) -> None:
     meta, raw = read_package(path)
+    if expected_kind is not None and meta.get("kind") != expected_kind:
+        raise ValueError(f"SPF kind mismatch: expected {expected_kind!r}, got {meta.get('kind')!r}")
     expected = {safe_rel(x["path"]): x for x in meta.get("files", [])}
     seen = set()
     with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tf:
@@ -277,6 +279,7 @@ def main() -> int:
     b.add_argument("--output-dir", type=Path, default=Path("installer"))
     v = sub.add_parser("verify", help="verify package header, payload and per-file hashes")
     v.add_argument("package", type=Path)
+    v.add_argument("--kind", choices=("esp", "system"), help="require this package kind")
     e = sub.add_parser("extract", help="extract an SPF to an already-mounted partition directory")
     e.add_argument("package", type=Path)
     e.add_argument("--target-root", type=Path, required=True, help="mounted ESP or system partition directory; raw devices are not supported")
@@ -289,7 +292,7 @@ def main() -> int:
             build(args.esp_root, args.output_dir / "esp.spf", "esp")
             build(args.system_root, args.output_dir / "system.spf", "system")
         elif args.command == "verify":
-            verify(args.package)
+            verify(args.package, args.kind)
         elif args.command == "extract":
             extract(args.package, args.target_root, args.overwrite)
         else:

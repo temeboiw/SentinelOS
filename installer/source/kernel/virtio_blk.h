@@ -59,6 +59,8 @@ struct virtio_blk_req {
 static int vb_ok;
 static volatile uint8_t *vb_common;
 static volatile uint8_t *vb_notify;
+static volatile uint8_t *vb_device_cfg;
+static uint64_t vb_capacity_sectors;
 static uint32_t vb_notify_mult;
 static uint16_t vb_qsize;
 
@@ -101,7 +103,7 @@ static int virtio_blk_init(void) {
         pci_cfg_write(0, slot, 0, 0x04, cmd | 0x06);
 
         uint8_t cap = pci_cfg_read8(0, slot, 0, 0x34);
-        volatile uint8_t *common = 0, *notify = 0;
+        volatile uint8_t *common = 0, *notify = 0, *device_cfg = 0;
         uint32_t notify_mult = 0;
         while (cap && cap != 0xFF) {
             uint8_t cid = pci_cfg_read8(0, slot, 0, cap);
@@ -119,6 +121,7 @@ static int virtio_blk_init(void) {
                     void *base = vb_map_bar(bar_pa, 0x10000);
                     volatile uint8_t *p = (volatile uint8_t *)base + off;
                     if (typ == VIRTIO_PCI_CAP_COMMON_CFG) common = p;
+                    else if (typ == VIRTIO_PCI_CAP_DEVICE_CFG) device_cfg = p;
                     else if (typ == VIRTIO_PCI_CAP_NOTIFY_CFG) {
                         notify = p;
                         notify_mult =
@@ -184,6 +187,8 @@ static int virtio_blk_init(void) {
 
         vb_common = common;
         vb_notify = notify;
+        vb_device_cfg = device_cfg;
+        vb_capacity_sectors = device_cfg ? *(volatile uint64_t *)device_cfg : 0;
         vb_notify_mult = notify_mult ? notify_mult : 1;
         vb_avail_idx = 0;
         vb_last_used = vb_used->idx;

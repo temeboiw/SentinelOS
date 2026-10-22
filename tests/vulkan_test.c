@@ -96,7 +96,7 @@ int main(void) {
 
     /* Execute real SPIR-V scalar instructions: 40 + 2 must produce 42. */
     const uint32_t exec_words[] = {
-        0x07230203u, 0x00010000u, 0u, 13u, 0u,
+        0x07230203u, 0x00010000u, 0u, 14u, 0u,
         (2u<<16)|17u, 1u,
         (3u<<16)|14u, 0u, 1u,
         (4u<<16)|15u, 0u, 3u, 0x6e69616du,
@@ -111,6 +111,7 @@ int main(void) {
         (5u<<16)|132u, 2u, 9u, 7u, 6u,
         (5u<<16)|170u, 2u, 10u, 7u, 11u,
         (6u<<16)|169u, 2u, 12u, 10u, 7u, 5u,
+        (5u<<16)|87u, 2u, 13u, 11u, 10u,
         (1u<<16)|253u,
         (1u<<16)|56u
     };
@@ -450,12 +451,13 @@ int main(void) {
     imci.extent.width = 4; imci.extent.height = 4; imci.extent.depth = 1;
     imci.mipLevels = 1; imci.arrayLayers = 1; imci.samples = 1;
     imci.tiling = 1;
-    /* Storage and sampling remain unsupported; color attachment images are now supported. */
+    /* Storage remains unsupported; sampled images now have real backing memory. */
     VkImage rejectedImage = 0;
     imci.usage = VK_IMAGE_USAGE_STORAGE_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
     imci.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-    CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_ERROR_FEATURE_NOT_PRESENT);
+    CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_SUCCESS);
+    vkDestroyImage(device, rejectedImage, 0); rejectedImage = 0;
     imci.tiling = 0; /* color attachments are currently supported with optimal tiling */
     imci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     CHECK(vkCreateImage(device, &imci, 0, &rejectedImage) == VK_SUCCESS);
@@ -642,12 +644,36 @@ int main(void) {
     stages[0].stage = 1u; stages[0].module = vertexShader; stages[0].pName = "main";
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = 0x10u; stages[1].module = fragmentShader; stages[1].pName = "main";
-    VkDescriptorSetLayoutBinding descBinding = {0};
-    descBinding.binding = 0; descBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descBinding.descriptorCount = 1; descBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkImageCreateInfo texCi = {0};
+    texCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; texCi.imageType = 1;
+    texCi.format = VK_FORMAT_R8G8B8A8_UNORM; texCi.extent.width = 2; texCi.extent.height = 2; texCi.extent.depth = 1;
+    texCi.mipLevels = 1; texCi.arrayLayers = 1; texCi.samples = 1; texCi.tiling = 1;
+    texCi.usage = VK_IMAGE_USAGE_SAMPLED_BIT; texCi.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkImage texImage = 0; CHECK(vkCreateImage(device, &texCi, 0, &texImage) == VK_SUCCESS);
+    VkMemoryRequirements texReq; vkGetImageMemoryRequirements(device, texImage, &texReq);
+    VkMemoryAllocateInfo texAi = {0}; texAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; texAi.allocationSize = texReq.size; texAi.memoryTypeIndex = 0;
+    VkDeviceMemory texMem = 0; CHECK(vkAllocateMemory(device, &texAi, 0, &texMem) == VK_SUCCESS);
+    CHECK(vkBindImageMemory(device, texImage, texMem, 0) == VK_SUCCESS);
+    CHECK(vkMapMemory(device, texMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
+    for (unsigned ti = 0; ti < 4; ++ti) { ((uint8_t *)mapped)[ti*4] = 255; ((uint8_t *)mapped)[ti*4+1] = 0; ((uint8_t *)mapped)[ti*4+2] = 0; ((uint8_t *)mapped)[ti*4+3] = 255; }
+    vkUnmapMemory(device, texMem);
+    VkImageViewCreateInfo texViewCi = {0}; texViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; texViewCi.image = texImage;
+    texViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D; texViewCi.format = texCi.format;
+    texViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; texViewCi.subresourceRange.levelCount = 1; texViewCi.subresourceRange.layerCount = 1;
+    VkImageView texView = 0; CHECK(vkCreateImageView(device, &texViewCi, 0, &texView) == VK_SUCCESS);
+    VkSamplerCreateInfo texSamplerCi = {0}; texSamplerCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    texSamplerCi.magFilter = VK_FILTER_NEAREST; texSamplerCi.minFilter = VK_FILTER_NEAREST;
+    texSamplerCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; texSamplerCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; texSamplerCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    texSamplerCi.maxAnisotropy = 1.0f; VkSampler texSampler = 0;
+    CHECK(vkCreateSampler(device, &texSamplerCi, 0, &texSampler) == VK_SUCCESS);
+    VkDescriptorSetLayoutBinding descBindings[2] = {{0}};
+    descBindings[0].binding = 0; descBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descBindings[0].descriptorCount = 1; descBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    descBindings[1].binding = 1; descBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descBindings[1].descriptorCount = 1; descBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo dslCi = {0};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 1; dslCi.pBindings = &descBinding;
+    dslCi.bindingCount = 2; dslCi.pBindings = descBindings;
     VkDescriptorSetLayout descriptorLayout = 0;
     CHECK(vkCreateDescriptorSetLayout(device, &dslCi, 0, &descriptorLayout) == VK_SUCCESS);
     VkPipelineLayoutCreateInfo plCi = {0};
@@ -655,10 +681,10 @@ int main(void) {
     plCi.setLayoutCount = 1; plCi.pSetLayouts = &descriptorLayout;
     VkPipelineLayout pipelineLayout = 0;
     CHECK(vkCreatePipelineLayout(device, &plCi, 0, &pipelineLayout) == VK_SUCCESS);
-    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
+    VkDescriptorPoolSize poolSizes[2] = {{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }};
     VkDescriptorPoolCreateInfo dpCi = {0};
     dpCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    dpCi.maxSets = 1; dpCi.poolSizeCount = 1; dpCi.pPoolSizes = &poolSize;
+    dpCi.maxSets = 1; dpCi.poolSizeCount = 2; dpCi.pPoolSizes = poolSizes;
     VkDescriptorPool descriptorPool = 0;
     CHECK(vkCreateDescriptorPool(device, &dpCi, 0, &descriptorPool) == VK_SUCCESS);
     VkDescriptorSetAllocateInfo dsAi = {0};
@@ -694,6 +720,11 @@ int main(void) {
     vkUpdateDescriptorSets(device, 1, &write, 0, 0);
     CHECK(descriptorSet->values[0][0].buffer == vertexBuffer);
     CHECK(descriptorSet->values[0][0].range == vertexCi.size);
+    VkDescriptorImageInfo texInfo = { texSampler, texView, VK_IMAGE_LAYOUT_GENERAL };
+    VkWriteDescriptorSet texWrite = {0}; texWrite.dstSet = descriptorSet; texWrite.dstBinding = 1;
+    texWrite.descriptorCount = 1; texWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; texWrite.pImageInfo = &texInfo;
+    vkUpdateDescriptorSets(device, 1, &texWrite, 0, 0);
+    CHECK(descriptorSet->values[1][0].imageView == texView && descriptorSet->values[1][0].sampler == texSampler);
     CHECK(vkMapMemory(device, vertexMem, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS);
     VkSoftVertex shaderTri[3] = {va, vb, vc};
     vk_copy(mapped, shaderTri, sizeof(shaderTri));
@@ -725,8 +756,7 @@ int main(void) {
         const unsigned inside = (2u*8u+2u)*4u;
         const unsigned outside = (7u*8u+7u)*4u;
         CHECK(pixels[inside] >= 40u);
-        CHECK(pixels[inside] == pixels[inside+1u] &&
-              pixels[inside+1u] == pixels[inside+2u]);
+        CHECK(pixels[inside+1u] == 0u && pixels[inside+2u] == 0u);
         CHECK(pixels[inside+3u] == 255u);
         CHECK(pixels[outside] == 0u && pixels[outside+1u] == 0u &&
               pixels[outside+2u] == 0u && pixels[outside+3u] == 0u);

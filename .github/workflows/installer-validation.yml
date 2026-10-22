@@ -37,8 +37,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld nasm qemu-system-x86 ovmf dosfstools mtools e2fsprogs xorriso
+      - name: Fetch EDK2 headers
+        run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Build native installer and ISO
+        env:
+          EDK2: ${{ runner.temp }}/edk2
         run: |
-          bash installer/build-installer.sh
+          EDK2="$RUNNER_TEMP/edk2" bash installer/build-installer.sh
           bash installer/make-iso.sh
           bash installer/check-iso.sh

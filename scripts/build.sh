@@ -423,6 +423,9 @@ lld -flavor link \
   /export:vkGetDeviceProcAddr \
   /export:vkGetInstanceProcAddr \
   /export:SentinelVulkanLoaderStatus \
+  /export:SentinelVulkanGpuStatus \
+  /export:SentinelVulkanSubmitVirGLStream \
+  /export:SentinelVulkanUploadVirGLBuffer \
   /export:SentinelVulkanCmdDrawTriangle \
   "/out:$SYS32/vulkan.dll" \
   "$B/obj/vulkan.o" \

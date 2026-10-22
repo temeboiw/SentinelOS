@@ -1729,13 +1729,22 @@ clang++ "${USER_CXXFLAGS[@]}" \
   -o "$B/obj/maze.o"
 
 lld -flavor link \
-  /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
+  /machine:x64 /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x42100000 \
   "/out:$B/rootfs/maze.exe" \
   "$B/obj/maze.o"
 
 if [[ ! -s "$B/rootfs/maze.exe" ]]; then
   echo "FATAL: maze.exe was not produced"
+  exit 1
+fi
+
+# Fail the build if the game is not an x86-64 PE32+ image. The .exe suffix
+# alone is not a format check; SentinelOS user executables must be PE32+.
+MAZE_FORMAT="$(file -b "$B/rootfs/maze.exe")"
+echo "  -> maze.exe format: $MAZE_FORMAT"
+if [[ "$MAZE_FORMAT" != *"PE32+"* || "$MAZE_FORMAT" != *"x86-64"* ]]; then
+  echo "FATAL: maze.exe is not a PE32+ x86-64 executable"
   exit 1
 fi
 ls -lh "$B/rootfs/maze.exe"

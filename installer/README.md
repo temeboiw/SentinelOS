@@ -75,17 +75,15 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 - Creates a FAT32 EFI boot image and copies the staged EFI tree plus `magic/System32` boot modules onto the ESP. This lets `loadufi.efi` load the HAL, kernel, and setup session from the ISO itself; installed-system boots still fall back to the ext4 reader when those files are not on the ESP.
 - Adds both SPF packages to the ISO.
 - Emits `SHA256SUMS` for the embedded boot image, packages, and media README.
-- Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, both embedded SPF packages, and a SHA-256 manifest that the trusted kernel checks before allowing disk writes.
+- Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, the embedded filesystem images, their SHA-256 manifest, and the SPF build-validation packages.
 
-## Installation status (work in progress)
+## Installation status
 
-The setup UI detects the first supported VirtIO block disk, writes GPT primary/backup metadata, formats the 128 MiB EFI partition as FAT32, and formats the system partition with a minimal ext4 layout (superblock, group descriptors, bitmaps, inode tables, and root directory). Both formatters perform basic read-back checks. The kernel exposes bounded one-sector read/write operations only to the trusted setup process; requests are range-checked against the reported device capacity. The UEFI loader now also stages `esp.spf`, `system.spf`, and `packages.sha256` from the ESP as raw boot modules. The trusted kernel exposes bounded 64 KiB package reads and verifies each complete package against the embedded SHA-256 manifest before permitting destructive disk operations. `make-iso.sh` embeds and byte-compares both package files inside the ESP as well as keeping the host-side ISO copies. The ISO builder estimates the required FAT ESP capacity from the staged tree and package sizes instead of assuming 128 MiB will always be enough.
+The graphical installer is designed to install without a shell. The ISO builder creates a 128 MiB FAT32 EFI image and a pre-populated ext4 system image (512 MiB by default), hashes both images, and embeds them on the boot ESP. UEFI stages esp.img, system.img, and install.sha256 as immutable boot modules. Before any disk writes, the trusted kernel checks both SHA-256 digests.
 
-**This is still not a complete OS installation.** The system filesystem currently contains only an empty root directory; SentinelOS boot/system files are not copied to the target. The native in-OS installer UI stops after filesystem formatting and explicitly reports that OS deployment is not implemented. The deployment engine and end-to-end installation/reboot test remain unfinished. Do not select a disk containing data you need: partitioning overwrites its partition table and formatting destroys data in both target partitions. Use only the disposable `sentinel-test-disk.img` during development. Do not run the VM test again until payload deployment and the remaining install stages are implemented and reviewed.
+When the user clicks **Install OS**, the in-OS setup app writes GPT metadata and asks the trusted kernel to copy the verified images to the fixed partition offsets. The kernel bounds-checks image sizes against the VirtIO disk capacity and reads back the first and last sectors after copying. The target disk must be at least about 640 MiB. The installed ext4 filesystem initially retains the image size even if its partition is larger.
 
-The host-side SPF extractor is a package-validation/test utility only; it is not an OS installer and must not be used as the installation path.
-
-The ISO and VM checks have not been run by this repository-editing session. A QEMU launch smoke test does not replace a visual UEFI boot test or an end-to-end installation test onto a disposable virtual disk.
+The host-side SPF extractor and .spf packages remain build/validation utilities; they are not the installation path. **The code path has been connected, but this session has not run the installer build, ISO checks, or a real UEFI install-and-reboot test. Do not treat the installer as release-ready until those checks pass.** Installing erases the selected disk. Use only a disposable virtual disk during testing.
 
 ## Regression tests
 

@@ -3,6 +3,7 @@
 
 typedef struct { int type,x,y,btn; char key; } InputEvent;
 typedef struct { u64 va; u32 w,h,pitch; } IFB;
+static int installer_payloads_ready;
 static void rect(u32*f,u32 p,u32 w,u32 h,int x,int y,int rw,int rh,u32 c){int x2=x+rw,y2=y+rh;if(x<0)x=0;if(y<0)y=0;if(x2>(int)w)x2=w;if(y2>(int)h)y2=h;if(x>=x2||y>=y2)return;for(int yy=y;yy<y2;yy++)for(int xx=x;xx<x2;xx++)f[(u64)yy*p+xx]=c;}
 static void text(u32*f,u32 p,u32 w,u32 h,int x,int y,const char*s,u32 c,int z){for(;*s;s++,x+=8*z){unsigned char ch=(unsigned char)*s;if(ch>=128)ch='?';const unsigned char*g=font8x8_basic[ch];for(int j=0;j<8;j++)for(int i=0;i<8;i++)if(g[j]&(1u<<i))rect(f,p,w,h,x+i*z,y+j*z,z,z,c);}}
 static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
@@ -170,6 +171,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    text(f,p,w,h,x+24,y+102,"Capacity (MiB):",0xFF203944,1);
    text(f,p,w,h,x+144,y+102,sizebuf,0xFF203944,1);
    text(f,p,w,h,x+24,y+126,"This is the dedicated QEMU test target.",0xFF203944,1);
+   text(f,p,w,h,x+24,y+146,installer_payloads_ready?"Install payloads: available":"Install payloads: missing/invalid",installer_payloads_ready?0xFF1B6C40:0xFF9B3B24,1);
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3F3E8);
    text(f,p,w,h,x+38,y+178,install_state==1?"GPT ready; click to format EFI partition":install_state==2?"EFI FAT32 formatted; click to format system":install_state==3?"System ext4 formatted; OS copy pending":install_state<0?"Disk operation failed - check log":"Ready to partition the selected disk",install_state>=1?0xFF1B6C40:install_state<0?0xFF9B3B24:0xFF1B6C40,1);
   }else{
@@ -179,7 +181,7 @@ static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present
    rect(f,p,w,h,x+24,y+162,pw-48,42,0xFFE3E9EC);
    text(f,p,w,h,x+38,y+178,"Target disk: unavailable",0xFF566B73,1);
   }
-  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&install_state<3?0xFF176B8C:0xFF9CAEB5);
+  rect(f,p,w,h,x+pw-142,y+ph-56,118,34,disk_present&&installer_payloads_ready&&install_state<3?0xFF176B8C:0xFF9CAEB5);
   text(f,p,w,h,x+pw-128,y+ph-45,install_state==3?"Formatted":install_state==2?"Format System":install_state==1?"Format ESP":install_state<0?"Retry":"Partition",0xFFFFFFFF,1);
   rect(f,p,w,h,x+24,y+ph-56,118,34,0xFF176B8C);
   text(f,p,w,h,x+57,y+ph-45,"Back",0xFFFFFFFF,1);
@@ -192,6 +194,16 @@ void instlr_main(void){
  if(gok&&gfx.backend==2&&gfx.surface_va){f.va=gfx.surface_va;f.w=gfx.width;f.h=gfx.height;f.pitch=gfx.pitch;}
  if(!f.va||f.w<320||f.h<200){NtWriteConsole("instlr: framebuffer unavailable; installer cannot continue\n");for(;;)(void)sy3(SYS_Yield,0,0,0);}
  f.pitch/=4;IFB b={f.va,f.w,f.h,f.pitch};u32*fb=(u32*)(u64)f.va;int page=0,checked=0,accepted=0,install_state=0;InstallerDiskInfo disk={0};int disk_present=(NtQueryInstallerDisk(&disk)!=0&&disk.present);u64 disk_mib=disk.sector_size?disk.sectors*disk.sector_size/(1024*1024):0;
+ /* Require both embedded package containers before permitting destructive disk work. */
+ u64 esp_package_size=0,system_package_size=0;unsigned char package_magic[8];
+ int esp_query=NtQueryInstallerPayload(0,&esp_package_size)==0&&esp_package_size>=24;
+ int sys_query=NtQueryInstallerPayload(1,&system_package_size)==0&&system_package_size>=24;
+ int esp_magic_ok=esp_query&&NtReadInstallerPayload(0,0,package_magic,8)==8;
+ if(esp_magic_ok){const char want[]="SENTSPF1";for(int i=0;i<8;i++)if(package_magic[i]!=(unsigned char)want[i])esp_magic_ok=0;}
+ int sys_magic_ok=sys_query&&NtReadInstallerPayload(1,0,package_magic,8)==8;
+ if(sys_magic_ok){const char want[]="SENTSPF1";for(int i=0;i<8;i++)if(package_magic[i]!=(unsigned char)want[i])sys_magic_ok=0;}
+ installer_payloads_ready=esp_magic_ok&&sys_magic_ok;
+ NtWriteConsole(installer_payloads_ready?"instlr: both package payloads detected\n":"instlr: package payload missing or invalid; disk writes disabled\n");
  int mouse_x=(int)f.w/2,mouse_y=(int)f.h/2;
  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
@@ -200,7 +212,7 @@ void instlr_main(void){
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
    else if(ev.x>=x+24&&ev.x<x+150&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=0;}
-   else if(disk_present&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}else if(install_state==2){NtWriteConsole("instlr: formatting system partition as ext4\n");install_state=format_ext4(264192,disk.sectors-264225)==0?3:-1;NtWriteConsole(install_state==3?"instlr: system ext4 format verified\n":"instlr: system ext4 format failed\n");}}
+   else if(disk_present&&installer_payloads_ready&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18&&install_state<3){if(install_state<=0){NtWriteConsole("instlr: writing GPT partition table to selected disk\n");install_state=make_gpt(disk.sectors)==0?1:-1;NtWriteConsole(install_state==1?"instlr: GPT partition table verified\n":"instlr: GPT partitioning failed\n");}else if(install_state==1){NtWriteConsole("instlr: formatting EFI partition as FAT32\n");install_state=format_fat32(2048,262144)==0?2:-1;NtWriteConsole(install_state==2?"instlr: EFI FAT32 format verified\n":"instlr: EFI FAT32 format failed\n");}else if(install_state==2){NtWriteConsole("instlr: formatting system partition as ext4\n");install_state=format_ext4(264192,disk.sectors-264225)==0?3:-1;NtWriteConsole(install_state==3?"instlr: system ext4 format verified\n":"instlr: system ext4 format failed\n");}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}

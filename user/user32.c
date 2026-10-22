@@ -796,7 +796,12 @@ static void u32_clear_layer(u32 *layer) {
         if (u32_clip_y1>=0 && (u32)u32_clip_y1<y1)y1=(u32)u32_clip_y1;
     }
     if(x0>x1)x0=x1; if(y0>y1)y0=y1;
-    for(u32 y=y0;y<y1;y++)for(u32 x=x0;x<x1;x++)layer[y*g_fw+x]=0;
+    for(u32 y=y0;y<y1;y++) {
+        /* Clear each damaged row sequentially rather than recomputing
+         * y*width+x for every pixel. Keep the clip bounds unchanged. */
+        u32 *p=&layer[y*g_fw+x0];
+        for(u32 x=x0;x<x1;x++)*p++=0;
+    }
 }
 
 static u32 u32_alpha_over(u32 dst,u32 src) {

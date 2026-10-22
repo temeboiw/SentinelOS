@@ -126,5 +126,5 @@ exec qemu-system-x86_64 \
     -device ich9-intel-hda,id=hda,debug=0 \
     -device hda-duplex,bus=hda.0,audiodev=audio0 \
     "${DISPLAY_ARGS[@]}" \
-    -serial mon:stdio \
+    -serial stdio \
     -no-reboot

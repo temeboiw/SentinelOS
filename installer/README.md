@@ -17,3 +17,14 @@ The script builds from the isolated `installer/source/` snapshot, excludes game/
 - `screen.exe` is the full-screen progress-style spinner for the later installation phase, but installation orchestration does not yet launch it.
 - SPF is a custom zlib/tar format, not WIM-compatible. Example: `python3 installer/make_spf.py extract installer/artifacts/system.spf --target-root /mnt/sentinel-system`. Add `--overwrite` only when deliberately replacing files.
 - Boot path selection, real disk enumeration, partition creation, FAT32/ext4 formatting, safe package extraction, and ISO mastering still need implementation and VM testing.
+
+
+## SPF regression tests
+
+Run the standalone Python tests (no third-party packages required):
+
+```sh
+python3 -m unittest discover -s installer/tests -v
+```
+
+The tests cover a package round-trip, overwrite protection, payload corruption, and path traversal rejection. They exercise the host-side package utility, not the in-kernel disk or filesystem drivers.

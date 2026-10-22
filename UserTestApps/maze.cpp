@@ -43,10 +43,6 @@ using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*
 
 struct Message { u32 hwnd,message; u64 wParam; long long lParam; u32 time; int x,y; };
 struct SurfaceInfo { u64 va; u32 w,h,pitch; };
-struct GfxInfo {
-    u32 size,version,backend,capabilities,width,height,pitch;
-    u32 pci_bus,pci_device,pci_function; u16_dummy_not_used;
-};
 struct GraphicsBootInfo {
     u32 size,version,backend,capabilities,width,height,pitch;
     u32 pci_bus,pci_device,pci_function;

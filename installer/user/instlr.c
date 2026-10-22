@@ -142,7 +142,7 @@ static int format_ext4(u64 start,u64 sectors){
   for(int i=0;i<8;i++)if(write_lba(glba+8+(u64)i,gd+i*512)<0)return -11;
  }
  unsigned char verify[512];if(NtInstallerDiskIo(0,start+2,verify)!=0||verify[56]!=0x53||verify[57]!=0xEF)return -12;
- if(NtInstallerDiskIo(0,start+8*68,verify)!=0)return -13;
+ if(NtInstallerDiskIo(0,start+8*68,verify)!=0||verify[0]!=2||verify[8]!='.'||verify[20]!='.')return -13;
  return 0;
 }
 static void paint(u32*f,IFB*b,int page,int accepted,int checked,int disk_present,u64 disk_mib,int install_state){

@@ -2149,10 +2149,13 @@ static Frame *syscall_handler(Frame *f) {
 
         MmSwitchToProcess(PspSystemProcess);
         for (uint64_t i = 0; i < pages; i++) {
+            /* Firmware GOP memory is device memory, not normal WB RAM.
+             * Match the kernel's uncached framebuffer mapping; a WB user alias
+             * can leave stores invisible to scanout on real hardware/VMs. */
             map_4k_in(cur->Pml4,
                       uva + (i << 12),
                       (user_fb_base + (i << 12)) & ~0xFFFULL,
-                      PTE_U | PTE_RW);
+                      PTE_U | PTE_RW | PTE_PCD | PTE_PWT);
         }
         MmSwitchToProcess(cur);
 

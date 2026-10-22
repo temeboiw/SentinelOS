@@ -383,6 +383,17 @@ lld -flavor link \
   /export:vkResetFences \
   /export:vkCreateSemaphore \
   /export:vkDestroySemaphore \
+  /export:vkCreateDescriptorSetLayout \
+  /export:vkDestroyDescriptorSetLayout \
+  /export:vkCreatePipelineLayout \
+  /export:vkDestroyPipelineLayout \
+  /export:vkCreateDescriptorPool \
+  /export:vkDestroyDescriptorPool \
+  /export:vkResetDescriptorPool \
+  /export:vkAllocateDescriptorSets \
+  /export:vkFreeDescriptorSets \
+  /export:vkUpdateDescriptorSets \
+  /export:vkCmdBindDescriptorSets \
   /export:vkCreateShaderModule \
   /export:vkDestroyShaderModule \
   /export:vkGetDeviceProcAddr \

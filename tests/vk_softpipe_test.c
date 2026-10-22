@@ -73,7 +73,7 @@ int main(void) {
     (void)vksoft_triangle(&target,&a,&b,&c,0);
     fails += check(color[4 * 16 + 4] == 0xff00ffffu,
                    "never depth comparison rejects fragment");
-    target.depth_compare = 0u;
+    target.depth_compare = 1u; /* restore LESS before perspective test */
 
     vksoft_clear(&target, 0xff000000u, 1.0f);
     a.x=2; a.y=2; a.z=0.5f; a.r=1; a.g=0; a.b=0; a.a=1; a.inv_w=1.0f;

@@ -512,7 +512,13 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     return 1;
 }
 static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
-    if(!gfx_gpu_ready)return 0;
+    /* On the firmware GOP fallback, user writes go directly to scanout memory.
+     * There is no GPU resource to TRANSFER/FLUSH; order stores and report the
+     * direct framebuffer presentation as successful instead of a false error. */
+    if(!gfx_gpu_ready) {
+        __asm__ volatile("sfence" ::: "memory");
+        return 1;
+    }
     if(x>=gfx_width||y>=gfx_height||!w||!h)return 0;
     if(w>gfx_width-x)w=gfx_width-x;if(h>gfx_height-y)h=gfx_height-y;
     GfxTransfer tr={0};tr.hdr.type=GFX_GPU_CMD_TRANSFER;

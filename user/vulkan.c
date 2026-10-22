@@ -939,15 +939,15 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     if(projected){if(g_frag_components[coord]<3)return 0;float q=vk_frag_float(g_frag_values[coord][2]);if(q==0.0f)return 0;u/=q;v/=q;}
     if(op==95u){int32_t x=(int32_t)g_frag_values[coord][0],y=(int32_t)g_frag_values[coord][1];u=((float)x+0.5f)/(float)ctx->texture->width;v=((float)y+0.5f)/(float)ctx->texture->height;}
     if(op==89u||op==90u||op==93u||op==94u){
-     if(wc<6u||!ctx->texture->compare_enable)return 0;float ref=vk_frag_float(g_frag_values[w[i+5]][0]);uint32_t p=vksoft_sample_texture(ctx->texture,u,v);
+     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable)return 0;float ref=vk_frag_float(g_frag_values[w[i+5]][0]);uint32_t p=vksoft_sample_texture(ctx->texture,u,v);
      g_frag_values[rid][0]=vk_frag_fbits(vk_frag_compare(ctx->texture->compare_op,ref,vk_frag_tex_channel(p,0))?1.0f:0.0f);g_frag_components[rid]=1;g_frag_defined[rid]=1;
     }else if(op==97u){
-     if(wc<7u||!ctx->texture->compare_enable)return 0;float ref=vk_frag_float(g_frag_values[w[i+5]][0]);uint32_t comp=g_frag_values[w[i+6]][0];if(comp>3u)return 0;
+     if(wc<7u||w[i+5]>=VK_SPIRV_MAX_IDS||w[i+6]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!g_frag_defined[w[i+6]]||!ctx->texture->compare_enable)return 0;float ref=vk_frag_float(g_frag_values[w[i+5]][0]);uint32_t comp=g_frag_values[w[i+6]][0];if(comp>3u)return 0;
      const float du=0.5f/(float)ctx->texture->width,dv=0.5f/(float)ctx->texture->height;
      const float ou[4]={-1.0f,1.0f,1.0f,-1.0f},ov[4]={-1.0f,-1.0f,1.0f,1.0f};
      for(unsigned k=0;k<4;k++){uint32_t p=vksoft_sample_texture(ctx->texture,u+ou[k]*du,v+ov[k]*dv);g_frag_values[rid][k]=vk_frag_fbits(vk_frag_compare(ctx->texture->compare_op,ref,vk_frag_tex_channel(p,comp))?1.0f:0.0f);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else if(op==96u){
-     if(wc<6u)return 0;uint32_t comp=g_frag_values[w[i+5]][0];if(comp>3u)return 0;const float du=0.5f/(float)ctx->texture->width,dv=0.5f/(float)ctx->texture->height;const float ou[4]={-1.0f,1.0f,1.0f,-1.0f},ov[4]={-1.0f,-1.0f,1.0f,1.0f};
+     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]])return 0;uint32_t comp=g_frag_values[w[i+5]][0];if(comp>3u)return 0;const float du=0.5f/(float)ctx->texture->width,dv=0.5f/(float)ctx->texture->height;const float ou[4]={-1.0f,1.0f,1.0f,-1.0f},ov[4]={-1.0f,-1.0f,1.0f,1.0f};
      for(unsigned k=0;k<4;k++){uint32_t p=vksoft_sample_texture(ctx->texture,u+ou[k]*du,v+ov[k]*dv);g_frag_values[rid][k]=vk_frag_fbits(vk_frag_tex_channel(p,comp));}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else{
      uint32_t p=vksoft_sample_texture(ctx->texture,u,v);g_frag_values[rid][0]=vk_frag_fbits(vk_frag_tex_channel(p,0));g_frag_values[rid][1]=vk_frag_fbits(vk_frag_tex_channel(p,1));g_frag_values[rid][2]=vk_frag_fbits(vk_frag_tex_channel(p,2));g_frag_values[rid][3]=vk_frag_fbits(vk_frag_tex_channel(p,3));g_frag_components[rid]=4;g_frag_defined[rid]=1;

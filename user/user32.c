@@ -1755,6 +1755,9 @@ static void on_click(int x, int y) {
     if(g_menu) {
         int mw=300,mh=360,mx=8,my=ty-mh-4;
         if(my<4)my=4;
+        int ssx=((int)g_fw-16)*100/mw,ssy=((int)g_fh-52)*100/mh;
+        int sc=ssx<ssy?ssx:ssy;if(sc>100)sc=100;if(sc<62)sc=62;
+        x=mx+((x-mx)*100)/sc;y=my+((y-my)*100)/sc;
         if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
             g_search_focus=1;
             u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);return;
@@ -2096,12 +2099,15 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 u32_mouse_record();
                 if(g_menu) {
                     int hv=-1,by=(int)g_fh-44-360-4;if(by<4)by=4;
-                    if(g_mx>=20&&g_mx<152&&g_my>=by+116&&g_my<by+164)hv=1;
-                    else if(g_mx>=162&&g_mx<296&&g_my>=by+116&&g_my<by+164)hv=2;
-                    else if(g_mx>=20&&g_mx<152&&g_my>=by+170&&g_my<by+218)hv=3;
-                    else if(g_mx>=20&&g_mx<152&&g_my>=by+258&&g_my<by+298)hv=4;
-                    else if(g_mx>=162&&g_mx<296&&g_my>=by+258&&g_my<by+298)hv=5;
-                    else if(g_mx>=18&&g_mx<298&&g_my>=by+310&&g_my<by+356)hv=6;
+                    int sx=((int)g_fw-16)*100/300,sy=((int)g_fh-52)*100/360;
+                    int sc=sx<sy?sx:sy;if(sc>100)sc=100;if(sc<62)sc=62;
+                    int hx=8+((g_mx-8)*100)/sc,hy=by+((g_my-by)*100)/sc;
+                    if(hx>=20&&hx<152&&hy>=by+116&&hy<by+164)hv=1;
+                    else if(hx>=162&&hx<296&&hy>=by+116&&hy<by+164)hv=2;
+                    else if(hx>=20&&hx<152&&hy>=by+170&&hy<by+218)hv=3;
+                    else if(hx>=20&&hx<152&&hy>=by+258&&hy<by+298)hv=4;
+                    else if(hx>=162&&hx<296&&hy>=by+258&&hy<by+298)hv=5;
+                    else if(hx>=18&&hx<298&&hy>=by+310&&hy<by+356)hv=6;
                     if(hv!=g_start_hover){g_start_hover=hv;compose_region(0,by,(int)g_fw,(int)g_fh);}
                 }
                 u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);

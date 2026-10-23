@@ -33,6 +33,12 @@ static void *get_proc(const char *dll,const char *name) {
 static void print(const char *s) {
     u64 n=0; while(s[n]) ++n; (void)syscall3(SYS_WRITE_FILE,1,(u64)s,n);
 }
+static void print_hex(u64 v) {
+    static const char digits[]="0123456789ABCDEF";
+    char out[19];out[0]='0';out[1]='x';
+    for(int i=0;i<16;i++)out[2+i]=digits[(v>>((15-i)*4))&15u];
+    out[18]=0;print(out);
+}
 
 using CreateWindowExA_t=void*(*)(u32,LPCSTR,LPCSTR,u32,int,int,int,int,void*,void*,void*,void*);
 using ShowWindow_t=BOOL(*)(void*,int);

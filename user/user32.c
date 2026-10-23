@@ -1663,49 +1663,82 @@ void *CreateWindowExA(
         return u32_child_create(cls,title,ex,style,x,y,w,h,parent,menu);
     }
     u32_child_destroy_all((void *)1);
+    /* A process has one top-level HWND in the current compact USER32 model,
+     * but it must still use the registered class procedure. Clearing this to
+     * NULL made CreateWindowEx appear to succeed while silently skipping the
+     * application's WM_NCCREATE/WM_CREATE initialization (many games then
+     * never initialized their renderer or first frame). */
     u32_wnd_style=style; u32_wnd_exstyle=ex; u32_wnd_id=0;
-    u32_wnd_proc=0; u32_wnd_userdata=0; u32_wnd_menu=menu; u32_wnd_parent=parent;
+    u32_wnd_proc=u32_class_proc; u32_wnd_userdata=0; u32_wnd_menu=menu; u32_wnd_parent=parent;
     u32_context_help_id=0;
 
     ensure_fb();
+    if (!g_front || !g_fw || !g_fh) return 0;
 
-    g_wnd.x = x;
-    g_wnd.y = y;
-    g_wnd.w = (w < 80 ? 640 : w);
-    g_wnd.h = (h < 80 ? 400 : h);
+    /* Resolve CW_USEDEFAULT and reject unusable geometry before registering
+     * the window with the kernel manager. Clamp normal windows to the active
+     * display while leaving explicit popup/full-screen geometry intact. */
+    if ((unsigned int)x==0x80000000u) x=40;
+    if ((unsigned int)y==0x80000000u) y=40;
+    if ((unsigned int)w==0x80000000u || w<=0) w=640;
+    if ((unsigned int)h==0x80000000u || h<=0) h=400;
+    if (w<80) w=80;
+    if (h<60) h=60;
+    if (w>(int)g_fw) w=(int)g_fw;
+    if (h>(int)g_fh) h=(int)g_fh;
+    if (x<0) x=0;
+    if (y<0) y=0;
+    if (x+w>(int)g_fw) x=(int)g_fw-w;
+    if (y+h>(int)g_fh) y=(int)g_fh-h;
 
-    if (w <= 2) {
-        g_wnd.w = 1;
-        g_wnd.h = 1;
-        g_wnd.visible = 0;
-    } else {
-        g_wnd.visible = 1;
+    g_wnd.x=x; g_wnd.y=y; g_wnd.w=w; g_wnd.h=h;
+    g_wnd.visible=(style&0x10000000u)!=0;
+    if (!(style&0x10000000u) && (style&0x80000000u)==0)
+        g_wnd.visible=0;
+    g_wnd.minimized=0;
+
+    int i=0;
+    if(title)for(;title[i]&&i<63;i++)g_wnd.title[i]=title[i];
+    g_wnd.title[i]=0;
+    g_nlines=0; g_menu=0; g_search_focus=0; g_search_len=0; g_drag=0;
+
+    /* Send the mandatory creation notifications before publishing a visible
+     * window. Applications can allocate their renderer/resources in WM_CREATE.
+     * WM_NCCREATE returning FALSE aborts creation; WM_CREATE returning -1 does
+     * likewise, matching the Win32 contract. */
+    typedef i64 (*U32_CREATEPROC)(void *,u32,u64,i64);
+    U32_CREATEPROC create_proc=(U32_CREATEPROC)u32_wnd_proc;
+    if(create_proc) {
+        if(!create_proc((void *)1,0x0081u,0,(i64)param)) {
+            u32_child_destroy_all((void *)1);
+            g_wnd.visible=0;
+            return 0;
+        }
+        if(create_proc((void *)1,0x0001u,0,(i64)param)==-1) {
+            u32_child_destroy_all((void *)1);
+            g_wnd.visible=0;
+            return 0;
+        }
     }
 
-    int i = 0;
-
-    if (title)
-        for (; title[i] && i < 63; i++)
-            g_wnd.title[i] = title[i];
-
-    g_wnd.title[i] = 0;
-    g_wnd.minimized = 0;
-    g_nlines = 0;
-    g_menu = 0;
-    g_search_focus = 0;
-    g_search_len = 0;
-    g_drag = 0;
-
     if (g_wnd.visible) {
-        sy3(SYS_WmReg, 0, (u64)g_wnd.title, 0);
-
-        int rect[4] = { g_wnd.x, g_wnd.y, g_wnd.w, g_wnd.h };
-        sy3(SYS_WmRect, (u64)rect, 0, 0);
-        /* Caption buttons are ordinary child BUTTON windows. */
-        (void)CreateWindowExA(0,"BUTTON","Minimize",0x50000000u,
-            g_wnd.w-56,4,24,24,(void *)1,(void *)0xF020u,inst,0);
-        (void)CreateWindowExA(0,"BUTTON","Close",0x50000000u,
-            g_wnd.w-28,4,24,24,(void *)1,(void *)0xF060u,inst,0);
+        if(!sy3(SYS_WmReg,0,(u64)g_wnd.title,0)) {
+            /* Window-manager registration can be unavailable during early
+             * boot; keep USER32's local window usable in that case. */
+        }
+        int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
+        (void)sy3(SYS_WmRect,(u64)rect,0,0);
+        if(!(style&0x80000000u)) {
+            (void)CreateWindowExA(0,"BUTTON","Minimize",0x50000000u,
+                g_wnd.w-56,4,24,24,(void *)1,(void *)0xF020u,inst,0);
+            (void)CreateWindowExA(0,"BUTTON","Close",0x50000000u,
+                g_wnd.w-28,4,24,24,(void *)1,(void *)0xF060u,inst,0);
+        }
+        if(create_proc) {
+            (void)create_proc((void *)1,0x0018u,1,0); /* WM_SHOWWINDOW */
+            (void)create_proc((void *)1,0x0005u,0,((i64)(u32)h<<16)|(u32)w); /* WM_SIZE */
+            (void)create_proc((void *)1,0x0003u,0,((i64)(u32)y<<16)|(u32)x); /* WM_MOVE */
+        }
     }
 
     compose();

@@ -168,7 +168,6 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
-static int g_power_menu;
 /* A non-desktop process can receive clicks over the shared taskbar. Publish
  * its freshly redrawn taskbar layer only when that process changes taskbar UI;
  * ordinary window repaints must never overwrite the desktop's taskbar/menu. */
@@ -990,7 +989,7 @@ static void submit_search(void) {
     static char cmd_name[]="cmd.exe";
     static char taskmgr_name[]="taskmgr.exe";
     static char files_name[]="fileexplorer.exe";
-    g_menu=0;g_power_menu=0;g_search_focus=0;
+    g_menu=0;g_search_focus=0;
     if(u32_menu_text_is("cmd")||u32_menu_text_is("cmd.exe"))
         u32_menu_launch(cmd_name);
     else if(u32_menu_text_is("taskmgr")||u32_menu_text_is("taskmgr.exe")||
@@ -1722,7 +1721,7 @@ static void on_click(int x, int y) {
         if(hit(x,y,8,ty+6,78,ty+38)) {
             u32_taskbar_dirty=1;
             g_menu=!g_menu;g_search_focus=0;
-            if(g_menu) {g_search_len=0;g_search_text[0]=0;g_power_menu=0;}
+            if(g_menu) {g_search_len=0;g_search_text[0]=0;}
             compose_region(0,ty-368,(int)g_fw,(int)g_fh);
             return;
         }
@@ -1737,35 +1736,35 @@ static void on_click(int x, int y) {
         }
         if(hit(x,y,mx+12,my+116,mx+144,my+164)) {
             static char files_name[]="fileexplorer.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
             compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(files_name);return;
         }
         if(hit(x,y,mx+154,my+116,mx+288,my+164)) {
             static char taskmgr_name[]="taskmgr.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
             compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(taskmgr_name);return;
         }
         if(hit(x,y,mx+12,my+170,mx+144,my+218)) {
             static char cmd_name[]="cmd.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
             compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(cmd_name);return;
         }
         if(hit(x,y,mx+12,my+258,mx+144,my+298)) {
-            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
             compose_region(0,my,(int)g_fw,(int)g_fh);
             show_shutdown_screen(0);sy3(SYS_Shutdown,0,0,0);return;
         }
         if(hit(x,y,mx+154,my+258,mx+288,my+298)) {
-            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
             compose_region(0,my,(int)g_fw,(int)g_fh);
             show_shutdown_screen(1);sy3(SYS_Shutdown,1,0,0);return;
         }
         if(hit(x,y,mx+12,my+310,mx+288,my+356)) {
             g_search_focus=0;g_search_len=0;g_search_text[0]=0;
-            static const char info[]="SentinelOS Settings: environment and display controls are being added.\\n";
+            static const char info[]="SentinelOS Settings: environment and display controls are being added.\n";
             sy3(SYS_Write,1,(u64)info,sizeof(info)-1);return;
         }
-        g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+        g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
         compose_region(0,my,(int)g_fw,(int)g_fh);return;
     }
     g_menu=0;
@@ -1823,7 +1822,7 @@ void *CreateWindowExA(
     int i=0;
     if(title)for(;title[i]&&i<63;i++)g_wnd.title[i]=title[i];
     g_wnd.title[i]=0;
-    g_nlines=0; g_menu=0; g_power_menu=0; g_search_focus=0; g_search_len=0; g_drag=0;
+    g_nlines=0; g_menu=0;  g_search_focus=0; g_search_len=0; g_drag=0;
 
     /* Send the mandatory creation notifications before publishing a visible
      * window. Applications can allocate their renderer/resources in WM_CREATE.

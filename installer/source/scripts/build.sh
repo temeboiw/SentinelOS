@@ -260,7 +260,6 @@ COMMON=(
   -mno-stack-arg-probe
   -mgeneral-regs-only
   -O2
-  -fintegrated-cc1
   -Wall
   -Wno-unused-function
   -I"$ROOT/shared"
@@ -339,7 +338,6 @@ USER_CFLAGS=(
   -mno-stack-arg-probe
   -mgeneral-regs-only
   -O2
-  -fintegrated-cc1
   -Wall
   -I"$ROOT/user"
   -I"$ROOT/shared"
@@ -1742,7 +1740,6 @@ USER_CXXFLAGS=(
   -mno-stack-arg-probe
   -mgeneral-regs-only
   -O2
-  -fintegrated-cc1
   -Wall
   -I"$ROOT/user"
   -I"$ROOT/shared"

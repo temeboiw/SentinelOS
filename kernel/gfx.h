@@ -499,14 +499,14 @@ static int gfx_virgl_clear_present_test(void) {
         0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {
-        DbgPrint("gfx: VirGL clear test failed: host rejected command stream\\n");
+        DbgPrint("gfx: VirGL clear test failed: host rejected command stream\n");
         return 0;
     }
     if(!gfx_present_virgl()) {
-        DbgPrint("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\\n");
+        DbgPrint("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\n");
         return 0;
     }
-    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\\n");
+    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\n");
     return 1;
 }
 static int gfx_create_resource(void) {

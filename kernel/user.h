@@ -1115,6 +1115,9 @@ static int user_rtc_system_time(UserSystemTime *out) {
 /* Shared software window compositor. USER32 surfaces are copied into kernel-owned
  * per-window backing stores; the shared GPU scanout is output-only. */
 #define SYS_NtPresentLayer 37
+/* Submit a window-local ARGB surface. Unlike the legacy full-screen layer
+ * API, pixels are addressed from the window's own (0,0) origin. */
+#define SYS_NtPresentWindowSurface 40
 #define WM_LAYER_BACKGROUND 0
 #define WM_LAYER_DESKTOP    1
 #define WM_LAYER_WINDOW     2
@@ -1124,10 +1127,18 @@ typedef struct {
     uint64_t pixels;
     uint32_t layer, x, y, w, h, width, height;
 } WmPresentLayerArgs;
+typedef struct {
+    uint64_t pixels;
+    uint32_t x, y, w, h, width, height;
+} WmPresentWindowSurfaceArgs;
 static uint32_t *wm_shared_background;
 static uint32_t *wm_shared_desktop;
 static uint32_t *wm_shared_taskbar;
+/* Legacy USER32 layers remain screen-sized; newer applications may submit
+ * tightly packed window-local surfaces with independent dimensions. */
 static uint32_t *wm_shared_windows[WM_MAX];
+static uint32_t *wm_shared_local_windows[WM_MAX];
+static uint32_t wm_shared_local_width[WM_MAX],wm_shared_local_height[WM_MAX];
 static uint32_t wm_shared_width, wm_shared_height;
 static uint32_t wm_shared_alpha(uint32_t dst, uint32_t src) {
     uint32_t a=src>>24;
@@ -1213,6 +1224,9 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     for(int i=0;i<WM_MAX;i++) {
         WmEntry *e=&wm_tab[i];
         if(!e->alive||e->minimized||e->w<=0||e->h<=0)continue;
+        /* Local-surface apps must always pass through composition; they do
+         * not own the shared scanout even when their window covers the screen. */
+        if(wm_shared_local_windows[i])continue;
         if(e->x<=0&&e->y<=0&&
            (uint64_t)e->w+12u>=width&&
            (uint64_t)e->h+16u>=height&&
@@ -1245,7 +1259,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         WmEntry entry;
         if(!wm_get_z_order(rank,&entry))break;
         int slot=wm_shared_window_slot(entry.pid);
-        if(slot<0||!wm_shared_windows[slot])continue;
+        if(slot<0||(!wm_shared_windows[slot]&&!wm_shared_local_windows[slot]))continue;
         order[count++]=slot;
     }
     uint64_t dbg_n=++wm_dbg_compose_calls;
@@ -1285,10 +1299,13 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     for(int oi=0;oi<count;oi++) {
         int slot=order[oi];
         WmEntry *e=&wm_tab[slot];
-        /* Frame includes the compositor's non-client border/title region. */
-        int64_t left=(int64_t)e->x-12, top=(int64_t)e->y-12;
-        int64_t right=(int64_t)e->x+(int64_t)e->w+12;
-        int64_t bottom=(int64_t)e->y+(int64_t)e->h+16;
+        /* Legacy USER32 presents screen-space layers including non-client
+         * decoration. Local surfaces instead map (0,0) to the window origin. */
+        int local=wm_shared_local_windows[slot]!=0;
+        int64_t left=local?(int64_t)e->x:(int64_t)e->x-12;
+        int64_t top=local?(int64_t)e->y:(int64_t)e->y-12;
+        int64_t right=local?(int64_t)e->x+wm_shared_local_width[slot]:(int64_t)e->x+(int64_t)e->w+12;
+        int64_t bottom=local?(int64_t)e->y+wm_shared_local_height[slot]:(int64_t)e->y+(int64_t)e->h+16;
         if(left<(int64_t)x)left=x;
         if(top<(int64_t)y)top=y;
         if(right>(int64_t)x+w)right=(int64_t)x+w;
@@ -1299,12 +1316,14 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         if(bottom>(int64_t)height)bottom=height;
         if(right<=left||bottom<=top)continue;
         window_overlay_pixels+=(uint64_t)(right-left)*(uint64_t)(bottom-top);
-        uint32_t *surface=wm_shared_windows[slot];
+        uint32_t *surface=local?wm_shared_local_windows[slot]:wm_shared_windows[slot];
+        uint32_t sw=local?wm_shared_local_width[slot]:width;
         for(uint32_t yy=(uint32_t)top;yy<(uint32_t)bottom;yy++) {
-            uint32_t row=yy*width;
             uint32_t *dstrow=out+yy*pitch;
+            uint32_t sy=local?(uint32_t)((int64_t)yy-e->y):yy;
             for(uint32_t xx=(uint32_t)left;xx<(uint32_t)right;xx++) {
-                uint32_t at=row+xx;
+                uint32_t sx=local?(uint32_t)((int64_t)xx-e->x):xx;
+                uint32_t at=local?sy*sw+sx:yy*width+xx;
                 dstrow[xx]=wm_shared_alpha(dstrow[xx],surface[at]);
             }
         }
@@ -1584,6 +1603,65 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    case SYS_NtPresentWindowSurface: {
+        WmPresentWindowSurfaceArgs a;
+        if(!f->rdi||!MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(a),0)) {
+            f->rax=0;return f;
+        }
+        a=*(WmPresentWindowSurfaceArgs*)f->rdi;
+        uint64_t pixels=(uint64_t)a.width*a.height;
+        uint64_t bytes=pixels*sizeof(uint32_t);
+        int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
+        int slot=wm_shared_window_slot(pid);
+        if(slot<0||!a.pixels||!a.width||!a.height||
+           a.width>1920u||a.height>1080u||pixels>WM_COMP_MAX_PIXELS||
+           !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
+           !wm_shared_width||!wm_shared_height||
+           a.x>=a.width||a.y>=a.height||!a.w||!a.h) {
+            f->rax=0;return f;
+        }
+        if(a.w>a.width-a.x)a.w=a.width-a.x;
+        if(a.h>a.height-a.y)a.h=a.height-a.y;
+        if((uint64_t)a.width*a.height*4ULL>SIZE_MAX) { f->rax=0;return f; }
+        KPROCESS *caller=MmCurrentProcess;
+        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        uint32_t *surface=wm_shared_local_windows[slot];
+        if(!surface||wm_shared_local_width[slot]!=a.width||
+           wm_shared_local_height[slot]!=a.height) {
+            uint32_t *replacement=kzalloc((size_t)bytes);
+            if(!replacement) {
+                if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+                f->rax=0;return f;
+            }
+            if(surface)kfree(surface);
+            surface=replacement;
+            wm_shared_local_windows[slot]=surface;
+            wm_shared_local_width[slot]=a.width;
+            wm_shared_local_height[slot]=a.height;
+        }
+        /* A process has one active surface representation. Drop its legacy
+         * screen-sized buffer to avoid retaining two full-resolution images. */
+        if(wm_shared_windows[slot]) {
+            kfree(wm_shared_windows[slot]);
+            wm_shared_windows[slot]=0;
+        }
+        uint32_t *src=(uint32_t*)a.pixels;
+        for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
+            for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
+                surface[yy*a.width+xx]=src[yy*a.width+xx];
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+        WmEntry *e=&wm_tab[slot];
+        int64_t sx=(int64_t)e->x+a.x,sy=(int64_t)e->y+a.y;
+        if(sx<0){uint32_t trim=(uint32_t)(-sx);if(trim>=a.w){f->rax=1;return f;}a.w-=trim;sx=0;}
+        if(sy<0){uint32_t trim=(uint32_t)(-sy);if(trim>=a.h){f->rax=1;return f;}a.h-=trim;sy=0;}
+        if(sx>=(int64_t)wm_shared_width||sy>=(int64_t)wm_shared_height){f->rax=1;return f;}
+        if(a.w>wm_shared_width-(uint32_t)sx)a.w=wm_shared_width-(uint32_t)sx;
+        if(a.h>wm_shared_height-(uint32_t)sy)a.h=wm_shared_height-(uint32_t)sy;
+        if(a.w&&a.h)wm_shared_compose((uint32_t)sx,(uint32_t)sy,a.w,a.h);
+        f->rax=1;
+        return f;
+    }
+
     case SYS_NtTerminateProcess: {
         DbgPrint("[user] exit");
 
@@ -1604,6 +1682,10 @@ static Frame *syscall_handler(Frame *f) {
             MmSwitchToProcess(PspSystemProcess);
             if(dead_slot>=0&&wm_shared_windows[dead_slot]) {
                 kfree(wm_shared_windows[dead_slot]);wm_shared_windows[dead_slot]=0;
+            }
+            if(dead_slot>=0&&wm_shared_local_windows[dead_slot]) {
+                kfree(wm_shared_local_windows[dead_slot]);wm_shared_local_windows[dead_slot]=0;
+                wm_shared_local_width[dead_slot]=wm_shared_local_height[dead_slot]=0;
             }
             wm_unregister(dead_pid);
             if(dx<0){dw+=dx;dx=0;}if(dy<0){dh+=dy;dy=0;}
@@ -2537,6 +2619,10 @@ static Frame *syscall_handler(Frame *f) {
         if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
         if(slot>=0&&wm_shared_windows[slot]) {
             kfree(wm_shared_windows[slot]);wm_shared_windows[slot]=0;
+        }
+        if(slot>=0&&wm_shared_local_windows[slot]) {
+            kfree(wm_shared_local_windows[slot]);wm_shared_local_windows[slot]=0;
+            wm_shared_local_width[slot]=wm_shared_local_height[slot]=0;
         }
         wm_unregister(pid);
         if(x<0){w+=x;x=0;}if(y<0){h+=y;y=0;}

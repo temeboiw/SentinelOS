@@ -56,6 +56,8 @@ int S3DSubmitVirGL(const void *commands, uint32_t length);
 int S3DPresentVirGL(void);
 /* Real host-accelerated VirGL clear; returns 0 if VirGL is unavailable. */
 int S3DClearVirGL(uint32_t argb);
+int S3DDrawMeshVirGL(const S3D_SURFACE *surface, const S3D_VERTEX *vertices,
+                     uint32_t vertex_count);
 int S3DDrawTriangleVirGL(const S3D_SURFACE *surface, const S3D_VERTEX *a,
                          const S3D_VERTEX *b, const S3D_VERTEX *c);
 #ifdef __cplusplus

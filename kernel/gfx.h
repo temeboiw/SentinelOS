@@ -514,11 +514,15 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     }
     gfx_gpu_ready=1;
     if(gfx_virgl_supported) {
-        if(gfx_create_virgl_context() && gfx_create_virgl_target() && gfx_create_virgl_buffer()) {
-            gfx_3d_ready=1;
-            DbgPrint("gfx: VirGL context and render target ready; raw command submission enabled\n");
+        if(!gfx_create_virgl_context()) {
+            DbgPrint("gfx: VirGL context creation failed (check virtio-gpu capset 1)\n");
+        } else if(!gfx_create_virgl_target()) {
+            DbgPrint("gfx: VirGL render-target creation/attachment failed\n");
+        } else if(!gfx_create_virgl_buffer()) {
+            DbgPrint("gfx: VirGL shared buffer creation/attachment failed\n");
         } else {
-            DbgPrint("gfx: VirGL render target setup failed; using 2D acceleration only\n");
+            gfx_3d_ready=1;
+            DbgPrint("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");
         }
     }
     DbgPrint("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",

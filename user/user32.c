@@ -2405,6 +2405,7 @@ __attribute__((dllexport)) U32_LRESULT DefWindowProcA(void *hwnd, U32_UINT msg, 
         case 0x0010u: return DestroyWindow(hwnd);
         case 0x0014u: return 1;
         case 0x001Fu: return 1;
+        case 0x0081u: return 1; /* WM_NCCREATE succeeds by default. */
         case 0x0084u: return 1;
         case 0x0085u: compose(); return 0;
         case 0x0018u: return IsWindow(hwnd);

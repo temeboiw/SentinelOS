@@ -1192,6 +1192,12 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint32_t width=wm_shared_width,height=wm_shared_height;
     if(width!=gfx_width||height!=gfx_height)return;
     if(x>=width||y>=height||!w||!h)return;
+    /* Clamp damage before any x+w/y+h arithmetic or pixel addressing.
+     * Present requests and window-move unions are user-influenced; a clipped
+     * rectangle must never wrap around and write beyond the GPU surface. */
+    if(w>width-x)w=width-x;
+    if(h>height-y)h=height-y;
+    if(!w||!h)return;
 
     /*
      * Fullscreen applications such as Maze draw directly to the shared
@@ -1257,9 +1263,11 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
          * pixels outside that frame into the shared scanout. */
         for(int oi=0;oi<count;oi++) {
             WmEntry *e=&wm_tab[order[oi]];
-            int left=e->x-12, top=e->y-12;
-            int right=e->x+e->w+12, bottom=e->y+e->h+16;
-            if((int)xx<left||(int)yy<top||(int)xx>=right||(int)yy>=bottom)
+            int64_t left=(int64_t)e->x-12, top=(int64_t)e->y-12;
+            int64_t right=(int64_t)e->x+(int64_t)e->w+12;
+            int64_t bottom=(int64_t)e->y+(int64_t)e->h+16;
+            if((int64_t)xx<left||(int64_t)yy<top||
+               (int64_t)xx>=right||(int64_t)yy>=bottom)
                 continue;
             c=wm_shared_alpha(c,wm_shared_windows[order[oi]][at]);
         }

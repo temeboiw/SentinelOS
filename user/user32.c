@@ -1148,7 +1148,7 @@ static void draw_taskbar(void) {
         if(g_search_len>0) {
             g_search_text[g_search_len]=0;
             draw_text(mx+42,my+72,g_search_text,COL_TEXT);
-        } else draw_text(mx+42,my+72,"TYPE TO SEARCH",COL_MUTED);
+        } else draw_text(mx+42,my+72,"Search...",COL_MUTED);
         draw_text(mx+16,my+105,"PINNED",COL_TEXT);
         draw_text(mx+mw-66,my+105,"APPS",COL_ACCENT);
         round_fill(mx+12,my+116,132,48,5,g_start_hover==1?0xFF34708D:0xFF244458);

@@ -1650,11 +1650,15 @@ static Frame *syscall_handler(Frame *f) {
             kfree(wm_shared_windows[slot]);
             wm_shared_windows[slot]=0;
         }
+        /* The source is a user virtual address. Restore the caller's CR3
+         * before dereferencing it; the system process page tables do not map
+         * this process's private image/buffers. Kernel heap mappings are shared
+         * in the kernel half, so the destination surface remains accessible. */
+        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
         uint32_t *src=(uint32_t*)a.pixels;
         for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
             for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
                 surface[yy*a.width+xx]=src[yy*a.width+xx];
-        if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
         WmEntry *e=&wm_tab[slot];
         int64_t sx=(int64_t)e->x+a.x,sy=(int64_t)e->y+a.y;
         if(sx<0){uint32_t trim=(uint32_t)(-sx);if(trim>=a.w){f->rax=1;return f;}a.w-=trim;sx=0;}

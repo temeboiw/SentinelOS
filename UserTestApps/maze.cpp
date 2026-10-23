@@ -204,6 +204,33 @@ static int gpu_append_scissor_clear(VirglStream *s,u32 x,u32 y,u32 w,u32 h,
     return virgl_stream_command(s,VIRGL_CCMD_SET_SCISSOR_STATE,VIRGL_OBJECT_NULL,scissor,3) &&
            virgl_stream_command(s,VIRGL_CCMD_CLEAR,VIRGL_OBJECT_NULL,clear,7);
 }
+/* Batch 8: reject malformed or incomplete GPU frame streams before
+ * crossing the kernel boundary. This validates transport packets, not shader
+ * execution or proof that the GPU produced the expected pixels. */
+static int gpu_frame_stream_ready(const VirglStream *stream) {
+    if(!stream || stream->failed || !stream->words || !stream->used_dwords)
+        return 0;
+    if(!virgl_stream_validate(stream->words,stream->used_dwords))
+        return 0;
+    u32 commands=virgl_stream_count_commands(stream->words,stream->used_dwords);
+    if(commands==UINT32_MAX || commands<5u)
+        return 0;
+    u32 bind=virgl_stream_find_command(stream->words,stream->used_dwords,
+                                       VIRGL_CCMD_BIND_OBJECT);
+    u32 framebuffer=virgl_stream_find_command(stream->words,stream->used_dwords,
+                                              VIRGL_CCMD_SET_FRAMEBUFFER_STATE);
+    u32 clear=virgl_stream_find_command(stream->words,stream->used_dwords,
+                                        VIRGL_CCMD_CLEAR);
+    if(bind==UINT32_MAX || framebuffer==UINT32_MAX || clear==UINT32_MAX)
+        return 0;
+    /* A clear command needs seven payload dwords; the framebuffer packet
+       needs at least its count/depth header. Reject truncated/wrong packets. */
+    if((stream->words[clear]>>16)!=7u ||
+       (stream->words[framebuffer]>>16)<2u)
+        return 0;
+    return 1;
+}
+
 static void draw_frame_gpu() {
     if(!screen_w||!screen_h||!submit_virgl_stream||!present_virgl)return;
     const u32 columns=75u;
@@ -260,6 +287,10 @@ static void draw_frame_gpu() {
     if(!gpu_append_scissor_clear(&stream,w/2u-5u,horizon,11u,1u,0.92f,0.92f,0.84f) ||
        !gpu_append_scissor_clear(&stream,w/2u,horizon-5u,1u,11u,0.92f,0.92f,0.84f))return;
     if(status_h && !gpu_append_scissor_clear(&stream,0,view_h,w,status_h,0.035f,0.055f,0.08f))return;
+    if(!gpu_frame_stream_ready(&stream)) {
+        print("maze.exe: FATAL: GPU frame stream failed structural/pipeline-state validation; CPU fallback disabled\n");
+        return;
+    }
     u32 bytes=virgl_stream_bytes(&stream);
     if(!bytes || bytes>4096u-sizeof(u32)*5u) {
         print("maze.exe: FATAL: GPU frame command stream exceeded safe VirGL packet size; CPU fallback disabled\n");

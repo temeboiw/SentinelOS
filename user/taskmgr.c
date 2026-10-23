@@ -79,9 +79,11 @@ void mainCRTStartup(void) {
     for(;;) {
         if(!pGet(&msg,0,0,0))continue;
         if(pDispatch)(void)pDispatch(&msg);
-        if(msg.message==0x0113u || msg.message==0x000Fu) {
+        if(msg.message==0x0113u) {
             draw_processes();
             if(pInvalidate)(void)pInvalidate(g_window,0,0);
+        } else if(msg.message==0x000Fu) {
+            draw_processes();
         }
     }
 }

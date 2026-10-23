@@ -3520,16 +3520,66 @@ __attribute__((dllexport)) BOOL GetMonitorInfoA(void *monitor,void *info){(void)
 
 __attribute__((dllexport)) BOOL GetMonitorInfoW(void *monitor,void *info){return GetMonitorInfoA(monitor,info);}
 
-__attribute__((dllexport)) BOOL EnumDisplaySettingsA(const char *device,DWORD mode,void *devmode){(void)device;if(!devmode||mode!=0xFFFFFFFFu)return 0;unsigned int *p=(unsigned int*)devmode;p[0]=sizeof(unsigned int)*32;p[4]=g_fw;p[5]=g_fh;p[6]=32;p[7]=60;return 1;}
+/*
+ * DEVMODEA/W offsets are shared through dmDisplayFrequency on Win32 x64.
+ * SentinelOS currently exposes one physical mode: the active framebuffer mode.
+ * Full-screen windows can still use SetWindowPos/MoveWindow without changing
+ * the physical display mode.
+ */
+enum {
+    U32_DM_SIZE_OFF=68, U32_DM_FIELDS_OFF=72,
+    U32_DM_BPP_OFF=168, U32_DM_WIDTH_OFF=172,
+    U32_DM_HEIGHT_OFF=176, U32_DM_FREQ_OFF=184,
+    U32_DM_MIN_SIZE=188,
+    U32_DM_PELSWIDTH=0x00080000u,
+    U32_DM_PELSHEIGHT=0x00100000u,
+    U32_DM_BITSPERPEL=0x00040000u,
+    U32_DM_DISPLAYFREQUENCY=0x00400000u
+};
 
+static unsigned int u32_dm_read32(const unsigned char *p,unsigned int off) {
+    unsigned int v=0; for(unsigned int i=0;i<4;i++)v|=(unsigned int)p[off+i]<<(i*8); return v;
+}
+static void u32_dm_write16(unsigned char *p,unsigned int off,unsigned short v) {
+    p[off]=(unsigned char)v;p[off+1]=(unsigned char)(v>>8);
+}
+static void u32_dm_write32(unsigned char *p,unsigned int off,unsigned int v) {
+    for(unsigned int i=0;i<4;i++)p[off+i]=(unsigned char)(v>>(i*8));
+}
+__attribute__((dllexport)) BOOL EnumDisplaySettingsA(const char *device,DWORD mode,void *devmode) {
+    (void)device;
+    if(!devmode || (mode!=0xFFFFFFFFu && mode!=0u))return 0;
+    ensure_fb();
+    unsigned char *p=(unsigned char*)devmode;
+    unsigned int caller_size=(unsigned int)p[U32_DM_SIZE_OFF] | ((unsigned int)p[U32_DM_SIZE_OFF+1]<<8);
+    if(caller_size<U32_DM_MIN_SIZE)return 0;
+    u32_dm_write32(p,U32_DM_FIELDS_OFF,U32_DM_BITSPERPEL|U32_DM_PELSWIDTH|U32_DM_PELSHEIGHT|U32_DM_DISPLAYFREQUENCY);
+    u32_dm_write32(p,U32_DM_BPP_OFF,32);
+    u32_dm_write32(p,U32_DM_WIDTH_OFF,g_fw);
+    u32_dm_write32(p,U32_DM_HEIGHT_OFF,g_fh);
+    u32_dm_write32(p,U32_DM_FREQ_OFF,60);
+    return 1;
+}
 __attribute__((dllexport)) BOOL EnumDisplaySettingsW(const unsigned short *device,DWORD mode,void *devmode){(void)device;return EnumDisplaySettingsA(0,mode,devmode);}
 
-__attribute__((dllexport)) long ChangeDisplaySettingsA(void *devmode, DWORD flags){(void)flags;return devmode? -2L:0L;}
-
+/* DISP_CHANGE_SUCCESSFUL=0, DISP_CHANGE_BADMODE=-2. We cannot reprogram the
+ * physical display yet, so accept only the active mode (or a reset request). */
+__attribute__((dllexport)) long ChangeDisplaySettingsA(void *devmode,DWORD flags) {
+    (void)flags;
+    if(!devmode)return 0;
+    unsigned char *p=(unsigned char*)devmode;
+    unsigned int size=(unsigned int)p[U32_DM_SIZE_OFF]|((unsigned int)p[U32_DM_SIZE_OFF+1]<<8);
+    if(size<U32_DM_MIN_SIZE)return -2L;
+    unsigned int fields=u32_dm_read32(p,U32_DM_FIELDS_OFF);
+    ensure_fb();
+    if((fields&U32_DM_PELSWIDTH)&&u32_dm_read32(p,U32_DM_WIDTH_OFF)!=g_fw)return -2L;
+    if((fields&U32_DM_PELSHEIGHT)&&u32_dm_read32(p,U32_DM_HEIGHT_OFF)!=g_fh)return -2L;
+    if((fields&U32_DM_BITSPERPEL)&&u32_dm_read32(p,U32_DM_BPP_OFF)!=32u)return -2L;
+    if((fields&U32_DM_DISPLAYFREQUENCY)&&u32_dm_read32(p,U32_DM_FREQ_OFF)!=60u)return -2L;
+    return 0;
+}
 __attribute__((dllexport)) long ChangeDisplaySettingsW(void *devmode,DWORD flags){return ChangeDisplaySettingsA(devmode,flags);}
-
 __attribute__((dllexport)) long ChangeDisplaySettingsExA(const char *device,void *devmode,void *hwnd,DWORD flags,void *param){(void)device;(void)hwnd;(void)param;return ChangeDisplaySettingsA(devmode,flags);}
-
 __attribute__((dllexport)) long ChangeDisplaySettingsExW(const unsigned short *device,void *devmode,void *hwnd,DWORD flags,void *param){(void)device;return ChangeDisplaySettingsExA(0,devmode,hwnd,flags,param);}
 
 static int u32_pe_resource_data(void *instance,unsigned int type_id,unsigned int resource_id,const unsigned char **data,unsigned int *bytes);

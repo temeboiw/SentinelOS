@@ -316,6 +316,7 @@ static S3D_VERTEX maze_gpu_vertices[16384];
 static MazeGpuFace maze_gpu_wall_faces[1024];
 static u32 maze_gpu_vertex_count;
 static u32 maze_gpu_wall_face_count;
+static float maze_cam_fx,maze_cam_fz,maze_cam_rx,maze_cam_rz;
 
 static u32 maze_shade(u32 base,float depth) {
     float scale=1.0f-depth*0.035f;
@@ -328,12 +329,10 @@ static u32 maze_shade(u32 base,float depth) {
 static int maze_project_world(float wx,float wy,float wz,u32 color,
                               S3D_VERTEX *out,float *depth_out) {
     if(!out)return 0;
-    const float fx=fcos(camera_yaw),fz=fsin(camera_yaw);
-    const float rx=-fz,rz=fx;
     const float dx=wx-player_x,dz=wz-player_y;
-    const float depth=dx*fx+dz*fz;
+    const float depth=dx*maze_cam_fx+dz*maze_cam_fz;
     if(depth<0.12f||depth>24.0f)return 0;
-    const float camera_x=dx*rx+dz*rz;
+    const float camera_x=dx*maze_cam_rx+dz*maze_cam_rz;
     const float focal=1.05f;
     const float nx=(camera_x*focal)/depth;
     const float ny=((wy-0.78f)*focal)/depth;
@@ -450,6 +449,9 @@ static void draw_frame_gpu() {
         gpu_triangle_surface_ready=1;
         print("maze.exe: VirGL mesh renderer ready; batching Maze geometry into GPU triangle lists\n");
     }
+    /* Cache yaw basis once per frame; per-vertex x87 trig is far too costly. */
+    maze_cam_fx=fcos(camera_yaw);maze_cam_fz=fsin(camera_yaw);
+    maze_cam_rx=-maze_cam_fz;maze_cam_rz=maze_cam_fx;
     maze_build_background_geometry();
     if(!maze_append_sorted_wall_faces()) {
         if(!gpu_triangle_error_reported) {

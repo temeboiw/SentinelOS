@@ -473,13 +473,6 @@ static void aero_desktop(void) {
     /* Soft, layered water/sky ribbons. Preserve each wave's absolute X so a
      * clipped repaint matches the cached full wallpaper exactly. */
     int base=h*2/3;
-    int first_x=0,last_x=w;
-    if(u32_render_clip) {
-        if(first_x<u32_clip_x0)first_x=u32_clip_x0;
-        if(last_x>u32_clip_x1)last_x=u32_clip_x1;
-        if(first_x<0)first_x=0;
-        if(last_x>w)last_x=w;
-    }
     for(int x=first_x;x<last_x;x++) {
         int dx=x-w/2;
         int curve=dx*dx;
@@ -2261,10 +2254,6 @@ BOOL DestroyWindow(void *hwnd) {
     /* Save the old frame before hiding it so every pixel it covered is
      * repainted from the desktop layers, including the title bar and shadow. */
     int had_window = g_wnd.visible && g_wnd.w > 2 && g_wnd.h > 2;
-    int x0 = g_wnd.x - 8, y0 = g_wnd.y - 8;
-    int x1 = g_wnd.x + g_wnd.w + 12;
-    int y1 = g_wnd.y + g_wnd.h + 16;
-
     sy3(SYS_WmUnreg, 0, 0, 0);
     g_wnd.visible = 0;
     g_wnd.minimized = 0;

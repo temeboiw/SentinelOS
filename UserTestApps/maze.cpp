@@ -19,7 +19,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34, SYS_PRESENT_LAYER=37 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34, SYS_PRESENT_LAYER=37, SYS_PRESENT_WINDOW_SURFACE=40 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -100,7 +100,14 @@ struct GraphicsBootInfo {
 };
 struct Rect { u32 x,y,w,h; };
 struct PresentLayerArgs { u64 pixels; u32 layer,x,y,w,h,width,height; };
+struct PresentWindowSurfaceArgs { u64 pixels; u32 x,y,w,h,width,height; };
+using PresentWindowSurface_t=BOOL(*)(const u32*,u32,u32,u32,u32,u32,u32);
+static PresentWindowSurface_t present_window_surface;
 static int layer_present_warned=0;
+/* Dedicated tightly packed CPU staging surface for the window manager.
+ * GPU output is copied here before the kernel compositor consumes it, so
+ * later desktop redraws no longer treat the shared scanout as Maze's layer. */
+static u32 maze_window_surface[1920u*1080u];
 static const int MW=16,MH=16;
 static const char maze[MH][MW+1]={
 "################",
@@ -163,12 +170,26 @@ static void rect(int x,int y,int w,int h,u32 c) {
     for(int yy=y;yy<y+h;yy++)for(int xx=x;xx<x+w;xx++)put_pixel(xx,yy,c);
 }
 
-/* Publish the completed scanout image to the WM-owned per-process window layer. */
+/* Publish Maze through its own window-local surface. The shared GPU
+ * scanout remains the GPU driver's render target for now; this staging step
+ * separates the app's presented image from the compositor's output buffer. */
 static void present_maze_layer() {
-    if(!pixels||!screen_w||!screen_h)return;
+    if(!pixels||!screen_w||!screen_h||screen_w>1920u||screen_h>1080u)return;
+    if(present_window_surface) {
+        for(u32 y=0;y<screen_h;y++)
+            for(u32 x=0;x<screen_w;x++)
+                maze_window_surface[(u64)y*screen_w+x]=pixels[(u64)y*pitch+x];
+        if(!present_window_surface(maze_window_surface,screen_w,screen_h,
+                                   0,0,screen_w,screen_h) && !layer_present_warned) {
+            print("maze.exe: window-local surface presentation rejected; game may remain hidden\n");
+            layer_present_warned=1;
+        }
+        return;
+    }
+    /* Backward-compatible fallback for older USER32 builds. */
     PresentLayerArgs a={(u64)(uintptr_t)pixels,2u,0u,0u,screen_w,screen_h,screen_w,screen_h};
     if(!syscall3(SYS_PRESENT_LAYER,(u64)(uintptr_t)&a,0,0) && !layer_present_warned) {
-        print("maze.exe: window-layer presentation rejected; game may remain hidden\n");
+        print("maze.exe: legacy window-layer presentation rejected; game may remain hidden\n");
         layer_present_warned=1;
     }
 }
@@ -510,6 +531,7 @@ extern "C" void maze_mainCRTStartup() {
     if(vkEnumerateVersion && vkEnumerateVersion(&vkVersion)!=0) vkVersion=0;
 
     auto create_window=(CreateWindowExA_t)get_proc("user32.dll","CreateWindowExA");
+    present_window_surface=(PresentWindowSurface_t)get_proc("user32.dll","PresentWindowSurface");
     auto show_window=(ShowWindow_t)get_proc("user32.dll","ShowWindow");
     auto show_cursor=(ShowCursor_t)get_proc("user32.dll","ShowCursor");
     set_cursor_pos=(SetCursorPos_t)get_proc("user32.dll","SetCursorPos");

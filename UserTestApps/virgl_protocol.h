@@ -18,6 +18,7 @@ enum VirglContextCommand : uint32_t {
     VIRGL_CCMD_SET_VERTEX_BUFFERS = 6,
     VIRGL_CCMD_CLEAR = 7,
     VIRGL_CCMD_DRAW_VBO = 8,
+    VIRGL_CCMD_SET_INDEX_BUFFER = 14,
     VIRGL_CCMD_SET_SCISSOR_STATE = 15,
     VIRGL_CCMD_BLIT = 16,
     VIRGL_CCMD_RESOURCE_COPY_REGION = 17,
@@ -428,6 +429,80 @@ static inline int virgl_stream_set_min_samples(VirglStream *s,
     }
     return virgl_stream_command(s, VIRGL_CCMD_SET_MIN_SAMPLES,
                                 VIRGL_OBJECT_NULL, &samples, 1u);
+}
+
+/* Batch 5, add-on 1/4: bind the index resource used by indexed draws.
+ * index_size is 1, 2, or 4 bytes; offset is a byte offset into the resource. */
+static inline int virgl_stream_set_index_buffer(VirglStream *s,
+                                                uint32_t resource_handle,
+                                                uint32_t index_size,
+                                                uint32_t offset_bytes) {
+    if (!resource_handle ||
+        (index_size != 1u && index_size != 2u && index_size != 4u) ||
+        (offset_bytes % index_size) != 0u) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[3] = {
+        resource_handle, index_size, offset_bytes
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_INDEX_BUFFER,
+                                VIRGL_OBJECT_NULL, payload, 3u);
+}
+
+/* Batch 5, add-on 2/4: issue an indexed DRAW_VBO packet.
+ * start/count address indices in the currently bound index buffer. The
+ * caller remains responsible for valid index data and vertex-buffer bounds. */
+static inline int virgl_stream_draw_indexed(VirglStream *s,
+                                            uint32_t start,
+                                            uint32_t count,
+                                            uint32_t primitive,
+                                            uint32_t instances,
+                                            int32_t index_bias,
+                                            uint32_t min_index,
+                                            uint32_t max_index) {
+    if (!count || !instances || primitive > VIRGL_PRIM_TRIANGLE_FAN ||
+        count - 1u > UINT32_MAX - start || min_index > max_index ||
+        index_bias < INT32_MIN || index_bias > INT32_MAX) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[VIRGL_DRAW_VBO_DWORDS] = {
+        start, count, primitive, 1u, instances, (uint32_t)index_bias,
+        0u, 0u, 0u, min_index, max_index, 0u
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_DRAW_VBO, VIRGL_OBJECT_NULL,
+                                payload, VIRGL_DRAW_VBO_DWORDS);
+}
+
+/* Batch 5, add-on 3/4: bind an array of sampler-state object handles to a
+ * shader stage beginning at start_slot. A zero handle unbinds that slot. */
+static inline int virgl_stream_bind_sampler_states(VirglStream *s,
+                                                   uint32_t shader_type,
+                                                   uint32_t start_slot,
+                                                   const uint32_t *handles,
+                                                   uint32_t handle_count) {
+    if (!s || shader_type > 5u || start_slot > 31u ||
+        handle_count > 32u - start_slot ||
+        (handle_count && !handles)) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    uint32_t payload[2u + 32u];
+    payload[0] = shader_type;
+    payload[1] = start_slot;
+    for (uint32_t i = 0; i < handle_count; ++i)
+        payload[2u + i] = handles[i];
+    return virgl_stream_command(s, VIRGL_CCMD_BIND_SAMPLER_STATES,
+                                VIRGL_OBJECT_NULL, payload,
+                                (uint16_t)(2u + handle_count));
+}
+
+/* Batch 5, add-on 4/4: order texture operations before later commands in the
+ * same context. This is a protocol command, not a CPU memory fence. */
+static inline int virgl_stream_texture_barrier(VirglStream *s) {
+    return virgl_stream_command(s, VIRGL_CCMD_TEXTURE_BARRIER,
+                                VIRGL_OBJECT_NULL, NULL, 0u);
 }
 
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {

@@ -2255,8 +2255,15 @@ __attribute__((dllexport)) BOOL MoveWindow(void *hwnd, int x, int y, int w, int 
     if (repaint) compose(); return 1;
 }
 __attribute__((dllexport)) BOOL SetWindowPos(void *hwnd, void *after, int x, int y, int cx, int cy, unsigned int flags) {
-    (void)after; if (flags & 0x0002u) { x=g_wnd.x; y=g_wnd.y; }
-    if (flags & 0x0001u) { cx=g_wnd.w; cy=g_wnd.h; }
+    (void)after;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    int oldx,oldy,oldw,oldh;
+    if(child){oldx=child->x;oldy=child->y;oldw=child->w;oldh=child->h;}
+    else {if(hwnd!=(void*)1||!g_wnd.visible)return 0;oldx=g_wnd.x;oldy=g_wnd.y;oldw=g_wnd.w;oldh=g_wnd.h;}
+    if(flags&0x0002u){x=oldx;y=oldy;}
+    if(flags&0x0001u){cx=oldw;cy=oldh;}
+    if(cx<1||cy<1)return 0;
+    if(x==oldx&&y==oldy&&cx==oldw&&cy==oldh)return 1;
     return MoveWindow(hwnd,x,y,cx,cy,!(flags&0x0008u));
 }
 __attribute__((dllexport)) BOOL GetWindowRect(void *hwnd, U32_RECT *r) {

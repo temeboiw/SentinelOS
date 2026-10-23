@@ -1287,9 +1287,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                 for(uint32_t xx=x;xx<x+w;xx++)dstrow[xx]=srcrow[xx];
             }
             int flush_ok=gfx_flush(x,y,w,h);
-            if(wm_dbg_sample(dbg_n))
-                DbgPrint("[gfx] fullscreen local present pid=%d damage=(%u,%u %ux%u) flush=%d\n",
-                         wm_tab[local_fullscreen].pid,x,y,w,h,flush_ok);
+            (void)flush_ok;
             if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
             return;
         }

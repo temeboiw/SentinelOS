@@ -88,8 +88,9 @@ static const char maze[MH][MW+1]={
 };
 static u32 *pixels;
 static u32 screen_w,screen_h,pitch;
-static int px=2,py=2,heading=0,won=0;
-static int mouse_turn_accum=0;
+static float player_x=2.5f, player_y=2.5f;
+static float camera_yaw=-1.57079632679f;
+static int won=0;
 static void *window_handle;
 static UpdateWindow_t update_window;
 static PeekMessageA_t peek_message;
@@ -127,83 +128,101 @@ static void rect(int x,int y,int w,int h,u32 c) {
     if(w<=0||h<=0)return;
     for(int yy=y;yy<y+h;yy++)for(int xx=x;xx<x+w;xx++)put_pixel(xx,yy,c);
 }
+/* x87 trigonometry avoids a CRT/libm dependency in this freestanding PE. */
+static float fsin(float angle) {
+    double a=(double)angle,r;
+    __asm__ volatile("fldl %1; fsin; fstpl %0":"=m"(r):"m"(a));
+    return (float)r;
+}
+static float fcos(float angle) {
+    double a=(double)angle,r;
+    __asm__ volatile("fldl %1; fcos; fstpl %0":"=m"(r):"m"(a));
+    return (float)r;
+}
 static void draw_frame() {
     if(!pixels||!screen_w||!screen_h)return;
-    int horizon=(int)screen_h/2;
-    rect(0,0,(int)screen_w,horizon,rgb(24,45,75));
-    rect(0,horizon,(int)screen_w,(int)screen_h-horizon,rgb(38,35,31));
-    /* Distance slices create a perspective 3D corridor with shaded wall faces. */
-    /* Paint distant geometry first so near walls cover it instead of bleeding through. */
-    for(int d=8;d>=1;d--) {
-        int wx=px,wy=py;
-        for(int step=1;step<=d;step++) { wx+=dirx[heading]; wy+=diry[heading]; }
-        int sideL=heading==0?3:heading==1?0:heading==2?1:2;
-        int sideR=(sideL+2)&3;
-        int leftx=px,lefty=py,rightx=px,righty=py;
-        for(int s=1;s<=d;s++) {
-            leftx+=dirx[sideL]; lefty+=diry[sideL];
-            rightx+=dirx[sideR]; righty+=diry[sideR];
+    const int w=(int)screen_w,h=(int)screen_h;
+    const int status_h=h>=240?18:0;
+    const int view_h=h-status_h;
+    const float dirx=fcos(camera_yaw), diry=fsin(camera_yaw);
+    const float plane_x=-diry*0.66f, plane_y=dirx*0.66f;
+    const int horizon=view_h/2;
+    /* Per-column DDA ray casting gives continuous perspective as the camera turns. */
+    for(int x=0;x<w;x++) {
+        float camera_x=2.0f*(float)x/(float)w-1.0f;
+        float ray_x=dirx+plane_x*camera_x;
+        float ray_y=diry+plane_y*camera_x;
+        int map_x=(int)player_x,map_y=(int)player_y;
+        float delta_x=ray_x==0.0f?1.0e30f:(ray_x<0?-ray_x:ray_x);
+        float delta_y=ray_y==0.0f?1.0e30f:(ray_y<0?-ray_y:ray_y);
+        delta_x=1.0f/delta_x; delta_y=1.0f/delta_y;
+        int step_x,step_y,hit=0,side=0;
+        float side_x,side_y;
+        if(ray_x<0) { step_x=-1; side_x=(player_x-(float)map_x)*delta_x; }
+        else { step_x=1; side_x=((float)map_x+1.0f-player_x)*delta_x; }
+        if(ray_y<0) { step_y=-1; side_y=(player_y-(float)map_y)*delta_y; }
+        else { step_y=1; side_y=((float)map_y+1.0f-player_y)*delta_y; }
+        for(int n=0;n<64&&!hit;n++) {
+            if(side_x<side_y) { side_x+=delta_x; map_x+=step_x; side=0; }
+            else { side_y+=delta_y; map_y+=step_y; side=1; }
+            if(blocked(map_x,map_y)) hit=1;
         }
-        int half=(int)screen_w/(d+2);
-        int top=horizon-(int)screen_h/(d+2);
-        int bottom=horizon+(int)screen_h/(d+2);
-        if(blocked(wx,wy)) {
-            rect((int)screen_w/2-half,top,half*2,bottom-top,
-                 rgb(115/(u32)(d/2+1),94/(u32)(d/2+1),72/(u32)(d/2+1)));
-            for(int k=1;k<4;k++) {
-                int yy=top+(bottom-top)*k/4;
-                rect((int)screen_w/2-half,yy,half*2,2,rgb(55,46,38));
+        float dist=side==0?(side_x-delta_x):(side_y-delta_y);
+        if(dist<0.05f)dist=0.05f;
+        int line_h=(int)((float)view_h/dist);
+        int top=horizon-line_h/2, bottom=horizon+line_h/2;
+        if(top<0)top=0;if(bottom>=view_h)bottom=view_h-1;
+        /* Ceiling and floor gradients are independent of wall distance. */
+        for(int y=0;y<view_h;y++) {
+            u32 color;
+            if(y<horizon) {
+                int shade=27+(horizon-y)*24/(horizon?horizon:1);
+                color=rgb(shade,shade+7,shade+17);
+            } else {
+                int depth=y-horizon;
+                int shade=47-depth*22/(horizon?horizon:1);
+                if(shade<17)shade=17;
+                color=rgb(shade+5,shade,shade-5);
             }
-            continue;
+            pixels[(u64)y*pitch+(u32)x]=color;
         }
-        /* Side-wall faces, narrowed by distance to suggest perspective. */
-        if(blocked(leftx,lefty)) {
-            for(int x=0;x<half;x++) {
-                int edge=(int)screen_w/2-half+x;
-                int shade=70+x*25/(half?half:1);
-                rect(edge,top,1,bottom-top,rgb(shade,shade-8,shade-18));
+        if(hit) {
+            float wall_x=side==0?player_y+dist*ray_y:player_x+dist*ray_x;
+            wall_x-= (float)(int)wall_x;
+            int stripe=(int)(wall_x*8.0f);
+            int base=side?106:139;
+            if(stripe==0||stripe==7)base-=18;
+            int shade=base-(int)(dist*9.0f);
+            if(shade<28)shade=28;if(shade>180)shade=180;
+            u32 wall=side?rgb(shade-17,shade-8,shade-2):rgb(shade,shade-13,shade-25);
+            for(int y=top;y<=bottom;y++) {
+                int edge=(y-top<2||bottom-y<2);
+                pixels[(u64)y*pitch+(u32)x]=edge?rgb(42,43,45):wall;
             }
         }
-        if(blocked(rightx,righty)) {
-            for(int x=0;x<half;x++) {
-                int edge=(int)screen_w/2+half-x;
-                int shade=62+x*20/(half?half:1);
-                rect(edge,top,1,bottom-top,rgb(shade,shade-7,shade-16));
-            }
-        }
-        /* Floor/ceiling depth bands. */
-        rect((int)screen_w/2-half,top,half*2,1,rgb(42,58,74));
-        rect((int)screen_w/2-half,bottom,half*2,1,rgb(88,76,61));
     }
-    /* Small center reticle. */
-    rect((int)screen_w/2-5,horizon,11,1,rgb(235,235,220));
-    rect((int)screen_w/2,horizon-5,1,11,rgb(235,235,220));
-    /* Status bar rendered as colored glyph blocks to avoid unsupported text APIs. */
-    rect(0,(int)screen_h-18,(int)screen_w,18,rgb(12,18,26));
-    for(int i=0;i<4;i++) rect(10+i*10,(int)screen_h-12,6,6,
-       i==heading?rgb(80,220,170):rgb(75,85,95));
-    if(won) {
-        rect((int)screen_w/2-80,(int)screen_h/2-18,160,36,rgb(35,150,90));
-        rect((int)screen_w/2-65,(int)screen_h/2-3,130,6,rgb(220,255,225));
+    /* Reticle and compact HUD are overlaid after the 3D view. */
+    rect(w/2-5,horizon,11,1,rgb(235,235,220));
+    rect(w/2,horizon-5,1,11,rgb(235,235,220));
+    if(status_h) {
+        rect(0,view_h,w,status_h,rgb(12,18,26));
+        int dir=(int)((camera_yaw+6.28318530718f)*4.0f/6.28318530718f)&3;
+        for(int i=0;i<4;i++)rect(10+i*10,view_h+6,6,6,i==dir?rgb(80,220,170):rgb(75,85,95));
     }
+    if(won)rect(w/2-80,h/2-18,160,36,rgb(35,150,90));
     Rect dirty={0,0,screen_w,screen_h};
     (void)syscall3(SYS_FLUSH_GRAPHICS,(u64)&dirty,0,0);
 }
-static void step(int dx,int dy) {
+static void move_player(float dx,float dy) {
     if(won)return;
-    int nx=px+dx,ny=py+dy;
-    if(blocked(nx,ny))return;
-    px=nx;py=ny;
-    if(maze[py][px]=='E')won=1;
-    draw_frame();
+    /* Axis-separated collision allows sliding along walls instead of sticking. */
+    float nx=player_x+dx;
+    if(!blocked((int)(nx+(dx>0?0.18f:-0.18f)),(int)player_y))player_x=nx;
+    float ny=player_y+dy;
+    if(!blocked((int)player_x,(int)(ny+(dy>0?0.18f:-0.18f))))player_y=ny;
+    int gx=(int)player_x,gy=(int)player_y;
+    if(gx>=0&&gx<MW&&gy>=0&&gy<MH&&maze[gy][gx]=='E')won=1;
 }
-/* Camera heading stays fixed: A/D strafe instead of rotating the view. */
-static void move_relative(int forward,int strafe) {
-    int fx=dirx[heading], fy=diry[heading];
-    int sx=dirx[(heading+1)&3], sy=diry[(heading+1)&3];
-    step(fx*forward+sx*strafe,fy*forward+sy*strafe);
-}
-
 extern "C" void maze_mainCRTStartup() {
     /* Verify that the SentinelOS Vulkan runtime is present and exposes its
        global entry points. This is capability detection, not scene rendering. */
@@ -247,13 +266,13 @@ extern "C" void maze_mainCRTStartup() {
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
     (void)show_window(window_handle,1);
-    /* Hide the desktop pointer while the fixed-camera game is active. */
+    /* Hide the pointer while the game captures relative mouse movement. */
     if(show_cursor) {
         for(int i=0;i<8;i++) {
             if(show_cursor(0)<0) break;
         }
     }
-    /* Confine pointer to the screen while the game owns mouse-look. */
+    /* Confine pointer to the display while the game owns mouse-look. */
     if(clip_cursor) { ClipRect clip={0,0,display_w,display_h}; (void)clip_cursor(&clip); }
     if(update_window)(void)update_window(window_handle);
 
@@ -262,13 +281,11 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    print("maze.exe: mouse-look enabled; pointer hidden and centered; software scene\n");
+    print("maze.exe: smooth mouse-look and ray-cast software scene active (Vulkan is loader-probed only)\n");
     Message msg{};
     u64 hz=tsc_frequency();
     u64 frame_cycles=hz/60ULL;
-    u64 step_cycles=hz/9ULL;
     u64 last_frame=read_tsc();
-    u64 last_step=last_frame;
     for(;;) {
         /* Poll messages without blocking the simulation thread. */
         while(peek_message(&msg,nullptr,0,0,1)) {
@@ -282,28 +299,38 @@ extern "C" void maze_mainCRTStartup() {
          * a physical key is held, without depending on keyboard typematic. */
         u64 now=read_tsc();
         if(now-last_frame>=frame_cycles) {
-            last_frame=now; /* 60 Hz input/simulation polling cadence */
+            u64 elapsed=now-last_frame;
+            last_frame=now;
+            float dt=(float)elapsed/(float)hz;
+            if(dt<0.0f)dt=0.0f;
+            if(dt>0.05f)dt=0.05f;
             u64 keys=syscall3(SYS_GAME_KEY_STATE,0,0,0);
             u32 mouse=(u32)syscall3(SYS_GAME_MOUSE_DELTA,0,0,0);
             int mdx=(int)(short)(mouse&0xffffu);
-            mouse_turn_accum+=mdx;
-            /* Grid renderer currently turns in quarter-turn increments. */
-            while(mouse_turn_accum>=28) { heading=(heading+1)&3; mouse_turn_accum-=28; draw_frame(); }
-            while(mouse_turn_accum<=-28) { heading=(heading+3)&3; mouse_turn_accum+=28; draw_frame(); }
+            /* Continuous yaw: no 90-degree snapping or mouse threshold. */
+            camera_yaw+=(float)mdx*0.035f;
+            const float tau=6.28318530718f;
+            while(camera_yaw<0.0f)camera_yaw+=tau;
+            while(camera_yaw>=tau)camera_yaw-=tau;
             if(set_cursor_pos && screen_w && screen_h)
                 (void)set_cursor_pos((int)screen_w/2,(int)screen_h/2);
             if(keys&(1u<<4)) goto game_exit;
-            if(now-last_step>=step_cycles) {
-                int forward=0,strafe=0;
-                if(keys&(1u<<0)) forward=1;
-                else if(keys&(1u<<2)) forward=-1;
-                if(keys&(1u<<1)) strafe=-1;
-                else if(keys&(1u<<3)) strafe=1;
-                if(forward||strafe) {
-                    move_relative(forward,strafe);
-                    last_step=now;
-                }
+            float forward=0.0f,strafe=0.0f;
+            if(keys&(1u<<0))forward+=1.0f;
+            if(keys&(1u<<2))forward-=1.0f;
+            if(keys&(1u<<1))strafe-=1.0f;
+            if(keys&(1u<<3))strafe+=1.0f;
+            if(forward!=0.0f||strafe!=0.0f) {
+                float len=1.0f;
+                if(forward!=0.0f&&strafe!=0.0f)len=0.70710678f;
+                const float speed=2.8f*dt*len;
+                float dx=(fcos(camera_yaw)*forward-fsin(camera_yaw)*strafe)*speed;
+                float dy=(fsin(camera_yaw)*forward+fcos(camera_yaw)*strafe)*speed;
+                move_player(dx,dy);
             }
+            /* Redraw at the frame cadence even when standing still, so mouse
+               look and animation never depend on a keypress edge. */
+            draw_frame();
         }
         (void)syscall3(SYS_YIELD,0,0,0);
     }

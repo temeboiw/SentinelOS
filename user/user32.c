@@ -186,6 +186,8 @@ static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static int u32_is_desktop_window(void);
 static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
+/* Kernel window registration is deferred until ShowWindow for initially hidden HWNDs. */
+static int u32_wnd_registered;
 static int u32_normal_x, u32_normal_y, u32_normal_w, u32_normal_h, u32_normal_valid;
 /* USER32 child HWNDs. Coordinates are client-relative, so moving the parent
  * automatically moves every child without stale screen-space rectangles. */
@@ -1689,6 +1691,7 @@ void *CreateWindowExA(
      * NULL made CreateWindowEx appear to succeed while silently skipping the
      * application's WM_NCCREATE/WM_CREATE initialization (many games then
      * never initialized their renderer or first frame). */
+    u32_wnd_registered=0;
     u32_wnd_style=style; u32_wnd_exstyle=ex; u32_wnd_id=0;
     u32_wnd_proc=u32_class_proc; u32_wnd_userdata=0; u32_wnd_menu=menu; u32_wnd_parent=parent;
     u32_context_help_id=0;
@@ -1754,10 +1757,8 @@ void *CreateWindowExA(
     }
 
     if (g_wnd.visible) {
-        if(!sy3(SYS_WmReg,0,(u64)g_wnd.title,0)) {
-            /* Window-manager registration can be unavailable during early
-             * boot; keep USER32's local window usable in that case. */
-        }
+        (void)sy3(SYS_WmReg,0,(u64)g_wnd.title,0);
+        u32_wnd_registered=1;
         int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
         (void)sy3(SYS_WmRect,(u64)rect,0,0);
         if(!(style&0x80000000u)) {
@@ -1788,6 +1789,15 @@ BOOL ShowWindow(void *hwnd, int cmd) {
         (void)sy3(SYS_WmMin,1,0,0);
     } else {
         g_wnd.visible=1;g_wnd.minimized=0;
+        /* CreateWindowEx may have started hidden (style lacks WS_VISIBLE).
+         * Publish it to the kernel window manager on its first show, otherwise
+         * the local USER32 frame exists but no global window layer is allocated. */
+        if(!u32_wnd_registered) {
+            (void)sy3(SYS_WmReg,0,(u64)g_wnd.title,0);
+            u32_wnd_registered=1;
+            int r[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
+            (void)sy3(SYS_WmRect,(u64)r,0,0);
+        }
         if(cmd==3) {
             if(!u32_normal_valid){u32_normal_x=g_wnd.x;u32_normal_y=g_wnd.y;u32_normal_w=g_wnd.w;u32_normal_h=g_wnd.h;u32_normal_valid=1;}
             ensure_fb();g_wnd.x=0;g_wnd.y=0;g_wnd.w=(int)g_fw;g_wnd.h=(int)g_fh;

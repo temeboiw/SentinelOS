@@ -337,6 +337,14 @@ static void draw_frame_gpu() {
         }
         return;
     }
+    /*
+     * VirGL's transfer updates the shared scanout surface, but the desktop
+     * compositor owns the visible output and can overwrite that surface on
+     * its next compose. Publish the completed scanout into this process's
+     * foreground window layer after every successful GPU frame so the WM
+     * composites Maze above Explorer instead of leaving Explorer visible.
+     */
+    present_maze_layer();
     report_frame_rate();
 }
 

@@ -187,7 +187,7 @@ static void report_frame_rate() {
     u64 elapsed=now-fps_window_start;
     if(elapsed<1000u)return;
     u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
-    print(gpu_scene_ready ? "maze.exe: measured VirGL GPU-span frame rate = " : "maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\n");
+    print("maze.exe: measured VirGL GPU-span frame rate = ");print_u32(fps);print(" FPS (CPU ray intersections, GPU span fills)\n");
     fps_window_start=now;fps_window_frames=0;
 }
 /* GPU raster path: CPU computes one ray intersection per vertical strip;
@@ -463,7 +463,7 @@ extern "C" void maze_mainCRTStartup() {
     /* GPU-only mode: never silently substitute CPU rasterization. The
        VirGL span renderer submits GPU scissor/clear work and presents the
        GPU target; if the transport is unavailable, report that explicitly. */
-    int virgl_gpu_candidate=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
+    int virgl_gpu_candidate=(vulkan_available && graphics_info_ok && (info.capabilities&(1u<<4)) &&
                              submit_virgl_stream && present_virgl);
     gpu_scene_ready=virgl_gpu_candidate;
     if(gpu_scene_ready)
@@ -509,12 +509,12 @@ extern "C" void maze_mainCRTStartup() {
     if(update_window)(void)update_window(window_handle);
 
     if(!pixels) {
-        print("maze.exe: no direct graphics surface; Vulkan loader probe completed, software scene unavailable\n");
+        print("maze.exe: FATAL: no direct graphics surface; GPU-only rendering unavailable\n");
     } else {
         draw_frame();
     }
-    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; Maze frames use VirGL GPU span rasterization\n" : "maze.exe: Vulkan device ready; Maze scene uses software fallback\n");
-    else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("\n"); }
+    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; GPU-only VirGL span path active (CPU ray intersections, GPU fills)\n" : "maze.exe: Vulkan device ready, but GPU-only renderer unavailable; no CPU fallback\n");
+    else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("; GPU-only mode will not render\n"); }
     Message msg{};
     u64 hz=tsc_frequency();
     /* Keep a phase-locked 60 Hz deadline instead of resetting the clock

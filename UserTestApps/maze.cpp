@@ -262,17 +262,17 @@ static void draw_frame_gpu() {
     if(status_h && !gpu_append_scissor_clear(&stream,0,view_h,w,status_h,0.035f,0.055f,0.08f))return;
     u32 bytes=virgl_stream_bytes(&stream);
     if(!bytes || bytes>4096u-sizeof(u32)*5u) {
-        print("maze.exe: GPU frame command stream exceeded safe VirGL packet size\n");
-        gpu_scene_ready=0;return;
+        print("maze.exe: FATAL: GPU frame command stream exceeded safe VirGL packet size; CPU fallback disabled\n");
+        return;
     }
     if(submit_virgl_stream(words,bytes)!=0) {
-        print("maze.exe: VirGL command submission failed; switching to software fallback\n");
-        gpu_scene_ready=0;return;
+        print("maze.exe: FATAL: VirGL command submission failed; CPU fallback disabled\n");
+        return;
     }
     gpu_rasterizer_created=1;
     if(present_virgl()!=0) {
-        print("maze.exe: VirGL target presentation failed; switching to software fallback\n");
-        gpu_scene_ready=0;return;
+        print("maze.exe: FATAL: VirGL target presentation failed; CPU fallback disabled\n");
+        return;
     }
     present_maze_layer();
     report_frame_rate();
@@ -281,6 +281,7 @@ static void draw_frame_gpu() {
 static void draw_frame() {
     if(gpu_scene_ready){draw_frame_gpu();return;}
     if(!pixels||!screen_w||!screen_h)return;
+    if(!gpu_scene_ready)return; /* GPU-only: do not execute CPU raycaster. */
     const int w=(int)screen_w,h=(int)screen_h;
     const int status_h=h>=240?18:0;
     const int view_h=h-status_h;
@@ -459,18 +460,16 @@ extern "C" void maze_mainCRTStartup() {
     }
     submit_virgl_stream=(VkSubmitVirGLStream_t)get_proc("vulkan.dll","SentinelVulkanSubmitVirGLStream");
     present_virgl=(VkPresentVirGL_t)get_proc("vulkan.dll","SentinelVulkanPresentVirGL");
-    /* Do not select the experimental VirGL span path just because its
-       transport entry points exist. The current driver does not yet prove
-       that its render target reaches scanout, which left the desktop visible
-       while Maze was running. Use the verified shared-surface software path
-       until GPU target readback/presentation is validated end-to-end. */
+    /* GPU-only mode: never silently substitute CPU rasterization. The
+       VirGL span renderer submits GPU scissor/clear work and presents the
+       GPU target; if the transport is unavailable, report that explicitly. */
     int virgl_gpu_candidate=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
                              submit_virgl_stream && present_virgl);
-    gpu_scene_ready=0;
-    if(virgl_gpu_candidate)
-        print("maze.exe: VirGL transport detected; using visible software renderer until GPU scanout is verified\n");
+    gpu_scene_ready=virgl_gpu_candidate;
+    if(gpu_scene_ready)
+        print("maze.exe: GPU-only mode; VirGL span renderer selected\n");
     else
-        print("maze.exe: VirGL GPU path unavailable; software renderer active\n");
+        print("maze.exe: ERROR: GPU-only mode requires an initialized VirGL 3D target\n");
     /* Harmless NOP probe is retained only when GPU rendering cannot be used. */
     int virgl_submit_ok=0;
     if(graphics_info_ok && (info.capabilities&(1u<<4)) &&
@@ -484,8 +483,8 @@ extern "C" void maze_mainCRTStartup() {
         }
     }
     if(!gpu_scene_ready) {
-        if(virgl_submit_ok) print("maze.exe: VirGL NOP transport test accepted; software renderer remains active\n");
-        else print("maze.exe: VirGL command submission unavailable; software renderer remains active\n");
+        if(virgl_submit_ok) print("maze.exe: VirGL transport responds, but GPU-only rendering cannot start without a 3D target\n");
+        else print("maze.exe: GPU-only rendering unavailable: VirGL command submission failed\n");
     }
     int display_w=screen_w?(int)screen_w:1280;
     int display_h=screen_h?(int)screen_h:800;

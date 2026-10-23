@@ -490,7 +490,7 @@ static int gfx_virgl_clear_present_test(void) {
         0x00030005u, /* SET_FRAMEBUFFER_STATE, 3 dwords */
         1u, 0u, 1u,  /* one color buffer, no depth, surface handle 1 */
         0x00070007u, /* CLEAR, 7 dwords */
-        0x00000001u, /* PIPE_CLEAR_COLOR0 */
+        0x00000004u, /* PIPE_CLEAR_COLOR0 */
         0x3D23D70Au, /* R = 0.04 */
         0x3DCCCCCDu, /* G = 0.10 */
         0x3F19999Au, /* B = 0.60 */

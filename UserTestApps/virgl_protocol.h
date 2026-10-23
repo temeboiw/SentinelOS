@@ -504,6 +504,72 @@ static inline int virgl_stream_texture_barrier(VirglStream *s) {
                                 VIRGL_OBJECT_NULL, NULL, 0u);
 }
 
+/* Batch 6, add-on 1/4: provide the four clip-plane coefficients in
+ * Gallium order. Each value is an IEEE-754 float bit pattern. */
+static inline int virgl_stream_set_clip_state(VirglStream *s,
+                                              const uint32_t planes[4]) {
+    if (!planes) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_SET_CLIP_STATE,
+                                VIRGL_OBJECT_NULL, planes, 4u);
+}
+
+/* Batch 6, add-on 2/4: set tessellation default outer/inner levels.
+ * Values are float bit patterns; the backend may ignore this on non-tess
+ * pipelines. */
+static inline int virgl_stream_set_tess_state(VirglStream *s,
+                                              uint32_t outer_bits,
+                                              uint32_t inner_bits) {
+    const uint32_t payload[2] = { outer_bits, inner_bits };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_TESS_STATE,
+                                VIRGL_OBJECT_NULL, payload, 2u);
+}
+
+/* Batch 6, add-on 3/4: issue a Gallium memory barrier with caller-selected
+ * PIPE_BARRIER_* flags. The flags must come from the matching Gallium ABI. */
+static inline int virgl_stream_memory_barrier(VirglStream *s,
+                                              uint32_t barrier_flags) {
+    if (!barrier_flags) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_MEMORY_BARRIER,
+                                VIRGL_OBJECT_NULL, &barrier_flags, 1u);
+}
+
+/* Batch 6, add-on 4/4: bind shader-buffer resources. Each entry is
+ * {slot, resource_handle, offset_bytes, size_bytes}; size must be nonzero.
+ * The protocol payload uses a count followed by four dwords per binding. */
+static inline int virgl_stream_set_shader_buffers(VirglStream *s,
+                                                   uint32_t shader_type,
+                                                   const uint32_t *entries,
+                                                   uint32_t buffer_count) {
+    if (!s || shader_type > 5u || !entries || !buffer_count ||
+        buffer_count > 16u) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    uint32_t payload[2u + 4u * 16u];
+    payload[0] = shader_type;
+    payload[1] = buffer_count;
+    for (uint32_t i = 0; i < buffer_count; ++i) {
+        const uint32_t *e = entries + i * 4u;
+        if (e[0] > 31u || !e[1] || !e[3] || (e[2] & 3u) || (e[3] & 3u)) {
+            s->failed = 1u;
+            return 0;
+        }
+        payload[2u + i * 4u] = e[0];
+        payload[3u + i * 4u] = e[1];
+        payload[4u + i * 4u] = e[2];
+        payload[5u + i * 4u] = e[3];
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_SET_SHADER_BUFFERS,
+                                VIRGL_OBJECT_NULL, payload,
+                                (uint16_t)(2u + buffer_count * 4u));
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

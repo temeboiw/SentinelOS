@@ -1267,24 +1267,53 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                      oi,e->pid,e->x,e->y,e->w,e->h,e->minimized);
         }
     }
-    for(uint32_t yy=y;yy<y+h;yy++)for(uint32_t xx=x;xx<x+w;xx++) {
-        uint32_t at=yy*width+xx;
-        uint32_t c=wm_shared_alpha(wm_shared_background[at],wm_shared_desktop[at]);
-        /* Window surfaces are screen-sized buffers, but their valid drawing
-         * area is bounded by the registered frame. Never composite stale
-         * pixels outside that frame into the shared scanout. */
-        for(int oi=0;oi<count;oi++) {
-            WmEntry *e=&wm_tab[order[oi]];
-            int64_t left=(int64_t)e->x-12, top=(int64_t)e->y-12;
-            int64_t right=(int64_t)e->x+(int64_t)e->w+12;
-            int64_t bottom=(int64_t)e->y+(int64_t)e->h+16;
-            if((int64_t)xx<left||(int64_t)yy<top||
-               (int64_t)xx>=right||(int64_t)yy>=bottom)
-                continue;
-            c=wm_shared_alpha(c,wm_shared_windows[order[oi]][at]);
+    /* First rebuild the damaged rectangle from the two static layers.
+     * Then overlay each window only where its frame intersects the damage.
+     * This avoids the old O(damage_pixels * window_count) hit-test loop:
+     * pixels outside every window no longer pay for every window's bounds. */
+    for(uint32_t yy=y;yy<y+h;yy++) {
+        uint32_t row=yy*width;
+        uint32_t *dstrow=out+yy*pitch;
+        for(uint32_t xx=x;xx<x+w;xx++) {
+            uint32_t at=row+xx;
+            dstrow[xx]=wm_shared_alpha(wm_shared_background[at],
+                                       wm_shared_desktop[at]);
         }
-        c=wm_shared_alpha(c,wm_shared_taskbar[at]);
-        out[yy*pitch+xx]=c;
+    }
+    for(int oi=0;oi<count;oi++) {
+        int slot=order[oi];
+        WmEntry *e=&wm_tab[slot];
+        /* Frame includes the compositor's non-client border/title region. */
+        int64_t left=(int64_t)e->x-12, top=(int64_t)e->y-12;
+        int64_t right=(int64_t)e->x+(int64_t)e->w+12;
+        int64_t bottom=(int64_t)e->y+(int64_t)e->h+16;
+        if(left<(int64_t)x)left=x;
+        if(top<(int64_t)y)top=y;
+        if(right>(int64_t)x+w)right=(int64_t)x+w;
+        if(bottom>(int64_t)y+h)bottom=(int64_t)y+h;
+        if(left<0)left=0;
+        if(top<0)top=0;
+        if(right>(int64_t)width)right=width;
+        if(bottom>(int64_t)height)bottom=height;
+        if(right<=left||bottom<=top)continue;
+        uint32_t *surface=wm_shared_windows[slot];
+        for(uint32_t yy=(uint32_t)top;yy<(uint32_t)bottom;yy++) {
+            uint32_t row=yy*width;
+            uint32_t *dstrow=out+yy*pitch;
+            for(uint32_t xx=(uint32_t)left;xx<(uint32_t)right;xx++) {
+                uint32_t at=row+xx;
+                dstrow[xx]=wm_shared_alpha(dstrow[xx],surface[at]);
+            }
+        }
+    }
+    /* Taskbar remains the top layer and is blended only once per damaged pixel. */
+    for(uint32_t yy=y;yy<y+h;yy++) {
+        uint32_t row=yy*width;
+        uint32_t *dstrow=out+yy*pitch;
+        for(uint32_t xx=x;xx<x+w;xx++) {
+            uint32_t at=row+xx;
+            dstrow[xx]=wm_shared_alpha(dstrow[xx],wm_shared_taskbar[at]);
+        }
     }
     int flush_ok=gfx_flush(x,y,w,h);
     if(wm_dbg_sample(dbg_n))

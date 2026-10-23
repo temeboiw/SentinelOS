@@ -165,6 +165,7 @@ static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static int u32_is_desktop_window(void);
 static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
+static int u32_normal_x, u32_normal_y, u32_normal_w, u32_normal_h, u32_normal_valid;
 /* USER32 child HWNDs. Coordinates are client-relative, so moving the parent
  * automatically moves every child without stale screen-space rectangles. */
 typedef struct {
@@ -1758,7 +1759,6 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
     return 1;
 }
 
-static int u32_normal_x, u32_normal_y, u32_normal_w, u32_normal_h, u32_normal_valid;
 static U32_RECT u32_invalid_rect;
 static int u32_update_pending;
 static BOOL u32_update_erase;
@@ -2791,24 +2791,6 @@ __attribute__((dllexport)) void *GetTopWindow(void *parent) {
     return parent==(u32_wnd_parent ? u32_wnd_parent : (void *)2) && g_wnd.visible ? (void *)1 : 0;
 }
 __attribute__((dllexport)) BOOL BringWindowToTop(void *hwnd) { return SetForegroundWindow(hwnd); }
-__attribute__((dllexport)) BOOL SetWindowPlacement(void *hwnd, const U32_WINDOWPLACEMENT *p) {
-    if (hwnd!=(void *)1 || !g_wnd.visible || !p || p->length<sizeof(U32_WINDOWPLACEMENT)) return 0;
-    int w=p->rcNormalPosition.right-p->rcNormalPosition.left;
-    int h=p->rcNormalPosition.bottom-p->rcNormalPosition.top;
-    if (w>0 && h>0) MoveWindow(hwnd,p->rcNormalPosition.left,p->rcNormalPosition.top,w,h,0);
-    if (p->showCmd==0) { g_wnd.visible=0; sy3(SYS_WmUnreg,0,0,0); }
-    else if (p->showCmd==2 || p->showCmd==6 || p->showCmd==7) { g_wnd.minimized=1; sy3(SYS_WmMin,0,0,0); }
-    else { g_wnd.visible=1; g_wnd.minimized=0; sy3(SYS_WmRestore,0,0,0); }
-    compose(); return 1;
-}
-__attribute__((dllexport)) BOOL GetWindowPlacement(void *hwnd, U32_WINDOWPLACEMENT *p) {
-    if (hwnd!=(void *)1 || !g_wnd.visible || !p || p->length<sizeof(U32_WINDOWPLACEMENT)) return 0;
-    p->flags=0; p->showCmd=g_wnd.minimized ? 2u : 1u;
-    p->ptMinPosition.x=0; p->ptMinPosition.y=0; p->ptMaxPosition.x=0; p->ptMaxPosition.y=0;
-    p->rcNormalPosition.left=g_wnd.x; p->rcNormalPosition.top=g_wnd.y;
-    p->rcNormalPosition.right=g_wnd.x+g_wnd.w; p->rcNormalPosition.bottom=g_wnd.y+g_wnd.h;
-    return 1;
-}
 __attribute__((dllexport)) BOOL GetWindowInfo(void *hwnd, U32_WINDOWINFO *info) {
     if (hwnd!=(void *)1 || !g_wnd.visible || !info || info->cbSize<sizeof(U32_WINDOWINFO)) return 0;
     info->rcWindow.left=g_wnd.x; info->rcWindow.top=g_wnd.y;

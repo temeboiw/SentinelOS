@@ -462,8 +462,7 @@ static inline int virgl_stream_draw_indexed(VirglStream *s,
                                             uint32_t min_index,
                                             uint32_t max_index) {
     if (!count || !instances || primitive > VIRGL_PRIM_TRIANGLE_FAN ||
-        count - 1u > UINT32_MAX - start || min_index > max_index ||
-        index_bias < INT32_MIN || index_bias > INT32_MAX) {
+        count - 1u > UINT32_MAX - start || min_index > max_index) {
         if (s) s->failed = 1u;
         return 0;
     }

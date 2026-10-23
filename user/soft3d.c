@@ -280,24 +280,26 @@ static int s3d_vb_bind_object(S3D_VIRGL_BUILDER *b,uint32_t obj,uint32_t handle)
 static int s3d_vb_destroy_object(S3D_VIRGL_BUILDER *b,uint32_t obj,uint32_t handle) {
     return s3d_vb_cmd(b,S3D_VIRGL_CMD_DESTROY_OBJECT,obj,1)&&s3d_vb_word(b,handle);
 }
-int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
-                         const S3D_VERTEX *b,const S3D_VERTEX *c) {
+int S3DDrawMeshVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *vertices,
+                     uint32_t vertex_count) {
     if(!surface||surface->backend!=2||!surface->virgl_buffer||
        surface->virgl_buffer_resource_id!=S3D_VIRGL_VERTEX_BUFFER_ID||
-       surface->virgl_buffer_size<84u||!a||!b||!c)return 0;
-    const S3D_VERTEX *v[3]={a,b,c};
+       !vertices||vertex_count<3u||vertex_count%3u!=0u||
+       vertex_count>surface->virgl_buffer_size/28u||
+       vertex_count>UINT32_MAX/28u)return 0;
+    uint32_t upload_bytes=vertex_count*28u;
     uint32_t *vb=(uint32_t*)surface->virgl_buffer;
-    for(uint32_t i=0;i<3;i++) {
+    for(uint32_t i=0;i<vertex_count;i++) {
         uint32_t o=i*7u;
-        vb[o+0]=s3d_fixed_to_float_bits(v[i]->x);
-        vb[o+1]=s3d_fixed_to_float_bits(v[i]->y);
-        vb[o+2]=s3d_fixed_to_float_bits(v[i]->z);
-        vb[o+3]=s3d_u8_to_float_bits((v[i]->color>>16)&255u);
-        vb[o+4]=s3d_u8_to_float_bits((v[i]->color>>8)&255u);
-        vb[o+5]=s3d_u8_to_float_bits(v[i]->color&255u);
-        vb[o+6]=s3d_u8_to_float_bits((v[i]->color>>24)&255u);
+        vb[o+0]=s3d_fixed_to_float_bits(vertices[i].x);
+        vb[o+1]=s3d_fixed_to_float_bits(vertices[i].y);
+        vb[o+2]=s3d_fixed_to_float_bits(vertices[i].z);
+        vb[o+3]=s3d_u8_to_float_bits((vertices[i].color>>16)&255u);
+        vb[o+4]=s3d_u8_to_float_bits((vertices[i].color>>8)&255u);
+        vb[o+5]=s3d_u8_to_float_bits(vertices[i].color&255u);
+        vb[o+6]=s3d_u8_to_float_bits((vertices[i].color>>24)&255u);
     }
-    if(!S3DUploadVirGLBuffer(84u))return 0;
+    if(!S3DUploadVirGLBuffer(upload_bytes))return 0;
 
     static const char vs[]="VERT\nDCL IN[0]\nDCL IN[1]\nDCL OUT[0], POSITION\nDCL OUT[1], COLOR\nMOV OUT[0], IN[0]\nMOV OUT[1], IN[1]\nEND\n";
     static const char fs[]="FRAG\nDCL IN[0], COLOR\nDCL OUT[0], COLOR\nMOV OUT[0], IN[0]\nEND\n";
@@ -371,7 +373,7 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
        start=0, count=3, mode=TRIANGLES, indexed=0, instances=1,
        zero bias/instance/restart fields, min=0, max=2, stream-output=0. */
     ok &= s3d_vb_word(&q,0); /* start */
-    ok &= s3d_vb_word(&q,3); /* vertex count */
+    ok &= s3d_vb_word(&q,vertex_count); /* batched triangle-list vertex count */
     ok &= s3d_vb_word(&q,S3D_VIRGL_PIPE_PRIM_TRIANGLES);
     ok &= s3d_vb_word(&q,0); /* non-indexed */
     ok &= s3d_vb_word(&q,1); /* one instance */
@@ -380,7 +382,7 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
     ok &= s3d_vb_word(&q,0); /* primitive restart disabled */
     ok &= s3d_vb_word(&q,0); /* restart index */
     ok &= s3d_vb_word(&q,0); /* minimum vertex index */
-    ok &= s3d_vb_word(&q,2); /* maximum vertex index */
+    ok &= s3d_vb_word(&q,vertex_count-1u); /* maximum vertex index */
     ok &= s3d_vb_word(&q,0); /* count-from-stream-output disabled */
 
     ok &= s3d_vb_destroy_object(&q,S3D_VIRGL_OBJECT_SHADER,11);
@@ -393,4 +395,11 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
     uint32_t bytes=q.count*4u;
     if(!ok||bytes>S3D_VIRGL_MAX_COMMAND_BYTES)return 0;
     return S3DSubmitVirGL(q.words,bytes)&&S3DPresentVirGL();
+}
+
+int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
+                         const S3D_VERTEX *b,const S3D_VERTEX *c) {
+    if(!a||!b||!c)return 0;
+    const S3D_VERTEX triangle[3]={*a,*b,*c};
+    return S3DDrawMeshVirGL(surface,triangle,3u);
 }

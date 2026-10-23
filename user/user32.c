@@ -168,6 +168,7 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+static int g_power_menu;
 /* A non-desktop process can receive clicks over the shared taskbar. Publish
  * its freshly redrawn taskbar layer only when that process changes taskbar UI;
  * ordinary window repaints must never overwrite the desktop's taskbar/menu. */
@@ -741,9 +742,10 @@ static unsigned int u32_auto_cursor_at(int x,int y) {
     /* Desktop taskbar, Start button and Start-menu actions are clickable. */
     if(y>=h-44)return 32649u;
     if(g_menu) {
-        int my=h-44-142-4;
-        if(x>=8&&x<198&&y>=my+12&&y<my+38)return 32513u;
-        if(x>=8&&x<198&&y>=my+48&&y<my+126)return 32649u;
+        int my=h-48-360-4;if(my<4)my=4;
+        if(x>=18&&x<298&&y>=my+60&&y<my+92)return 32513u;
+        if(x>=18&&x<298&&y>=my+116&&y<my+218)return 32649u;
+        if(x>=18&&x<298&&y>=my+258&&y<my+298)return 32649u;
     }
     return 32512u;
 }
@@ -964,53 +966,43 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
 static int hit(int x, int y, int x0, int y0, int x1, int y1) {    return x >= x0 && x < x1 && y >= y0 && y < y1;
 }
 
-static int search_is_cmd(void) {
-    const char *a = g_search_text;
-    const char *b = "cmd";
-
-    while (*a && *b) {
-        char ca = *a++;
-        char cb = *b++;
-
-        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-
-        if (ca != cb) return 0;
+static int u32_menu_text_is(const char *wanted) {
+    const char *a=g_search_text,*b=wanted;
+    while(*a&&*b) {
+        char ca=*a++,cb=*b++;
+        if(ca>='A'&&ca<='Z')ca=(char)(ca+'a'-'A');
+        if(cb>='A'&&cb<='Z')cb=(char)(cb+'a'-'A');
+        if(ca!=cb)return 0;
     }
+    return *a==0&&*b==0;
+}
 
-    return *a == 0 && *b == 0;
+static void u32_menu_launch(const char *name) {
+    u64 result=sy3(SYS_CreateProcess,(u64)name,0,0);
+    if(!result||result==(u64)-1) {
+        static const char error[]="Start menu: application launch failed\\n";
+        sy3(SYS_Write,1,(u64)error,sizeof(error)-1);
+    }
 }
 
 static void submit_search(void) {
-    g_search_text[g_search_len] = 0;
-
-    if (search_is_cmd()) {
-        static char cmd_name[] = "cmd.exe";
-
-        g_menu = 0;
-        g_search_focus = 0;
-        /*
-         * SYS_CreateProcess is syscall 4 in this OS.
-         * The process must also be loaded by the bootloader.
-         */
-        u64 result = sy3(
-            SYS_CreateProcess,
-            (u64)cmd_name, 0, 0
-        );
-
-        if (!result || result == (u64)-1) {
-            static const char error[] = "Start menu: failed to launch cmd.exe\n";
-            sy3(SYS_Write, 1, (u64)error,
-                sizeof(error) - 1);
-        }
-    } else if (g_search_len > 0) {
-        static const char message[] =
-            "Start menu: only cmd is supported right now\n";
-        sy3(SYS_Write, 1, (u64)message,
-            sizeof(message) - 1);
+    g_search_text[g_search_len]=0;
+    static char cmd_name[]="cmd.exe";
+    static char taskmgr_name[]="taskmgr.exe";
+    static char files_name[]="fileexplorer.exe";
+    g_menu=0;g_power_menu=0;g_search_focus=0;
+    if(u32_menu_text_is("cmd")||u32_menu_text_is("cmd.exe"))
+        u32_menu_launch(cmd_name);
+    else if(u32_menu_text_is("taskmgr")||u32_menu_text_is("taskmgr.exe")||
+            u32_menu_text_is("task manager"))
+        u32_menu_launch(taskmgr_name);
+    else if(u32_menu_text_is("file explorer")||u32_menu_text_is("explorer")||
+            u32_menu_text_is("fileexplorer.exe"))
+        u32_menu_launch(files_name);
+    else if(g_search_len>0) {
+        static const char message[]="Start menu: no match; try cmd, taskmgr, or file explorer\\n";
+        sy3(SYS_Write,1,(u64)message,sizeof(message)-1);
     }
-
-    g_search_focus = 0;
 }
 
 /*
@@ -1118,37 +1110,50 @@ static void draw_taskbar(void) {
     }
 
     if (g_menu) {
-        int mw = 190;
-        int mh = 142;
-        int mx = 8;
-        int my = ty - mh - 4;
-
-        panel(mx, my, mw, mh, COL_PANEL, COL_TASKLINE);
-        fill(mx, my, mw, 3, COL_ACCENT);
-
-        /* Search field inside Start menu. */
-        panel(
-            mx + 10, my + 12, mw - 20, 26,
-            COL_BG,
-            g_search_focus ? COL_ACCENT : COL_TASKLINE
-        );
-
-        if (g_search_len > 0) {
-            g_search_text[g_search_len] = 0;
-            draw_text(
-                mx + 17, my + 21,
-                g_search_text, COL_TEXT
-            );
-        } else {
-            draw_text(
-                mx + 17, my + 21,
-                "SEARCH APPS", COL_MUTED
-            );
-        }
-
-        draw_text(mx + 14, my + 52, "SHUTDOWN", COL_DANGER);
-        draw_text(mx + 14, my + 76, "RESTART", COL_WARN);
-        draw_text(mx + 14, my + 100, "CANCEL", COL_MUTED);
+        int mw=300,mh=360,mx=8,my=ty-mh-4;
+        if(my<4)my=4;
+        /* Windows 10-inspired Start surface with glass depth and real app tiles. */
+        round_fill(mx+4,my+5,mw,mh,10,0x55314F62);
+        round_fill(mx,my,mw,mh,9,0xF0182938);
+        round_fill(mx+1,my+1,mw-2,mh-2,8,0xF51A2B3B);
+        fill(mx,my,4,mh,COL_ACCENT);
+        gradient_v(mx+5,my+1,mw-6,54,0xFF253F55,0xFF1A2D3D);
+        fill(mx+12,my+12,30,30,0xFF087DB5);
+        fill(mx+18,my+18,7,7,0xFFFFFFFF);fill(mx+27,my+18,7,7,0xFFFFFFFF);
+        fill(mx+18,my+27,7,7,0xFFFFFFFF);fill(mx+27,my+27,7,7,0xFFFFFFFF);
+        draw_text(mx+52,my+16,"SENTINELOS",COL_TEXT);
+        draw_text(mx+52,my+32,"YOUR WORKSPACE",COL_MUTED);
+        panel(mx+12,my+60,mw-24,32,COL_BG,g_search_focus?COL_ACCENT:COL_TASKLINE);
+        round_fill(mx+22,my+69,9,9,5,COL_MUTED);
+        round_fill(mx+24,my+71,5,5,3,COL_BG);
+        fill(mx+30,my+78,5,2,COL_MUTED);
+        if(g_search_len>0) {
+            g_search_text[g_search_len]=0;
+            draw_text(mx+42,my+72,g_search_text,COL_TEXT);
+        } else draw_text(mx+42,my+72,"TYPE TO SEARCH",COL_MUTED);
+        draw_text(mx+16,my+105,"PINNED",COL_TEXT);
+        draw_text(mx+mw-66,my+105,"ALL APPS",COL_ACCENT);
+        round_fill(mx+12,my+116,132,48,5,0xFF244458);
+        round_fill(mx+18,my+125,25,25,4,0xFF0A83B7);
+        fill(mx+23,my+131,15,3,0xFFFFFFFF);fill(mx+23,my+138,15,3,0xFFFFFFFF);
+        draw_text(mx+50,my+135,"FILE EXPLORER",COL_TEXT);
+        round_fill(mx+154,my+116,134,48,5,0xFF244458);
+        round_fill(mx+160,my+125,25,25,4,0xFF167C67);
+        fill(mx+165,my+130,15,2,0xFFFFFFFF);fill(mx+165,my+136,15,2,0xFFFFFFFF);fill(mx+165,my+142,15,2,0xFFFFFFFF);
+        draw_text(mx+192,my+135,"TASK MANAGER",COL_TEXT);
+        round_fill(mx+12,my+170,132,48,5,0xFF244458);
+        round_fill(mx+18,my+179,25,25,4,0xFF4D5C70);
+        draw_text(mx+24,my+188,"C:",COL_TEXT);
+        draw_text(mx+50,my+189,"COMMAND PROMPT",COL_TEXT);
+        draw_text(mx+16,my+236,"POWER OPTIONS",COL_MUTED);
+        fill(mx+12,my+248,mw-24,1,0xFF3A5365);
+        round_fill(mx+12,my+258,132,40,5,0xFF263E4E);
+        draw_text(mx+24,my+274,"SHUT DOWN",COL_DANGER);
+        round_fill(mx+154,my+258,134,40,5,0xFF263E4E);
+        draw_text(mx+166,my+274,"RESTART",COL_WARN);
+        fill(mx+12,my+310,mw-24,1,0xFF3A5365);
+        draw_text(mx+16,my+329,"SYSTEM SETTINGS",COL_TEXT);
+        draw_text(mx+16,my+345,"POWER  |  SIGN OUT  |  HELP",COL_MUTED);
     }
 }
 
@@ -1727,57 +1732,48 @@ static void on_click(int x, int y) {
             g_search_focus = 0;
 
             if (g_menu) {
-                g_search_len = 0;
-                g_search_text[0] = 0;
-            }
-
-            compose_region(0, ty-150, (int)g_fw, (int)g_fh);
-            return;
+        int mw=300,mh=360,mx=8,my=ty-mh-4;
+        if(my<4)my=4;
+        if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
+            g_search_focus=1;g_search_len=0;g_search_text[0]=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);return;
         }
+        if(hit(x,y,mx+12,my+116,mx+144,my+164)) {
+            static char files_name[]="fileexplorer.exe";
+            g_menu=0;g_search_focus=0;g_power_menu=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            u32_menu_launch(files_name);return;
+        }
+        if(hit(x,y,mx+154,my+116,mx+288,my+164)) {
+            static char taskmgr_name[]="taskmgr.exe";
+            g_menu=0;g_search_focus=0;g_power_menu=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            u32_menu_launch(taskmgr_name);return;
+        }
+        if(hit(x,y,mx+12,my+170,mx+144,my+218)) {
+            static char cmd_name[]="cmd.exe";
+            g_menu=0;g_search_focus=0;g_power_menu=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            u32_menu_launch(cmd_name);return;
+        }
+        if(hit(x,y,mx+12,my+258,mx+144,my+298)) {
+            g_menu=0;g_search_focus=0;g_power_menu=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            show_shutdown_screen(0);sy3(SYS_Shutdown,0,0,0);return;
+        }
+        if(hit(x,y,mx+154,my+258,mx+288,my+298)) {
+            g_menu=0;g_search_focus=0;g_power_menu=0;
+            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            show_shutdown_screen(1);sy3(SYS_Shutdown,1,0,0);return;
+        }
+        if(hit(x,y,mx+12,my+310,mx+288,my+356)) {
+            g_search_focus=0;g_search_len=0;g_search_text[0]=0;
+            static const char info[]="SentinelOS Settings: environment and display controls are being added.\\n";
+            sy3(SYS_Write,1,(u64)info,sizeof(info)-1);return;
+        }
+        g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+        compose_region(0,my,(int)g_fw,(int)g_fh);return;
     }
-
-    if (g_menu) {
-        int mw = 190, mh = 142;
-        int mx = 8, my = ty - mh - 4;
-
-        /* Clicking the search box focuses it. */
-        if (hit(x, y,
-                mx + 10, my + 12,
-                mx + mw - 10, my + 38)) {
-            g_search_focus = 1;
-            u32_taskbar_dirty=1;
-            compose_region(0, my, (int)g_fw, (int)g_fh);
-            return;
-        }
-
-        if (hit(x, y, mx, my + 42, mx + mw, my + 68)) {
-            show_shutdown_screen(0);
-            sy3(SYS_Shutdown, 0, 0, 0);
-            return;
-        }
-
-        if (hit(x, y, mx, my + 66, mx + mw, my + 92)) {
-            show_shutdown_screen(1);
-            sy3(SYS_Shutdown, 1, 0, 0);
-            return;
-        }
-
-        if (hit(x, y, mx, my + 92, mx + mw, my + 118)) {
-            g_menu = 0;
-            g_search_focus = 0;
-            u32_taskbar_dirty=1;
-            compose_region(0, my, (int)g_fw, (int)g_fh);
-            return;
-        }
-
-        /* Click elsewhere closes the menu. */
-        g_menu = 0;
-        g_search_focus = 0;
-        u32_taskbar_dirty=1;
-        compose_region(0, my, (int)g_fw, (int)g_fh);
-        return;
-    }
-
     g_menu = 0;
 }
 
@@ -1833,7 +1829,7 @@ void *CreateWindowExA(
     int i=0;
     if(title)for(;title[i]&&i<63;i++)g_wnd.title[i]=title[i];
     g_wnd.title[i]=0;
-    g_nlines=0; g_menu=0; g_search_focus=0; g_search_len=0; g_drag=0;
+    g_nlines=0; g_menu=0; g_power_menu=0; g_search_focus=0; g_search_len=0; g_drag=0;
 
     /* Send the mandatory creation notifications before publishing a visible
      * window. Applications can allocate their renderer/resources in WM_CREATE.
@@ -2348,7 +2344,7 @@ void DrawTaskbar(void) {
     if(ty<0)ty=0;
     int y0=ty;
     if(g_menu || u32_taskbar_menu_was_open) {
-        int menu_y=ty-146;
+        int menu_y=ty-364;
         if(menu_y<0)menu_y=0;
         if(menu_y<y0)y0=menu_y;
     }

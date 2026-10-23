@@ -520,17 +520,21 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
         gfx_gpu_failed=1;return 0;
     }
     gfx_gpu_ready=1;
+    DbgPrint("gfx: VirtIO feature negotiation: VIRGL=%u CONTEXT_INIT=%u\\n",
+        (unsigned)gfx_virgl_supported,(unsigned)gfx_context_init_supported);
     if(gfx_virgl_supported) {
         if(!gfx_create_virgl_context()) {
-            DbgPrint("gfx: VirGL context creation failed (check virtio-gpu capset 1)\n");
+            DbgPrint("gfx: VirGL context creation failed (CTX_CREATE rejected; verify host VirGL/capset 1 support)\\n");
         } else if(!gfx_create_virgl_target()) {
-            DbgPrint("gfx: VirGL render-target creation/attachment failed\n");
+            DbgPrint("gfx: VirGL render-target creation/attachment failed (CREATE_3D, ATTACH_BACKING, or CTX_ATTACH_RESOURCE)\\n");
         } else if(!gfx_create_virgl_buffer()) {
-            DbgPrint("gfx: VirGL shared buffer creation/attachment failed\n");
+            DbgPrint("gfx: VirGL shared buffer creation/attachment failed (buffer CREATE_3D/ATTACH_BACKING)\\n");
         } else {
             gfx_3d_ready=1;
-            DbgPrint("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");
+            DbgPrint("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\\n");
         }
+    } else {
+        DbgPrint("gfx: VirGL is not negotiated; this VM is using a 2D-only VirtIO-GPU device. Start with SENTINELOS_DISPLAY=window SENTINELOS_VIRGL=1 bash scripts/run.sh and host OpenGL support.\\n");
     }
     DbgPrint("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",
         gfx_width,gfx_height,(unsigned long long)gfx_surface_pages);

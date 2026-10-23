@@ -177,7 +177,7 @@ static void present_maze_layer() {
     if(present_window_surface) {
         for(u32 y=0;y<screen_h;y++)
             for(u32 x=0;x<screen_w;x++)
-                maze_window_surface[(u64)y*screen_w+x]=pixels[(u64)y*pitch+x];
+                maze_window_surface[(u64)y*screen_w+x]=0xFF000000u|(pixels[(u64)y*pitch+x]&0x00FFFFFFu);
         if(!present_window_surface(maze_window_surface,screen_w,screen_h,
                                    0,0,screen_w,screen_h) && !layer_present_warned) {
             print("maze.exe: window-local surface presentation rejected; game may remain hidden\n");

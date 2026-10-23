@@ -257,7 +257,7 @@ static void report_frame_rate() {
     u64 elapsed=now-fps_window_start;
     if(elapsed<1000u)return;
     u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
-    print("maze.exe: measured VirGL shader-triangle frame rate = ");print_u32(fps);print(" FPS\n");
+    print("maze.exe: measured VirGL Maze mesh frame rate = ");print_u32(fps);print(" FPS\n");
     fps_window_start=now;fps_window_frames=0;
 }
 /* GPU raster path: CPU computes one ray intersection per vertical strip;
@@ -307,24 +307,132 @@ static i32 gpu_fixed16(float v) {
     if(q< -2147483000.0)q= -2147483000.0;
     return (i32)q;
 }
-static S3D_VERTEX gpu_project_spinning_vertex(float x,float y,float z,
-                                               float sx,float cx,float sy,float cy,
-                                               u32 color) {
-    /* Rotate the 3D vertex around Y, then X; project to Vulkan-style clip
-       coordinates. The vertex and fragment shaders still run on VirGL. */
-    float rx=x*cy+z*sy;
-    float rz= -x*sy+z*cy;
-    float ry=y*cx-rz*sx;
-    rz=y*sx+rz*cx;
-    float camera_z=2.8f-rz;
-    if(camera_z<0.35f)camera_z=0.35f;
-    float perspective=1.65f/camera_z;
-    S3D_VERTEX out{};
-    out.x=gpu_fixed16(rx*perspective);
-    out.y=gpu_fixed16(ry*perspective);
-    out.z=gpu_fixed16(0.45f+rz*0.12f);
-    out.color=color;
-    return out;
+
+/* Batch 1 Maze engine: CPU builds and transforms world geometry; VirGL
+ * executes one batched triangle-list draw for the complete scene. */
+struct MazeWorldPoint { float x,y,z; };
+struct MazeGpuFace { float depth; S3D_VERTEX v[6]; };
+static S3D_VERTEX maze_gpu_vertices[16384];
+static MazeGpuFace maze_gpu_wall_faces[1024];
+static u32 maze_gpu_vertex_count;
+static u32 maze_gpu_wall_face_count;
+
+static u32 maze_shade(u32 base,float depth) {
+    float scale=1.0f-depth*0.035f;
+    if(scale<0.42f)scale=0.42f;
+    if(scale>1.0f)scale=1.0f;
+    u32 r=(base>>16)&255u,g=(base>>8)&255u,b=base&255u;
+    r=(u32)((float)r*scale);g=(u32)((float)g*scale);b=(u32)((float)b*scale);
+    return rgb(r,g,b);
+}
+static int maze_project_world(float wx,float wy,float wz,u32 color,
+                              S3D_VERTEX *out,float *depth_out) {
+    if(!out)return 0;
+    const float fx=fcos(camera_yaw),fz=fsin(camera_yaw);
+    const float rx=-fz,rz=fx;
+    const float dx=wx-player_x,dz=wz-player_y;
+    const float depth=dx*fx+dz*fz;
+    if(depth<0.12f||depth>24.0f)return 0;
+    const float camera_x=dx*rx+dz*rz;
+    const float focal=1.05f;
+    const float nx=(camera_x*focal)/depth;
+    const float ny=((wy-0.78f)*focal)/depth;
+    out->x=gpu_fixed16(nx);
+    out->y=gpu_fixed16(ny);
+    out->z=gpu_fixed16(0.5f);
+    out->color=color;
+    if(depth_out)*depth_out=depth;
+    return 1;
+}
+static int maze_append_projected_quad(const MazeWorldPoint p[4],u32 color) {
+    if(maze_gpu_vertex_count+6u>16384u)return 0;
+    S3D_VERTEX v[4];
+    for(u32 i=0;i<4;i++)
+        if(!maze_project_world(p[i].x,p[i].y,p[i].z,color,&v[i],0))return 0;
+    S3D_VERTEX *out=&maze_gpu_vertices[maze_gpu_vertex_count];
+    out[0]=v[0];out[1]=v[1];out[2]=v[2];
+    out[3]=v[0];out[4]=v[2];out[5]=v[3];
+    maze_gpu_vertex_count+=6u;
+    return 1;
+}
+static int maze_append_wall_face(const MazeWorldPoint p[4],u32 base_color) {
+    if(maze_gpu_wall_face_count>=1024u)return 0;
+    S3D_VERTEX v[4];float depth_sum=0.0f;
+    for(u32 i=0;i<4;i++) {
+        float d=0.0f;
+        if(!maze_project_world(p[i].x,p[i].y,p[i].z,base_color,&v[i],&d))return 0;
+        depth_sum+=d;
+    }
+    MazeGpuFace *face=&maze_gpu_wall_faces[maze_gpu_wall_face_count++];
+    face->depth=depth_sum*0.25f;
+    const u32 color=maze_shade(base_color,face->depth);
+    for(u32 i=0;i<4;i++)v[i].color=color;
+    face->v[0]=v[0];face->v[1]=v[1];face->v[2]=v[2];
+    face->v[3]=v[0];face->v[4]=v[2];face->v[5]=v[3];
+    return 1;
+}
+static void maze_build_background_geometry() {
+    maze_gpu_vertex_count=0;
+    maze_gpu_wall_face_count=0;
+    for(int z=0;z<MH;z++)for(int x=0;x<MW;x++) {
+        if(maze[z][x]=='#')continue;
+        const u32 floor_color=maze[z][x]=='E'
+            ?rgb(34,142,94)
+            :(((x+z)&1)?rgb(64,68,72):rgb(56,60,65));
+        MazeWorldPoint floor[4]={
+            {(float)x,0.0f,(float)z},{(float)x+1.0f,0.0f,(float)z},
+            {(float)x+1.0f,0.0f,(float)z+1.0f},{(float)x,0.0f,(float)z+1.0f}
+        };
+        MazeWorldPoint ceiling[4]={
+            {(float)x,2.0f,(float)z},{(float)x+1.0f,2.0f,(float)z},
+            {(float)x+1.0f,2.0f,(float)z+1.0f},{(float)x,2.0f,(float)z+1.0f}
+        };
+        (void)maze_append_projected_quad(floor,floor_color);
+        (void)maze_append_projected_quad(ceiling,rgb(24,31,43));
+    }
+    /* Only add the side of each wall facing the player. Faces are sorted
+       back-to-front below because the current target has no depth attachment. */
+    for(int z=0;z<MH;z++)for(int x=0;x<MW;x++) {
+        if(maze[z][x]!='#')continue;
+        const float x0=(float)x,x1=x0+1.0f,z0=(float)z,z1=z0+1.0f;
+        const u32 stone=rgb(154,160,169);
+        if(player_x<x0) {
+            MazeWorldPoint p[4]={{x0,0,z0},{x0,0,z1},{x0,2,z1},{x0,2,z0}};
+            (void)maze_append_wall_face(p,stone);
+        } else if(player_x>x1) {
+            MazeWorldPoint p[4]={{x1,0,z1},{x1,0,z0},{x1,2,z0},{x1,2,z1}};
+            (void)maze_append_wall_face(p,rgb(134,144,157));
+        }
+        if(player_y<z0) {
+            MazeWorldPoint p[4]={{x1,0,z0},{x0,0,z0},{x0,2,z0},{x1,2,z0}};
+            (void)maze_append_wall_face(p,rgb(170,176,184));
+        } else if(player_y>z1) {
+            MazeWorldPoint p[4]={{x0,0,z1},{x1,0,z1},{x1,2,z1},{x0,2,z1}};
+            (void)maze_append_wall_face(p,rgb(119,130,145));
+        }
+    }
+}
+static int maze_append_sorted_wall_faces() {
+    u32 counts[64]={0},offsets[65]={0},cursor[64]={0};
+    u32 order[1024];
+    for(u32 i=0;i<maze_gpu_wall_face_count;i++) {
+        int bucket=(int)(maze_gpu_wall_faces[i].depth*4.0f);
+        if(bucket<0)bucket=0;if(bucket>63)bucket=63;
+        counts[bucket]++;
+    }
+    for(u32 b=0;b<64;b++)offsets[b+1]=offsets[b]+counts[b];
+    for(u32 b=0;b<64;b++)cursor[b]=offsets[b];
+    for(u32 i=0;i<maze_gpu_wall_face_count;i++) {
+        int bucket=(int)(maze_gpu_wall_faces[i].depth*4.0f);
+        if(bucket<0)bucket=0;if(bucket>63)bucket=63;
+        order[cursor[bucket]++]=i;
+    }
+    for(int b=63;b>=0;b--)for(u32 j=offsets[b];j<offsets[b+1];j++) {
+        if(maze_gpu_vertex_count+6u>16384u)return 0;
+        const MazeGpuFace *face=&maze_gpu_wall_faces[order[j]];
+        for(u32 k=0;k<6;k++)maze_gpu_vertices[maze_gpu_vertex_count++]=face->v[k];
+    }
+    return 1;
 }
 static void draw_frame_gpu() {
     if(!gpu_triangle_surface_ready) {
@@ -334,36 +442,30 @@ static void draw_frame_gpu() {
            !gpu_triangle_surface.virgl_buffer ||
            gpu_triangle_surface.virgl_buffer_size<84u) {
             if(!gpu_triangle_error_reported) {
-                print("maze.exe: FATAL: VirGL triangle target/vertex buffer unavailable; shader demo cannot run\n");
+                print("maze.exe: FATAL: VirGL mesh target/vertex buffer unavailable\n");
                 gpu_triangle_error_reported=1;
             }
             return;
         }
         gpu_triangle_surface_ready=1;
-        print("maze.exe: VirGL GPU triangle target ready; vertex+fragment TGSI shaders enabled\n");
+        print("maze.exe: VirGL mesh renderer ready; batching Maze geometry into GPU triangle lists\n");
     }
-    gpu_triangle_angle+=0.035f;
-    const float tau=6.28318530718f;
-    while(gpu_triangle_angle>=tau)gpu_triangle_angle-=tau;
-    float sy=fsin(gpu_triangle_angle),cy=fcos(gpu_triangle_angle);
-    float sx=fsin(gpu_triangle_angle*0.63f),cx=fcos(gpu_triangle_angle*0.63f);
-    S3D_VERTEX a=gpu_project_spinning_vertex(-0.9f,-0.68f,0.0f,sx,cx,sy,cy,0xffff6548u);
-    S3D_VERTEX b=gpu_project_spinning_vertex( 0.9f,-0.68f,0.0f,sx,cx,sy,cy,0xff45e7ffu);
-    S3D_VERTEX c=gpu_project_spinning_vertex( 0.0f, 0.88f,0.0f,sx,cx,sy,cy,0xffa7ff62u);
-    if(!S3DDrawTriangleVirGL(&gpu_triangle_surface,&a,&b,&c)) {
+    maze_build_background_geometry();
+    if(!maze_append_sorted_wall_faces()) {
         if(!gpu_triangle_error_reported) {
-            print("maze.exe: FATAL: VirGL shader triangle submission/presentation failed\n");
+            print("maze.exe: FATAL: Maze scene exceeded geometry buffer capacity\n");
             gpu_triangle_error_reported=1;
         }
         return;
     }
-    /*
-     * VirGL's transfer updates the shared scanout surface, but the desktop
-     * compositor owns the visible output and can overwrite that surface on
-     * its next compose. Publish the completed scanout into this process's
-     * foreground window layer after every successful GPU frame so the WM
-     * composites Maze above Explorer instead of leaving Explorer visible.
-     */
+    if(maze_gpu_vertex_count<3u ||
+       !S3DDrawMeshVirGL(&gpu_triangle_surface,maze_gpu_vertices,maze_gpu_vertex_count)) {
+        if(!gpu_triangle_error_reported) {
+            print("maze.exe: FATAL: VirGL Maze mesh submission/presentation failed\n");
+            gpu_triangle_error_reported=1;
+        }
+        return;
+    }
     present_maze_layer();
     report_frame_rate();
 }
@@ -564,7 +666,7 @@ extern "C" void maze_mainCRTStartup() {
     int virgl_gpu_candidate=virgl_buffer_ok;
     gpu_scene_ready=virgl_gpu_candidate;
     if(gpu_scene_ready) {
-        print("maze.exe: GPU-only mode; VirGL shader-driven spinning triangle selected\n");
+        print("maze.exe: GPU-only mode; VirGL batched Maze mesh selected\n");
     } else {
         if(!graphics_info_ok) {
             print("maze.exe: GPU diagnostics: SYS_GRAPHICS_INFO failed; no GPU surface metadata\n");
@@ -620,7 +722,7 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; spinning triangle is rendered by VirGL vertex/fragment shaders\n" : "maze.exe: Vulkan device ready, but GPU-only triangle renderer unavailable; no CPU fallback\n");
+    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; Maze scene is rasterized by VirGL vertex/fragment shaders\n" : "maze.exe: Vulkan device ready, but GPU-only Maze mesh renderer unavailable; no CPU fallback\n");
     else { print("maze.exe: Vulkan runtime probe failed at "); print(vk_failure); print("; independent VirGL triangle path may still run\n"); }
     Message msg{};
     u64 hz=tsc_frequency();

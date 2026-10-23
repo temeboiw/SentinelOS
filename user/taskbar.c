@@ -22,6 +22,35 @@ static int taskbar_get_system_time(TaskbarSystemTime *out) {
     return result == 0;
 }
 
+/* Europe/Helsinki: EET UTC+2 in winter, EEST UTC+3 in summer.
+ * DST starts/ends at 01:00 UTC on the last Sundays of March and October. */
+static int taskbar_weekday(int y,int m,int d) {
+    static const int offsets[12]={0,3,2,5,0,3,5,1,4,6,2,4};
+    if(m<3)y--;
+    return (y+y/4-y/100+y/400+offsets[m-1]+d)%7;
+}
+static int taskbar_month_days(int y,int m) {
+    static const int days[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+    if(m==2&&((y%4==0&&y%100!=0)||y%400==0))return 29;
+    return (m>=1&&m<=12)?days[m-1]:30;
+}
+static void taskbar_helsinki_time(TaskbarSystemTime *t) {
+    if(!t||t->month<1||t->month>12||t->day<1||t->day>31)return;
+    int mar=31-taskbar_weekday(t->year,3,31);
+    int oct=31-taskbar_weekday(t->year,10,31);
+    int summer=(t->month>3&&t->month<10)||
+        (t->month==3&&(t->day>mar||(t->day==mar&&t->hour>=1)))||
+        (t->month==10&&(t->day<oct||(t->day==oct&&t->hour<1)));
+    t->hour=(u16)(t->hour+(summer?3:2));
+    if(t->hour>=24) {
+        t->hour=(u16)(t->hour-24);
+        if(++t->day>taskbar_month_days(t->year,t->month)) {
+            t->day=1;if(++t->month>12){t->month=1;++t->year;}
+        }
+        t->day_of_week=(u16)taskbar_weekday(t->year,t->month,t->day);
+    }
+}
+
 static const unsigned char FONT[40][7] = {
 {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
 {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},{0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
@@ -189,6 +218,7 @@ void TaskbarDraw(
         char clock_text[6] = {'-', '-', ':', '-', '-', 0};
         char date_text[11] = {'-', '-', '-', '-', '-', '-', '-', '-', '-', '-', 0};
         if (taskbar_get_system_time(&now)) {
+            taskbar_helsinki_time(&now);
             clock_text[0] = (char)('0' + (now.hour / 10) % 10);
             clock_text[1] = (char)('0' + now.hour % 10);
             clock_text[3] = (char)('0' + (now.minute / 10) % 10);

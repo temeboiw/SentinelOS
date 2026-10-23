@@ -1767,16 +1767,15 @@ ls -lh "$B/rootfs/game.exe"
 
 echo "  -> maze.exe (3D maze prototype; Vulkan runtime probe + software fallback)"
 
-# Maze uses floating-point raycasting and x87 trigonometry. The shared user
-# flags disable all FP registers, which forces Clang to emit compiler-rt helper
-# calls; this toolchain does not ship a Windows-target builtins archive. Compile
-# this standalone app with x87 arithmetic instead, while keeping the rest of the
-# OS/user images on the conservative general-register-only flags.
+# Maze uses floating-point raycasting and inline x87 trigonometry. The shared
+# user flags prohibit all FP/SIMD registers, which forces software helper calls.
+# Clang's Windows x64 target does not support -mfpmath=387, so enable the
+# target's normal hardware floating-point code generation for this app only.
+# Other OS/user images retain the conservative general-register-only flags.
 MAZE_CXXFLAGS=()
 for flag in "${USER_CXXFLAGS[@]}"; do
   [[ "$flag" == "-mgeneral-regs-only" ]] || MAZE_CXXFLAGS+=("$flag")
 done
-MAZE_CXXFLAGS+=(-mfpmath=387)
 
 clang++ "${MAZE_CXXFLAGS[@]}" \
   -c "$ROOT/UserTestApps/maze.cpp" \

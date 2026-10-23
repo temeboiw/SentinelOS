@@ -705,13 +705,20 @@ extern "C" void maze_mainCRTStartup() {
         if(!virgl_submit_ok)
             print("maze.exe: reason: VirGL was initialized but its NOP command was rejected\n");
     }
+    /* Open as a normal resizable desktop window, not a fullscreen popup.
+       Keep the client area comfortably sized and centered within the display. */
     int display_w=screen_w?(int)screen_w:1280;
     int display_h=screen_h?(int)screen_h:800;
-
-    /* WS_POPUP is intentional: a game that takes over the display has no
-       title bar/border, while USER32 still owns and tracks its HWND. */
-    window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x80000000u,
-                                0,0,display_w,display_h,0,0,0,0);
+    int window_w=display_w<1000?display_w-48:960;
+    int window_h=display_h<680?display_h-96:600;
+    if(window_w<320)window_w=320;
+    if(window_h<240)window_h=240;
+    int window_x=(display_w-window_w)/2;
+    int window_y=(display_h-window_h)/2;
+    /* WS_OVERLAPPEDWINDOW: title bar, system menu, minimize/maximize,
+       sizing border. Rendering remains clipped to this HWND's client area. */
+    window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x00CF0000u,
+                                window_x,window_y,window_w,window_h,0,0,0,0);
     if(!window_handle) {
         print("maze.exe: window creation failed\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");

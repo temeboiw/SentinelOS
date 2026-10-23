@@ -3547,9 +3547,6 @@ enum {
 static unsigned int u32_dm_read32(const unsigned char *p,unsigned int off) {
     unsigned int v=0; for(unsigned int i=0;i<4;i++)v|=(unsigned int)p[off+i]<<(i*8); return v;
 }
-static void u32_dm_write16(unsigned char *p,unsigned int off,unsigned short v) {
-    p[off]=(unsigned char)v;p[off+1]=(unsigned char)(v>>8);
-}
 static void u32_dm_write32(unsigned char *p,unsigned int off,unsigned int v) {
     for(unsigned int i=0;i<4;i++)p[off+i]=(unsigned char)(v>>(i*8));
 }

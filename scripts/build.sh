@@ -1815,6 +1815,7 @@ for image in \
   taskbar.dll \
   kernel32.dll \
   user32.dll \
+  vulkan.dll \
   cmd.exe \
   msiexec.exe
 do
@@ -1835,6 +1836,7 @@ ls -lh \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
   "$SYS32/user32.dll" \
+  "$SYS32/vulkan.dll" \
   "$SYS32/cmd.exe" \
   "$SYS32/msiexec.exe"
 

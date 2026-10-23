@@ -18,7 +18,7 @@ enum VirglContextCommand : uint32_t {
     VIRGL_CCMD_SET_VERTEX_BUFFERS = 6,
     VIRGL_CCMD_CLEAR = 7,
     VIRGL_CCMD_DRAW_VBO = 8,
-    VIRGL_CCMD_SET_SCISSOR_STATE = 16,
+    VIRGL_CCMD_SET_SCISSOR_STATE = 15,
     VIRGL_CCMD_BIND_SHADER = 31
 };
 
@@ -68,7 +68,8 @@ static inline int virgl_stream_command(VirglStream *s, uint8_t opcode,
                                        uint8_t object_type,
                                        const uint32_t *payload,
                                        uint16_t payload_dwords) {
-    if (!s || s->failed || (payload_dwords && !payload) ||
+    if (!s || s->failed || !s->words || s->used_dwords > s->capacity_dwords ||
+        (payload_dwords && !payload) ||
         (uint32_t)payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
         if (s) s->failed = 1;
         return 0;

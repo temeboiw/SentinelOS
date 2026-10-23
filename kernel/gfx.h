@@ -512,7 +512,7 @@ static int gfx_virgl_clear_present_test(void) {
     }
     /* The virtio response confirms command completion, but this driver does
        not read back or inspect pixel values. Do not claim visual validation. */
-    DbgPrint("gfx: VirGL clear commands completed and scanout flushed; pixel contents not read back/verified\\n");
+    DbgPrint("gfx: VirGL clear commands completed and scanout flushed; pixel contents not read back/verified\n");
     return 1;
 }
 static int gfx_create_resource(void) {

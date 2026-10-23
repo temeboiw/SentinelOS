@@ -1297,8 +1297,10 @@ static void compose(void) {
 
         /* Borderless popup/fullscreen windows must not inherit SentinelOS
          * Aero chrome. Keep them as managed windows; do not destroy the HWND. */
-        int u32_borderless = (u32_wnd_style & 0x80000000u) != 0 ||
-                             (u32_wnd_style & 0x00C00000u) == 0;
+        /* Only WS_POPUP explicitly requests borderless rendering.
+         * Missing WS_CAPTION alone is common for ordinary tool/dialog
+         * windows and must not remove their Aero frame. */
+        int u32_borderless = (u32_wnd_style & 0x80000000u) != 0;
         if (!u32_borderless) {
             /* Soft shadow, rounded glass frame, blue Aero caption. */
             round_fill(x+4,y+7,w,h,11,0x55314F62);

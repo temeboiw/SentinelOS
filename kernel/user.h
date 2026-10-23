@@ -1192,6 +1192,40 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint32_t width=wm_shared_width,height=wm_shared_height;
     if(width!=gfx_width||height!=gfx_height)return;
     if(x>=width||y>=height||!w||!h)return;
+
+    /*
+     * Fullscreen applications such as Maze draw directly to the shared
+     * scanout and flush their own frames. A later taskbar/window-layer update
+     * must not rebuild the desktop over that frame, or the game flickers
+     * between its own pixels and the desktop. Treat a screen-covering,
+     * frontmost window as temporarily owning scanout. Its normal window
+     * registration is still retained, so unregister/exit allows composition
+     * to resume and restore the desktop/taskbar.
+     */
+    int fullscreen_slot=-1;
+    unsigned long long fullscreen_z=0;
+    for(int i=0;i<WM_MAX;i++) {
+        WmEntry *e=&wm_tab[i];
+        if(!e->alive||e->minimized||e->w<=0||e->h<=0)continue;
+        if(e->x<=0&&e->y<=0&&
+           (uint64_t)e->w+12u>=width&&
+           (uint64_t)e->h+16u>=height&&
+           (fullscreen_slot<0||e->z>fullscreen_z)) {
+            fullscreen_slot=i;
+            fullscreen_z=e->z;
+        }
+    }
+    if(fullscreen_slot>=0) {
+        int covered_by_newer=0;
+        for(int i=0;i<WM_MAX;i++) {
+            WmEntry *e=&wm_tab[i];
+            if(e->alive&&!e->minimized&&e->z>fullscreen_z) {
+                covered_by_newer=1;
+                break;
+            }
+        }
+        if(!covered_by_newer)return;
+    }
     if(w>width-x)w=width-x;if(h>height-y)h=height-y;
     KPROCESS *old=MmCurrentProcess;
     if(old!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);

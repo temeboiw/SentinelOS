@@ -1237,15 +1237,27 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(old!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
     uint32_t *out=(uint32_t*)PHYS_TO_VIRT(gfx_surface_pa);
     uint32_t pitch=gfx_pitch/4u;
+    /* Consume the window manager's canonical back-to-front order.
+     * Surface slots are process-owned; resolve each copied entry back to its
+     * slot only after the order snapshot has been obtained. */
     int order[WM_MAX],count=0;
-    for(int i=0;i<WM_MAX;i++) {
-        WmEntry *e=&wm_tab[i];
-        if(!e->alive||e->minimized||!wm_shared_windows[i])continue;
-        int j=count++;
-        while(j>0&&wm_tab[order[j-1]].z>e->z){order[j]=order[j-1];j--;}
-        order[j]=i;
+    for(int rank=0;rank<WM_MAX;rank++) {
+        WmEntry entry;
+        if(!wm_get_z_order(rank,&entry))break;
+        int slot=wm_shared_window_slot(entry.pid);
+        if(slot<0||!wm_shared_windows[slot])continue;
+        order[count++]=slot;
     }
     uint64_t dbg_n=++wm_dbg_compose_calls;
+    static uint64_t wm_dbg_composed_pixels;
+    uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
+    wm_dbg_composed_pixels+=damage_pixels;
+    if(w==width&&h==height) {
+        DbgPrint("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
+                 (unsigned long long)dbg_n,
+                 (unsigned long long)damage_pixels,
+                 (unsigned long long)wm_dbg_composed_pixels);
+    }
     if(wm_dbg_sample(dbg_n)) {
         DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
                  (unsigned long long)dbg_n,x,y,w,h,count,pitch);
@@ -2538,6 +2550,23 @@ static Frame *syscall_handler(Frame *f) {
             f->rax=0;return f;
         }
         for(int i=0;i<4;i++)rect[i]=src[i];
+        /* Keep frame arithmetic bounded before computing old/new damage.
+         * Partially off-screen windows are supported, but absurd coordinates
+         * and dimensions must not overflow signed int additions below. */
+        uint32_t screen_w=wm_shared_width?wm_shared_width:gfx_width;
+        uint32_t screen_h=wm_shared_height?wm_shared_height:gfx_height;
+        if(!screen_w||!screen_h||screen_w>1920u||screen_h>1080u) {
+            f->rax=0;return f;
+        }
+        if(rect[2]<1)rect[2]=1;
+        if(rect[3]<1)rect[3]=1;
+        if((uint32_t)rect[2]>screen_w)rect[2]=(int)screen_w;
+        if((uint32_t)rect[3]>screen_h)rect[3]=(int)screen_h;
+        int x_limit=(int)screen_w+12,y_limit=(int)screen_h+16;
+        if(rect[0]<-x_limit)rect[0]=-x_limit;
+        if(rect[0]>x_limit)rect[0]=x_limit;
+        if(rect[1]<-y_limit)rect[1]=-y_limit;
+        if(rect[1]>y_limit)rect[1]=y_limit;
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         int slot=wm_shared_window_slot(pid);
         int ox=0,oy=0,ow=0,oh=0;

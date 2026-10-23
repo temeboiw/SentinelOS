@@ -167,7 +167,8 @@ static inline int virgl_stream_validate(const uint32_t *words,
 static inline int virgl_stream_draw_arrays(VirglStream *s, uint32_t start,
                                            uint32_t count, uint32_t primitive,
                                            uint32_t instances) {
-    if (!count || !instances || primitive > VIRGL_PRIM_TRIANGLE_FAN) {
+    if (!count || !instances || primitive > VIRGL_PRIM_TRIANGLE_FAN ||
+        count - 1u > UINT32_MAX - start) {
         if (s) s->failed = 1;
         return 0;
     }

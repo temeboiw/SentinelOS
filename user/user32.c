@@ -1125,7 +1125,12 @@ static void draw_taskbar(void) {
     if (g_menu) {
         int mw=300,mh=360,mx=8,my=ty-mh-4;
         if(my<4)my=4;
-        /* Windows 10-inspired Start surface with glass depth and real app tiles. */
+        int ssx=((int)g_fw-16)*100/mw,ssy=((int)g_fh-52)*100/mh;
+        g_start_scale_percent=ssx<ssy?ssx:ssy;
+        if(g_start_scale_percent>100)g_start_scale_percent=100;
+        if(g_start_scale_percent<62)g_start_scale_percent=62;
+        g_start_scale_x=mx;g_start_scale_y=my;g_start_scale_active=1;
+        /* Keep all menu geometry proportional to the available screen. */
         round_fill(mx+4,my+5,mw,mh,10,0x55314F62);
         round_fill(mx,my,mw,mh,9,0xF0182938);
         round_fill(mx+1,my+1,mw-2,mh-2,8,0xF51A2B3B);
@@ -1172,6 +1177,7 @@ static void draw_taskbar(void) {
         fill(mx+12,my+310,mw-24,1,0xFF3A5365);
         if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,3,0xFF34708D);
         draw_text(mx+16,my+329,"Settings / Help",COL_TEXT);
+        g_start_scale_active=0;
     }
 }
 

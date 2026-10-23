@@ -214,6 +214,23 @@ static void user_set_kernel_stack(uint64_t rsp0) {
 }
 
 static void cpu_init_cpu(uint32_t cpu_index) {
+    // User images may contain compiler-generated SSE2/XMM instructions. UEFI
+    // firmware does not guarantee that the OS-facing FPU/SSE control bits are
+    // left enabled, so establish the architectural state before entering ring 3.
+    // CR0.EM=0 enables x87/SSE; CR0.TS=0 avoids lazy-FPU #NM faults; CR0.MP=1
+    // enables the expected WAIT/FWAIT behavior. CR4.OSFXSR and OSXMMEXCPT enable
+    // SSE register state and SIMD floating-point exception delivery.
+    uint64_t cr0, cr4;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~((1ULL << 2) | (1ULL << 3)); // clear EM and TS
+    cr0 |= (1ULL << 1);                 // set MP
+    __asm__ volatile("mov %0, %%cr0" :: "r"(cr0) : "memory");
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1ULL << 9) | (1ULL << 10);  // OSFXSR | OSXMMEXCPT
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+    uint32_t mxcsr = 0x1F80;             // architectural default MXCSR
+    __asm__ volatile("fninit; ldmxcsr %0" :: "m"(mxcsr) : "memory");
+
     if (cpu_index >= CPU_MAX) {
         DbgPrint("cpu: invalid CPU index %u\n", cpu_index);
         for (;;) __asm__ volatile("cli; hlt");

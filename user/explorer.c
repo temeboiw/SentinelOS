@@ -161,7 +161,7 @@ static void handle_search_key(MSG *msg, void **hwnd) {
             launch_app("taskmgr.exe", hwnd);
         } else if (g_search_len != 0) {
             if (pText)
-                pText(*hwnd, 0, 9, "App not found. Try cmd.", -1);
+                pText(*hwnd, 0, 9, "App not found. Try cmd or taskmgr.", -1);
             if (pInv) pInv(*hwnd, 0, 1);
             if (pUpd) pUpd(*hwnd);
         }

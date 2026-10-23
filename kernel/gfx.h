@@ -296,7 +296,8 @@ static int gfx_queue_init(void) {
 }
 static int gfx_command(const void *request, uint32_t request_len) {
     if(!gfx_gpu_ready && !gfx_common) return 0;
-    if(request_len>4096u) return 0;
+    if(!gfx_queue_size || !gfx_avail || !gfx_used || !gfx_desc || !gfx_req || !gfx_resp ||
+       request_len < sizeof(GfxCtrlHdr) || request_len > 4096u) return 0;
     for(unsigned int i=0;i<request_len;i++)gfx_req[i]=((const uint8_t*)request)[i];
     gfx_resp->hdr.type=0;gfx_resp->hdr.flags=0;gfx_resp->hdr.fence_id=0;
     gfx_resp->hdr.ctx_id=0;gfx_resp->hdr.padding=0;
@@ -338,7 +339,9 @@ static int gfx_create_virgl_context(void) {
     return gfx_command(&ctx,sizeof ctx);
 }
 static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
-    if(!gfx_3d_ready||!stream||!length||length>4096u-32u)return 0;
+    /* VirGL command words are 32-bit little-endian dwords. Reject partial
+       words before they can reach the host renderer. */
+    if(!gfx_3d_ready||!stream||!length||(length&3u)||length>4096u-sizeof(GfxCtrlHdr)-8u)return 0;
     struct { GfxCtrlHdr hdr; uint32_t size,padding; } submit={0};
     submit.hdr.type=GFX_GPU_CMD_SUBMIT_3D;
     submit.hdr.ctx_id=1;
@@ -426,7 +429,7 @@ static int gfx_map_virgl_buffer_for_process(KPROCESS *proc,uint64_t *uva_out) {
     return 0;
 }
 static int gfx_upload_virgl_buffer(uint32_t bytes) {
-    if(!gfx_3d_ready||!gfx_virgl_buffer_pa||!bytes||bytes>GFX_VIRGL_BUFFER_BYTES)return 0;
+    if(!gfx_3d_ready||!gfx_virgl_buffer_pa||!bytes||(bytes&3u)||bytes>GFX_VIRGL_BUFFER_BYTES)return 0;
     struct {
         GfxCtrlHdr hdr;
         uint32_t x,y,z,width,height,depth;

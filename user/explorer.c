@@ -155,6 +155,10 @@ static void handle_search_key(MSG *msg, void **hwnd) {
     if (c == '\n' || c == '\r') {
         if (equals_ci(g_search, "cmd")) {
             launch_app("cmd.exe", hwnd);
+        } else if (equals_ci(g_search, "taskmgr") ||
+                   equals_ci(g_search, "taskmgr.exe") ||
+                   equals_ci(g_search, "task manager")) {
+            launch_app("taskmgr.exe", hwnd);
         } else if (g_search_len != 0) {
             if (pText)
                 pText(*hwnd, 0, 9, "App not found. Try cmd.", -1);
@@ -202,7 +206,7 @@ void explorer_main(void) {
        the wallpaper or spinning a permanent polling loop. */
     if (pSetTimer && hwnd) (void)pSetTimer(hwnd, 1, 60000, 0);
 
-    NtWriteConsole("explorer: modern desktop ready; search supports cmd\n");
+    NtWriteConsole("explorer: modern desktop ready; search supports cmd and taskmgr\n");
 
     MSG msg;
 

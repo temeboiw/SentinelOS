@@ -1615,6 +1615,7 @@ static Frame *syscall_handler(Frame *f) {
         int slot=wm_shared_window_slot(pid);
         if(slot<0||!a.pixels||!a.width||!a.height||
            a.width>1920u||a.height>1080u||pixels>WM_COMP_MAX_PIXELS||
+           a.width>(uint32_t)wm_tab[slot].w||a.height>(uint32_t)wm_tab[slot].h||
            !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
            !wm_shared_width||!wm_shared_height||
            a.x>=a.width||a.y>=a.height||!a.w||!a.h) {

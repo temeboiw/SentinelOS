@@ -251,126 +251,6 @@ static inline int virgl_stream_set_viewport_bits(VirglStream *s,
                                 VIRGL_OBJECT_NULL, payload, 7u);
 }
 
-/* Add-on 5/4: create a TGSI shader object from validated token dwords.
- * token_dwords counts 32-bit TGSI words, not bytes. */
-static inline int virgl_stream_create_shader(VirglStream *s,
-                                             uint32_t handle,
-                                             uint32_t shader_type,
-                                             const uint32_t *tokens,
-                                             uint32_t token_dwords) {
-    if (!s || !handle || shader_type > 5u || !tokens || !token_dwords ||
-        token_dwords > 1024u ||
-        s->failed || !s->words ||
-        token_dwords > s->capacity_dwords ||
-        s->used_dwords > s->capacity_dwords ||
-        token_dwords + 4u > s->capacity_dwords - s->used_dwords) {
-        if (s) s->failed = 1u;
-        return 0;
-    }
-    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT,
-                                         VIRGL_OBJECT_SHADER,
-                                         (uint16_t)(token_dwords + 3u))) ||
-        !virgl_stream_word(s, handle) ||
-        !virgl_stream_word(s, shader_type) ||
-        !virgl_stream_word(s, token_dwords)) return 0;
-    for (uint32_t i = 0; i < token_dwords; ++i)
-        if (!virgl_stream_word(s, tokens[i])) return 0;
-    return 1;
-}
-
-/* Add-on 6/4: bind one vertex buffer for DRAW_VBO.
- * resource_id is a VirGL resource handle, not a host pointer. */
-static inline int virgl_stream_set_vertex_buffer(VirglStream *s,
-                                                  uint32_t resource_id,
-                                                  uint32_t stride,
-                                                  uint32_t offset) {
-    if (!resource_id || !stride) {
-        if (s) s->failed = 1u;
-        return 0;
-    }
-    const uint32_t payload[4] = { 1u, resource_id, stride, offset };
-    return virgl_stream_command(s, VIRGL_CCMD_SET_VERTEX_BUFFERS,
-                                VIRGL_OBJECT_NULL, payload, 4u);
-}
-
-/* Add-on 7/4: configure one color attachment and an optional depth surface.
- * Surface handles must refer to surfaces already created by the caller. */
-static inline int virgl_stream_set_framebuffer(VirglStream *s,
-                                                uint32_t color_surface,
-                                                uint32_t depth_surface) {
-    if (!color_surface) {
-        if (s) s->failed = 1u;
-        return 0;
-    }
-    const uint32_t payload[3] = { 1u, depth_surface, color_surface };
-    return virgl_stream_command(s, VIRGL_CCMD_SET_FRAMEBUFFER_STATE,
-                                VIRGL_OBJECT_NULL, payload, 3u);
-}
-
-/* Add-on 8/4: destroy a previously created Gallium object handle. */
-static inline int virgl_stream_destroy_object(VirglStream *s,
-                                               uint32_t object_type,
-                                               uint32_t handle) {
-    if (object_type == VIRGL_OBJECT_NULL || object_type >= VIRGL_OBJECT_MAX ||
-        !handle) {
-        if (s) s->failed = 1u;
-        return 0;
-    }
-    return virgl_stream_command(s, VIRGL_CCMD_DESTROY_OBJECT,
-                                (uint8_t)object_type, &handle, 1u);
-}
-
-/* Batch 2, add-on 1/4: bind one or more Gallium vertex buffers.
- * Each descriptor is {stride_bytes, byte_offset, resource_handle}; start_slot
- * is the first vertex-buffer binding slot. */
-static inline int virgl_stream_set_vertex_buffers(VirglStream *s,
-                                                   uint32_t start_slot,
-                                                   const uint32_t *descriptors,
-                                                   uint32_t buffer_count) {
-    if (!s || !descriptors || !buffer_count || buffer_count > 64u ||
-        start_slot > 31u || buffer_count > (UINT16_MAX - 1u) / 3u) {
-        if (s) s->failed = 1;
-        return 0;
-    }
-    uint32_t payload_dwords = 1u + buffer_count * 3u;
-    if (s->failed || payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
-        s->failed = 1;
-        return 0;
-    }
-    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_SET_VERTEX_BUFFERS,
-                                         VIRGL_OBJECT_NULL, payload_dwords)) ||
-        !virgl_stream_word(s, start_slot)) return 0;
-    for (uint32_t i = 0; i < buffer_count * 3u; ++i)
-        if (!virgl_stream_word(s, descriptors[i])) return 0;
-    return 1;
-}
-
-/* Batch 2, add-on 2/4: create a vertex-element layout object.
- * Each element is {source_offset, instance_divisor, vertex_buffer_index,
- * pipe_format}; formats are Gallium PIPE_FORMAT_* numeric values. */
-static inline int virgl_stream_create_vertex_elements(VirglStream *s,
-                                                       uint32_t handle,
-                                                       const uint32_t *elements,
-                                                       uint32_t element_count) {
-    if (!s || !handle || !elements || !element_count || element_count > 64u ||
-        1u + element_count * 4u > UINT16_MAX) {
-        if (s) s->failed = 1;
-        return 0;
-    }
-    uint32_t payload_dwords = 1u + element_count * 4u;
-    if (s->failed || payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
-        s->failed = 1;
-        return 0;
-    }
-    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT,
-                                         VIRGL_OBJECT_VERTEX_ELEMENTS,
-                                         payload_dwords)) ||
-        !virgl_stream_word(s, handle)) return 0;
-    for (uint32_t i = 0; i < element_count * 4u; ++i)
-        if (!virgl_stream_word(s, elements[i])) return 0;
-    return 1;
-}
-
 /* Batch 2, add-on 3/4: create a TGSI shader object. shader_type follows
  * Gallium PIPE_SHADER_* (vertex=0, fragment=1). tokens must be a valid TGSI
  * token stream; this encoder does not compile GLSL or validate shader tokens. */
@@ -411,6 +291,59 @@ static inline int virgl_stream_destroy_object(VirglStream *s,
     }
     return virgl_stream_command(s, VIRGL_CCMD_DESTROY_OBJECT,
                                 (uint8_t)object_type, &handle, 1u);
+}
+
+
+/* Batch 3, add-on 1/4: bind the vertex-element layout used by DRAW_VBO. */
+static inline int virgl_stream_bind_vertex_elements(VirglStream *s,
+                                                    uint32_t handle) {
+    if (!handle) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_BIND_OBJECT,
+                                VIRGL_OBJECT_VERTEX_ELEMENTS, &handle, 1u);
+}
+
+/* Batch 3, add-on 2/4: set a scissor rectangle in framebuffer pixel space.
+ * max_x/max_y are exclusive upper bounds, matching Gallium scissor boxes. */
+static inline int virgl_stream_set_scissor(VirglStream *s, uint32_t index,
+                                           uint32_t min_x, uint32_t min_y,
+                                           uint32_t max_x, uint32_t max_y) {
+    if (index > 15u || max_x < min_x || max_y < min_y) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[5] = { index, min_x, min_y, max_x, max_y };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_SCISSOR_STATE,
+                                VIRGL_OBJECT_NULL, payload, 5u);
+}
+
+/* Batch 3, add-on 3/4: bind a constant/uniform buffer to a shader stage.
+ * buffer_handle is a VirGL resource handle; offset and size are byte units. */
+static inline int virgl_stream_set_uniform_buffer(VirglStream *s,
+                                                  uint32_t shader_type,
+                                                  uint32_t slot,
+                                                  uint32_t buffer_handle,
+                                                  uint32_t offset_bytes,
+                                                  uint32_t size_bytes) {
+    if (shader_type > 5u || slot > 31u || !buffer_handle || !size_bytes ||
+        (offset_bytes & 3u) || (size_bytes & 3u)) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[6] = {
+        shader_type, slot, 0u, buffer_handle, offset_bytes, size_bytes
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_UNIFORM_BUFFER,
+                                VIRGL_OBJECT_NULL, payload, 6u);
+}
+
+/* Batch 3, add-on 4/4: set the fragment sample mask. */
+static inline int virgl_stream_set_sample_mask(VirglStream *s,
+                                               uint32_t sample_mask) {
+    return virgl_stream_command(s, VIRGL_CCMD_SET_SAMPLE_MASK,
+                                VIRGL_OBJECT_NULL, &sample_mask, 1u);
 }
 
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {

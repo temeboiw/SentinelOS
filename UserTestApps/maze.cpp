@@ -338,8 +338,8 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    if(vulkan_available) print("maze.exe: Vulkan instance/device/graphics queue initialized; ray-cast scene still uses software renderer\\n");
-    else print("maze.exe: Vulkan device initialization failed; ray-cast software fallback active\\n");
+    if(vulkan_available) print("maze.exe: Vulkan instance/device/graphics queue initialized; ray-cast scene still uses software renderer\n");
+    else print("maze.exe: Vulkan device initialization failed; ray-cast software fallback active\n");
     Message msg{};
     u64 hz=tsc_frequency();
     u64 frame_cycles=hz/60ULL;

@@ -498,7 +498,6 @@ echo "  -> taskbar.dll"
 clang "${USER_CFLAGS[@]}" \
   -c "$ROOT/user/taskbar.c" \
   -o "$B/obj/taskbar.o"
-
 lld -flavor link \
   /dll /noentry /subsystem:native /nodefaultlib \
   /fixed:no /base:0x40200000 \
@@ -997,8 +996,7 @@ lld -flavor link \
   /export:FindFirstVolumeMountPointA \
   /export:FindFirstVolumeMountPointW \
   /export:FindNextVolumeMountPointA \
-  /export:FindNextVolumeMountPointW \
-  /export:FindVolumeMountPointClose \
+  /export:FindNextVolumeMountPointW \  /export:FindVolumeMountPointClose \
   /export:SetVolumeLabelA \
   /export:SetVolumeLabelW \
   /export:GetVolumeInformationByHandleW \
@@ -1497,8 +1495,7 @@ lld -flavor link \
   /export:GetWindowDisplayAffinityEx \
   /export:GetWindowDpiAwarenessContextEx \
   /export:GetDpiForMonitor \
-  /export:EnableNonClientDpiScaling \
-  /export:SetThreadDpiAwarenessContext \
+  /export:EnableNonClientDpiScaling \  /export:SetThreadDpiAwarenessContext \
   /export:GetThreadDpiAwarenessContext \
   /export:GetDpiFromDpiAwarenessContext \
   /export:SetProcessDpiAwarenessContext \
@@ -1930,6 +1927,17 @@ then
 fi
 
 echo "build ok -> $DISKIMG"
+
+# The normal build owns the installer pipeline too: use this same build's
+# kernel, EFI stages, DLLs and root filesystem to create the installable ISO.
+# Installer staging is separate so the installed OS rootfs is not mutated.
+# QEMU is not launched unless --run was explicitly set.
+if [[ "${SENTINELOS_SKIP_INSTALLER_ISO:-0}" != "1" ]]; then
+  echo "==> Build and validate the integrated SentinelOS installer ISO"
+  export -f run_cc clang clang++ lld
+  export CLANG_BIN CLANGXX_BIN LLD_BIN
+  bash "$ROOT/installer/build-iso.sh"
+fi
 
 if [[ $DO_RUN -eq 1 ]]; then
   exec "$ROOT/scripts/run.sh"

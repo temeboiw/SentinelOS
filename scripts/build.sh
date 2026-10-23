@@ -1767,15 +1767,26 @@ ls -lh "$B/rootfs/game.exe"
 
 echo "  -> maze.exe (3D maze prototype; Vulkan runtime probe + software fallback)"
 
+# Maze uses scalar floating-point math for its raycaster. The common user
+# flags deliberately disable FP/SIMD register use, so Clang lowers those
+# operations to compiler-rt helper symbols. Link the target's builtins archive
+# explicitly because this freestanding PE uses /nodefaultlib.
 clang++ "${USER_CXXFLAGS[@]}" \
   -c "$ROOT/UserTestApps/maze.cpp" \
   -o "$B/obj/maze.o"
+
+MAZE_BUILTINS="$(clang++ --target=x86_64-windows-gnu -rtlib=compiler-rt -print-libgcc-file-name)"
+if [[ ! -s "$MAZE_BUILTINS" ]]; then
+  echo "FATAL: Clang compiler-rt builtins not found for maze floating-point helpers" >&2
+  echo "       Install the matching x86_64 Windows compiler-rt runtime or set up the LLVM toolchain." >&2
+  exit 1
+fi
 
 lld -flavor link \
   /machine:x64 /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x42100000 \
   "/out:$B/rootfs/maze.exe" \
-  "$B/obj/maze.o"
+  "$B/obj/maze.o" "$MAZE_BUILTINS"
 
 if [[ ! -s "$B/rootfs/maze.exe" ]]; then
   echo "FATAL: maze.exe was not produced"

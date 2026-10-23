@@ -1611,7 +1611,9 @@ static void compose(void) {
      * previous footprint and then captures the newly composed underlay. */
     g_front=g_scanout; g_pitch=g_scan_pitch;
     u32_render_clip=0;
-    cur_ox=g_mx; cur_oy=g_my;
+    /* Do not overwrite cur_ox/cur_oy here: they identify the old cursor's
+     * saved-under rectangle. cursor_save_draw restores that rectangle first,
+     * then records the new pointer position and paints the final overlay. */
     cursor_save_draw(g_mx,g_my);
     if(g_scanout && g_scan_pitch && g_fw && g_fh)
         u32_flush_raw(g_mx,g_my,16,16);
@@ -2658,11 +2660,17 @@ __attribute__((dllexport)) BOOL SetCursorPos(int x, int y) {
     g_mx=x; g_my=y; u32_mouse_record(); compose(); return 1;
 }
 __attribute__((dllexport)) int ShowCursor(BOOL show) {
-    /* Win32 uses a display counter: negative means hidden. Calls are the only
-     * way to change visibility; repainting must never permanently lose it. */
-    if (show) { if(u32_show_cursor_count<0)u32_show_cursor_count++; else if(u32_show_cursor_count<32767)u32_show_cursor_count++; }
+    /* Win32 semantics: every call adjusts the display count by exactly one.
+     * A negative count hides the pointer; zero or above shows it. */
+    if (show) { if(u32_show_cursor_count<32767)u32_show_cursor_count++; }
     else { if(u32_show_cursor_count>-32768)u32_show_cursor_count--; }
-    compose();
+    if(u32_show_cursor_count<0 || u32_cursor_explicit_hidden) {
+        if(cur_on) cursor_restore();
+        cur_on=0;
+        if(g_scanout) u32_flush_raw(cur_ox,cur_oy,16,16);
+    } else {
+        cursor_repaint_transition(g_mx,g_my,g_mx,g_my);
+    }
     return u32_show_cursor_count;
 }
 __attribute__((dllexport)) void *SetCapture(void *hwnd) {
@@ -3261,6 +3269,20 @@ __attribute__((dllexport)) void *SetCursor(void *cursor){
         cursor_repaint_transition(g_mx,g_my,g_mx,g_my);
     }
     return old;
+}
+
+/* Win32 SetSystemCursor replaces a stock cursor shape. SentinelOS cursor
+ * handles encode the standard IDC_* resource ID in their low 16 bits, so
+ * accept valid loaded cursor handles and apply them as the current system
+ * shape. OCR_* selects the system role; all supported roles currently share
+ * the single active pointer shape, matching the compositor's one-pointer model. */
+__attribute__((dllexport)) BOOL SetSystemCursor(void *cursor, unsigned int id) {
+    if(!cursor || id<32512u || id>32651u) return 0;
+    u32_current_cursor=cursor;
+    u32_cursor_explicit_hidden=0;
+    u32_hover_cursor_id=(unsigned int)((unsigned long long)cursor&0xFFFFu);
+    cursor_repaint_transition(g_mx,g_my,g_mx,g_my);
+    return 1;
 }
 __attribute__((dllexport)) int GetMouseMovePointsEx(unsigned int cbSize,const U32_MOUSEMOVEPOINT *point,U32_MOUSEMOVEPOINT *out,int count,unsigned int resolution){
     (void)resolution;

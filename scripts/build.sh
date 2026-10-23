@@ -1903,16 +1903,8 @@ fi
 
 echo "build ok -> $DISKIMG"
 
-# The normal build owns the installer pipeline too: use this same build's
-# kernel, EFI stages, DLLs and root filesystem to create the installable ISO.
-# Installer staging is separate so the installed OS rootfs is not mutated.
-# QEMU is not launched unless --run was explicitly set.
-if [[ "${SENTINELOS_SKIP_INSTALLER_ISO:-0}" != "1" ]]; then
-  echo "==> Build and validate the integrated SentinelOS installer ISO"
-  export -f run_cc clang clang++ lld
-  export CLANG_BIN CLANGXX_BIN LLD_BIN
-  bash "$ROOT/installer/build-iso.sh"
-fi
+# Keep the regular build focused on the bootable disk image. Installer ISO
+# generation is a separate, explicitly invoked task.
 
 if [[ $DO_RUN -eq 1 ]]; then
   exec "$ROOT/scripts/run.sh"

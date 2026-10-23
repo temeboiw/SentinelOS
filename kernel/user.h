@@ -92,12 +92,28 @@ typedef struct {
     int fresh;
     int parent;
     int system_app;
+    char image_name[64];
     uint64_t gpr[14];
 } UserProc;
+
+typedef struct {
+    uint32_t pid, parent_pid, state, reserved;
+    char image_name[64];
+} UserProcessSnapshot;
 
 static UserProc up_tab[UP_MAX];
 static int up_n;
 static int up_cur = -1;
+
+static void up_set_image_name(UserProc *u, const char *name) {
+    if (!u) return;
+    unsigned int i = 0;
+    if (name) while (name[i] && i < sizeof(u->image_name) - 1) {
+        u->image_name[i] = name[i];
+        i++;
+    }
+    u->image_name[i] = 0;
+}
 
 /*
  * Each process/module pair has its own physical image allocation.
@@ -838,6 +854,7 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 #define VFS_USER_HANDLES 32
 #define SYS_NtCloseFile 22
 #define SYS_NtQueryFileSize 25
+#define SYS_NtQueryProcessList 41
 #define SYS_NtSetFilePosition 26
 typedef struct {
     uint32_t ino;
@@ -2038,6 +2055,7 @@ static Frame *syscall_handler(Frame *f) {
         if (up_find_proc(caller) < 0 && up_n < UP_MAX) {
             up_tab[up_n].parent = -1;
             up_tab[up_n].proc = caller;
+            up_set_image_name(&up_tab[up_n], "unknown.exe");
             up_tab[up_n].entry = f->rip;
             up_tab[up_n].alive = 1;
             up_tab[up_n].fresh = 0;
@@ -2061,6 +2079,7 @@ static Frame *syscall_handler(Frame *f) {
             up_tab[up_n].parent = up_find_proc(caller);
             up_tab[up_n].system_app = PspIsSystemAppName(name);
             up_tab[up_n].proc = proc;
+            up_set_image_name(&up_tab[up_n], name);
             up_tab[up_n].entry = entry;
             up_tab[up_n].alive = 1;
             up_tab[up_n].fresh = 1;
@@ -2085,6 +2104,43 @@ static Frame *syscall_handler(Frame *f) {
 
         MmSwitchToProcess(caller);
         f->rax = proc->Pid;
+        return f;
+    }
+
+    case SYS_NtQueryProcessList: {
+        uint64_t capacity = f->rsi;
+        if (capacity > UP_MAX) capacity = UP_MAX;
+        if (capacity && (!f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi,
+                                 capacity * sizeof(UserProcessSnapshot), 1))) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        uint64_t total = 0;
+        UserProcessSnapshot *out = (UserProcessSnapshot *)(uintptr_t)f->rdi;
+        for (int i = 0; i < up_n; i++) {
+            if (!up_tab[i].alive || !up_tab[i].proc) continue;
+            if (total < capacity) {
+                UserProcessSnapshot *row = &out[total];
+                row->pid = up_tab[i].proc->Pid;
+                row->parent_pid = 0;
+                int parent = up_tab[i].parent;
+                if (parent >= 0 && parent < up_n && up_tab[parent].alive &&
+                    up_tab[parent].proc)
+                    row->parent_pid = up_tab[parent].proc->Pid;
+                row->state = up_tab[i].fresh ? 1u : 2u;
+                row->reserved = 0;
+                unsigned int j = 0;
+                while (j < sizeof(row->image_name) - 1 &&
+                       up_tab[i].image_name[j]) {
+                    row->image_name[j] = up_tab[i].image_name[j];
+                    j++;
+                }
+                row->image_name[j] = 0;
+            }
+            total++;
+        }
+        f->rax = total;
         return f;
     }
 
@@ -2926,6 +2982,7 @@ static void user_enter(BootInfo *bi) {
     up_tab[0].parent = -1;
     up_tab[0].system_app = 1; /* smss is the trusted system-process root */
     up_tab[0].proc = proc;
+    up_set_image_name(&up_tab[0], "smss.exe");
     up_tab[0].entry = entry;
     up_tab[0].alive = 1;
     up_tab[0].fresh = 0;

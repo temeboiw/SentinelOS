@@ -333,6 +333,17 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
 
     ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_FRAMEBUFFER,0,3);
     ok &= s3d_vb_word(&q,1);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,10);
+    /* Clear the attached target before drawing the next animated frame.
+       This stays in the same submission as the triangle to avoid a
+       clear/present flash between separate command buffers. */
+    ok &= s3d_vb_cmd(&q,7u,0,7);
+    ok &= s3d_vb_word(&q,4u);
+    ok &= s3d_vb_word(&q,s3d_u8_to_float_bits(8u));
+    ok &= s3d_vb_word(&q,s3d_u8_to_float_bits(13u));
+    ok &= s3d_vb_word(&q,s3d_u8_to_float_bits(24u));
+    ok &= s3d_vb_word(&q,s3d_u8_to_float_bits(255u));
+    ok &= s3d_vb_word(&q,0x3F800000u);
+    ok &= s3d_vb_word(&q,0u);
     ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VIEWPORT,0,7);
     ok &= s3d_vb_word(&q,0);
     uint32_t hw=s3d_uint_to_float_bits(surface->width/2u);

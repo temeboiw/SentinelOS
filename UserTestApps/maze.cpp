@@ -154,6 +154,24 @@ static float fcos(float angle) {
     __asm__ volatile("fldl %1; fcos; fstpl %0":"=m"(r):"m"(a));
     return (float)r;
 }
+static u64 fps_window_start;
+static u32 fps_window_frames;
+static void print_u32(u32 value) {
+    char digits[11];u32 n=0;
+    do { digits[n++]=(char)('0'+value%10u); value/=10u; } while(value&&n<sizeof(digits));
+    while(n) { char one[2]={digits[--n],0}; print(one); }
+}
+static void report_frame_rate() {
+    ++fps_window_frames;
+    if(fps_window_frames<300u)return;
+    u64 now=syscall3(SYS_GET_TICK_COUNT,0,0,0);
+    if(!fps_window_start) { fps_window_start=now; fps_window_frames=0; return; }
+    u64 elapsed=now-fps_window_start;
+    if(elapsed<1000u)return;
+    u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
+    print("maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\\n");
+    fps_window_start=now;fps_window_frames=0;
+}
 static void draw_frame() {
     if(!pixels||!screen_w||!screen_h)return;
     const int w=(int)screen_w,h=(int)screen_h;
@@ -227,6 +245,7 @@ static void draw_frame() {
     if(won)rect(w/2-80,h/2-18,160,36,rgb(35,150,90));
     Rect dirty={0,0,screen_w,screen_h};
     (void)syscall3(SYS_FLUSH_GRAPHICS,(u64)&dirty,0,0);
+    report_frame_rate();
 }
 static void move_player(float dx,float dy) {
     if(won)return;

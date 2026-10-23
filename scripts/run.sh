@@ -69,22 +69,28 @@ if [[ "${SENTINELOS_GPU:-virtio}" == "none" ]]; then
 fi
 
 if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
-    if [[ "$MODE" != "window" ]]; then
-        echo "Error: SENTINELOS_VIRGL=1 requires SENTINELOS_DISPLAY=window and host OpenGL." >&2
-        exit 1
-    fi
-    # GTK lacks OpenGL support in some QEMU builds; allow choosing SDL.
-    VIRGL_BACKEND="${SENTINELOS_VIRGL_BACKEND:-gtk}"
-    case "$VIRGL_BACKEND" in
-        gtk|sdl) DISPLAY_ARGS=(-display "$VIRGL_BACKEND,gl=on") ;;
-        *)
-            echo "Error: unsupported SENTINELOS_VIRGL_BACKEND: $VIRGL_BACKEND" >&2
-            echo "Choose gtk or sdl." >&2
-            exit 1
-            ;;
-    esac
     GPU_ARGS=(-vga none -device virtio-vga-gl)
-    echo "SentinelOS: requesting VirGL-capable VirtIO-VGA (backend=$VIRGL_BACKEND; host OpenGL required)"
+
+    if [[ "$MODE" == "vnc" ]]; then
+        # QEMU's egl-headless renderer is designed to pair with VNC/SPICE:
+        # VNC carries the desktop image while EGL provides the OpenGL context
+        # required by virtio-vga-gl/VirGL. Host EGL/GBM support is still needed.
+        VNC_BIND="${SENTINELOS_VNC_BIND:-127.0.0.1}"
+        DISPLAY_ARGS=(-display egl-headless -vnc "${VNC_BIND}:0")
+        echo "SentinelOS: VNC + VirGL 3D (egl-headless; VNC at ${VNC_BIND}:5900; host EGL/GBM required)"
+    else
+        # GTK/SDL window backends require a host graphical display.
+        VIRGL_BACKEND="${SENTINELOS_VIRGL_BACKEND:-gtk}"
+        case "$VIRGL_BACKEND" in
+            gtk|sdl) DISPLAY_ARGS=(-display "$VIRGL_BACKEND,gl=on") ;;
+            *)
+                echo "Error: unsupported SENTINELOS_VIRGL_BACKEND: $VIRGL_BACKEND" >&2
+                echo "Choose gtk or sdl." >&2
+                exit 1
+                ;;
+        esac
+        echo "SentinelOS: requesting VirGL-capable VirtIO-VGA (backend=$VIRGL_BACKEND; host OpenGL required)"
+    fi
 fi
 
 # Find OVMF firmware.

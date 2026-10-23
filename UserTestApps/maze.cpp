@@ -45,6 +45,20 @@ using ClipCursor_t=BOOL(*)(const ClipRect*);
 using VkCreateInstance_t=int(__attribute__((ms_abi)) *)(const void*,const void*,void**);
 using VkEnumerateInstanceVersion_t=int(__attribute__((ms_abi)) *)(u32*);
 using VkGetInstanceProcAddr_t=void*(__attribute__((ms_abi)) *)(void*,const char*);
+using VkEnumeratePhysicalDevices_t=int(__attribute__((ms_abi)) *)(void*,u32*,void**);
+using VkGetPhysicalDeviceQueueFamilyProperties_t=void(__attribute__((ms_abi)) *)(void*,u32*,void*);
+using VkCreateDevice_t=int(__attribute__((ms_abi)) *)(void*,const void*,const void*,void**);
+using VkGetDeviceQueue_t=void(__attribute__((ms_abi)) *)(void*,u32,u32,void**);
+using VkDestroyDevice_t=void(__attribute__((ms_abi)) *)(void*,const void*);
+using VkDestroyInstance_t=void(__attribute__((ms_abi)) *)(void*,const void*);
+using VkDeviceWaitIdle_t=int(__attribute__((ms_abi)) *)(void*);
+struct VkAppInfoMaze { u32 sType; const void *pNext; const char *pApplicationName; u32 applicationVersion; const char *pEngineName; u32 engineVersion; u32 apiVersion; };
+struct VkInstanceInfoMaze { u32 sType; const void *pNext; u32 flags; const VkAppInfoMaze *pApplicationInfo; u32 enabledLayerCount; const char *const *ppEnabledLayerNames; u32 enabledExtensionCount; const char *const *ppEnabledExtensionNames; };
+struct VkQueueInfoMaze { u32 sType; const void *pNext; u32 flags; u32 queueFamilyIndex; u32 queueCount; const float *pQueuePriorities; };
+struct VkDeviceInfoMaze { u32 sType; const void *pNext; u32 flags; u32 queueCreateInfoCount; const VkQueueInfoMaze *pQueueCreateInfos; u32 enabledLayerCount; const char *const *ppEnabledLayerNames; u32 enabledExtensionCount; const char *const *ppEnabledExtensionNames; const void *pEnabledFeatures; };
+struct VkQueueFamilyMaze { u32 queueFlags,queueCount,timestampValidBits; struct { i32 width,height,depth; } minImageTransferGranularity; };
+struct VkRuntimeMaze { void *instance,*physical,*device,*queue; VkDestroyDevice_t destroyDevice; VkDestroyInstance_t destroyInstance; VkDeviceWaitIdle_t waitIdle; u32 ready; };
+static VkRuntimeMaze vkrt{};
 
 /* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
    followed by message, then naturally aligned WPARAM/LPARAM fields. */
@@ -224,13 +238,56 @@ static void move_player(float dx,float dy) {
     if(gx>=0&&gx<MW&&gy>=0&&gy<MH&&maze[gy][gx]=='E')won=1;
 }
 extern "C" void maze_mainCRTStartup() {
-    /* Verify that the SentinelOS Vulkan runtime is present and exposes its
-       global entry points. This is capability detection, not scene rendering. */
+    /* Bring up a real Vulkan instance, enumerate the software physical device,
+       and create a graphics queue. Scene drawing is switched only after a
+       pipeline and render target have been created successfully. */
     auto vkCreateInstance=(VkCreateInstance_t)get_proc("vulkan.dll","vkCreateInstance");
     auto vkEnumerateVersion=(VkEnumerateInstanceVersion_t)get_proc("vulkan.dll","vkEnumerateInstanceVersion");
     auto vkGetInstanceProcAddr=(VkGetInstanceProcAddr_t)get_proc("vulkan.dll","vkGetInstanceProcAddr");
     u32 vkVersion=0;
-    int vulkan_available=vkCreateInstance&&vkGetInstanceProcAddr;
+    int vulkan_available=0;
+    if(vkCreateInstance&&vkGetInstanceProcAddr) {
+        VkAppInfoMaze app={0,0,"SentinelOS Maze",1,"SentinelOS",1,(1u<<22)};
+        VkInstanceInfoMaze ici={1,0,0,&app,0,0,0,0};
+        void *instance=0;
+        if(vkCreateInstance(&ici,0,&instance)==0&&instance) {
+            auto vkEnumPhys=(VkEnumeratePhysicalDevices_t)vkGetInstanceProcAddr(instance,"vkEnumeratePhysicalDevices");
+            auto vkQueueProps=(VkGetPhysicalDeviceQueueFamilyProperties_t)vkGetInstanceProcAddr(instance,"vkGetPhysicalDeviceQueueFamilyProperties");
+            auto vkCreateDev=(VkCreateDevice_t)vkGetInstanceProcAddr(instance,"vkCreateDevice");
+            auto vkGetQueue=(VkGetDeviceQueue_t)vkGetInstanceProcAddr(instance,"vkGetDeviceQueue");
+            vkrt.destroyInstance=(VkDestroyInstance_t)vkGetInstanceProcAddr(instance,"vkDestroyInstance");
+            if(vkEnumPhys&&vkQueueProps&&vkCreateDev&&vkGetQueue&&vkrt.destroyInstance) {
+                u32 count=0;
+                if(vkEnumPhys(instance,&count,0)==0&&count>0&&count<=8) {
+                    void *physical[8]={0}; u32 available=count;
+                    if(vkEnumPhys(instance,&available,physical)==0&&available>0&&physical[0]) {
+                        u32 qcount=0; vkQueueProps(physical[0],&qcount,0);
+                        VkQueueFamilyMaze qprops[8]={{0}};
+                        if(qcount>0&&qcount<=8) {
+                            u32 qcap=qcount; vkQueueProps(physical[0],&qcap,qprops);
+                            u32 qfamily=0; int found=0;
+                            for(u32 qi=0;qi<qcap;qi++) if((qprops[qi].queueFlags&1u)&&qprops[qi].queueCount) {qfamily=qi;found=1;break;}
+                            if(found) {
+                                float priority=1.0f;
+                                VkQueueInfoMaze qci={2,0,0,qfamily,1,&priority};
+                                VkDeviceInfoMaze dci={3,0,0,1,&qci,0,0,0,0,0};
+                                void *device=0;
+                                if(vkCreateDev(physical[0],&dci,0,&device)==0&&device) {
+                                    vkrt.instance=instance;vkrt.physical=physical[0];vkrt.device=device;
+                                    vkrt.destroyDevice=(VkDestroyDevice_t)vkGetInstanceProcAddr(instance,"vkDestroyDevice");
+                                    vkrt.waitIdle=(VkDeviceWaitIdle_t)vkGetInstanceProcAddr(instance,"vkDeviceWaitIdle");
+                                    vkGetQueue(device,qfamily,0,&vkrt.queue);
+                                    if(vkrt.queue&&vkrt.destroyDevice&&vkrt.waitIdle) {vkrt.ready=1;vulkan_available=1;}
+                                    else { if(vkrt.destroyDevice)vkrt.destroyDevice(device,0);vkrt.device=0; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if(!vkrt.ready) { vkrt.destroyInstance(instance,0); vkrt.instance=0; }
+        }
+    }
     if(vkEnumerateVersion && vkEnumerateVersion(&vkVersion)!=0) vkVersion=0;
 
     auto create_window=(CreateWindowExA_t)get_proc("user32.dll","CreateWindowExA");

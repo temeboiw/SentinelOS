@@ -2776,9 +2776,6 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = 0;
         return f;
 
-    case 40:
-        f->rax = (uint64_t)-1LL;
-        return f;
 
     default:
         if (f->rax >= 0x1000 && f->rax <= 0x10FF)

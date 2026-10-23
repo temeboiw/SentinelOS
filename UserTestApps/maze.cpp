@@ -17,7 +17,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34, SYS_PRESENT_LAYER=37 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -87,6 +87,17 @@ struct GraphicsBootInfo {
     u32 virgl_buffer_resource_id,virgl_buffer_size;
 };
 struct Rect { u32 x,y,w,h; };
+struct PresentLayerArgs { u64 pixels; u32 layer,x,y,w,h,width,height; };
+static int layer_present_warned=0;
+/* Publish the completed scanout image to the WM-owned per-process window layer. */
+static void present_maze_layer() {
+    if(!pixels||!screen_w||!screen_h)return;
+    PresentLayerArgs a={(u64)(uintptr_t)pixels,2u,0u,0u,screen_w,screen_h,screen_w,screen_h};
+    if(!syscall3(SYS_PRESENT_LAYER,(u64)(uintptr_t)&a,0,0) && !layer_present_warned) {
+        print("maze.exe: window-layer presentation rejected; game may remain hidden\n");
+        layer_present_warned=1;
+    }
+}
 
 static const int MW=16,MH=16;
 static const char maze[MH][MW+1]={
@@ -262,6 +273,7 @@ static void draw_frame_gpu() {
         print("maze.exe: VirGL target presentation failed; switching to software fallback\n");
         gpu_scene_ready=0;return;
     }
+    present_maze_layer();
     report_frame_rate();
 }
 
@@ -339,6 +351,7 @@ static void draw_frame() {
     if(won)rect(w/2-80,h/2-18,160,36,rgb(35,150,90));
     Rect dirty={0,0,screen_w,screen_h};
     (void)syscall3(SYS_FLUSH_GRAPHICS,(u64)&dirty,0,0);
+    present_maze_layer();
     report_frame_rate();
 }
 static void move_player(float dx,float dy) {

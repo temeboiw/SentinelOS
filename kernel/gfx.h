@@ -406,7 +406,11 @@ static int gfx_create_virgl_buffer(void) {
         uint32_t array_size,last_level,nr_samples,flags,padding;
     } cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.hdr.ctx_id=1;cr.resource_id=GFX_VIRGL_BUFFER_ID;
-    cr.target=0; /* PIPE_BUFFER */
+    /* VirGL CREATE_3D uses Gallium pipe_texture_target values. A buffer
+       resource is PIPE_TEXTURE_BUFFER (5), not PIPE_TEXTURE_1D (0). Passing
+       target 0 makes vrend validate buffer bind flags as texture flags and
+       reject the otherwise valid 0x70 vertex/index/constant-buffer mask. */
+    cr.target=5; /* PIPE_TEXTURE_BUFFER */
     cr.format=0; /* PIPE_BUFFER resources use format 0 */
     cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
     cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;
@@ -506,7 +510,9 @@ static int gfx_virgl_clear_present_test(void) {
         DbgPrint("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\n");
         return 0;
     }
-    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\n");
+    /* The virtio response confirms command completion, but this driver does
+       not read back or inspect pixel values. Do not claim visual validation. */
+    DbgPrint("gfx: VirGL clear commands completed and scanout flushed; pixel contents not read back/verified\\n");
     return 1;
 }
 static int gfx_create_resource(void) {

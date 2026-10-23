@@ -412,8 +412,13 @@ static void maze_build_background_geometry() {
     }
 }
 static int maze_append_sorted_wall_faces() {
-    u32 counts[64]={0},offsets[65]={0},cursor[64]={0};
+    u32 counts[64],offsets[65],cursor[64];
     u32 order[1024];
+    /* Freestanding PE has no CRT memset; volatile stores keep the compiler
+       from lowering aggregate zero-initialization back into a memset call. */
+    volatile u32 *vc=counts,*vo=offsets,*vr=cursor;
+    for(u32 i=0;i<64u;i++){vc[i]=0u;vo[i]=0u;vr[i]=0u;}
+    vo[64]=0u;
     for(u32 i=0;i<maze_gpu_wall_face_count;i++) {
         int bucket=(int)(maze_gpu_wall_faces[i].depth*4.0f);
         if(bucket<0)bucket=0;if(bucket>63)bucket=63;

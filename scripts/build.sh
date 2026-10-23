@@ -1775,7 +1775,9 @@ clang++ "${USER_CXXFLAGS[@]}" \
   -c "$ROOT/UserTestApps/maze.cpp" \
   -o "$B/obj/maze.o"
 
-MAZE_BUILTINS="$(clang++ --target=x86_64-windows-gnu -rtlib=compiler-rt -print-libgcc-file-name)"
+# Call the resolved host Clang binary directly: clang++ is a shell function
+# in this script that deliberately rejects driver queries which look like links.
+MAZE_BUILTINS="$("$CLANGXX_BIN" --target=x86_64-windows-gnu -rtlib=compiler-rt -print-libgcc-file-name)"
 if [[ ! -s "$MAZE_BUILTINS" ]]; then
   echo "FATAL: Clang compiler-rt builtins not found for maze floating-point helpers" >&2
   echo "       Install the matching x86_64 Windows compiler-rt runtime or set up the LLVM toolchain." >&2

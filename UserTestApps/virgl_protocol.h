@@ -346,6 +346,90 @@ static inline int virgl_stream_set_sample_mask(VirglStream *s,
                                 VIRGL_OBJECT_NULL, &sample_mask, 1u);
 }
 
+
+/* Batch 4, add-on 1/4: configure framebuffer attachments.
+ * cbuf_handles contains one VirGL surface handle per color attachment;
+ * depth_handle is zero when no depth/stencil surface is attached. */
+static inline int virgl_stream_set_framebuffer(VirglStream *s,
+                                               uint32_t color_count,
+                                               uint32_t depth_handle,
+                                               const uint32_t *cbuf_handles) {
+    if (color_count > 8u || (color_count && !cbuf_handles)) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    uint32_t payload[10];
+    payload[0] = color_count;
+    payload[1] = depth_handle;
+    for (uint32_t i = 0; i < color_count; ++i) {
+        if (!cbuf_handles[i]) {
+            if (s) s->failed = 1u;
+            return 0;
+        }
+        payload[i + 2u] = cbuf_handles[i];
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_SET_FRAMEBUFFER_STATE,
+                                VIRGL_OBJECT_NULL, payload,
+                                (uint16_t)(color_count + 2u));
+}
+
+/* Batch 4, add-on 2/4: clear selected framebuffer attachments.
+ * color/depth are IEEE-754 bit patterns, not numeric integer values. */
+static inline int virgl_stream_clear_bits(VirglStream *s, uint32_t buffers,
+                                          const uint32_t color[4],
+                                          uint32_t depth_bits,
+                                          uint32_t stencil) {
+    if (!buffers || !color) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[7] = {
+        buffers, color[0], color[1], color[2], color[3],
+        depth_bits, stencil
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_CLEAR, VIRGL_OBJECT_NULL,
+                                payload, 7u);
+}
+
+/* Batch 4, add-on 3/4: set vertex-buffer bindings.
+ * Each entry is {slot, resource_handle, stride_bytes, offset_bytes}. */
+static inline int virgl_stream_set_vertex_buffers(VirglStream *s,
+                                                  const uint32_t *entries,
+                                                  uint32_t buffer_count) {
+    if (!s || !entries || !buffer_count || buffer_count > 16u) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    uint32_t payload[1u + 4u * 16u];
+    payload[0] = buffer_count;
+    for (uint32_t i = 0; i < buffer_count; ++i) {
+        const uint32_t *e = entries + i * 4u;
+        if (e[0] > 31u || !e[1] || (e[2] && (e[3] % e[2]) != 0u)) {
+            s->failed = 1u;
+            return 0;
+        }
+        payload[1u + i * 4u] = e[0];
+        payload[2u + i * 4u] = e[1];
+        payload[3u + i * 4u] = e[2];
+        payload[4u + i * 4u] = e[3];
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_SET_VERTEX_BUFFERS,
+                                VIRGL_OBJECT_NULL, payload,
+                                (uint16_t)(1u + buffer_count * 4u));
+}
+
+/* Batch 4, add-on 4/4: request a minimum number of samples for subsequent
+ * rendering. The backend may clamp this to the framebuffer's sample count. */
+static inline int virgl_stream_set_min_samples(VirglStream *s,
+                                               uint32_t samples) {
+    if (samples > 32u) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_SET_MIN_SAMPLES,
+                                VIRGL_OBJECT_NULL, &samples, 1u);
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

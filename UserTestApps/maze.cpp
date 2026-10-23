@@ -65,6 +65,7 @@ static VkRuntimeMaze vkrt{};
 static VkSubmitVirGLStream_t submit_virgl_stream;
 static VkPresentVirGL_t present_virgl;
 static int gpu_scene_ready=0;
+static int gpu_rasterizer_created=0;
 
 /* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
    followed by message, then naturally aligned WPARAM/LPARAM fields. */
@@ -202,8 +203,9 @@ static void draw_frame_gpu() {
     const u32 rasterizer[9]={1u,(1u<<1)|(2u<<10)|(2u<<12)|(1u<<14),
                              float_bits(1.0f),0u,0u,float_bits(1.0f),0u,0u,0u};
     const u32 rasterizer_handle=1u;
-    if(!virgl_stream_command(&stream,VIRGL_CCMD_CREATE_OBJECT,VIRGL_OBJECT_RASTERIZER,rasterizer,9) ||
-       !virgl_stream_command(&stream,VIRGL_CCMD_BIND_OBJECT,VIRGL_OBJECT_RASTERIZER,&rasterizer_handle,1) ||
+    if(!gpu_rasterizer_created &&
+       !virgl_stream_command(&stream,VIRGL_CCMD_CREATE_OBJECT,VIRGL_OBJECT_RASTERIZER,rasterizer,9))return;
+    if(!virgl_stream_command(&stream,VIRGL_CCMD_BIND_OBJECT,VIRGL_OBJECT_RASTERIZER,&rasterizer_handle,1) ||
        !virgl_stream_command(&stream,VIRGL_CCMD_SET_FRAMEBUFFER_STATE,VIRGL_OBJECT_NULL,fb,3))return;
     if(!gpu_append_scissor_clear(&stream,0,0,w,horizon,0.12f,0.15f,0.21f) ||
        !gpu_append_scissor_clear(&stream,0,horizon,w,view_h-horizon,0.12f,0.10f,0.08f))return;
@@ -251,8 +253,13 @@ static void draw_frame_gpu() {
         print("maze.exe: GPU frame command stream exceeded safe VirGL packet size\n");
         gpu_scene_ready=0;return;
     }
-    if(submit_virgl_stream(words,bytes)!=0 || present_virgl()!=0) {
-        print("maze.exe: GPU render/present failed; switching to software fallback\n");
+    if(submit_virgl_stream(words,bytes)!=0) {
+        print("maze.exe: VirGL command submission failed; switching to software fallback\n");
+        gpu_scene_ready=0;return;
+    }
+    gpu_rasterizer_created=1;
+    if(present_virgl()!=0) {
+        print("maze.exe: VirGL target presentation failed; switching to software fallback\n");
         gpu_scene_ready=0;return;
     }
     report_frame_rate();

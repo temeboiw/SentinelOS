@@ -1123,12 +1123,12 @@ static void draw_taskbar(void) {
     }
 
     if (g_menu) {
-        int mw=300,mh=360,mx=8,my=ty-mh-4;
-        if(my<4)my=4;
-        int ssx=((int)g_fw-16)*100/mw,ssy=((int)g_fh-52)*100/mh;
+        int mw=300,mh=360,mx=8;
+        int ssx=(int)g_fw*100/1024,ssy=(int)g_fh*100/768;
         g_start_scale_percent=ssx<ssy?ssx:ssy;
         if(g_start_scale_percent>100)g_start_scale_percent=100;
         if(g_start_scale_percent<62)g_start_scale_percent=62;
+        int my=ty-(mh*g_start_scale_percent+50)/100-4;if(my<4)my=4;
         g_start_scale_x=mx;g_start_scale_y=my;g_start_scale_active=1;
         /* Keep all menu geometry proportional to the available screen. */
         round_fill(mx+4,my+5,mw,mh,10,0x55314F62);
@@ -1753,10 +1753,10 @@ static void on_click(int x, int y) {
     }
 
     if(g_menu) {
-        int mw=300,mh=360,mx=8,my=ty-mh-4;
-        if(my<4)my=4;
-        int ssx=((int)g_fw-16)*100/mw,ssy=((int)g_fh-52)*100/mh;
+        int mw=300,mh=360,mx=8;
+        int ssx=(int)g_fw*100/1024,ssy=(int)g_fh*100/768;
         int sc=ssx<ssy?ssx:ssy;if(sc>100)sc=100;if(sc<62)sc=62;
+        int my=ty-(mh*sc+50)/100-4;if(my<4)my=4;
         x=mx+((x-mx)*100)/sc;y=my+((y-my)*100)/sc;
         if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
             g_search_focus=1;
@@ -2098,9 +2098,10 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_my = ev.y;
                 u32_mouse_record();
                 if(g_menu) {
-                    int hv=-1,by=(int)g_fh-44-360-4;if(by<4)by=4;
-                    int sx=((int)g_fw-16)*100/300,sy=((int)g_fh-52)*100/360;
+                    int hv=-1;
+                    int sx=(int)g_fw*100/1024,sy=(int)g_fh*100/768;
                     int sc=sx<sy?sx:sy;if(sc>100)sc=100;if(sc<62)sc=62;
+                    int by=(int)g_fh-44-(360*sc+50)/100-4;if(by<4)by=4;
                     int hx=8+((g_mx-8)*100)/sc,hy=by+((g_my-by)*100)/sc;
                     if(hx>=20&&hx<152&&hy>=by+116&&hy<by+164)hv=1;
                     else if(hx>=162&&hx<296&&hy>=by+116&&hy<by+164)hv=2;

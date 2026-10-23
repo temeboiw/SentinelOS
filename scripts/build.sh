@@ -1833,7 +1833,7 @@ ls -lh \
   "$SYS32/user32.dll" \
   "$SYS32/vulkan.dll" \
   "$SYS32/cmd.exe" \
-  "$SYS32/taskmgr.exe" \\
+  "$SYS32/taskmgr.exe" \
   "$SYS32/msiexec.exe"
 
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"

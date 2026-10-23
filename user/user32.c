@@ -168,6 +168,7 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+static int g_start_hover=-1;
 /* A non-desktop process can receive clicks over the shared taskbar. Publish
  * its freshly redrawn taskbar layer only when that process changes taskbar UI;
  * ordinary window repaints must never overwrite the desktop's taskbar/menu. */
@@ -1132,24 +1133,29 @@ static void draw_taskbar(void) {
         } else draw_text(mx+42,my+72,"TYPE TO SEARCH",COL_MUTED);
         draw_text(mx+16,my+105,"PINNED",COL_TEXT);
         draw_text(mx+mw-66,my+105,"APPS",COL_ACCENT);
-        round_fill(mx+12,my+116,132,48,5,0xFF244458);
+        round_fill(mx+12,my+116,132,48,5,g_start_hover==1?0xFF34708D:0xFF244458);
+        if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFF77D8FF);
         round_fill(mx+18,my+125,25,25,4,0xFF0A83B7);
         fill(mx+23,my+131,15,3,0xFFFFFFFF);fill(mx+23,my+138,15,3,0xFFFFFFFF);
-        draw_text(mx+50,my+135,"FILE EXPLORER",COL_TEXT);
-        round_fill(mx+154,my+116,134,48,5,0xFF244458);
+        draw_text(mx+50,my+135,"Files",COL_TEXT);
+        round_fill(mx+154,my+116,134,48,5,g_start_hover==2?0xFF34708D:0xFF244458);
+        if(g_start_hover==2)fill(mx+154,my+116,134,2,0xFF77D8FF);
         round_fill(mx+160,my+125,25,25,4,0xFF167C67);
         fill(mx+165,my+130,15,2,0xFFFFFFFF);fill(mx+165,my+136,15,2,0xFFFFFFFF);fill(mx+165,my+142,15,2,0xFFFFFFFF);
-        draw_text(mx+192,my+135,"TASK MANAGER",COL_TEXT);
-        round_fill(mx+12,my+170,132,48,5,0xFF244458);
+        draw_text(mx+192,my+135,"Task Mgr",COL_TEXT);
+        round_fill(mx+12,my+170,132,48,5,g_start_hover==3?0xFF34708D:0xFF244458);
+        if(g_start_hover==3)fill(mx+12,my+170,132,2,0xFF77D8FF);
         round_fill(mx+18,my+179,25,25,4,0xFF4D5C70);
         draw_text(mx+24,my+188,"C:",COL_TEXT);
-        draw_text(mx+50,my+189,"COMMAND PROMPT",COL_TEXT);
+        draw_text(mx+50,my+189,"Command",COL_TEXT);
         draw_text(mx+16,my+236,"POWER OPTIONS",COL_MUTED);
         fill(mx+12,my+248,mw-24,1,0xFF3A5365);
-        round_fill(mx+12,my+258,132,40,5,0xFF263E4E);
-        draw_text(mx+24,my+274,"SHUT DOWN",COL_DANGER);
-        round_fill(mx+154,my+258,134,40,5,0xFF263E4E);
-        draw_text(mx+166,my+274,"RESTART",COL_WARN);
+        round_fill(mx+12,my+258,132,40,5,g_start_hover==4?0xFF34708D:0xFF263E4E);
+        if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFF77D8FF);
+        draw_text(mx+24,my+274,"Shut down",COL_DANGER);
+        round_fill(mx+154,my+258,134,40,5,g_start_hover==5?0xFF34708D:0xFF263E4E);
+        if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFF77D8FF);
+        draw_text(mx+166,my+274,"Restart",COL_WARN);
         fill(mx+12,my+310,mw-24,1,0xFF3A5365);
         draw_text(mx+16,my+329,"SYSTEM SETTINGS",COL_TEXT);
         draw_text(mx+16,my+345,"ENVIRONMENT TOOLS NEXT",COL_MUTED);
@@ -1720,7 +1726,7 @@ static void on_click(int x, int y) {
         }
         if(hit(x,y,8,ty+6,78,ty+38)) {
             u32_taskbar_dirty=1;
-            g_menu=!g_menu;g_search_focus=0;
+            g_menu=!g_menu;g_search_focus=0;g_start_hover=-1;
             if(g_menu) {g_search_len=0;g_search_text[0]=0;}
             compose_region(0,ty-368,(int)g_fw,(int)g_fh);
             return;
@@ -1728,10 +1734,10 @@ static void on_click(int x, int y) {
     }
 
     if(g_menu) {
-        int mw=300,mh=360,mx=8,my=ty-mh-8;
+        int mw=300,mh=360,mx=8,my=ty-mh-4;
         if(my<4)my=4;
         if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
-            g_search_focus=1;g_search_len=0;g_search_text[0]=0;
+            g_search_focus=1;
             u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);return;
         }
         if(hit(x,y,mx+12,my+116,mx+144,my+164)) {
@@ -2027,6 +2033,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                  * search box has focus.
                  */
                 if (g_menu && g_search_focus) {
+                    if(key==27){g_menu=0;g_search_focus=0;g_start_hover=-1;compose();continue;}
                     if (key == '\b') {
                         if (g_search_len > 0) {
                             g_search_len--;

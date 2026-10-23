@@ -976,6 +976,43 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
 static int hit(int x, int y, int x0, int y0, int x1, int y1) {    return x >= x0 && x < x1 && y >= y0 && y < y1;
 }
 
+/* Shared Start-menu geometry for drawing, pointer hover, and hit testing. */
+typedef struct {
+    int x, y, scale, width, height;
+} U32_START_LAYOUT;
+
+static U32_START_LAYOUT u32_start_layout(void) {
+    U32_START_LAYOUT l;
+    int w=(int)g_fw, h=(int)g_fh;
+    int ty=h-48;
+    int sx=w*100/1024, sy=h*100/768;
+    int sc=sx<sy?sx:sy;
+    if(sc>100)sc=100;
+    if(sc<62)sc=62;
+    l.x=8;
+    l.y=ty-(360*sc+50)/100-4;
+    if(l.y<4)l.y=4;
+    l.scale=sc;
+    l.width=300;
+    l.height=360;
+    return l;
+}
+
+static int u32_start_hover_at(int x, int y) {
+    U32_START_LAYOUT l=u32_start_layout();
+    int sc=l.scale;
+    x=l.x+((x-l.x)*100)/sc;
+    y=l.y+((y-l.y)*100)/sc;
+    if(hit(x,y,l.x+12,l.y+60,l.x+l.width-12,l.y+92)) return 0;
+    if(hit(x,y,l.x+12,l.y+116,l.x+144,l.y+164)) return 1;
+    if(hit(x,y,l.x+154,l.y+116,l.x+288,l.y+164)) return 2;
+    if(hit(x,y,l.x+12,l.y+170,l.x+144,l.y+218)) return 3;
+    if(hit(x,y,l.x+12,l.y+258,l.x+144,l.y+298)) return 4;
+    if(hit(x,y,l.x+154,l.y+258,l.x+288,l.y+298)) return 5;
+    if(hit(x,y,l.x+12,l.y+310,l.x+288,l.y+356)) return 6;
+    return -1;
+}
+
 static int u32_menu_text_is(const char *wanted) {
     const char *a=g_search_text,*b=wanted;
     while(*a&&*b) {

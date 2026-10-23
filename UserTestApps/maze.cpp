@@ -8,6 +8,7 @@
  */
 #include <stdint.h>
 #include "virgl_protocol.h"
+#include "../user/soft3d.h"
 
 using u64 = unsigned long long;
 using u32 = unsigned int;
@@ -66,6 +67,10 @@ static VkSubmitVirGLStream_t submit_virgl_stream;
 static VkPresentVirGL_t present_virgl;
 static int gpu_scene_ready=0;
 static int gpu_rasterizer_created=0;
+static S3D_SURFACE gpu_triangle_surface{};
+static int gpu_triangle_surface_ready=0;
+static int gpu_triangle_error_reported=0;
+static float gpu_triangle_angle=0.0f;
 
 /* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
    followed by message, then naturally aligned WPARAM/LPARAM fields. */
@@ -187,7 +192,7 @@ static void report_frame_rate() {
     u64 elapsed=now-fps_window_start;
     if(elapsed<1000u)return;
     u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
-    print("maze.exe: measured VirGL GPU-span frame rate = ");print_u32(fps);print(" FPS (CPU ray intersections, GPU span fills)\n");
+    print("maze.exe: measured VirGL shader-triangle frame rate = ");print_u32(fps);print(" FPS\n");
     fps_window_start=now;fps_window_frames=0;
 }
 /* GPU raster path: CPU computes one ray intersection per vertical strip;
@@ -231,81 +236,62 @@ static int gpu_frame_stream_ready(const VirglStream *stream) {
     return 1;
 }
 
+static i32 gpu_fixed16(float v) {
+    double q=(double)v*65536.0;
+    if(q>2147483000.0)q=2147483000.0;
+    if(q< -2147483000.0)q= -2147483000.0;
+    return (i32)q;
+}
+static S3D_VERTEX gpu_project_spinning_vertex(float x,float y,float z,
+                                               float sx,float cx,float sy,float cy,
+                                               u32 color) {
+    /* Rotate the 3D vertex around Y, then X; project to Vulkan-style clip
+       coordinates. The vertex and fragment shaders still run on VirGL. */
+    float rx=x*cy+z*sy;
+    float rz= -x*sy+z*cy;
+    float ry=y*cx-rz*sx;
+    rz=y*sx+rz*cx;
+    float camera_z=2.8f-rz;
+    if(camera_z<0.35f)camera_z=0.35f;
+    float perspective=1.65f/camera_z;
+    S3D_VERTEX out{};
+    out.x=gpu_fixed16(rx*perspective);
+    out.y=gpu_fixed16(ry*perspective);
+    out.z=gpu_fixed16(0.45f+rz*0.12f);
+    out.color=color;
+    return out;
+}
 static void draw_frame_gpu() {
-    if(!screen_w||!screen_h||!submit_virgl_stream||!present_virgl)return;
-    const u32 columns=75u;
-    const u32 w=screen_w,h=screen_h;
-    const u32 status_h=h>=240u?18u:0u, view_h=h-status_h, horizon=view_h/2u;
-    u32 words[1000]; VirglStream stream{}; virgl_stream_init(&stream,words,1000);
-    const u32 fb[3]={1u,0u,1u};
-    /* Scissored clears are ignored unless a rasterizer object enables S0.SCISSOR. */
-    const u32 rasterizer[9]={1u,(1u<<1)|(2u<<10)|(2u<<12)|(1u<<14),
-                             float_bits(1.0f),0u,0u,float_bits(1.0f),0u,0u,0u};
-    const u32 rasterizer_handle=1u;
-    if(!gpu_rasterizer_created &&
-       !virgl_stream_command(&stream,VIRGL_CCMD_CREATE_OBJECT,VIRGL_OBJECT_RASTERIZER,rasterizer,9))return;
-    if(!virgl_stream_command(&stream,VIRGL_CCMD_BIND_OBJECT,VIRGL_OBJECT_RASTERIZER,&rasterizer_handle,1) ||
-       !virgl_stream_command(&stream,VIRGL_CCMD_SET_FRAMEBUFFER_STATE,VIRGL_OBJECT_NULL,fb,3))return;
-    if(!gpu_append_scissor_clear(&stream,0,0,w,horizon,0.12f,0.15f,0.21f) ||
-       !gpu_append_scissor_clear(&stream,0,horizon,w,view_h-horizon,0.12f,0.10f,0.08f))return;
-    const float dx=fcos(camera_yaw),dy=fsin(camera_yaw);
-    const float plane_x=-dy*0.66f,plane_y=dx*0.66f;
-    for(u32 col=0;col<columns;col++) {
-        float camera_x=2.0f*((float)col+0.5f)/(float)columns-1.0f;
-        float ray_x=dx+plane_x*camera_x,ray_y=dy+plane_y*camera_x;
-        int map_x=(int)player_x,map_y=(int)player_y;
-        float ax=ray_x<0?-ray_x:ray_x,ay=ray_y<0?-ray_y:ray_y;
-        float delta_x=ax==0.0f?1.0e30f:1.0f/ax,delta_y=ay==0.0f?1.0e30f:1.0f/ay;
-        int step_x,step_y,hit=0,side=0;float side_x,side_y;
-        if(ray_x<0){step_x=-1;side_x=(player_x-(float)map_x)*delta_x;}
-        else{step_x=1;side_x=((float)map_x+1.0f-player_x)*delta_x;}
-        if(ray_y<0){step_y=-1;side_y=(player_y-(float)map_y)*delta_y;}
-        else{step_y=1;side_y=((float)map_y+1.0f-player_y)*delta_y;}
-        for(int n=0;n<64&&!hit;n++){
-            if(side_x<side_y){side_x+=delta_x;map_x+=step_x;side=0;}
-            else{side_y+=delta_y;map_y+=step_y;side=1;}
-            if(blocked(map_x,map_y))hit=1;
+    if(!gpu_triangle_surface_ready) {
+        if(!S3DGetSurface(&gpu_triangle_surface) ||
+           gpu_triangle_surface.backend!=2 ||
+           gpu_triangle_surface.virgl_buffer_resource_id!=S3D_VIRGL_VERTEX_BUFFER_ID ||
+           !gpu_triangle_surface.virgl_buffer ||
+           gpu_triangle_surface.virgl_buffer_size<84u) {
+            if(!gpu_triangle_error_reported) {
+                print("maze.exe: FATAL: VirGL triangle target/vertex buffer unavailable; shader demo cannot run\n");
+                gpu_triangle_error_reported=1;
+            }
+            return;
         }
-        float dist=side==0?side_x-delta_x:side_y-delta_y;
-        if(dist<0.05f)dist=0.05f;
-        int line_h=(int)((float)view_h/dist);
-        int top=(int)horizon-line_h/2,bottom=(int)horizon+line_h/2;
-        if(top<0)top=0;if(bottom>=(int)view_h)bottom=(int)view_h-1;
-        float wall_x=side==0?player_y+dist*ray_y:player_x+dist*ray_x;
-        wall_x-=(float)(int)wall_x;
-        int stripe=(int)(wall_x*8.0f),base=side?106:139;
-        if(stripe==0||stripe==7)base-=18;
-        int shade=base-(int)(dist*9.0f);if(shade<28)shade=28;if(shade>180)shade=180;
-        float rr=(float)(side?shade-17:shade)/255.0f;
-        float gg=(float)(side?shade-8:shade-13)/255.0f;
-        float bb=(float)(side?shade-2:shade-25)/255.0f;
-        u32 x0=(col*w)/columns,x1=((col+1u)*w)/columns;
-        if(x1<=x0)x1=x0+1;
-        if(hit && bottom>=top &&
-           !gpu_append_scissor_clear(&stream,x0,(u32)top,x1-x0,(u32)(bottom-top+1),rr,gg,bb))return;
+        gpu_triangle_surface_ready=1;
+        print("maze.exe: VirGL GPU triangle target ready; vertex+fragment TGSI shaders enabled\n");
     }
-    if(!gpu_append_scissor_clear(&stream,w/2u-5u,horizon,11u,1u,0.92f,0.92f,0.84f) ||
-       !gpu_append_scissor_clear(&stream,w/2u,horizon-5u,1u,11u,0.92f,0.92f,0.84f))return;
-    if(status_h && !gpu_append_scissor_clear(&stream,0,view_h,w,status_h,0.035f,0.055f,0.08f))return;
-    if(!gpu_frame_stream_ready(&stream)) {
-        print("maze.exe: FATAL: GPU frame stream failed structural/pipeline-state validation; CPU fallback disabled\n");
+    gpu_triangle_angle+=0.035f;
+    const float tau=6.28318530718f;
+    while(gpu_triangle_angle>=tau)gpu_triangle_angle-=tau;
+    float sy=fsin(gpu_triangle_angle),cy=fcos(gpu_triangle_angle);
+    float sx=fsin(gpu_triangle_angle*0.63f),cx=fcos(gpu_triangle_angle*0.63f);
+    S3D_VERTEX a=gpu_project_spinning_vertex(-0.9f,-0.68f,0.0f,sx,cx,sy,cy,0xffff6548u);
+    S3D_VERTEX b=gpu_project_spinning_vertex( 0.9f,-0.68f,0.0f,sx,cx,sy,cy,0xff45e7ffu);
+    S3D_VERTEX c=gpu_project_spinning_vertex( 0.0f, 0.88f,0.0f,sx,cx,sy,cy,0xffa7ff62u);
+    if(!S3DDrawTriangleVirGL(&gpu_triangle_surface,&a,&b,&c)) {
+        if(!gpu_triangle_error_reported) {
+            print("maze.exe: FATAL: VirGL shader triangle submission/presentation failed\n");
+            gpu_triangle_error_reported=1;
+        }
         return;
     }
-    u32 bytes=virgl_stream_bytes(&stream);
-    if(!bytes || bytes>4096u-sizeof(u32)*5u) {
-        print("maze.exe: FATAL: GPU frame command stream exceeded safe VirGL packet size; CPU fallback disabled\n");
-        return;
-    }
-    if(submit_virgl_stream(words,bytes)!=0) {
-        print("maze.exe: FATAL: VirGL command submission failed; CPU fallback disabled\n");
-        return;
-    }
-    gpu_rasterizer_created=1;
-    if(present_virgl()!=0) {
-        print("maze.exe: FATAL: VirGL target presentation failed; CPU fallback disabled\n");
-        return;
-    }
-    present_maze_layer();
     report_frame_rate();
 }
 
@@ -494,13 +480,15 @@ extern "C" void maze_mainCRTStartup() {
     /* GPU-only mode: never silently substitute CPU rasterization. The
        VirGL span renderer submits GPU scissor/clear work and presents the
        GPU target; if the transport is unavailable, report that explicitly. */
-    int virgl_gpu_candidate=(vulkan_available && graphics_info_ok && (info.capabilities&(1u<<4)) &&
-                             submit_virgl_stream && present_virgl);
+    int virgl_gpu_candidate=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
+                             info.virgl_buffer_va &&
+                             info.virgl_buffer_resource_id==S3D_VIRGL_VERTEX_BUFFER_ID &&
+                             info.virgl_buffer_size>=84u);
     gpu_scene_ready=virgl_gpu_candidate;
     if(gpu_scene_ready)
-        print("maze.exe: GPU-only mode; VirGL span renderer selected\n");
+        print("maze.exe: GPU-only mode; VirGL shader-driven spinning triangle selected\n");
     else
-        print("maze.exe: ERROR: GPU-only mode requires an initialized VirGL 3D target\n");
+        print("maze.exe: ERROR: GPU-only mode requires a VirGL 3D target and vertex buffer\n");
     /* Harmless NOP probe is retained only when GPU rendering cannot be used. */
     int virgl_submit_ok=0;
     if(graphics_info_ok && (info.capabilities&(1u<<4)) &&
@@ -544,8 +532,8 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; GPU-only VirGL span path active (CPU ray intersections, GPU fills)\n" : "maze.exe: Vulkan device ready, but GPU-only renderer unavailable; no CPU fallback\n");
-    else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("; GPU-only mode will not render\n"); }
+    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; spinning triangle is rendered by VirGL vertex/fragment shaders\n" : "maze.exe: Vulkan device ready, but GPU-only triangle renderer unavailable; no CPU fallback\n");
+    else { print("maze.exe: Vulkan runtime probe failed at "); print(vk_failure); print("; independent VirGL triangle path may still run\n"); }
     Message msg{};
     u64 hz=tsc_frequency();
     /* Keep a phase-locked 60 Hz deadline instead of resetting the clock

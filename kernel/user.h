@@ -1251,6 +1251,50 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(old!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
     uint32_t *out=(uint32_t*)PHYS_TO_VIRT(gfx_surface_pa);
     uint32_t pitch=gfx_pitch/4u;
+
+    /* A fullscreen app using PresentWindowSurface owns the visible scanout
+     * while it is the frontmost window. Do not rebuild the desktop/taskbar
+     * over it: desktop repaint requests can arrive after the app's frame and
+     * otherwise leave Explorer visible while the game runs behind it. Local
+     * surfaces are tightly packed and independent of the shared scanout. */
+    int local_fullscreen=-1;
+    unsigned long long local_fullscreen_z=0;
+    for(int i=0;i<WM_MAX;i++) {
+        WmEntry *e=&wm_tab[i];
+        if(!e->alive||e->minimized||!wm_shared_local_windows[i])continue;
+        if(e->x>0||e->y>0||
+           wm_shared_local_width[i]<width||
+           wm_shared_local_height[i]<height)continue;
+        if(local_fullscreen<0||e->z>local_fullscreen_z) {
+            local_fullscreen=i;
+            local_fullscreen_z=e->z;
+        }
+    }
+    if(local_fullscreen>=0) {
+        int covered=0;
+        for(int i=0;i<WM_MAX;i++) {
+            WmEntry *e=&wm_tab[i];
+            if(e->alive&&!e->minimized&&e->z>local_fullscreen_z) {
+                covered=1;break;
+            }
+        }
+        if(!covered) {
+            uint32_t *src=wm_shared_local_windows[local_fullscreen];
+            uint32_t sw=wm_shared_local_width[local_fullscreen];
+            for(uint32_t yy=y;yy<y+h;yy++) {
+                uint32_t *dstrow=out+yy*pitch;
+                uint32_t *srcrow=src+yy*sw;
+                for(uint32_t xx=x;xx<x+w;xx++)dstrow[xx]=srcrow[xx];
+            }
+            int flush_ok=gfx_flush(x,y,w,h);
+            if(wm_dbg_sample(dbg_n))
+                DbgPrint("[gfx] fullscreen local present pid=%d damage=(%u,%u %ux%u) flush=%d\\n",
+                         wm_tab[local_fullscreen].pid,x,y,w,h,flush_ok);
+            if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
+            return;
+        }
+    }
+
     /* Consume the window manager's canonical back-to-front order.
      * Surface slots are process-owned; resolve each copied entry back to its
      * slot only after the order snapshot has been obtained. */

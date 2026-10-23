@@ -40,12 +40,10 @@ static void say(CHAR16 *s) {
     if (!s) return;
     for (; *s; ++s) {
         UINT32 c = (UINT32)*s;
-        if (c == L'\\r' || c == L'\\n' || c < 0x80u) {
-            if (c == L'\\n') serial_char('\\r');
-            serial_char((char)c);
-        } else {
-            serial_char('?');
-        }
+        if (c == L'\\r' && s[1] == L'\\n') continue;
+        if (c == L'\\n') serial_char('\\r');
+        if (c < 0x80u) serial_char((char)c);
+        else serial_char('?');
     }
 }
 static void paint_firmware_background(void) {

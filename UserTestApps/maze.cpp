@@ -194,7 +194,7 @@ static int gpu_append_scissor_clear(VirglStream *s,u32 x,u32 y,u32 w,u32 h,
 }
 static void draw_frame_gpu() {
     if(!screen_w||!screen_h||!submit_virgl_stream||!present_virgl)return;
-    const u32 columns=60u;
+    const u32 columns=75u;
     const u32 w=screen_w,h=screen_h;
     const u32 status_h=h>=240u?18u:0u, view_h=h-status_h, horizon=view_h/2u;
     u32 words[1000]; VirglStream stream{}; virgl_stream_init(&stream,words,1000);

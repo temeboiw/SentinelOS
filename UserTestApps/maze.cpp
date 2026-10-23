@@ -128,6 +128,9 @@ static const char maze[MH][MW+1]={
 };
 static u32 *pixels;
 static u32 screen_w,screen_h,pitch;
+/* GPU rendering still targets the shared scanout, but Maze owns a clipped
+   viewport and publishes only that rectangle as its window-local surface. */
+static u32 maze_view_x,maze_view_y,maze_view_w,maze_view_h;
 static float player_x=2.5f, player_y=2.5f;
 static float camera_yaw=-1.57079632679f;
 static int won=0;
@@ -161,8 +164,9 @@ static u64 tsc_frequency() {
 }
 static u32 rgb(u32 r,u32 g,u32 b) { return 0xff000000u|(r<<16)|(g<<8)|b; }
 static void put_pixel(int x,int y,u32 c) {
-    if(pixels&&x>=0&&y>=0&&(u32)x<screen_w&&(u32)y<screen_h)
-        pixels[(u64)y*pitch+(u32)x]=c;
+    if(!pixels||x<0||y<0||(u32)x>=maze_view_w||(u32)y>=maze_view_h)return;
+    u32 sx=maze_view_x+(u32)x,sy=maze_view_y+(u32)y;
+    if(sx<screen_w&&sy<screen_h)pixels[(u64)sy*pitch+sx]=c;
 }
 static void rect(int x,int y,int w,int h,u32 c) {
     if(w<=0||h<=0)return;
@@ -173,20 +177,24 @@ static void rect(int x,int y,int w,int h,u32 c) {
  * scanout remains the GPU driver's render target for now; this staging step
  * separates the app's presented image from the compositor's output buffer. */
 static void present_maze_layer() {
-    if(!pixels||!screen_w||!screen_h||screen_w>1920u||screen_h>1080u)return;
+    if(!pixels||!screen_w||!screen_h||!maze_view_w||!maze_view_h||
+       maze_view_w>1920u||maze_view_h>1080u||
+       maze_view_x>screen_w||maze_view_y>screen_h||
+       maze_view_w>screen_w-maze_view_x||maze_view_h>screen_h-maze_view_y)return;
     if(present_window_surface) {
-        for(u32 y=0;y<screen_h;y++)
-            for(u32 x=0;x<screen_w;x++)
-                maze_window_surface[(u64)y*screen_w+x]=0xFF000000u|(pixels[(u64)y*pitch+x]&0x00FFFFFFu);
-        if(!present_window_surface(maze_window_surface,screen_w,screen_h,
-                                   0,0,screen_w,screen_h) && !layer_present_warned) {
+        for(u32 y=0;y<maze_view_h;y++)
+            for(u32 x=0;x<maze_view_w;x++)
+                maze_window_surface[(u64)y*maze_view_w+x]=
+                    0xFF000000u|(pixels[(u64)(maze_view_y+y)*pitch+maze_view_x+x]&0x00FFFFFFu);
+        if(!present_window_surface(maze_window_surface,maze_view_w,maze_view_h,
+                                   0,0,maze_view_w,maze_view_h) && !layer_present_warned) {
             print("maze.exe: window-local surface presentation rejected; game may remain hidden\n");
             layer_present_warned=1;
         }
         return;
     }
     /* Backward-compatible fallback for older USER32 builds. */
-    PresentLayerArgs a={(u64)(uintptr_t)pixels,2u,0u,0u,screen_w,screen_h,screen_w,screen_h};
+    PresentLayerArgs a={(u64)(uintptr_t)maze_window_surface,2u,0u,0u,maze_view_w,maze_view_h,maze_view_w,maze_view_h};
     if(!syscall3(SYS_PRESENT_LAYER,(u64)(uintptr_t)&a,0,0) && !layer_present_warned) {
         print("maze.exe: legacy window-layer presentation rejected; game may remain hidden\n");
         layer_present_warned=1;
@@ -208,18 +216,18 @@ static void draw_status_text(int x,int y,const char *s,u32 color,int scale) {
 /* Diagnostic UI only: the 3D scene remains GPU-only. */
 static int gpu_status_screen_drawn=0;
 static void draw_gpu_unavailable_screen() {
-    if(gpu_status_screen_drawn||!pixels||!screen_w||!screen_h)return;
+    if(gpu_status_screen_drawn||!pixels||!maze_view_w||!maze_view_h)return;
     const u32 bg=rgb(12,18,31),panel=rgb(23,34,53),cyan=rgb(70,210,238);
-    for(u32 y=0;y<screen_h;y++)
-        for(u32 x=0;x<screen_w;x++)
-            pixels[(u64)y*pitch+x]=bg;
-    int pw=(int)screen_w-80,ph=230;
+    for(u32 y=0;y<maze_view_h;y++)
+        for(u32 x=0;x<maze_view_w;x++)
+            put_pixel((int)x,(int)y,bg);
+    int pw=(int)maze_view_w-80,ph=230;
     if(pw>760)pw=760;
-    if(pw<320)pw=(int)screen_w-24;
-    if(pw<1)pw=(int)screen_w;
-    if(ph>(int)screen_h-24)ph=(int)screen_h-24;
-    if(ph<80)ph=(int)screen_h;
-    int px=((int)screen_w-pw)/2,py=((int)screen_h-ph)/2;
+    if(pw<320)pw=(int)maze_view_w-24;
+    if(pw<1)pw=(int)maze_view_w;
+    if(ph>(int)maze_view_h-24)ph=(int)maze_view_h-24;
+    if(ph<80)ph=(int)maze_view_h;
+    int px=((int)maze_view_w-pw)/2,py=((int)maze_view_h-ph)/2;
     rect(px,py,pw,ph,panel);
     rect(px,py,pw,5,cyan);
     draw_status_text(px+24,py+26,"GPU RENDERING UNAVAILABLE",rgb(245,248,255),2);
@@ -336,8 +344,14 @@ static int maze_project_world(float wx,float wy,float wz,u32 color,
     const float focal=1.05f;
     const float nx=(camera_x*focal)/depth;
     const float ny=((wy-0.78f)*focal)/depth;
-    out->x=gpu_fixed16(nx);
-    out->y=gpu_fixed16(ny);
+    /* Convert viewport-local normalized device coordinates into the full
+       scanout's NDC so the GPU writes only into Maze's window rectangle. */
+    const float screen_nx=(2.0f*((float)maze_view_x+
+        ((nx+1.0f)*0.5f*(float)maze_view_w))/(float)screen_w)-1.0f;
+    const float screen_ny=(2.0f*((float)maze_view_y+
+        ((1.0f-ny)*0.5f*(float)maze_view_h))/(float)screen_h)-1.0f;
+    out->x=gpu_fixed16(screen_nx);
+    out->y=gpu_fixed16(screen_ny);
     out->z=gpu_fixed16(0.5f);
     out->color=color;
     if(depth_out)*depth_out=depth;
@@ -715,6 +729,8 @@ extern "C" void maze_mainCRTStartup() {
     if(window_h<240)window_h=240;
     int window_x=(display_w-window_w)/2;
     int window_y=(display_h-window_h)/2;
+    maze_view_x=(u32)window_x;maze_view_y=(u32)window_y;
+    maze_view_w=(u32)window_w;maze_view_h=(u32)window_h;
     /* WS_OVERLAPPEDWINDOW: title bar, system menu, minimize/maximize,
        sizing border. Rendering remains clipped to this HWND's client area. */
     window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x00CF0000u,

@@ -1,10 +1,10 @@
 /*
- * SentinelOS 3D maze prototype.
+ * SentinelOS VirGL GPU triangle test.
  * Freestanding C++ PE: no CRT, exceptions, RTTI, or import libraries.
- * Draws perspective wall slices into the OS framebuffer using the existing
- * software 3D surface API. It probes SentinelOS' Vulkan loader at startup;
- * the current Vulkan runtime does not yet expose a swapchain/present path,
- * so this version does NOT claim Vulkan is the scene renderer.
+ * Submits a spinning, perspective-projected 3D triangle through the existing
+ * VirGL vertex-buffer and render-target resources. VirGL executes TGSI vertex
+ * and fragment shaders and rasterizes the triangle; CPU code animates the
+ * triangle's three input vertices. This is not a Vulkan graphics-pipeline test.
  */
 #include <stdint.h>
 #include "virgl_protocol.h"

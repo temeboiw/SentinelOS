@@ -573,10 +573,22 @@ static uint32_t g_virgl_last_submit_ok;
 static uint64_t sentinel_syscall2(uint64_t number,uint64_t arg0,uint64_t arg1) {
 #if defined(__x86_64__) || defined(_M_X64)
  uint64_t result;
- __asm__ volatile("syscall"
-   : "=a"(result)
-   : "a"(number),"D"(arg0),"S"(arg1)
-   : "rcx","r11","memory");
+ /*
+  * SentinelOS user programs enter the kernel through int 0x80. The SYSCALL
+  * instruction is not enabled by the current kernel entry setup (EFER.SCE),
+  * so emitting it here raises #UD inside vulkan.dll when Maze submits its
+  * first VirGL frame. Keep the DLL bridge on the same ABI as user apps.
+  */
+ __asm__ volatile(
+   "mov %[number], %%rax\n"
+   "mov %[arg0], %%rdi\n"
+   "mov %[arg1], %%rsi\n"
+   "xor %%rdx, %%rdx\n"
+   "int $0x80\n"
+   "mov %%rax, %[result]"
+   : [result]"=r"(result)
+   : [number]"r"(number),[arg0]"r"(arg0),[arg1]"r"(arg1)
+   : "rax","rdi","rsi","rdx","memory","cc");
  return result;
 #else
  /* The SentinelOS syscall ABI is x86-64 only. Host-side tests may compile

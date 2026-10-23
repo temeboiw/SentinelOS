@@ -1707,14 +1707,25 @@ void *CreateWindowExA(
      * WM_NCCREATE returning FALSE aborts creation; WM_CREATE returning -1 does
      * likewise, matching the Win32 contract. */
     typedef i64 (*U32_CREATEPROC)(void *,u32,u64,i64);
+    typedef struct {
+        void *create_param,*instance,*menu,*parent;
+        int cy,cx,y,x;
+        long style;
+        LPCSTR name,cls;
+        u32 exstyle;
+    } U32_CREATESTRUCTA;
+    U32_CREATESTRUCTA create_info={
+        param,inst,menu,parent,h,w,y,x,(long)style,
+        title?title:"",cls?cls:"",ex
+    };
     U32_CREATEPROC create_proc=(U32_CREATEPROC)u32_wnd_proc;
     if(create_proc) {
-        if(!create_proc((void *)1,0x0081u,0,(i64)param)) {
+        if(!create_proc((void *)1,0x0081u,0,(i64)&create_info)) {
             u32_child_destroy_all((void *)1);
             g_wnd.visible=0;
             return 0;
         }
-        if(create_proc((void *)1,0x0001u,0,(i64)param)==-1) {
+        if(create_proc((void *)1,0x0001u,0,(i64)&create_info)==-1) {
             u32_child_destroy_all((void *)1);
             g_wnd.visible=0;
             return 0;

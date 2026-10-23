@@ -169,6 +169,7 @@ static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_m
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
 static int g_start_hover=-1;
+static int g_start_scale_active, g_start_scale_percent=100, g_start_scale_x, g_start_scale_y;
 /* A non-desktop process can receive clicks over the shared taskbar. Publish
  * its freshly redrawn taskbar layer only when that process changes taskbar UI;
  * ordinary window repaints must never overwrite the desktop's taskbar/menu. */
@@ -368,6 +369,13 @@ static void putpx(int x, int y, u32 col) {
 
 static void fill(int x, int y, int w, int h, u32 col) {
     if (w <= 0 || h <= 0) return;
+    if(g_start_scale_active) {
+        int s=g_start_scale_percent;
+        x=g_start_scale_x+((x-g_start_scale_x)*s+50)/100;
+        y=g_start_scale_y+((y-g_start_scale_y)*s+50)/100;
+        w=(w*s+50)/100;h=(h*s+50)/100;
+        if(w<1)w=1;if(h<1)h=1;
+    }
     int x1=x+w, y1=y+h;
     if (u32_render_clip) {
         if (x < u32_clip_x0) x=u32_clip_x0;
@@ -532,6 +540,11 @@ static void draw_char(int x, int y, char ch, u32 col) {
 
 static void draw_text(int x, int y, const char *s, u32 col) {
     if (!s) return;
+    if(g_start_scale_active) {
+        int sc=g_start_scale_percent;
+        x=g_start_scale_x+((x-g_start_scale_x)*sc+50)/100;
+        y=g_start_scale_y+((y-g_start_scale_y)*sc+50)/100;
+    }
     for (; *s; s++) {
         int adv = u32_ttf_font.valid
             ? u32_ttf_draw(&u32_ttf_font,x,y+13,(unsigned char)*s,14,col)

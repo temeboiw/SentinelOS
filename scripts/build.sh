@@ -430,7 +430,10 @@ echo "  -> Vulkan CPU runtime regression tests"
 # jobs and must not reinterpret GNU ld flags as compiler arguments.
 HOST_CC="${HOST_CC:-cc}"
 need "$HOST_CC"
-"$HOST_CC" -O2 -Wall \
+# Termux proot exports TERMUX_EXEC__PROC_SELF_EXE, which can make Clang
+# mistake the proot executable for its internal -cc1 frontend. The host test
+# compiler may itself be a Clang wrapper, so remove the marker here too.
+env -u TERMUX_EXEC__PROC_SELF_EXE "$HOST_CC" -O2 -Wall \
   "$ROOT/tests/vulkan_test.c" \
   -o "$B/vulkan_test"
 "$B/vulkan_test"

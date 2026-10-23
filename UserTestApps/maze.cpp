@@ -247,22 +247,31 @@ extern "C" void maze_mainCRTStartup() {
     auto vkGetInstanceProcAddr=(VkGetInstanceProcAddr_t)get_proc("vulkan.dll","vkGetInstanceProcAddr");
     u32 vkVersion=0;
     int vulkan_available=0;
+    const char *vk_failure="loader entry points missing";
     if(vkCreateInstance&&vkGetInstanceProcAddr) {
         VkAppInfoMaze app={0,0,"SentinelOS Maze",1,"SentinelOS",1,(1u<<22)};
         VkInstanceInfoMaze ici={1,0,0,&app,0,0,0,0};
         void *instance=0;
-        if(vkCreateInstance(&ici,0,&instance)==0&&instance) {
+        int create_result=vkCreateInstance(&ici,0,&instance);
+        if(create_result==0&&instance) {
+            vk_failure="instance dispatch functions missing";
             auto vkEnumPhys=(VkEnumeratePhysicalDevices_t)vkGetInstanceProcAddr(instance,"vkEnumeratePhysicalDevices");
             auto vkQueueProps=(VkGetPhysicalDeviceQueueFamilyProperties_t)vkGetInstanceProcAddr(instance,"vkGetPhysicalDeviceQueueFamilyProperties");
             auto vkCreateDev=(VkCreateDevice_t)vkGetInstanceProcAddr(instance,"vkCreateDevice");
             auto vkGetQueue=(VkGetDeviceQueue_t)vkGetInstanceProcAddr(instance,"vkGetDeviceQueue");
             vkrt.destroyInstance=(VkDestroyInstance_t)vkGetInstanceProcAddr(instance,"vkDestroyInstance");
             if(vkEnumPhys&&vkQueueProps&&vkCreateDev&&vkGetQueue&&vkrt.destroyInstance) {
+                vk_failure="physical-device enumeration failed";
                 u32 count=0;
-                if(vkEnumPhys(instance,&count,0)==0&&count>0&&count<=8) {
+                int enum_result=vkEnumPhys(instance,&count,0);
+                if(enum_result==0&&count>0&&count<=8) {
                     void *physical[8]={0}; u32 available=count;
-                    if(vkEnumPhys(instance,&available,physical)==0&&available>0&&physical[0]) {
-                        u32 qcount=0; vkQueueProps(physical[0],&qcount,0);
+                    vk_failure="physical-device handles unavailable";
+                    enum_result=vkEnumPhys(instance,&available,physical);
+                    if(enum_result==0&&available>0&&physical[0]) {
+                        u32 qcount=0;
+                        vk_failure="no graphics queue family";
+                        vkQueueProps(physical[0],&qcount,0);
                         VkQueueFamilyMaze qprops[8]={{0}};
                         if(qcount>0&&qcount<=8) {
                             u32 qcap=qcount; vkQueueProps(physical[0],&qcap,qprops);
@@ -273,20 +282,28 @@ extern "C" void maze_mainCRTStartup() {
                                 VkQueueInfoMaze qci={2,0,0,qfamily,1,&priority};
                                 VkDeviceInfoMaze dci={3,0,0,1,&qci,0,0,0,0,0};
                                 void *device=0;
-                                if(vkCreateDev(physical[0],&dci,0,&device)==0&&device) {
+                                vk_failure="vkCreateDevice failed";
+                                int device_result=vkCreateDev(physical[0],&dci,0,&device);
+                                if(device_result==0&&device) {
                                     vkrt.instance=instance;vkrt.physical=physical[0];vkrt.device=device;
                                     vkrt.destroyDevice=(VkDestroyDevice_t)vkGetInstanceProcAddr(instance,"vkDestroyDevice");
                                     vkrt.waitIdle=(VkDeviceWaitIdle_t)vkGetInstanceProcAddr(instance,"vkDeviceWaitIdle");
+                                    vk_failure="device queue or required device functions missing";
                                     vkGetQueue(device,qfamily,0,&vkrt.queue);
                                     if(vkrt.queue&&vkrt.destroyDevice&&vkrt.waitIdle) {vkrt.ready=1;vulkan_available=1;}
                                     else { if(vkrt.destroyDevice)vkrt.destroyDevice(device,0);vkrt.device=0; }
                                 }
                             }
-                        }
-                    }
-                }
+                        } else vk_failure="invalid graphics queue family count";
+                    } else vk_failure="physical-device enumeration failed";
+                } else vk_failure="no Vulkan physical device";
             }
-            if(!vkrt.ready) { vkrt.destroyInstance(instance,0); vkrt.instance=0; }
+            if(!vkrt.ready) {
+                if(vkrt.destroyInstance)vkrt.destroyInstance(instance,0);
+                vkrt.instance=0;
+            }
+        } else {
+            vk_failure="vkCreateInstance failed";
         }
     }
     if(vkEnumerateVersion && vkEnumerateVersion(&vkVersion)!=0) vkVersion=0;
@@ -356,7 +373,7 @@ extern "C" void maze_mainCRTStartup() {
         draw_frame();
     }
     if(vulkan_available) print("maze.exe: Vulkan instance/device/graphics queue initialized; ray-cast scene still uses software renderer\n");
-    else print("maze.exe: Vulkan device initialization failed; ray-cast software fallback active\n");
+    else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("\n"); }
     Message msg{};
     u64 hz=tsc_frequency();
     u64 frame_cycles=hz/60ULL;

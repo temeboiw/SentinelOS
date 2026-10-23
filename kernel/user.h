@@ -204,7 +204,7 @@ static void up_load(Frame *f, int idx) {
 
     if (u->fresh || u->rip < 0x10000) {
         f->rip = u->entry ? u->entry : u->rip;
-        f->rsp = USER_STACK_TOP;
+        f->rsp = USER_STACK_TOP - sizeof(uint64_t);
         f->rflags = 0x202;
         f->rax = 0;
         up_clear_gpr(f);
@@ -1857,7 +1857,7 @@ static Frame *syscall_handler(Frame *f) {
             up_tab[up_n].alive = 1;
             up_tab[up_n].fresh = 1;
             up_tab[up_n].rip = entry;
-            up_tab[up_n].rsp = USER_STACK_TOP;
+            up_tab[up_n].rsp = USER_STACK_TOP - sizeof(uint64_t);
             up_tab[up_n].rflags = 0x202;
             up_tab[up_n].rax = 0;
             up_n++;
@@ -2703,7 +2703,7 @@ static void user_enter(BootInfo *bi) {
     up_tab[0].alive = 1;
     up_tab[0].fresh = 0;
     up_tab[0].rip = entry;
-    up_tab[0].rsp = USER_STACK_TOP;
+    up_tab[0].rsp = USER_STACK_TOP - sizeof(uint64_t);
     up_tab[0].rflags = 0x202;
     up_tab[0].rax = 0;
 
@@ -2716,7 +2716,7 @@ static void user_enter(BootInfo *bi) {
     uint64_t *s = (uint64_t *)ktop;
 
     *--s = USER_DS;
-    *--s = USER_STACK_TOP;
+    *--s = USER_STACK_TOP - sizeof(uint64_t);
     *--s = 0x202;
     *--s = USER_CS;
     *--s = entry;

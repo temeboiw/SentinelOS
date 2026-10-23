@@ -186,6 +186,7 @@ static int u32_show_cursor_count;
 /* SetCursor(NULL) explicitly hides the pointer until a non-NULL cursor is set. */
 static int u32_cursor_explicit_hidden;
 static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
+static void compose_region(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static int u32_is_desktop_window(void);
 static void u32_clear_layer(u32 *layer);
@@ -608,6 +609,16 @@ static void cursor_restore_fast(void) {
     cur_on=0;
 }
 
+/* Erase the pointer footprint from the authoritative scene whenever the
+ * pointer is hidden. Restoring saved-under pixels alone can resurrect stale
+ * window/menu pixels after another process has repainted the scanout. */
+static void cursor_clear_footprint(void) {
+    if (!cur_on || !g_scanout) return;
+    int x0=cur_ox, y0=cur_oy;
+    cursor_restore_fast();
+    compose_region(x0,y0,x0+16,y0+16);
+}
+
 static void cursor_restore(void) {
     if (!cur_on || !g_scanout) return;
 
@@ -766,7 +777,7 @@ static void cursor_save_draw(int x, int y) {
     /* ShowCursor(FALSE) hides the pointer for this process. Restore any
      * previously painted pixels before returning so no cursor trail remains. */
     if (u32_show_cursor_count < 0 || u32_cursor_explicit_hidden) {
-        if (cur_on) cursor_restore_fast();
+        cursor_clear_footprint();
         cur_on=0;
         return;
     }
@@ -1783,10 +1794,17 @@ static void on_click(int x, int y) {
             ax+=bw+6;
         }
         if(hit(x,y,8,ty+6,78,ty+38)) {
+            U32_START_LAYOUT menu_layout=u32_start_layout();
+            int damage_y=g_menu?menu_layout.y:(ty-368);
             u32_taskbar_dirty=1;
             g_menu=!g_menu;g_search_focus=0;g_start_hover=-1;
-            if(g_menu) {g_search_len=0;g_search_text[0]=0;}
-            compose_region(0,ty-368,(int)g_fw,(int)g_fh);
+            if(g_menu) {
+                g_search_len=0;g_search_text[0]=0;
+                menu_layout=u32_start_layout();
+                damage_y=menu_layout.y;
+            }
+            if(damage_y<0)damage_y=0;
+            compose_region(0,damage_y,(int)g_fw,(int)g_fh);
             return;
         }
     }
@@ -1831,7 +1849,7 @@ static void on_click(int x, int y) {
             static const char info[]="SentinelOS Settings: environment and display controls are being added.\n";
             sy3(SYS_Write,1,(u64)info,sizeof(info)-1);return;
         }
-        g_menu=0;g_search_focus=0;u32_taskbar_dirty=1;
+        g_menu=0;g_search_focus=0;g_start_hover=-1;u32_taskbar_dirty=1;
         compose_region(0,my,(int)g_fw,(int)g_fh);return;
     }
     g_menu=0;
@@ -2665,7 +2683,7 @@ __attribute__((dllexport)) int ShowCursor(BOOL show) {
     if (show) { if(u32_show_cursor_count<32767)u32_show_cursor_count++; }
     else { if(u32_show_cursor_count>-32768)u32_show_cursor_count--; }
     if(u32_show_cursor_count<0 || u32_cursor_explicit_hidden) {
-        if(cur_on) cursor_restore();
+        cursor_clear_footprint();
         cur_on=0;
         if(g_scanout) u32_flush_raw(cur_ox,cur_oy,16,16);
     } else {

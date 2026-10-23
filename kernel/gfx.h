@@ -477,32 +477,36 @@ static int gfx_present_virgl(void) {
 /* Issue a real VirGL clear, copy the rendered 3D target into the shared
  * scanout backing, then transfer/flush it through the 2D display resource.
  * This is a startup validation pattern, not a replacement scene renderer. */
+/* Submit a real VirGL clear, copy the 3D target to guest backing, then
+ * transfer and flush that backing through the existing 2D scanout resource.
+ * This validates clear/presentation only; it is not the Maze scene renderer. */
 static int gfx_virgl_clear_present_test(void) {
     if(!gfx_3d_ready || !gfx_width || !gfx_height)return 0;
-    /* Command lengths are payload dwords, matching VIRGL_CMD0 encoding. */
+    /* CREATE_OBJECT(SURFACE): 6 payload dwords; SET_FRAMEBUFFER_STATE: 3;
+       CLEAR: 7 (mask, RGBA, depth float, stencil). */
     uint32_t stream[19]={
-        0x00050801u, /* CREATE_OBJECT, SURFACE, 5 dwords */
-        1u, GFX_VIRGL_TARGET_ID, 2u, 0u, 0u, /* handle,res,format,level,layers */
-        0x00030004u, /* SET_FRAMEBUFFER_STATE, 3 dwords */
+        0x00060801u, /* CREATE_OBJECT, SURFACE, 6 dwords */
+        1u, GFX_VIRGL_TARGET_ID, 2u, 0u, 0u, 0u, /* handle,res,format,level,layers */
+        0x00030005u, /* SET_FRAMEBUFFER_STATE, 3 dwords */
         1u, 0u, 1u,  /* one color buffer, no depth, surface handle 1 */
-        0x00080007u, /* CLEAR, 8 dwords */
-        0x00000004u, /* PIPE_CLEAR_COLOR0 */
+        0x00070007u, /* CLEAR, 7 dwords */
+        0x00000001u, /* PIPE_CLEAR_COLOR0 */
         0x3D23D70Au, /* R = 0.04 */
         0x3DCCCCCDu, /* G = 0.10 */
         0x3F19999Au, /* B = 0.60 */
         0x3F800000u, /* A = 1.00 */
-        0x00000000u, 0x3FF00000u, /* double depth = 1.0 */
-        0u
+        0x3F800000u, /* depth = 1.0f */
+        0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {
-        DbgPrint("gfx: VirGL clear test failed during command submission/parser validation\n");
+        DbgPrint("gfx: VirGL clear test failed: host rejected command stream\\n");
         return 0;
     }
     if(!gfx_present_virgl()) {
-        DbgPrint("gfx: VirGL clear accepted but 3D-to-scanout transfer/presentation failed\n");
+        DbgPrint("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\\n");
         return 0;
     }
-    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\n");
+    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\\n");
     return 1;
 }
 static int gfx_create_resource(void) {

@@ -381,7 +381,8 @@ extern "C" void maze_mainCRTStartup() {
        accumulating into a progressively slower frame cadence. */
     u64 frame_cycles=hz/60ULL;
     if(!frame_cycles)frame_cycles=1;
-    u64 next_frame=read_tsc()+frame_cycles;
+    u64 last_frame=read_tsc();
+    u64 next_frame=last_frame+frame_cycles;
     for(;;) {
         /* Poll messages without blocking the simulation thread. */
         while(peek_message(&msg,nullptr,0,0,1)) {
@@ -395,7 +396,8 @@ extern "C" void maze_mainCRTStartup() {
          * a physical key is held, without depending on keyboard typematic. */
         u64 now=read_tsc();
         if(now>=next_frame) {
-            u64 elapsed=now-(next_frame-frame_cycles);
+            u64 elapsed=now-last_frame;
+            last_frame=now;
             /* Advance from the previous deadline, not from 'now'. If we fell
                far behind, drop missed presentation slots instead of spinning
                through a burst of stale frames. */

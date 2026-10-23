@@ -1415,6 +1415,21 @@ static void compose(void) {
             fill(x+4,y+3,w-8,1,0xFFFFFFFF);
             fill(x+3,y+35,w-6,1,0xFFFFFFFF);
             draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
+            /* Render the standard caption controls as part of the retained
+             * window frame, independent of child-HWND clipping or app menus. */
+            if(w>=112) {
+                int bx=x+w-56, by=y+5;
+                round_fill(bx,by,23,23,5,0xFF2B83A8);
+                gradient_v(bx+1,by+1,21,10,0xFFB9F4FC,0xFF55B7D9);
+                fill(bx+6,by+15,11,2,0xFFFFFFFF);
+                bx=x+w-29;
+                round_fill(bx,by,23,23,5,0xFFB74F69);
+                gradient_v(bx+1,by+1,21,10,0xFFFFD4DD,0xFFE56D83);
+                fill(bx+6,by+6,2,11,0xFFFFFFFF);
+                fill(bx+15,by+6,2,11,0xFFFFFFFF);
+                fill(bx+6,by+6,11,2,0xFFFFFFFF);
+                fill(bx+6,by+15,11,2,0xFFFFFFFF);
+            }
             round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
             fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
         } else {
@@ -1619,6 +1634,20 @@ static void on_click(int x, int y) {
     if (g_wnd.visible && !g_wnd.minimized) {
         int wx = g_wnd.x, wy = g_wnd.y;
         int ww = g_wnd.w;
+        if(!(u32_wnd_style&0x80000000u) && ww>=112 &&
+           y>=wy+5 && y<wy+28) {
+            if(x>=wx+ww-29 && x<wx+ww-5) {
+                SendMessageA((void *)1,0x0010u,0,0); /* WM_CLOSE */
+                DestroyWindow((void *)1);
+                return;
+            }
+            if(x>=wx+ww-56 && x<wx+ww-32) {
+                g_wnd.minimized=1;
+                (void)sy3(SYS_WmMin,1,0,0);
+                compose();
+                return;
+            }
+        }
         U32_CHILDWND *clicked_child=0;
         for(int ci=0;ci<64;ci++) {
             U32_CHILDWND *cc=&u32_child_windows[ci];
@@ -1841,12 +1870,7 @@ void *CreateWindowExA(
         u32_wnd_registered=1;
         int rect[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};
         (void)sy3(SYS_WmRect,(u64)rect,0,0);
-        if(!(style&0x80000000u)) {
-            (void)CreateWindowExA(0,"BUTTON","Minimize",0x50000000u,
-                g_wnd.w-56,4,24,24,(void *)1,(void *)0xF020u,inst,0);
-            (void)CreateWindowExA(0,"BUTTON","Close",0x50000000u,
-                g_wnd.w-28,4,24,24,(void *)1,(void *)0xF060u,inst,0);
-        }
+        /* Caption controls are painted and hit-tested by USER32 itself. */
         if(create_proc) {
             (void)create_proc((void *)1,0x0018u,1,0); /* WM_SHOWWINDOW */
             (void)create_proc((void *)1,0x0005u,0,((i64)(u32)h<<16)|(u32)w); /* WM_SIZE */
@@ -1864,6 +1888,16 @@ BOOL ShowWindow(void *hwnd, int cmd) {
     if(child){BOOL was=child->visible;child->visible=(cmd!=0);compose();return was;}
     if(hwnd!=(void*)1 || g_wnd.w<=2)return 0;
     BOOL was=g_wnd.visible&&!g_wnd.minimized;
+    /* Explorer's Desktop HWND is a shell/composition owner, not a normal
+     * visible top-level window. Keep it out of the window chrome and window
+     * manager while still allowing its text/taskbar calls to compose the shell. */
+    if(u32_is_desktop_window()) {
+        g_wnd.visible=0;
+        g_wnd.minimized=0;
+        u32_child_destroy_all((void *)1);
+        compose();
+        return was;
+    }
     if(cmd==0 || cmd==6 || cmd==2) {
         g_wnd.visible=1;g_wnd.minimized=1;
         (void)sy3(SYS_WmMin,1,0,0);

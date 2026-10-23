@@ -128,8 +128,11 @@ run_cc() {
     return 2
   fi
 
-  # Let Clang handle its own frontend invocation; do not manually invoke -cc1.
-  "$drv" "$@"
+  # Termux exports this marker inside proot. Clang then mistakenly selects
+  # the proot executable as its cc1 frontend and fails with "unknown option -cc1".
+  # Remove it for the compiler process and its children so Clang launches its
+  # actual frontend instead. Keep the user's shell environment unchanged.
+  env -u TERMUX_EXEC__PROC_SELF_EXE "$drv" "$@"
 }
 
 clang()   { run_cc "$CLANG_BIN" "$@"; }

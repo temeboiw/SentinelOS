@@ -169,7 +169,7 @@ static void report_frame_rate() {
     u64 elapsed=now-fps_window_start;
     if(elapsed<1000u)return;
     u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
-    print("maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\\n");
+    print("maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\n");
     fps_window_start=now;fps_window_frames=0;
 }
 static void draw_frame() {

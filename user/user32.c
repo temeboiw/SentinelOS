@@ -752,14 +752,11 @@ static unsigned int u32_auto_cursor_at(int x,int y) {
             if(y<wy+32&&x<wx+ww-60)return 32646u;
         }
     }
-    /* Desktop taskbar, Start button and Start-menu actions are clickable. */
+    /* Keep the arrow visible above the Start surface. The menu is scaled
+     * to the current display, so use the exact same scaled hit rectangles
+     * as painting/click dispatch instead of fixed 1024x768 coordinates. */
+    if(g_menu) return 32512u;
     if(y>=h-44)return 32649u;
-    if(g_menu) {
-        int my=h-48-360-4;if(my<4)my=4;
-        if(x>=18&&x<298&&y>=my+60&&y<my+92)return 32513u;
-        if(x>=18&&x<298&&y>=my+116&&y<my+218)return 32649u;
-        if(x>=18&&x<298&&y>=my+258&&y<my+298)return 32649u;
-    }
     return 32512u;
 }
 
@@ -2098,18 +2095,12 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_my = ev.y;
                 u32_mouse_record();
                 if(g_menu) {
-                    int hv=-1;
-                    int sx=(int)g_fw*100/1024,sy=(int)g_fh*100/768;
-                    int sc=sx<sy?sx:sy;if(sc>100)sc=100;if(sc<62)sc=62;
-                    int by=(int)g_fh-44-(360*sc+50)/100-4;if(by<4)by=4;
-                    int hx=8+((g_mx-8)*100)/sc,hy=by+((g_my-by)*100)/sc;
-                    if(hx>=20&&hx<152&&hy>=by+116&&hy<by+164)hv=1;
-                    else if(hx>=162&&hx<296&&hy>=by+116&&hy<by+164)hv=2;
-                    else if(hx>=20&&hx<152&&hy>=by+170&&hy<by+218)hv=3;
-                    else if(hx>=20&&hx<152&&hy>=by+258&&hy<by+298)hv=4;
-                    else if(hx>=162&&hx<296&&hy>=by+258&&hy<by+298)hv=5;
-                    else if(hx>=18&&hx<298&&hy>=by+310&&hy<by+356)hv=6;
-                    if(hv!=g_start_hover){g_start_hover=hv;compose_region(0,by,(int)g_fw,(int)g_fh);}
+                    int hv=u32_start_hover_at(g_mx,g_my);
+                    if(hv!=g_start_hover) {
+                        g_start_hover=hv;
+                        U32_START_LAYOUT sl=u32_start_layout();
+                        compose_region(0,sl.y,(int)g_fw,(int)g_fh);
+                    }
                 }
                 u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
 

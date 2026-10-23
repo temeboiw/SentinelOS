@@ -376,8 +376,12 @@ extern "C" void maze_mainCRTStartup() {
     else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("\n"); }
     Message msg{};
     u64 hz=tsc_frequency();
+    /* Keep a phase-locked 60 Hz deadline instead of resetting the clock
+       to the late wakeup time every frame. This prevents scheduler jitter from
+       accumulating into a progressively slower frame cadence. */
     u64 frame_cycles=hz/60ULL;
-    u64 last_frame=read_tsc();
+    if(!frame_cycles)frame_cycles=1;
+    u64 next_frame=read_tsc()+frame_cycles;
     for(;;) {
         /* Poll messages without blocking the simulation thread. */
         while(peek_message(&msg,nullptr,0,0,1)) {
@@ -390,9 +394,14 @@ extern "C" void maze_mainCRTStartup() {
         /* A make/break-aware kernel state keeps movement continuous while
          * a physical key is held, without depending on keyboard typematic. */
         u64 now=read_tsc();
-        if(now-last_frame>=frame_cycles) {
-            u64 elapsed=now-last_frame;
-            last_frame=now;
+        if(now>=next_frame) {
+            u64 elapsed=now-(next_frame-frame_cycles);
+            /* Advance from the previous deadline, not from 'now'. If we fell
+               far behind, drop missed presentation slots instead of spinning
+               through a burst of stale frames. */
+            next_frame+=frame_cycles;
+            if(now>=next_frame && now-next_frame>=frame_cycles*3ULL)
+                next_frame=now+frame_cycles;
             float dt=(float)elapsed/(float)hz;
             if(dt<0.0f)dt=0.0f;
             if(dt>0.05f)dt=0.05f;

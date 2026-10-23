@@ -19,7 +19,42 @@ enum VirglContextCommand : uint32_t {
     VIRGL_CCMD_CLEAR = 7,
     VIRGL_CCMD_DRAW_VBO = 8,
     VIRGL_CCMD_SET_SCISSOR_STATE = 15,
-    VIRGL_CCMD_BIND_SHADER = 31
+    VIRGL_CCMD_BLIT = 16,
+    VIRGL_CCMD_RESOURCE_COPY_REGION = 17,
+    VIRGL_CCMD_BIND_SAMPLER_STATES = 18,
+    VIRGL_CCMD_BEGIN_QUERY = 19,
+    VIRGL_CCMD_END_QUERY = 20,
+    VIRGL_CCMD_GET_QUERY_RESULT = 21,
+    VIRGL_CCMD_SET_POLYGON_STIPPLE = 22,
+    VIRGL_CCMD_SET_CLIP_STATE = 23,
+    VIRGL_CCMD_SET_SAMPLE_MASK = 24,
+    VIRGL_CCMD_SET_STREAMOUT_TARGETS = 25,
+    VIRGL_CCMD_SET_RENDER_CONDITION = 26,
+    VIRGL_CCMD_SET_UNIFORM_BUFFER = 27,
+    VIRGL_CCMD_SET_SUB_CTX = 28,
+    VIRGL_CCMD_CREATE_SUB_CTX = 29,
+    VIRGL_CCMD_DESTROY_SUB_CTX = 30,
+    VIRGL_CCMD_BIND_SHADER = 31,
+    VIRGL_CCMD_SET_TESS_STATE = 32,
+    VIRGL_CCMD_SET_MIN_SAMPLES = 33,
+    VIRGL_CCMD_SET_SHADER_BUFFERS = 34,
+    VIRGL_CCMD_SET_SHADER_IMAGES = 35,
+    VIRGL_CCMD_MEMORY_BARRIER = 36,
+    VIRGL_CCMD_LAUNCH_GRID = 37,
+    VIRGL_CCMD_SET_FRAMEBUFFER_STATE_NO_ATTACH = 38,
+    VIRGL_CCMD_TEXTURE_BARRIER = 39,
+    VIRGL_CCMD_SET_ATOMIC_BUFFERS = 40,
+    VIRGL_CCMD_SET_DEBUG_FLAGS = 41,
+    VIRGL_CCMD_GET_QUERY_RESULT_QBO = 42,
+    VIRGL_CCMD_TRANSFER3D = 43,
+    VIRGL_CCMD_END_TRANSFERS = 44,
+    VIRGL_CCMD_COPY_TRANSFER3D = 45,
+    VIRGL_CCMD_SET_TWEAKS = 46,
+    VIRGL_CCMD_CLEAR_TEXTURE = 47,
+    VIRGL_CCMD_PIPE_RESOURCE_CREATE = 48,
+    VIRGL_CCMD_PIPE_RESOURCE_SET_TYPE = 49,
+    VIRGL_CCMD_GET_MEMORY_INFO = 50,
+    VIRGL_CCMD_MAX = 51
 };
 
 enum VirglObjectType : uint32_t {
@@ -31,8 +66,35 @@ enum VirglObjectType : uint32_t {
     VIRGL_OBJECT_VERTEX_ELEMENTS = 5,
     VIRGL_OBJECT_SAMPLER_VIEW = 6,
     VIRGL_OBJECT_SAMPLER_STATE = 7,
-    VIRGL_OBJECT_SURFACE = 8
+    VIRGL_OBJECT_SURFACE = 8,
+    VIRGL_OBJECT_QUERY = 9,
+    VIRGL_OBJECT_STREAMOUT_TARGET = 10,
+    VIRGL_OBJECT_MAX = 11
 };
+
+enum VirglPrimitiveMode : uint32_t {
+    VIRGL_PRIM_POINTS = 0,
+    VIRGL_PRIM_LINES = 1,
+    VIRGL_PRIM_LINE_LOOP = 2,
+    VIRGL_PRIM_LINE_STRIP = 3,
+    VIRGL_PRIM_TRIANGLES = 4,
+    VIRGL_PRIM_TRIANGLE_STRIP = 5,
+    VIRGL_PRIM_TRIANGLE_FAN = 6
+};
+
+#define VIRGL_DRAW_VBO_DWORDS 12u
+#define VIRGL_DRAW_VBO_START 0u
+#define VIRGL_DRAW_VBO_COUNT 1u
+#define VIRGL_DRAW_VBO_MODE 2u
+#define VIRGL_DRAW_VBO_INDEXED 3u
+#define VIRGL_DRAW_VBO_INSTANCE_COUNT 4u
+#define VIRGL_DRAW_VBO_INDEX_BIAS 5u
+#define VIRGL_DRAW_VBO_START_INSTANCE 6u
+#define VIRGL_DRAW_VBO_PRIMITIVE_RESTART 7u
+#define VIRGL_DRAW_VBO_RESTART_INDEX 8u
+#define VIRGL_DRAW_VBO_MIN_INDEX 9u
+#define VIRGL_DRAW_VBO_MAX_INDEX 10u
+#define VIRGL_DRAW_VBO_COUNT_FROM_SO 11u
 
 #define VIRGL_CMD0(cmd, obj, payload_dwords) \
     ((uint32_t)(cmd) | ((uint32_t)(obj) << 8) | ((uint32_t)(payload_dwords) << 16))
@@ -92,10 +154,29 @@ static inline int virgl_stream_validate(const uint32_t *words,
         uint32_t object_type = (header >> 8) & 0xffu;
         uint32_t payload = header >> 16;
         (void)object_type;
-        if (opcode > 63u || payload > dword_count - at - 1u) return 0;
+        if (opcode >= VIRGL_CCMD_MAX || object_type >= VIRGL_OBJECT_MAX ||
+            payload > dword_count - at - 1u) return 0;
         at += 1u + payload;
     }
     return at == dword_count;
+}
+
+
+/* Encode a non-indexed DRAW_VBO packet (12 payload dwords). The reserved
+   fields are explicitly zeroed so callers cannot leak uninitialized state. */
+static inline int virgl_stream_draw_arrays(VirglStream *s, uint32_t start,
+                                           uint32_t count, uint32_t primitive,
+                                           uint32_t instances) {
+    if (!count || !instances || primitive > VIRGL_PRIM_TRIANGLE_FAN) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    const uint32_t p[VIRGL_DRAW_VBO_DWORDS] = {
+        start, count, primitive, 0u, instances, 0u, 0u, 0u, 0u, start,
+        start + count - 1u, 0u
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_DRAW_VBO, VIRGL_OBJECT_NULL,
+                                p, VIRGL_DRAW_VBO_DWORDS);
 }
 
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {

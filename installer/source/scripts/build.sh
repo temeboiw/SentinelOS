@@ -113,6 +113,16 @@ LLD_BIN="$(find_llvm_tool LLD_BIN)"
 # Termux/proot workaround: ask the real Clang driver for its job plan,
 # then execute only the cc1 compile command. Do not use eval on arbitrary
 # driver output and never run the host linker from this workaround.
+run_asm() {
+  local drv="$1" out line cmd
+  shift
+  out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
+  while IFS= read -r line; do
+    [[ "$line" == *'"-cc1"'* || "$line" == *'"-cc1as"'* ]] || continue
+    cmd="$(printf '%s\n' "$line" | sed -E "s|^ *\"[^\"]*\"| \"$drv\"|")"
+    eval "$cmd" </dev/null || return 1
+  done <<<"$out"
+}
 run_cc() {
   local drv="$1" out line command_line
   shift
@@ -129,9 +139,10 @@ run_cc() {
   # trampoline are actually produced; this still cannot invoke a linker.
   for arg in "$@"; do
     case "$arg" in
-      *.S|*.s|*.asm) "$drv" "$@"; return $? ;;
+      *.S|*.s|*.asm) run_asm "$drv" "$@"; return $? ;;
     esac
   done
+  "$drv" "$@"; return $?
   out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
   while IFS= read -r line; do
     # Clang prints one quoted command per line. Match an actual cc1 token,
@@ -451,7 +462,8 @@ HOST_CC="${HOST_CC:-cc}"
 need "$HOST_CC"
 "$HOST_CC" -O2 -Wall \
   "$ROOT/tests/vulkan_test.c" \
-  -o "$B/vulkan_test"
+  -c -o "$B/vulkan_test.o"
+cc "$B/vulkan_test.o" -lm -o "$B/vulkan_test"
 "$B/vulkan_test"
 
 

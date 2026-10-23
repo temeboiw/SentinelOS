@@ -752,13 +752,16 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
      * while the cursor was there. Then draw the cursor exactly once at its
      * new position and flush that footprint. */
     int rendered_x=cur_ox, rendered_y=cur_oy;
-    if (cur_on) {
-        cursor_restore();
-        u32_flush_graphics(rendered_x,rendered_y,16,16);
-    }
+    if (cur_on) cursor_restore_fast();
     cur_ox=x; cur_oy=y;
     cursor_save_draw(x,y);
-    u32_flush_graphics(x,y,16,16);
+    /* Present old and new cursor footprints together. Two separate flushes
+       expose a one-frame gap and make the pointer flicker under rapid motion. */
+    int x0=rendered_x<x?rendered_x:x, y0=rendered_y<y?rendered_y:y;
+    int x1=(rendered_x>x?rendered_x:x)+16, y1=(rendered_y>y?rendered_y:y)+16;
+    if(x0<0)x0=0;if(y0<0)y0=0;
+    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
+    if(x1>x0&&y1>y0)u32_flush_graphics(x0,y0,x1-x0,y1-y0);
     (void)old_x; (void)old_y;
 }
 
@@ -974,24 +977,61 @@ static void submit_search(void) {
 /*
  * Draw the taskbar and Start menu.
  */
+/* Convert the UTC-backed kernel clock to Europe/Helsinki. Finland uses
+ * EET (UTC+2) in winter and EEST (UTC+3) between the last Sundays of March
+ * and October; the DST transition instants are 01:00 UTC. */
+static int u32_weekday(int y,int m,int d) {
+    static const int offsets[12]={0,3,2,5,0,3,5,1,4,6,2,4};
+    if(m<3)y--;
+    return (y+y/4-y/100+y/400+offsets[m-1]+d)%7;
+}
+static int u32_month_days(int y,int m) {
+    static const int days[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+    if(m==2 && ((y%4==0 && y%100!=0)||y%400==0))return 29;
+    return (m>=1&&m<=12)?days[m-1]:30;
+}
+static void u32_helsinki_time(U32_SYSTEM_TIME *t) {
+    if(!t || t->month<1 || t->month>12 || t->day<1 || t->day>31)return;
+    int march_last=31-u32_weekday(t->year,3,31);
+    int october_last=31-u32_weekday(t->year,10,31);
+    int summer=0;
+    if(t->month>3 && t->month<10)summer=1;
+    else if(t->month==3 && (t->day>march_last ||
+            (t->day==march_last && t->hour>=1)))summer=1;
+    else if(t->month==10 && (t->day<october_last ||
+            (t->day==october_last && t->hour<1)))summer=1;
+    t->hour=(unsigned short)(t->hour+(summer?3:2));
+    if(t->hour>=24) {
+        t->hour=(unsigned short)(t->hour-24);
+        if(++t->day>u32_month_days(t->year,t->month)) {
+            t->day=1;
+            if(++t->month>12){t->month=1;++t->year;}
+        }
+        t->day_of_week=(unsigned short)u32_weekday(t->year,t->month,t->day);
+    }
+}
+
 static void draw_taskbar(void) {
     int h = (int)g_fh;
     int w = (int)g_fw;
     int ty = h - 48;
     if (ty < 0) ty = 0;
 
-    /* Flat Windows 10-inspired taskbar. Keep the clock zone reserved before
-       laying out app buttons so labels never draw underneath the date/time. */
-    fill(0, ty, w, h - ty, 0xFF202020);
-    fill(0, ty, w, 2, 0xFF0078D4);
+    /* Frosted, rounded Aero/modern taskbar. Keep a dark translucent base,
+       a soft top highlight and a reserved clock zone for stable layout. */
+    fill(0, ty-3, w, 3, 0x33243D50);
+    round_fill(0, ty, w, h-ty, 10, 0xD91B2B38);
+    fill(0, ty+14, w, h-ty-14, 0xD91B2B38);
+    fill(10, ty+1, w-20, 1, 0x99FFFFFF);
+    fill(0, ty+2, w, 1, 0x663B9FC2);
 
-    /* Start button and four-pane mark. */
-    fill(0, ty + 2, 48, h - ty - 2, 0xFF181818);
+    /* Start button and four-pane mark, with a quiet hover-ready glass tile. */
+    round_fill(5,ty+6,38,36,7,0x554BB7DA);
     fill(14,ty+15,8,7,0xFFFFFFFF); fill(24,ty+14,8,8,0xFFFFFFFF);
     fill(14,ty+24,8,7,0xFFFFFFFF); fill(24,ty+24,8,7,0xFFFFFFFF);
 
     /* A subtle separator distinguishes the running-app area. */
-    fill(48,ty+8,1,h-ty-16,0xFF383838);
+    fill(48,ty+9,1,h-ty-18,0x665E9BAD);
 
     g_tb_n = 0;
     int ax = 54;
@@ -1012,12 +1052,13 @@ static void draw_taskbar(void) {
     }
 
     /* Clock and date come from the RTC-backed kernel system-time service. */
-    fill(w > 100 ? w - 100 : 0, ty + 2, w > 100 ? 100 : w, h - ty - 2, 0xFF202020);
+    round_fill(w > 104 ? w - 104 : 0, ty + 5, w > 104 ? 99 : w, h - ty - 10, 7, 0x66506C7C);
     if (w >= 108) {
         U32_SYSTEM_TIME now;
         char clock_text[6] = {'-', '-', ':', '-', '-', 0};
         char date_text[11] = {'-', '-', '-', '-', '-', '-', '-', '-', '-', '-', 0};
         if (u32_get_system_time(&now)) {
+            u32_helsinki_time(&now);
             clock_text[0] = (char)('0' + (now.hour / 10) % 10);
             clock_text[1] = (char)('0' + now.hour % 10);
             clock_text[3] = (char)('0' + (now.minute / 10) % 10);

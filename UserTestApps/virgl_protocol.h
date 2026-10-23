@@ -320,6 +320,99 @@ static inline int virgl_stream_destroy_object(VirglStream *s,
                                 (uint8_t)object_type, &handle, 1u);
 }
 
+/* Batch 2, add-on 1/4: bind one or more Gallium vertex buffers.
+ * Each descriptor is {stride_bytes, byte_offset, resource_handle}; start_slot
+ * is the first vertex-buffer binding slot. */
+static inline int virgl_stream_set_vertex_buffers(VirglStream *s,
+                                                   uint32_t start_slot,
+                                                   const uint32_t *descriptors,
+                                                   uint32_t buffer_count) {
+    if (!s || !descriptors || !buffer_count || buffer_count > 64u ||
+        start_slot > 31u || buffer_count > (UINT16_MAX - 1u) / 3u) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    uint32_t payload_dwords = 1u + buffer_count * 3u;
+    if (s->failed || payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
+        s->failed = 1;
+        return 0;
+    }
+    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_SET_VERTEX_BUFFERS,
+                                         VIRGL_OBJECT_NULL, payload_dwords)) ||
+        !virgl_stream_word(s, start_slot)) return 0;
+    for (uint32_t i = 0; i < buffer_count * 3u; ++i)
+        if (!virgl_stream_word(s, descriptors[i])) return 0;
+    return 1;
+}
+
+/* Batch 2, add-on 2/4: create a vertex-element layout object.
+ * Each element is {source_offset, instance_divisor, vertex_buffer_index,
+ * pipe_format}; formats are Gallium PIPE_FORMAT_* numeric values. */
+static inline int virgl_stream_create_vertex_elements(VirglStream *s,
+                                                       uint32_t handle,
+                                                       const uint32_t *elements,
+                                                       uint32_t element_count) {
+    if (!s || !handle || !elements || !element_count || element_count > 64u ||
+        1u + element_count * 4u > UINT16_MAX) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    uint32_t payload_dwords = 1u + element_count * 4u;
+    if (s->failed || payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
+        s->failed = 1;
+        return 0;
+    }
+    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT,
+                                         VIRGL_OBJECT_VERTEX_ELEMENTS,
+                                         payload_dwords)) ||
+        !virgl_stream_word(s, handle)) return 0;
+    for (uint32_t i = 0; i < element_count * 4u; ++i)
+        if (!virgl_stream_word(s, elements[i])) return 0;
+    return 1;
+}
+
+/* Batch 2, add-on 3/4: create a TGSI shader object. shader_type follows
+ * Gallium PIPE_SHADER_* (vertex=0, fragment=1). tokens must be a valid TGSI
+ * token stream; this encoder does not compile GLSL or validate shader tokens. */
+static inline int virgl_stream_create_shader(VirglStream *s,
+                                              uint32_t handle,
+                                              uint32_t shader_type,
+                                              const uint32_t *tokens,
+                                              uint32_t token_count) {
+    if (!s || !handle || shader_type > 5u || !tokens || !token_count ||
+        token_count > UINT16_MAX - 4u) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    uint32_t payload_dwords = 4u + token_count;
+    if (s->failed || payload_dwords + 1u > s->capacity_dwords - s->used_dwords) {
+        s->failed = 1;
+        return 0;
+    }
+    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT,
+                                         VIRGL_OBJECT_SHADER, payload_dwords)) ||
+        !virgl_stream_word(s, handle) ||
+        !virgl_stream_word(s, shader_type) ||
+        !virgl_stream_word(s, 0u) ||
+        !virgl_stream_word(s, token_count)) return 0;
+    for (uint32_t i = 0; i < token_count; ++i)
+        if (!virgl_stream_word(s, tokens[i])) return 0;
+    return 1;
+}
+
+/* Batch 2, add-on 4/4: destroy a previously created Gallium object. */
+static inline int virgl_stream_destroy_object(VirglStream *s,
+                                               uint32_t object_type,
+                                               uint32_t handle) {
+    if (!s || object_type == VIRGL_OBJECT_NULL ||
+        object_type >= VIRGL_OBJECT_MAX || !handle) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_DESTROY_OBJECT,
+                                (uint8_t)object_type, &handle, 1u);
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

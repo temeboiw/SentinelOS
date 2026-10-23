@@ -180,6 +180,77 @@ static inline int virgl_stream_draw_arrays(VirglStream *s, uint32_t start,
                                 p, VIRGL_DRAW_VBO_DWORDS);
 }
 
+/* Add-on 1/4: create a Gallium state object. The object handle is the
+ * first payload dword, followed by the object's protocol-specific state. */
+static inline int virgl_stream_create_object(VirglStream *s,
+                                             uint32_t object_type,
+                                             uint32_t handle,
+                                             const uint32_t *state,
+                                             uint16_t state_dwords) {
+    if (object_type == VIRGL_OBJECT_NULL || object_type >= VIRGL_OBJECT_MAX ||
+        !handle || state_dwords == UINT16_MAX ||
+        (state_dwords && !state)) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    uint32_t payload[256];
+    if ((uint32_t)state_dwords + 1u > (uint32_t)(sizeof(payload)/sizeof(payload[0]))) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    payload[0] = handle;
+    for (uint32_t i = 0; i < state_dwords; ++i) payload[i + 1u] = state[i];
+    return virgl_stream_command(s, VIRGL_CCMD_CREATE_OBJECT,
+                                (uint8_t)object_type, payload,
+                                (uint16_t)(state_dwords + 1u));
+}
+
+/* Add-on 2/4: bind a previously created Gallium state object. */
+static inline int virgl_stream_bind_object(VirglStream *s,
+                                           uint32_t object_type,
+                                           uint32_t handle) {
+    if (object_type == VIRGL_OBJECT_NULL || object_type >= VIRGL_OBJECT_MAX ||
+        !handle) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_BIND_OBJECT,
+                                (uint8_t)object_type, &handle, 1u);
+}
+
+/* Add-on 3/4: bind a shader object to a pipeline stage.
+ * shader_type follows Gallium PIPE_SHADER_* (vertex=0, fragment=1). */
+static inline int virgl_stream_bind_shader(VirglStream *s,
+                                           uint32_t shader_handle,
+                                           uint32_t shader_type) {
+    if (!shader_handle || shader_type > 5u) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    const uint32_t payload[2] = { shader_handle, shader_type };
+    return virgl_stream_command(s, VIRGL_CCMD_BIND_SHADER,
+                                VIRGL_OBJECT_NULL, payload, 2u);
+}
+
+/* Add-on 4/4: set a Gallium viewport (index + scale[3] + translate[3]).
+ * Float parameters are passed as their IEEE-754 bit patterns to keep this
+ * header independent of libm and runtime conversion helpers. */
+static inline int virgl_stream_set_viewport_bits(VirglStream *s,
+                                                 uint32_t index,
+                                                 const uint32_t scale[3],
+                                                 const uint32_t translate[3]) {
+    if (!scale || !translate || index > 15u) {
+        if (s) s->failed = 1;
+        return 0;
+    }
+    const uint32_t payload[7] = {
+        index, scale[0], scale[1], scale[2],
+        translate[0], translate[1], translate[2]
+    };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_VIEWPORT_STATE,
+                                VIRGL_OBJECT_NULL, payload, 7u);
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

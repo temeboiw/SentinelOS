@@ -174,7 +174,7 @@ static void report_frame_rate() {
     u64 elapsed=now-fps_window_start;
     if(elapsed<1000u)return;
     u32 fps=(u32)(((u64)fps_window_frames*1000u)/elapsed);
-    print("maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\n");
+    print(gpu_scene_ready ? "maze.exe: measured VirGL GPU-span frame rate = " : "maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\n");
     fps_window_start=now;fps_window_frames=0;
 }
 /* GPU raster path: CPU computes one ray intersection per vertical strip;
@@ -183,10 +183,12 @@ static u32 float_bits(float f) { union { float f; u32 u; } v; v.f=f; return v.u;
 static int gpu_append_scissor_clear(VirglStream *s,u32 x,u32 y,u32 w,u32 h,
                                     float r,float g,float b) {
     if(!w||!h)return 1;
-    const u32 scissor[5]={0u,x,y,x+w,y+h};
+    /* VirGL packs two 16-bit coordinates into each scissor dword. */
+    const u32 scissor[3]={0u,(x&0xffffu)|((y&0xffffu)<<16),
+                           ((x+w)&0xffffu)|(((y+h)&0xffffu)<<16)};
     const u32 clear[7]={4u,float_bits(r),float_bits(g),float_bits(b),
                         float_bits(1.0f),float_bits(1.0f),0u};
-    return virgl_stream_command(s,VIRGL_CCMD_SET_SCISSOR_STATE,VIRGL_OBJECT_NULL,scissor,5) &&
+    return virgl_stream_command(s,VIRGL_CCMD_SET_SCISSOR_STATE,VIRGL_OBJECT_NULL,scissor,3) &&
            virgl_stream_command(s,VIRGL_CCMD_CLEAR,VIRGL_OBJECT_NULL,clear,7);
 }
 static void draw_frame_gpu() {
@@ -196,7 +198,13 @@ static void draw_frame_gpu() {
     const u32 status_h=h>=240u?18u:0u, view_h=h-status_h, horizon=view_h/2u;
     u32 words[1000]; VirglStream stream{}; virgl_stream_init(&stream,words,1000);
     const u32 fb[3]={1u,0u,1u};
-    if(!virgl_stream_command(&stream,VIRGL_CCMD_SET_FRAMEBUFFER_STATE,VIRGL_OBJECT_NULL,fb,3))return;
+    /* Scissored clears are ignored unless a rasterizer object enables S0.SCISSOR. */
+    const u32 rasterizer[9]={1u,(1u<<1)|(2u<<10)|(2u<<12)|(1u<<14),
+                             float_bits(1.0f),0u,0u,float_bits(1.0f),0u,0u,0u};
+    const u32 rasterizer_handle=1u;
+    if(!virgl_stream_command(&stream,VIRGL_CCMD_CREATE_OBJECT,VIRGL_OBJECT_RASTERIZER,rasterizer,9) ||
+       !virgl_stream_command(&stream,VIRGL_CCMD_BIND_OBJECT,VIRGL_OBJECT_RASTERIZER,&rasterizer_handle,1) ||
+       !virgl_stream_command(&stream,VIRGL_CCMD_SET_FRAMEBUFFER_STATE,VIRGL_OBJECT_NULL,fb,3))return;
     if(!gpu_append_scissor_clear(&stream,0,0,w,horizon,0.12f,0.15f,0.21f) ||
        !gpu_append_scissor_clear(&stream,0,horizon,w,view_h-horizon,0.12f,0.10f,0.08f))return;
     const float dx=fcos(camera_yaw),dy=fsin(camera_yaw);

@@ -576,6 +576,68 @@ static inline int virgl_stream_set_shader_buffers(VirglStream *s,
                                 (uint16_t)(2u + buffer_count * 3u));
 }
 
+/* Batch 7, add-on 1/4: save a command-stream position before building a
+ * multi-command state setup. UINT32_MAX means the stream is not checkpointable. */
+static inline uint32_t virgl_stream_checkpoint(const VirglStream *s) {
+    if (!s || s->failed || !s->words ||
+        s->used_dwords > s->capacity_dwords) return UINT32_MAX;
+    return s->used_dwords;
+}
+
+/* Batch 7, add-on 2/4: roll back to a prior checkpoint after a compound
+ * command sequence fails. Only checkpoints within the current used range
+ * are accepted; a rollback clears the stream's failed flag. */
+static inline int virgl_stream_rollback(VirglStream *s, uint32_t checkpoint) {
+    if (!s || !s->words || checkpoint > s->used_dwords ||
+        checkpoint > s->capacity_dwords) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    s->used_dwords = checkpoint;
+    s->failed = 0u;
+    return 1;
+}
+
+/* Batch 7, add-on 3/4: count complete commands without trusting a caller's
+ * cached length. Returns UINT32_MAX for malformed/truncated input. */
+static inline uint32_t virgl_stream_count_commands(const uint32_t *words,
+                                                   uint32_t dword_count) {
+    if (!words || !dword_count) return UINT32_MAX;
+    uint32_t at = 0u, count = 0u;
+    while (at < dword_count) {
+        const uint32_t header = words[at];
+        const uint32_t opcode = header & 0xffu;
+        const uint32_t object_type = (header >> 8) & 0xffu;
+        const uint32_t payload = header >> 16;
+        if (opcode >= VIRGL_CCMD_MAX || object_type >= VIRGL_OBJECT_MAX ||
+            payload > dword_count - at - 1u) return UINT32_MAX;
+        at += 1u + payload;
+        ++count;
+    }
+    return at == dword_count ? count : UINT32_MAX;
+}
+
+/* Batch 7, add-on 4/4: find the first command of an opcode. Returns its
+ * dword offset, or UINT32_MAX when absent or the stream is malformed. */
+static inline uint32_t virgl_stream_find_command(const uint32_t *words,
+                                                 uint32_t dword_count,
+                                                 uint32_t wanted_opcode) {
+    if (!words || !dword_count || wanted_opcode >= VIRGL_CCMD_MAX)
+        return UINT32_MAX;
+    uint32_t at = 0u;
+    while (at < dword_count) {
+        const uint32_t header = words[at];
+        const uint32_t opcode = header & 0xffu;
+        const uint32_t object_type = (header >> 8) & 0xffu;
+        const uint32_t payload = header >> 16;
+        if (opcode >= VIRGL_CCMD_MAX || object_type >= VIRGL_OBJECT_MAX ||
+            payload > dword_count - at - 1u) return UINT32_MAX;
+        if (opcode == wanted_opcode) return at;
+        at += 1u + payload;
+    }
+    return UINT32_MAX;
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

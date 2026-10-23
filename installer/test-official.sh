@@ -72,24 +72,14 @@ run_vm() {
       -monitor none -no-reboot -no-shutdown
     return
   fi
-  LOG="$HERE/artifacts/qemu-uefi-smoke.log"
-  echo "==> Launch UEFI VM for 45 seconds; serial output -> $LOG"
-  echo "This checks that QEMU/OVMF can start the ISO; it does not prove the installer UI or disk installation works."
-  set +e
-  QEMU_AUDIO_DRV=none timeout --signal=TERM 45s qemu-system-x86_64 \
+  echo "==> Boot SentinelOS installer ISO in an interactive UEFI VM"
+  echo "The VM uses a normal graphical display and stays running until you close it or press Ctrl+C."
+  echo "Serial console output is sent to this terminal; no smoke-test log file is created."
+  QEMU_AUDIO_DRV=none qemu-system-x86_64 \
     -machine q35,accel=tcg -cpu max -m 2048 \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
-    -cdrom "$ISO" -boot order=d -display none -serial "file:$LOG" \
+    -cdrom "$ISO" -boot order=d -serial stdio \
     -monitor none -no-reboot -no-shutdown
-  rc=$?
-  set -e
-  if [[ "$rc" -ne 124 && "$rc" -ne 0 && "$rc" -ne 143 ]]; then
-    echo "ERROR: QEMU exited unexpectedly with status $rc" >&2
-    [[ -f "$LOG" ]] && cat "$LOG" >&2
-    exit "$rc"
-  fi
-  echo "QEMU ran until the smoke-test timeout. Inspect the display manually with a graphical VM run before calling this a successful boot test."
-  echo "Serial log: $LOG"
 }
 case "$MODE" in
   unit) run_unit ;;

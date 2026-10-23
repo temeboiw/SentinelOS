@@ -183,6 +183,8 @@ static char g_search_text[32];
 static int g_search_len;
 static int cur_on, cur_ox=640, cur_oy=400;
 static int u32_show_cursor_count;
+/* SetCursor(NULL) explicitly hides the pointer until a non-NULL cursor is set. */
+static int u32_cursor_explicit_hidden;
 static void u32_repaint_scene_rect(int x0, int y0, int x1, int y1);
 static void u32_composite_layers(int x0, int y0, int x1, int y1);
 static int u32_is_desktop_window(void);
@@ -763,7 +765,7 @@ static unsigned int u32_auto_cursor_at(int x,int y) {
 static void cursor_save_draw(int x, int y) {
     /* ShowCursor(FALSE) hides the pointer for this process. Restore any
      * previously painted pixels before returning so no cursor trail remains. */
-    if (u32_show_cursor_count < 0) {
+    if (u32_show_cursor_count < 0 || u32_cursor_explicit_hidden) {
         if (cur_on) cursor_restore_fast();
         cur_on=0;
         return;
@@ -1603,15 +1605,16 @@ static void compose(void) {
         u32_clip_x0=saved_x0; u32_clip_y0=saved_y0;
         u32_clip_x1=saved_x1; u32_clip_y1=saved_y1;
     }
-    /* The layered compositor saves the exact pixels under its cursor
-     * overlay. Do not reset that state after a frame: mouse transitions use it
-     * to erase only the cursor that was actually painted. */
+    /* Keep the cursor as the final screen-space overlay, after every window,
+     * taskbar, Start-menu and partial repaint. Re-saving is safe when the
+     * layered path already painted it: cursor_save_draw first restores the
+     * previous footprint and then captures the newly composed underlay. */
     g_front=g_scanout; g_pitch=g_scan_pitch;
     u32_render_clip=0;
-    if (!layered) {
-        cur_ox=g_mx; cur_oy=g_my;
-        cursor_save_draw(g_mx,g_my);
-    }
+    cur_ox=g_mx; cur_oy=g_my;
+    cursor_save_draw(g_mx,g_my);
+    if(g_scanout && g_scan_pitch && g_fw && g_fh)
+        u32_flush_raw(g_mx,g_my,16,16);
     if(u32_force_full_compose) {
         u32_render_clip=force_saved_clip;
         u32_clip_x0=force_saved_x0; u32_clip_y0=force_saved_y0;
@@ -2655,8 +2658,12 @@ __attribute__((dllexport)) BOOL SetCursorPos(int x, int y) {
     g_mx=x; g_my=y; u32_mouse_record(); compose(); return 1;
 }
 __attribute__((dllexport)) int ShowCursor(BOOL show) {
-    if (show) u32_show_cursor_count++; else u32_show_cursor_count--;
-    compose(); return u32_show_cursor_count;
+    /* Win32 uses a display counter: negative means hidden. Calls are the only
+     * way to change visibility; repainting must never permanently lose it. */
+    if (show) { if(u32_show_cursor_count<0)u32_show_cursor_count++; else if(u32_show_cursor_count<32767)u32_show_cursor_count++; }
+    else { if(u32_show_cursor_count>-32768)u32_show_cursor_count--; }
+    compose();
+    return u32_show_cursor_count;
 }
 __attribute__((dllexport)) void *SetCapture(void *hwnd) {
     void *old=u32_capture; u32_capture=hwnd; return old;
@@ -3243,12 +3250,13 @@ typedef struct { unsigned int cbSize,dwTime; } U32_LASTINPUTINFO;
 __attribute__((dllexport)) BOOL GetLastInputInfo(U32_LASTINPUTINFO *info){if(!info||info->cbSize<sizeof(*info))return 0;info->dwTime=u32_last_input_time;return 1;}
 __attribute__((dllexport)) void *GetCursor(void){return u32_current_cursor;}
 typedef struct { unsigned int cbSize,flags; void *hCursor; U32_POINT ptScreenPos; } U32_CURSORINFO;
-__attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=1;info->hCursor=u32_current_cursor;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
+__attribute__((dllexport)) BOOL GetCursorInfo(U32_CURSORINFO *info){if(!info||info->cbSize<sizeof(U32_CURSORINFO))return 0;info->flags=(u32_show_cursor_count>=0&&!u32_cursor_explicit_hidden)?1u:0u;info->hCursor=u32_current_cursor;info->ptScreenPos.x=g_mx;info->ptScreenPos.y=g_my;return 1;}
 __attribute__((dllexport)) void *SetCursor(void *cursor){
     void *old=u32_current_cursor;
     if(!cursor || (((unsigned long long)cursor&0xFFFF0000ULL)==0x00330000ULL)) {
         u32_current_cursor=cursor;
-        if(!cursor || (((unsigned long long)cursor&0xFFFFu)==32512u))
+        u32_cursor_explicit_hidden=(cursor==0);
+        if(cursor && (((unsigned long long)cursor&0xFFFFu)==32512u))
             u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
         cursor_repaint_transition(g_mx,g_my,g_mx,g_my);
     }

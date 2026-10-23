@@ -452,6 +452,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             "taskbar.dll",
             "kernel32.dll",
             "user32.dll",
+            "vulkan.dll",
             "hello.exe",
             "cmd.exe",
             "msiexec.exe"

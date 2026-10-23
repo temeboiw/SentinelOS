@@ -19,7 +19,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34, SYS_PRESENT_LAYER=37, SYS_PRESENT_WINDOW_SURFACE=40 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34, SYS_PRESENT_LAYER=37 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -100,7 +100,6 @@ struct GraphicsBootInfo {
 };
 struct Rect { u32 x,y,w,h; };
 struct PresentLayerArgs { u64 pixels; u32 layer,x,y,w,h,width,height; };
-struct PresentWindowSurfaceArgs { u64 pixels; u32 x,y,w,h,width,height; };
 using PresentWindowSurface_t=BOOL(*)(const u32*,u32,u32,u32,u32,u32,u32);
 static PresentWindowSurface_t present_window_surface;
 static int layer_present_warned=0;

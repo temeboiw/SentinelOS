@@ -174,6 +174,7 @@ for src in \
   user/explorer.c \
   user/fileexplorer.c \
   user/cmd.c \
+  user/taskmgr.c \
   user/msiexec.c \
   UserTestApps/game.cpp \
   UserTestApps/maze.cpp
@@ -1695,6 +1696,18 @@ lld -flavor link \
   "/out:$SYS32/cmd.exe" \
   "$B/obj/cmd.o"
 
+echo "  -> taskmgr.exe"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/taskmgr.c" \
+  -o "$B/obj/taskmgr.o"
+
+lld -flavor link \
+  /subsystem:windows /entry:mainCRTStartup /nodefaultlib \
+  /fixed:no /base:0x40500000 \
+  "/out:$SYS32/taskmgr.exe" \
+  "$B/obj/taskmgr.o"
+
 echo "  -> msiexec.exe"
 
 clang "${USER_CFLAGS[@]}" \
@@ -1798,6 +1811,7 @@ for image in \
   user32.dll \
   vulkan.dll \
   cmd.exe \
+  taskmgr.exe \
   msiexec.exe
 do
   if [[ ! -s "$SYS32/$image" ]]; then
@@ -1819,6 +1833,7 @@ ls -lh \
   "$SYS32/user32.dll" \
   "$SYS32/vulkan.dll" \
   "$SYS32/cmd.exe" \
+  "$SYS32/taskmgr.exe" \\
   "$SYS32/msiexec.exe"
 
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"

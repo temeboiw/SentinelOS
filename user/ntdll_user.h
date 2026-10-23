@@ -11,7 +11,7 @@ enum {
     SYS_CreateProcess = 4, SYS_OpenFile = 5, SYS_ReadFile = 6,
     SYS_QueryDir = 7, SYS_MapFramebuffer = 8, SYS_GetProcAddress = 9,
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
-    SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
+    SYS_CreateThread = 13, SYS_Wait = 14, SYS_NtQueryProcessList = 41, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
     SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37
 };
@@ -102,6 +102,15 @@ static inline u64 NtInitializeGraphics(GfxBootInfo *out) {
     out->version = 1;
     return sy3(SYS_InitializeGraphics, (u64)out, 0, 0);
 }
+typedef struct {
+    u32 pid, parent_pid, state, reserved;
+    char image_name[64];
+} NT_PROCESS_SNAPSHOT;
+
+static inline u64 NtQueryProcessList(NT_PROCESS_SNAPSHOT *rows, u64 capacity) {
+    return sy3(SYS_NtQueryProcessList, (u64)rows, capacity, 0);
+}
+
 typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } NT_PRESENT_LAYER;
 static inline u64 NtPresentLayer(const NT_PRESENT_LAYER *layer) {
     return sy3(SYS_PresentLayer, (u64)layer, 0, 0);

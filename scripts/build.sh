@@ -1765,7 +1765,7 @@ fi
 
 ls -lh "$B/rootfs/game.exe"
 
-echo "  -> maze.exe (3D maze prototype; Vulkan runtime probe + software fallback)"
+echo "  -> maze.exe (VirGL shader-driven spinning 3D triangle; GPU-only)"
 
 # Maze uses floating-point raycasting and inline x87 trigonometry. The shared
 # user flags prohibit all FP/SIMD registers, which forces software helper calls.
@@ -1785,7 +1785,8 @@ lld -flavor link \
   /machine:x64 /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x42100000 \
   "/out:$B/rootfs/maze.exe" \
-  "$B/obj/maze.o"
+  "$B/obj/maze.o" \
+  "$B/obj/soft3d.o"
 
 if [[ ! -s "$B/rootfs/maze.exe" ]]; then
   echo "FATAL: maze.exe was not produced"

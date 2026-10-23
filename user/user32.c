@@ -1157,8 +1157,8 @@ static void draw_taskbar(void) {
         if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFF77D8FF);
         draw_text(mx+166,my+274,"Restart",COL_WARN);
         fill(mx+12,my+310,mw-24,1,0xFF3A5365);
-        draw_text(mx+16,my+329,"SYSTEM SETTINGS",COL_TEXT);
-        draw_text(mx+16,my+345,"ENVIRONMENT TOOLS NEXT",COL_MUTED);
+        if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,3,0xFF34708D);
+        draw_text(mx+16,my+329,"Settings / Help",COL_TEXT);
     }
 }
 
@@ -2075,6 +2075,16 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 g_mx = ev.x;
                 g_my = ev.y;
                 u32_mouse_record();
+                if(g_menu) {
+                    int hv=-1,by=(int)g_fh-44-360-4;if(by<4)by=4;
+                    if(g_mx>=20&&g_mx<152&&g_my>=by+116&&g_my<by+164)hv=1;
+                    else if(g_mx>=162&&g_mx<296&&g_my>=by+116&&g_my<by+164)hv=2;
+                    else if(g_mx>=20&&g_mx<152&&g_my>=by+170&&g_my<by+218)hv=3;
+                    else if(g_mx>=20&&g_mx<152&&g_my>=by+258&&g_my<by+298)hv=4;
+                    else if(g_mx>=162&&g_mx<296&&g_my>=by+258&&g_my<by+298)hv=5;
+                    else if(g_mx>=18&&g_mx<298&&g_my>=by+310&&g_my<by+356)hv=6;
+                    if(hv!=g_start_hover){g_start_hover=hv;compose_region(0,by,(int)g_fw,(int)g_fh);}
+                }
                 u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
 
                 msg->hwnd=g_wnd.visible?1u:0u;msg->message=(ev.type==3)?0x0201u:0x0200u;

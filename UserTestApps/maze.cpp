@@ -579,14 +579,11 @@ extern "C" void maze_mainCRTStartup() {
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
     (void)show_window(window_handle,1);
-    /* Hide the pointer while the game captures relative mouse movement. */
-    if(show_cursor) {
-        for(int i=0;i<8;i++) {
-            if(show_cursor(0)<0) break;
-        }
-    }
-    /* Confine pointer to the display while the game owns mouse-look. */
-    if(clip_cursor) { ClipRect clip={0,0,display_w,display_h}; (void)clip_cursor(&clip); }
+    /* SentinelOS does not yet provide reliable per-window mouse capture
+       and focus-loss notifications. Keep the desktop pointer usable rather
+       than hiding/clipping it globally when this fullscreen window is shown.
+       Mouse-look still consumes relative PS/2 deltas; do not warp the global
+       pointer to the screen center every frame. */
     if(update_window)(void)update_window(window_handle);
 
     if(!pixels) {
@@ -637,8 +634,9 @@ extern "C" void maze_mainCRTStartup() {
             const float tau=6.28318530718f;
             while(camera_yaw<0.0f)camera_yaw+=tau;
             while(camera_yaw>=tau)camera_yaw-=tau;
-            if(set_cursor_pos && screen_w && screen_h)
-                (void)set_cursor_pos((int)screen_w/2,(int)screen_h/2);
+            /* Do not SetCursorPos here: the current USER32 implementation
+               has no reliable capture/focus lifecycle, and warping the shared
+               pointer makes Explorer appear frozen while Maze is running. */
             if(keys&(1u<<4)) goto game_exit;
             float forward=0.0f,strafe=0.0f;
             if(keys&(1u<<0))forward+=1.0f;
@@ -666,9 +664,6 @@ game_exit:
         if(vkrt.destroyInstance) vkrt.destroyInstance(vkrt.instance,0);
         vkrt.ready=0;
     }
-    /* Do not leave the desktop pointer clipped/hidden after the game exits. */
-    if(clip_cursor) (void)clip_cursor(nullptr);
-    if(show_cursor) { for(int i=0;i<8;i++) if(show_cursor(1)>=0) break; }
     (void)syscall3(SYS_TERMINATE_PROCESS,0,0,0);
     for(;;)__asm__ volatile("pause");
 }

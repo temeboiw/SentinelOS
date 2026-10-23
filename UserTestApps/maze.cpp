@@ -89,16 +89,6 @@ struct GraphicsBootInfo {
 struct Rect { u32 x,y,w,h; };
 struct PresentLayerArgs { u64 pixels; u32 layer,x,y,w,h,width,height; };
 static int layer_present_warned=0;
-/* Publish the completed scanout image to the WM-owned per-process window layer. */
-static void present_maze_layer() {
-    if(!pixels||!screen_w||!screen_h)return;
-    PresentLayerArgs a={(u64)(uintptr_t)pixels,2u,0u,0u,screen_w,screen_h,screen_w,screen_h};
-    if(!syscall3(SYS_PRESENT_LAYER,(u64)(uintptr_t)&a,0,0) && !layer_present_warned) {
-        print("maze.exe: window-layer presentation rejected; game may remain hidden\n");
-        layer_present_warned=1;
-    }
-}
-
 static const int MW=16,MH=16;
 static const char maze[MH][MW+1]={
 "################",
@@ -160,6 +150,17 @@ static void rect(int x,int y,int w,int h,u32 c) {
     if(w<=0||h<=0)return;
     for(int yy=y;yy<y+h;yy++)for(int xx=x;xx<x+w;xx++)put_pixel(xx,yy,c);
 }
+
+/* Publish the completed scanout image to the WM-owned per-process window layer. */
+static void present_maze_layer() {
+    if(!pixels||!screen_w||!screen_h)return;
+    PresentLayerArgs a={(u64)(uintptr_t)pixels,2u,0u,0u,screen_w,screen_h,screen_w,screen_h};
+    if(!syscall3(SYS_PRESENT_LAYER,(u64)(uintptr_t)&a,0,0) && !layer_present_warned) {
+        print("maze.exe: window-layer presentation rejected; game may remain hidden\n");
+        layer_present_warned=1;
+    }
+}
+
 /* x87 trigonometry avoids a CRT/libm dependency in this freestanding PE. */
 static float fsin(float angle) {
     double a=(double)angle,r;

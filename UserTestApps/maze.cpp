@@ -522,19 +522,35 @@ extern "C" void maze_mainCRTStartup() {
     /* GPU-only mode: never silently substitute CPU rasterization. The
        VirGL span renderer submits GPU scissor/clear work and presents the
        GPU target; if the transport is unavailable, report that explicitly. */
-    int virgl_gpu_candidate=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
-                             info.virgl_buffer_va &&
-                             info.virgl_buffer_resource_id==S3D_VIRGL_VERTEX_BUFFER_ID &&
-                             info.virgl_buffer_size>=84u);
+    const int virgl_capable=(graphics_info_ok && (info.capabilities&(1u<<4))!=0);
+    const int virgl_buffer_ok=(virgl_capable && info.virgl_buffer_va &&
+                               info.virgl_buffer_resource_id==S3D_VIRGL_VERTEX_BUFFER_ID &&
+                               info.virgl_buffer_size>=84u);
+    int virgl_gpu_candidate=virgl_buffer_ok;
     gpu_scene_ready=virgl_gpu_candidate;
-    if(gpu_scene_ready)
+    if(gpu_scene_ready) {
         print("maze.exe: GPU-only mode; VirGL shader-driven spinning triangle selected\n");
-    else
-        print("maze.exe: ERROR: GPU-only mode requires a VirGL 3D target and vertex buffer\n");
-    /* Harmless NOP probe is retained only when GPU rendering cannot be used. */
+    } else {
+        if(!graphics_info_ok) {
+            print("maze.exe: GPU diagnostics: SYS_GRAPHICS_INFO failed; no GPU surface metadata\n");
+        } else {
+            print("maze.exe: GPU diagnostics: graphics info received; capabilities=");
+            print_hex((u64)info.capabilities);
+            print(" buffer_va=");print_hex(info.virgl_buffer_va);
+            print(" buffer_id=");print_hex((u64)info.virgl_buffer_resource_id);
+            print(" buffer_bytes=");print_hex((u64)info.virgl_buffer_size);
+            print("\n");
+            if(!virgl_capable)
+                print("maze.exe: reason: kernel did not initialize a VirGL 3D target (2D/VNC mode or host VirGL unavailable)\n");
+            else if(!virgl_buffer_ok)
+                print("maze.exe: reason: VirGL is advertised but the shared vertex buffer mapping/size is invalid\n");
+        }
+    }
+    /* Only probe transport after the kernel has positively advertised an
+       initialized VirGL context, target, and shared buffer. Do not report a
+       skipped probe as a command-submission failure in 2D-only mode. */
     int virgl_submit_ok=0;
-    if(graphics_info_ok && (info.capabilities&(1u<<4)) &&
-       info.virgl_buffer_va && info.virgl_buffer_size>=sizeof(u32)) {
+    if(virgl_buffer_ok) {
         u32 command_words[1]={0};
         VirglStream stream{};
         virgl_stream_init(&stream,command_words,1);
@@ -542,10 +558,8 @@ extern "C" void maze_mainCRTStartup() {
            virgl_stream_bytes(&stream)==sizeof(u32)) {
             virgl_submit_ok=(syscall3(SYS_SUBMIT_3D,(u64)command_words,sizeof(u32),0)!=0);
         }
-    }
-    if(!gpu_scene_ready) {
-        if(virgl_submit_ok) print("maze.exe: VirGL transport responds, but GPU-only rendering cannot start without a 3D target\n");
-        else print("maze.exe: GPU-only rendering unavailable: VirGL command submission failed\n");
+        if(!virgl_submit_ok)
+            print("maze.exe: reason: VirGL was initialized but its NOP command was rejected\n");
     }
     int display_w=screen_w?(int)screen_w:1280;
     int display_h=screen_h?(int)screen_h:800;

@@ -474,6 +474,37 @@ static int gfx_present_virgl(void) {
     if(!gfx_command(&tr,sizeof tr))return 0;
     return gfx_flush(0,0,gfx_width,gfx_height);
 }
+/* Issue a real VirGL clear, copy the rendered 3D target into the shared
+ * scanout backing, then transfer/flush it through the 2D display resource.
+ * This is a startup validation pattern, not a replacement scene renderer. */
+static int gfx_virgl_clear_present_test(void) {
+    if(!gfx_3d_ready || !gfx_width || !gfx_height)return 0;
+    /* Command lengths are payload dwords, matching VIRGL_CMD0 encoding. */
+    uint32_t stream[19]={
+        0x00050801u, /* CREATE_OBJECT, SURFACE, 5 dwords */
+        1u, GFX_VIRGL_TARGET_ID, 2u, 0u, 0u, /* handle,res,format,level,layers */
+        0x00030004u, /* SET_FRAMEBUFFER_STATE, 3 dwords */
+        1u, 0u, 1u,  /* one color buffer, no depth, surface handle 1 */
+        0x00080007u, /* CLEAR, 8 dwords */
+        0x00000004u, /* PIPE_CLEAR_COLOR0 */
+        0x3D23D70Au, /* R = 0.04 */
+        0x3DCCCCCDu, /* G = 0.10 */
+        0x3F19999Au, /* B = 0.60 */
+        0x3F800000u, /* A = 1.00 */
+        0x00000000u, 0x3FF00000u, /* double depth = 1.0 */
+        0u
+    };
+    if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {
+        DbgPrint("gfx: VirGL clear test failed during command submission/parser validation\n");
+        return 0;
+    }
+    if(!gfx_present_virgl()) {
+        DbgPrint("gfx: VirGL clear accepted but 3D-to-scanout transfer/presentation failed\n");
+        return 0;
+    }
+    DbgPrint("gfx: VirGL GPU clear + 3D-to-2D transfer + scanout flush succeeded\n");
+    return 1;
+}
 static int gfx_create_resource(void) {
     GfxCreate2D cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_2D;cr.resource_id=GFX_RESOURCE_ID;
@@ -532,6 +563,7 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
         } else {
             gfx_3d_ready=1;
             DbgPrint("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");
+            (void)gfx_virgl_clear_present_test();
         }
     } else {
         DbgPrint("gfx: VirGL is not negotiated; this VM is using a 2D-only VirtIO-GPU device. Start with SENTINELOS_DISPLAY=window SENTINELOS_VIRGL=1 bash scripts/run.sh and host OpenGL support.\n");

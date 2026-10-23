@@ -326,6 +326,8 @@ static int gfx_command(const void *request, uint32_t request_len) {
     return 1;
 }
 static int gfx_create_virgl_context(void) {
+    if(!gfx_gpu_ready || !gfx_common || !gfx_width || !gfx_height ||
+       gfx_width>GFX_GPU_MAX_W || gfx_height>GFX_GPU_MAX_H) return 0;
     struct {
         GfxCtrlHdr hdr;
         uint32_t nlen, context_init;
@@ -352,6 +354,11 @@ static int gfx_submit_virgl(const uint8_t *stream,uint32_t length) {
 }
 static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h);
 static int gfx_create_virgl_target(void) {
+    /* The 3D target aliases the framebuffer backing. Never expose an invalid
+       or undersized surface to the host GPU renderer. */
+    if(!gfx_surface_pa || !gfx_surface_bytes || !gfx_width || !gfx_height ||
+       gfx_surface_bytes<(uint64_t)gfx_width*gfx_height*4ULL ||
+       gfx_width>GFX_GPU_MAX_W || gfx_height>GFX_GPU_MAX_H) return 0;
     struct {
         GfxCtrlHdr hdr;
         uint32_t resource_id,target,format,bind,width,height,depth;
@@ -378,6 +385,8 @@ static int gfx_create_virgl_target(void) {
     return 1;
 }
 static int gfx_create_virgl_buffer(void) {
+    if(!gfx_gpu_ready || !gfx_common || !gfx_width || !gfx_height ||
+       gfx_width>GFX_GPU_MAX_W || gfx_height>GFX_GPU_MAX_H) return 0;
     gfx_virgl_buffer_pa=pmm_alloc_n(GFX_VIRGL_BUFFER_PAGES);
     if(!gfx_virgl_buffer_pa)return 0;
     for(uint64_t p=0;p<GFX_VIRGL_BUFFER_PAGES;p++) {
@@ -442,6 +451,8 @@ static int gfx_upload_virgl_buffer(uint32_t bytes) {
     return gfx_command(&tr,sizeof tr);
 }
 static int gfx_present_virgl(void) {
+    if(!gfx_surface_pa || !gfx_surface_bytes || !gfx_width || !gfx_height ||
+       gfx_surface_bytes<(uint64_t)gfx_width*gfx_height*4ULL) return 0;
     if(!gfx_3d_ready)return 0;
     struct {
         GfxCtrlHdr hdr;

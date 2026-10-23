@@ -1617,7 +1617,7 @@ static Frame *syscall_handler(Frame *f) {
            a.width>1920u||a.height>1080u||pixels>WM_COMP_MAX_PIXELS||
            a.width>(uint32_t)wm_tab[slot].w||a.height>(uint32_t)wm_tab[slot].h||
            !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
-           !wm_shared_width||!wm_shared_height||
+           !gfx_width||!gfx_height||
            a.x>=a.width||a.y>=a.height||!a.w||!a.h) {
             f->rax=0;return f;
         }
@@ -1626,6 +1626,10 @@ static Frame *syscall_handler(Frame *f) {
         if((uint64_t)a.width*a.height*4ULL>SIZE_MAX) { f->rax=0;return f; }
         KPROCESS *caller=MmCurrentProcess;
         if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
+        if(!wm_shared_ensure(gfx_width,gfx_height)) {
+            if(caller!=PspSystemProcess)MmSwitchToProcess(caller);
+            f->rax=0;return f;
+        }
         uint32_t *surface=wm_shared_local_windows[slot];
         if(!surface||wm_shared_local_width[slot]!=a.width||
            wm_shared_local_height[slot]!=a.height) {

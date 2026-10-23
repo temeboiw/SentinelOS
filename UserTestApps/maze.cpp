@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "virgl_protocol.h"
 #include "../user/soft3d.h"
+#include "../user/font8x8.h"
 
 using u64 = unsigned long long;
 using u32 = unsigned int;
@@ -166,6 +167,44 @@ static void present_maze_layer() {
     }
 }
 
+static void draw_status_text(int x,int y,const char *s,u32 color,int scale) {
+    for(;*s;s++,x+=8*scale) {
+        unsigned char ch=(unsigned char)*s;
+        if(ch>=128)continue;
+        for(int row=0;row<8;row++) {
+            unsigned char bits=font8x8_basic[ch][row];
+            for(int col=0;col<8;col++)
+                if(bits&(1u<<col))rect(x+col*scale,y+row*scale,scale,scale,color);
+        }
+    }
+}
+
+/* Diagnostic UI only: the 3D scene remains GPU-only. */
+static int gpu_status_screen_drawn=0;
+static void draw_gpu_unavailable_screen() {
+    if(gpu_status_screen_drawn||!pixels||!screen_w||!screen_h)return;
+    const u32 bg=rgb(12,18,31),panel=rgb(23,34,53),cyan=rgb(70,210,238);
+    for(u32 y=0;y<screen_h;y++)
+        for(u32 x=0;x<screen_w;x++)
+            pixels[(u64)y*pitch+x]=bg;
+    int pw=(int)screen_w-80,ph=230;
+    if(pw>760)pw=760;
+    if(pw<320)pw=(int)screen_w-24;
+    if(pw<1)pw=(int)screen_w;
+    if(ph>(int)screen_h-24)ph=(int)screen_h-24;
+    if(ph<80)ph=(int)screen_h;
+    int px=((int)screen_w-pw)/2,py=((int)screen_h-ph)/2;
+    rect(px,py,pw,ph,panel);
+    rect(px,py,pw,5,cyan);
+    draw_status_text(px+24,py+26,"GPU RENDERING UNAVAILABLE",rgb(245,248,255),2);
+    draw_status_text(px+24,py+82,"VIRGL 3D TARGET NOT ACTIVE",cyan,1);
+    draw_status_text(px+24,py+112,"START QEMU WITH HOST OPENGL",rgb(224,229,240),1);
+    draw_status_text(px+24,py+142,"VNC MODE WITH VIRGL=0 IS 2D ONLY",rgb(224,229,240),1);
+    draw_status_text(px+24,py+184,"NO CPU 3D FALLBACK IS USED",rgb(154,171,194),1);
+    present_maze_layer();
+    gpu_status_screen_drawn=1;
+}
+
 /* x87 trigonometry avoids a CRT/libm dependency in this freestanding PE. */
 static float fsin(float angle) {
     double a=(double)angle,r;
@@ -298,7 +337,10 @@ static void draw_frame_gpu() {
 static void draw_frame() {
     if(gpu_scene_ready){draw_frame_gpu();return;}
     if(!pixels||!screen_w||!screen_h)return;
-    if(!gpu_scene_ready)return; /* GPU-only: do not execute CPU raycaster. */
+    /* Keep the launched fullscreen window visible in a 2D-only VM. This is
+       a diagnostic screen, not a CPU-rendered substitute for the 3D scene. */
+    draw_gpu_unavailable_screen();
+    return;
     const int w=(int)screen_w,h=(int)screen_h;
     const int status_h=h>=240?18:0;
     const int view_h=h-status_h;

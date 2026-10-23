@@ -504,27 +504,29 @@ static inline int virgl_stream_texture_barrier(VirglStream *s) {
                                 VIRGL_OBJECT_NULL, NULL, 0u);
 }
 
-/* Batch 6, add-on 1/4: provide the four clip-plane coefficients in
- * Gallium order. Each value is an IEEE-754 float bit pattern. */
+/* Batch 6, add-on 1/4: provide all eight clip-plane vectors (x/y/z/w).
+ * Each of the 32 entries is an IEEE-754 float bit pattern. */
 static inline int virgl_stream_set_clip_state(VirglStream *s,
-                                              const uint32_t planes[4]) {
+                                              const uint32_t planes[32]) {
     if (!planes) {
         if (s) s->failed = 1u;
         return 0;
     }
     return virgl_stream_command(s, VIRGL_CCMD_SET_CLIP_STATE,
-                                VIRGL_OBJECT_NULL, planes, 4u);
+                                VIRGL_OBJECT_NULL, planes, 32u);
 }
 
-/* Batch 6, add-on 2/4: set tessellation default outer/inner levels.
- * Values are float bit patterns; the backend may ignore this on non-tess
- * pipelines. */
+/* Batch 6, add-on 2/4: set Gallium tessellation defaults and spacing/winding
+ * controls. The six protocol dwords must be pre-encoded for the active
+ * Gallium ABI; this function intentionally does not guess enum encodings. */
 static inline int virgl_stream_set_tess_state(VirglStream *s,
-                                              uint32_t outer_bits,
-                                              uint32_t inner_bits) {
-    const uint32_t payload[2] = { outer_bits, inner_bits };
+                                              const uint32_t state[6]) {
+    if (!state) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
     return virgl_stream_command(s, VIRGL_CCMD_SET_TESS_STATE,
-                                VIRGL_OBJECT_NULL, payload, 2u);
+                                VIRGL_OBJECT_NULL, state, 6u);
 }
 
 /* Batch 6, add-on 3/4: issue a Gallium memory barrier with caller-selected
@@ -540,34 +542,34 @@ static inline int virgl_stream_memory_barrier(VirglStream *s,
 }
 
 /* Batch 6, add-on 4/4: bind shader-buffer resources. Each entry is
- * {slot, resource_handle, offset_bytes, size_bytes}; size must be nonzero.
- * The protocol payload uses a count followed by four dwords per binding. */
+ * {offset_bytes, size_bytes, resource_handle}; slots are consecutive starting
+ * at start_slot, as required by the VirGL protocol's three-dword entry. */
 static inline int virgl_stream_set_shader_buffers(VirglStream *s,
                                                    uint32_t shader_type,
+                                                   uint32_t start_slot,
                                                    const uint32_t *entries,
                                                    uint32_t buffer_count) {
-    if (!s || shader_type > 5u || !entries || !buffer_count ||
-        buffer_count > 16u) {
+    if (!s || shader_type > 5u || start_slot > 31u ||
+        !entries || !buffer_count || buffer_count > 32u - start_slot) {
         if (s) s->failed = 1u;
         return 0;
     }
-    uint32_t payload[2u + 4u * 16u];
+    uint32_t payload[2u + 3u * 32u];
     payload[0] = shader_type;
-    payload[1] = buffer_count;
+    payload[1] = start_slot;
     for (uint32_t i = 0; i < buffer_count; ++i) {
-        const uint32_t *e = entries + i * 4u;
-        if (e[0] > 31u || !e[1] || !e[3] || (e[2] & 3u) || (e[3] & 3u)) {
+        const uint32_t *e = entries + i * 3u;
+        if (!e[1] || !e[2] || (e[0] & 3u) || (e[1] & 3u)) {
             s->failed = 1u;
             return 0;
         }
-        payload[2u + i * 4u] = e[0];
-        payload[3u + i * 4u] = e[1];
-        payload[4u + i * 4u] = e[2];
-        payload[5u + i * 4u] = e[3];
+        payload[2u + i * 3u] = e[0];
+        payload[3u + i * 3u] = e[1];
+        payload[4u + i * 3u] = e[2];
     }
     return virgl_stream_command(s, VIRGL_CCMD_SET_SHADER_BUFFERS,
                                 VIRGL_OBJECT_NULL, payload,
-                                (uint16_t)(2u + buffer_count * 4u));
+                                (uint16_t)(2u + buffer_count * 3u));
 }
 
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {

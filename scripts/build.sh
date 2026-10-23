@@ -114,46 +114,24 @@ LLD_BIN="$(find_llvm_tool LLD_BIN)"
 # then execute only the cc1 compile command. Do not use eval on arbitrary
 # driver output and never run the host linker from this workaround.
 run_cc() {
-  local drv="$1" out line command_line
+  local drv="$1" arg compile_only=0
   shift
-  local compile_only=0 arg found=0
+
   for arg in "$@"; do
-    case "$arg" in -c|-S|-E) compile_only=1 ;; esac
+    case "$arg" in
+      -c|-S|-E) compile_only=1 ;;
+    esac
   done
+
   if (( compile_only == 0 )); then
     echo "error: internal PE Clang wrapper received a link action; use the host compiler for native executables" >&2
     return 2
   fi
-  # Integrated-assembler inputs emit -cc1as, not -cc1. Run the real Clang
-  # driver directly for compile-only assembly so objects such as the SMP
-  # trampoline are actually produced; this still cannot invoke a linker.
-  for arg in "$@"; do
-    case "$arg" in
-      *.S|*.s|*.asm) "$drv" "$@"; return $? ;;
-    esac
-  done
-  out="$("$drv" -### "$@" 2>&1)" || { printf '%s\n' "$out" >&2; return 1; }
-  while IFS= read -r line; do
-    # Clang prints one quoted command per line. Match an actual cc1 token,
-    # not incidental text, and skip all ld/lld commands and linker flags.
-    [[ "$line" == *'"-cc1"'* ]] || continue
-    command_line="$(printf '%s\n' "$line" | sed -E "s#^[[:space:]]*(\"[^\"]*\"|[^[:space:]]+)#\"$drv\"#")"
-    [[ "$command_line" == *"--hash-style"* || "$command_line" == *"--build-id"* ||
-       "$command_line" == *"--eh-frame-hdr"* || "$command_line" == *"elf_x86_64"* ]] && {
-      echo "error: refusing to pass host linker flags to Clang cc1: $command_line" >&2
-      return 2
-    }
-    found=1
-    # shellcheck disable=SC2086
-    eval "$command_line" </dev/null || return 1
-  done <<<"$out"
-  if (( found == 0 )); then
-    printf 'error: no Clang cc1 compile command found for: %q ' "$drv" >&2
-    printf '%q ' "$@" >&2
-    printf '\nClang driver output was:\n%s\n' "$out" >&2
-    return 1
-  fi
+
+  # Let Clang handle its own frontend invocation; do not manually invoke -cc1.
+  "$drv" "$@"
 }
+
 clang()   { run_cc "$CLANG_BIN" "$@"; }
 clang++() { run_cc "$CLANGXX_BIN" "$@"; }
 lld()     { "$LLD_BIN" "$@"; }

@@ -7,6 +7,7 @@
  * so this version does NOT claim Vulkan is the scene renderer.
  */
 #include <stdint.h>
+#include "virgl_protocol.h"
 
 using u64 = unsigned long long;
 using u32 = unsigned int;
@@ -16,7 +17,7 @@ using LPCSTR = const char *;
 
 enum : u64 { SYS_TERMINATE_PROCESS=0, SYS_WRITE_FILE=1, SYS_GET_PROC_ADDRESS=9,
              SYS_GET_INPUT=10, SYS_GET_TICK_COUNT=24, SYS_GRAPHICS_INFO=32,
-             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39 };
+             SYS_FLUSH_GRAPHICS=33, SYS_YIELD=21, SYS_GAME_KEY_STATE=38, SYS_GAME_MOUSE_DELTA=39, SYS_SUBMIT_3D=34 };
 
 static u64 syscall3(u64 n,u64 a,u64 b,u64 c) {
     u64 r;
@@ -307,10 +308,26 @@ extern "C" void maze_mainCRTStartup() {
     /* Query the active display before creating the HWND so fullscreen
        geometry matches the real framebuffer instead of assuming 1280x800. */
     GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;
-    if(syscall3(SYS_GRAPHICS_INFO,(u64)&info,0,0)&&info.surface_va&&info.width&&info.height&&info.pitch>=info.width*4) {
+    u64 graphics_info_ok=syscall3(SYS_GRAPHICS_INFO,(u64)&info,0,0);
+    if(graphics_info_ok&&info.surface_va&&info.width&&info.height&&info.pitch>=info.width*4) {
         pixels=(u32*)(uintptr_t)info.surface_va;
         screen_w=info.width; screen_h=info.height; pitch=info.pitch/4;
     }
+    /* First exercise the real kernel-to-VirGL command path with a legal NOP.
+       This validates transport only; it is not a scene draw or GPU-render proof. */
+    int virgl_submit_ok=0;
+    if(graphics_info_ok && (info.capabilities&(1u<<4)) &&
+       info.virgl_buffer_va && info.virgl_buffer_size>=sizeof(u32)) {
+        u32 command_words[1]={0};
+        VirglStream stream{};
+        virgl_stream_init(&stream,command_words,1);
+        if(virgl_stream_command(&stream,VIRGL_CCMD_NOP,VIRGL_OBJECT_NULL,nullptr,0) &&
+           virgl_stream_bytes(&stream)==sizeof(u32)) {
+            virgl_submit_ok=(syscall3(SYS_SUBMIT_3D,(u64)command_words,sizeof(u32),0)!=0);
+        }
+    }
+    if(virgl_submit_ok) print("maze.exe: VirGL command submission smoke test accepted (NOP only; scene is not GPU-rendered)\n");
+    else print("maze.exe: VirGL command submission unavailable; no GPU scene-render claim\n");
     int display_w=screen_w?(int)screen_w:1280;
     int display_h=screen_h?(int)screen_h:800;
 

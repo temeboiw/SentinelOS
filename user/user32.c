@@ -1295,22 +1295,29 @@ static void compose(void) {
         int x = g_wnd.x, y = g_wnd.y;
         int w = g_wnd.w, h = g_wnd.h;
 
-        /* Soft shadow, rounded glass frame, blue aero caption. */
-        round_fill(x+4,y+7,w,h,11,0x55314F62);
-        round_fill(x,y,w,h,10,0xFF6BB5D0);
-        round_fill(x+1,y+1,w-2,h-2,9,0xFFEAF8FC);
-        round_fill(x+2,y+2,w-4,34,8,0xFF3B9CC6);
-        fill(x+2,y+20,w-4,16,0xFF3B9CC6);
-        gradient_v(x+3,y+3,w-6,11,0xFFB9F2FC,0xFF69C5E1);
-        fill(x+4,y+3,w-8,1,0xFFFFFFFF);
-        fill(x+3,y+35,w-6,1,0xFFFFFFFF);
+        /* Borderless popup/fullscreen windows must not inherit SentinelOS
+         * Aero chrome. Keep them as managed windows; do not destroy the HWND. */
+        int u32_borderless = (u32_wnd_style & 0x80000000u) != 0 ||
+                             (u32_wnd_style & 0x00C00000u) == 0;
+        if (!u32_borderless) {
+            /* Soft shadow, rounded glass frame, blue Aero caption. */
+            round_fill(x+4,y+7,w,h,11,0x55314F62);
+            round_fill(x,y,w,h,10,0xFF6BB5D0);
+            round_fill(x+1,y+1,w-2,h-2,9,0xFFEAF8FC);
+            round_fill(x+2,y+2,w-4,34,8,0xFF3B9CC6);
+            fill(x+2,y+20,w-4,16,0xFF3B9CC6);
+            gradient_v(x+3,y+3,w-6,11,0xFFB9F2FC,0xFF69C5E1);
+            fill(x+4,y+3,w-8,1,0xFFFFFFFF);
+            fill(x+3,y+35,w-6,1,0xFFFFFFFF);
+            draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
+            round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
+            fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
+        } else {
+            /* No title bar, border, or rounded inset in popup/borderless mode. */
+            fill(x,y,w,h,0xFF000000);
+        }
 
-        draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
-
-        round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
-        fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
-
-        u32_draw_child_windows();
+        if (!u32_borderless) u32_draw_child_windows();
 
         for (int i = 0; i < g_nlines; i++) {
             const char *s = g_lines[i];

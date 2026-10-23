@@ -39,7 +39,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -55,6 +55,27 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
         : [n]"r"(n), [a]"r"(a), [b]"r"(b), [c]"r"(c)
         : "rax","rdi","rsi","rdx","memory","cc");
     return r;
+}
+
+/* Nonstandard SentinelOS extension for apps that render into a window-local
+ * ARGB surface. Dirty coordinates are local to the surface, not screen-space.
+ * The kernel translates them using the registered window rectangle. */
+typedef struct {
+    u64 pixels;
+    u32 x, y, w, h, width, height;
+} U32_WINDOW_SURFACE_ARGS;
+
+__attribute__((dllexport))
+BOOL PresentWindowSurface(const u32 *pixels, u32 width, u32 height,
+                          u32 dirty_x, u32 dirty_y,
+                          u32 dirty_w, u32 dirty_h) {
+    if (!pixels || !width || !height || width > 1920u || height > 1080u ||
+        dirty_x >= width || dirty_y >= height || !dirty_w || !dirty_h)
+        return 0;
+    U32_WINDOW_SURFACE_ARGS args = {
+        (u64)pixels, dirty_x, dirty_y, dirty_w, dirty_h, width, height
+    };
+    return sy3(SYS_PresentWindowSurface, (u64)&args, 0, 0) != 0;
 }
 
 typedef struct {

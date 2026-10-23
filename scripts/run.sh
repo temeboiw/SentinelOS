@@ -73,9 +73,18 @@ if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
         echo "Error: SENTINELOS_VIRGL=1 requires SENTINELOS_DISPLAY=window and host OpenGL." >&2
         exit 1
     fi
-    DISPLAY_ARGS=(-display gtk,gl=on)
+    # GTK lacks OpenGL support in some QEMU builds; allow choosing SDL.
+    VIRGL_BACKEND="${SENTINELOS_VIRGL_BACKEND:-gtk}"
+    case "$VIRGL_BACKEND" in
+        gtk|sdl) DISPLAY_ARGS=(-display "$VIRGL_BACKEND,gl=on") ;;
+        *)
+            echo "Error: unsupported SENTINELOS_VIRGL_BACKEND: $VIRGL_BACKEND" >&2
+            echo "Choose gtk or sdl." >&2
+            exit 1
+            ;;
+    esac
     GPU_ARGS=(-vga none -device virtio-vga-gl)
-    echo "SentinelOS: requesting VirGL-capable VirtIO-VGA (host OpenGL required)"
+    echo "SentinelOS: requesting VirGL-capable VirtIO-VGA (backend=$VIRGL_BACKEND; host OpenGL required)"
 fi
 
 # Find OVMF firmware.

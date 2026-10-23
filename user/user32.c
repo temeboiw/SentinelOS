@@ -1706,17 +1706,25 @@ __attribute__((dllexport))
 BOOL ShowWindow(void *hwnd, int cmd) {
     U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
     if(child){BOOL was=child->visible;child->visible=(cmd!=0);compose();return was;}
-    (void)hwnd;
-    (void)cmd;
-
-    if (g_wnd.w > 2) {
-        g_wnd.visible = 1;
-        g_wnd.minimized = 0;
-        sy3(SYS_WmMin, 0, 0, 0);
+    if(hwnd!=(void*)1 || g_wnd.w<=2)return 0;
+    BOOL was=g_wnd.visible&&!g_wnd.minimized;
+    if(cmd==0 || cmd==6 || cmd==2) {
+        g_wnd.visible=1;g_wnd.minimized=1;
+        (void)sy3(SYS_WmMin,1,0,0);
+    } else {
+        g_wnd.visible=1;g_wnd.minimized=0;
+        if(cmd==3) {
+            if(!u32_normal_valid){u32_normal_x=g_wnd.x;u32_normal_y=g_wnd.y;u32_normal_w=g_wnd.w;u32_normal_h=g_wnd.h;u32_normal_valid=1;}
+            ensure_fb();g_wnd.x=0;g_wnd.y=0;g_wnd.w=(int)g_fw;g_wnd.h=(int)g_fh;
+            int r[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};(void)sy3(SYS_WmRect,(u64)r,0,0);
+        } else if(cmd==9 && u32_normal_valid) {
+            g_wnd.x=u32_normal_x;g_wnd.y=u32_normal_y;g_wnd.w=u32_normal_w;g_wnd.h=u32_normal_h;
+            int r[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};(void)sy3(SYS_WmRect,(u64)r,0,0);
+        }
+        (void)sy3(SYS_WmMin,0,0,0);
     }
-
     compose();
-    return 1;
+    return was;
 }
 
 __attribute__((dllexport))
@@ -1750,6 +1758,7 @@ BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
     return 1;
 }
 
+static int u32_normal_x, u32_normal_y, u32_normal_w, u32_normal_h, u32_normal_valid;
 static U32_RECT u32_invalid_rect;
 static int u32_update_pending;
 static BOOL u32_update_erase;
@@ -2271,6 +2280,26 @@ __attribute__((dllexport)) BOOL GetWindowRect(void *hwnd, U32_RECT *r) {
     if(child){if(!r||child->parent!=(void *)1)return 0;r->left=g_wnd.x+child->x;r->top=g_wnd.y+child->y;r->right=r->left+child->w;r->bottom=r->top+child->h;return 1;}
     if(hwnd!=(void *)1 || !r || !g_wnd.visible) return 0;
     r->left=g_wnd.x; r->top=g_wnd.y; r->right=g_wnd.x+g_wnd.w; r->bottom=g_wnd.y+g_wnd.h; return 1;
+}
+__attribute__((dllexport)) BOOL GetWindowPlacement(void *hwnd, U32_WINDOWPLACEMENT *p) {
+    if(hwnd!=(void*)1||!p||p->length<sizeof(U32_WINDOWPLACEMENT)||!IsWindow(hwnd))return 0;
+    p->flags=0;p->showCmd=g_wnd.minimized?2u:(u32_normal_valid&&g_wnd.x==0&&g_wnd.y==0&&g_wnd.w==(int)g_fw&&g_wnd.h==(int)g_fh?3u:1u);
+    p->ptMinPosition.x=p->ptMinPosition.y=-1;p->ptMaxPosition.x=p->ptMaxPosition.y=0;
+    p->rcNormalPosition.left=u32_normal_valid?u32_normal_x:g_wnd.x;
+    p->rcNormalPosition.top=u32_normal_valid?u32_normal_y:g_wnd.y;
+    p->rcNormalPosition.right=(u32_normal_valid?u32_normal_x:g_wnd.x)+(u32_normal_valid?u32_normal_w:g_wnd.w);
+    p->rcNormalPosition.bottom=(u32_normal_valid?u32_normal_y:g_wnd.y)+(u32_normal_valid?u32_normal_h:g_wnd.h);
+    return 1;
+}
+__attribute__((dllexport)) BOOL SetWindowPlacement(void *hwnd, const U32_WINDOWPLACEMENT *p) {
+    if(hwnd!=(void*)1||!p||p->length<sizeof(U32_WINDOWPLACEMENT)||!IsWindow(hwnd))return 0;
+    if(p->rcNormalPosition.right<=p->rcNormalPosition.left||p->rcNormalPosition.bottom<=p->rcNormalPosition.top)return 0;
+    u32_normal_x=p->rcNormalPosition.left;u32_normal_y=p->rcNormalPosition.top;
+    u32_normal_w=p->rcNormalPosition.right-p->rcNormalPosition.left;
+    u32_normal_h=p->rcNormalPosition.bottom-p->rcNormalPosition.top;u32_normal_valid=1;
+    if(p->showCmd==2u||p->showCmd==6u) return ShowWindow(hwnd,2);
+    if(p->showCmd==3u) return ShowWindow(hwnd,3);
+    return ShowWindow(hwnd,9);
 }
 __attribute__((dllexport)) BOOL IsWindow(void *hwnd) { return (hwnd==(void *)1 && g_wnd.visible) || u32_child_from_hwnd(hwnd)!=0; }
 __attribute__((dllexport)) BOOL IsWindowVisible(void *hwnd) { return IsWindow(hwnd) && !g_wnd.minimized; }

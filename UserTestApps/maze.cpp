@@ -338,7 +338,8 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    print("maze.exe: smooth mouse-look and ray-cast software scene active (Vulkan is loader-probed only)\n");
+    if(vulkan_available) print("maze.exe: Vulkan instance/device/graphics queue initialized; ray-cast scene still uses software renderer\\n");
+    else print("maze.exe: Vulkan device initialization failed; ray-cast software fallback active\\n");
     Message msg{};
     u64 hz=tsc_frequency();
     u64 frame_cycles=hz/60ULL;
@@ -392,6 +393,12 @@ extern "C" void maze_mainCRTStartup() {
         (void)syscall3(SYS_YIELD,0,0,0);
     }
 game_exit:
+    if(vkrt.ready) {
+        if(vkrt.waitIdle) (void)vkrt.waitIdle(vkrt.device);
+        if(vkrt.destroyDevice) vkrt.destroyDevice(vkrt.device,0);
+        if(vkrt.destroyInstance) vkrt.destroyInstance(vkrt.instance,0);
+        vkrt.ready=0;
+    }
     /* Do not leave the desktop pointer clipped/hidden after the game exits. */
     if(clip_cursor) (void)clip_cursor(nullptr);
     if(show_cursor) { for(int i=0;i<8;i++) if(show_cursor(1)>=0) break; }

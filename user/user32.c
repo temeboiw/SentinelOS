@@ -434,11 +434,44 @@ static void round_fill(int x,int y,int w,int h,int r,u32 c) {
         fill(x+inset,y+yy,w-2*inset,1,c);
     }
 }
+static int u32_isqrt(u64 n) {
+    if(!n)return 0;
+    u64 x=n, y=(x+1u)/2u;
+    while(y<x){x=y;y=(x+n/x)/2u;}
+    return (int)x;
+}
+static void u32_ellipse_fill(int cx,int cy,int rx,int ry,u32 color) {
+    if(rx<=0||ry<=0)return;
+    u64 rx2=(u64)rx*(u64)rx, ry2=(u64)ry*(u64)ry;
+    for(int dy=-ry;dy<=ry;dy++) {
+        u64 ay=(u64)(dy<0?-dy:dy);
+        if(ay>(u64)ry)continue;
+        u64 rem=ry2-ay*ay;
+        int span=u32_isqrt((rx2*rem)/ry2);
+        fill(cx-span,cy+dy,span*2+1,1,color);
+    }
+}
 static void aero_desktop(void) {
     gradient_v(0,0,(int)g_fw,(int)g_fh,0xFFDDF7FC,0xFF3C9DC5);
+    int h=(int)g_fh,w=(int)g_fw;
+    /* Sunlit coastal sky: layered warm/cool discs and distant shoreline.
+       The wallpaper is rasterized once into the static cache, so the extra
+       geometry never adds per-frame work or mouse-movement redraws. */
+    int sunx=w*3/4, suny=h*29/100, sunr=h/9;
+    if(sunr<24)sunr=24;if(sunr>105)sunr=105;
+    u32_ellipse_fill(sunx,suny,sunr+28,sunr+28,0xFF9DD9E9);
+    u32_ellipse_fill(sunx,suny,sunr+16,sunr+16,0xFFBDEAF0);
+    u32_ellipse_fill(sunx,suny,sunr+7,sunr+7,0xFFDDF5F4);
+    u32_ellipse_fill(sunx,suny,sunr,sunr,0xFFFFF3D5);
+    /* Soft distant hills frame the water without covering the bright sky. */
+    int first_x=0,last_x=w;
+    if(u32_render_clip) {
+        if(first_x<u32_clip_x0)first_x=u32_clip_x0;
+        if(last_x>u32_clip_x1)last_x=u32_clip_x1;
+        if(first_x<0)first_x=0;if(last_x>w)last_x=w;
+    }
     /* Soft, layered water/sky ribbons. Preserve each wave's absolute X so a
      * clipped repaint matches the cached full wallpaper exactly. */
-    int h=(int)g_fh,w=(int)g_fw;
     int base=h*2/3;
     int first_x=0,last_x=w;
     if(u32_render_clip) {
@@ -453,7 +486,20 @@ static void aero_desktop(void) {
         int wave1=base+curve/(w>0?w*14:1);
         int wave2=base+28+curve/(w>0?w*19:1);
         if(wave1>=0&&wave1<h)fill(x,wave1,1,h-wave1,color_mix(0xFF80D5E9,0xFF2B8CB9,(unsigned int)(wave1*100/(h?h:1))));
-        if(wave2>=0&&wave2<h)fill(x,wave2,1,h-wave2,0x302E9DC2);
+        if(wave2>=0&&wave2<h)fill(x,wave2,1,h-wave2,0xFF4DA9C4);
+        /* Layered coastal hills, using stable absolute X coordinates so
+           partial damage renders exactly the same pixels as a full frame. */
+        int dx_far=x-w*29/100;
+        int far_y=h*59/100+(dx_far*dx_far)/(w>0?w*11:1);
+        int dx_near=x-w*72/100;
+        int near_y=h*70/100+(dx_near*dx_near)/(w>0?w*20:1);
+        if(far_y<h)fill(x,far_y,1,h-far_y,0xFF287D91);
+        if(near_y<h)fill(x,near_y,1,h-near_y,0xFF15576F);
+        /* Thin sunlight streaks across the water add depth at no frame cost. */
+        if(x%37<2) {
+            int ry=base+18+(curve/(w>0?w*19:1));
+            if(ry<h-50)fill(x,ry,1,7,0xFFB0E7E8);
+        }
     }
     fill(0,0,w,2,0xDFFFFFFF);
 }

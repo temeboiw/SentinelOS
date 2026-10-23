@@ -251,6 +251,75 @@ static inline int virgl_stream_set_viewport_bits(VirglStream *s,
                                 VIRGL_OBJECT_NULL, payload, 7u);
 }
 
+/* Add-on 5/4: create a TGSI shader object from validated token dwords.
+ * token_dwords counts 32-bit TGSI words, not bytes. */
+static inline int virgl_stream_create_shader(VirglStream *s,
+                                             uint32_t handle,
+                                             uint32_t shader_type,
+                                             const uint32_t *tokens,
+                                             uint32_t token_dwords) {
+    if (!s || !handle || shader_type > 5u || !tokens || !token_dwords ||
+        token_dwords > 1024u ||
+        s->failed || !s->words ||
+        token_dwords > s->capacity_dwords ||
+        s->used_dwords > s->capacity_dwords ||
+        token_dwords + 4u > s->capacity_dwords - s->used_dwords) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    if (!virgl_stream_word(s, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT,
+                                         VIRGL_OBJECT_SHADER,
+                                         (uint16_t)(token_dwords + 3u))) ||
+        !virgl_stream_word(s, handle) ||
+        !virgl_stream_word(s, shader_type) ||
+        !virgl_stream_word(s, token_dwords)) return 0;
+    for (uint32_t i = 0; i < token_dwords; ++i)
+        if (!virgl_stream_word(s, tokens[i])) return 0;
+    return 1;
+}
+
+/* Add-on 6/4: bind one vertex buffer for DRAW_VBO.
+ * resource_id is a VirGL resource handle, not a host pointer. */
+static inline int virgl_stream_set_vertex_buffer(VirglStream *s,
+                                                  uint32_t resource_id,
+                                                  uint32_t stride,
+                                                  uint32_t offset) {
+    if (!resource_id || !stride) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[4] = { 1u, resource_id, stride, offset };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_VERTEX_BUFFERS,
+                                VIRGL_OBJECT_NULL, payload, 4u);
+}
+
+/* Add-on 7/4: configure one color attachment and an optional depth surface.
+ * Surface handles must refer to surfaces already created by the caller. */
+static inline int virgl_stream_set_framebuffer(VirglStream *s,
+                                                uint32_t color_surface,
+                                                uint32_t depth_surface) {
+    if (!color_surface) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    const uint32_t payload[3] = { 1u, depth_surface, color_surface };
+    return virgl_stream_command(s, VIRGL_CCMD_SET_FRAMEBUFFER_STATE,
+                                VIRGL_OBJECT_NULL, payload, 3u);
+}
+
+/* Add-on 8/4: destroy a previously created Gallium object handle. */
+static inline int virgl_stream_destroy_object(VirglStream *s,
+                                               uint32_t object_type,
+                                               uint32_t handle) {
+    if (object_type == VIRGL_OBJECT_NULL || object_type >= VIRGL_OBJECT_MAX ||
+        !handle) {
+        if (s) s->failed = 1u;
+        return 0;
+    }
+    return virgl_stream_command(s, VIRGL_CCMD_DESTROY_OBJECT,
+                                (uint8_t)object_type, &handle, 1u);
+}
+
 static inline uint32_t virgl_stream_bytes(const VirglStream *s) {
     if (!s || s->failed || !s->words ||
         !virgl_stream_validate(s->words, s->used_dwords)) return 0;

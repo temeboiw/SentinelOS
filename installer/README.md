@@ -1,30 +1,25 @@
 # SentinelOS V.4 [Beta] installer
 
-All installer-specific code and generated output stays under `installer/`; the original root-level source files are not edited.
+The installer is part of the SentinelOS repository and uses the **same build artifacts** as the OS. Installer-specific setup applications and ISO packaging scripts remain in `installer/`, but there is no separate OS source snapshot build.
 
-## Build the ISO
+## Build the OS and installer ISO together
 
-Use a **native x86-64 Ubuntu/Debian Linux environment** (not Android/Termux Clang). Install the build tools:
+Use a native x86-64 Linux environment with the required build tools installed. For example:
 
 ```sh
 apt update
 apt install clang lld llvm python3 xorriso dosfstools mtools qemu-utils fdisk e2fsprogs
 ```
 
-Set `EDK2` to an edk2 checkout with `MdePkg/Include`, then from the repository root run:
+From the repository root, run the single build command:
 
 ```sh
-export EDK2=/path/to/edk2
-bash installer/build-iso.sh
+bash scripts/build.sh
 ```
 
-Create a disposable sparse 1 GiB raw disk for the installer VM (this creates a local file; it does not touch physical disks):
+The build compiles SentinelOS, stages the installer payload from that build, creates the UEFI El Torito/hybrid ISO, and validates the final media. It does not launch QEMU. The ISO and SHA-256 sidecar are written to `installer/artifacts/SentinelOS-V4-BETA.iso` and `installer/artifacts/SentinelOS-V4-BETA.iso.sha256`.
 
-```sh
-bash installer/create-test-disk.sh
-```
-
-This runs the isolated source build, links installer-specific `instlr.exe`, `screen.exe`, and installer `smss.exe`, creates and verifies `artifacts/esp.spf` and `artifacts/system.spf`, masters a UEFI El Torito/hybrid ISO, then smoke-checks the final ISO and package payloads. The intended output is `installer/artifacts/SentinelOS-V4-BETA.iso` with a SHA-256 sidecar.
+For packaging-only iteration after a successful OS build, `bash installer/build-iso.sh` remains available as a developer subcommand; it does not build a second OS source snapshot. QEMU-based boot smoke tests are optional and separate from building the ISO.
 
 To run individual stages:
 

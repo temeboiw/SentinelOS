@@ -1,6 +1,7 @@
 #pragma once
 // Shared by bootx64.c, bootuni.c and loadufi.c (each is its own freestanding EFI app).
 #include <Uefi.h>
+#include <Protocol/GraphicsOutput.h>
 
 static EFI_SYSTEM_TABLE  *st;
 static EFI_BOOT_SERVICES *bs;

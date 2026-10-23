@@ -77,8 +77,8 @@ static void redraw_desktop(void **hwnd) {
 
     if (pText) {
         pText(0, 0, 4, "Welcome to SentinelOS", -1);
-        pText(0, 0, 5, "A fresh breeze for your desktop", -1);
-        pText(0, 0, 7, "Search apps below: type cmd and press Enter", -1);
+        pText(0, 0, 5, "Your workspace, ready when you are", -1);
+        pText(0, 0, 7, "Search apps below  |  type cmd and press Enter", -1);
         pText(0, 0, 8, "Search: ", -1);
     }
 
@@ -172,7 +172,7 @@ static void handle_search_key(MSG *msg, void **hwnd) {
 }
 
 void explorer_main(void) {
-    NtWriteConsole("explorer: Frutiger Aero desktop shell\n");
+    NtWriteConsole("explorer: modern glass desktop shell\n");
 
     char u32n[] = {
         'u','s','e','r','3','2','.','d','l','l',0
@@ -202,7 +202,7 @@ void explorer_main(void) {
        the wallpaper or spinning a permanent polling loop. */
     if (pSetTimer && hwnd) (void)pSetTimer(hwnd, 1, 60000, 0);
 
-    NtWriteConsole("explorer: glass desktop ready; search supports cmd\n");
+    NtWriteConsole("explorer: modern desktop ready; search supports cmd\n");
 
     MSG msg;
 

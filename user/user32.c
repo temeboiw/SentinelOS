@@ -2034,7 +2034,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         }
 
 
-                        compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh-48);
+                        compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh);
                         continue;
                     }
 
@@ -2049,7 +2049,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_search_text[g_search_len++] = key;
                         g_search_text[g_search_len] = 0;
 
-                        compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh-48);
+                        compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh);
                     }
 
                     continue;

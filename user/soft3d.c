@@ -309,16 +309,15 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
     ok &= s3d_vb_bind_shader(&q,12,1);
 
     /* CREATE_OBJECT(SURFACE): handle, resource, format, level,
-       first_layer, last_layer (six payload dwords). */
-    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_SURFACE,6);
+       packed first/last layer (five payload dwords). */
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_SURFACE,5);
     ok &= s3d_vb_word(&q,10);ok &= s3d_vb_word(&q,S3D_VIRGL_RENDER_TARGET_ID);
-    ok &= s3d_vb_word(&q,2);ok &= s3d_vb_word(&q,0);
-    ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
+    ok &= s3d_vb_word(&q,2);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
 
-    /* Vertex-element state starts with the element count, followed by four
-       dwords per element: offset, instance divisor, buffer slot, format. */
-    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_VERTEX_ELEMENTS,10);
-    ok &= s3d_vb_word(&q,13);ok &= s3d_vb_word(&q,2);
+    /* Two vertex elements: each is offset, instance divisor, buffer slot,
+       source format. The command has no separate element-count dword. */
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_CREATE_OBJECT,S3D_VIRGL_OBJECT_VERTEX_ELEMENTS,9);
+    ok &= s3d_vb_word(&q,13);
     ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
     ok &= s3d_vb_word(&q,S3D_VIRGL_FORMAT_R32G32B32_FLOAT);
     ok &= s3d_vb_word(&q,12);ok &= s3d_vb_word(&q,0);ok &= s3d_vb_word(&q,0);
@@ -362,13 +361,11 @@ int S3DDrawTriangleVirGL(const S3D_SURFACE *surface,const S3D_VERTEX *a,
     uint32_t hh=s3d_uint_to_float_bits(surface->height/2u);
     ok &= s3d_vb_word(&q,hw);ok &= s3d_vb_word(&q,hh);ok &= s3d_vb_word(&q,0x3F000000u);
     ok &= s3d_vb_word(&q,hw);ok &= s3d_vb_word(&q,hh);ok &= s3d_vb_word(&q,0x3F000000u);
-    /* SET_VERTEX_BUFFERS: count, then {slot, resource, stride, offset}. */
-    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VERTEX_BUFFERS,0,5);
-    ok &= s3d_vb_word(&q,1); /* one buffer */
-    ok &= s3d_vb_word(&q,0); /* slot */
-    ok &= s3d_vb_word(&q,S3D_VIRGL_VERTEX_BUFFER_ID);
+    /* SET_VERTEX_BUFFERS: stride, byte offset, resource handle. */
+    ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_SET_VERTEX_BUFFERS,0,3);
     ok &= s3d_vb_word(&q,28); /* 3 floats + 4 floats */
     ok &= s3d_vb_word(&q,0);  /* byte offset */
+    ok &= s3d_vb_word(&q,S3D_VIRGL_VERTEX_BUFFER_ID);
     ok &= s3d_vb_cmd(&q,S3D_VIRGL_CMD_DRAW_VBO,0,12);
     /* DRAW_VBO is exactly 12 payload dwords. For this non-indexed triangle:
        start=0, count=3, mode=TRIANGLES, indexed=0, instances=1,

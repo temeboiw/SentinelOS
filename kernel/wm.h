@@ -168,27 +168,21 @@ static int wm_get_z_order(int rank, WmEntry *out) {
         if (wm_tab[i].alive && !wm_tab[i].minimized) count++;
     if (rank >= count) return 0;
 
-    for (int wanted = 0; wanted < count; wanted++) {
-        int best = -1;
-        unsigned long long best_z = ~0ULL;
-        for (int i = 0; i < WM_MAX; i++) {
-            WmEntry *e = &wm_tab[i];
-            if (!e->alive || e->minimized) continue;
-            int already_before = 0;
-            for (int j = 0; j < WM_MAX; j++) {
-                WmEntry *p = &wm_tab[j];
-                if (p->alive && !p->minimized &&
-                    (p->z < e->z || (p->z == e->z && j < i)))
-                    already_before++;
-            }
-            if (already_before == wanted &&
-                (best < 0 || e->z < best_z)) {
-                best = i;
-                best_z = e->z;
-            }
+    /* Rank each candidate by the number of live entries before it. This is
+     * O(WM_MAX^2), deterministic for equal z values, and copies the result so
+     * callers never hold a pointer into the mutable window table. */
+    for (int i = 0; i < WM_MAX; i++) {
+        WmEntry *e = &wm_tab[i];
+        if (!e->alive || e->minimized) continue;
+        int before = 0;
+        for (int j = 0; j < WM_MAX; j++) {
+            WmEntry *p = &wm_tab[j];
+            if (p->alive && !p->minimized &&
+                (p->z < e->z || (p->z == e->z && j < i)))
+                before++;
         }
-        if (wanted == rank && best >= 0) {
-            *out = wm_tab[best];
+        if (before == rank) {
+            *out = *e;
             return 1;
         }
     }

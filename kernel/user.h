@@ -1655,12 +1655,29 @@ static Frame *syscall_handler(Frame *f) {
         uint64_t bytes=pixels*sizeof(uint32_t);
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         int slot=wm_shared_window_slot(pid);
-        if(slot<0||!a.pixels||!a.width||!a.height||
-           a.width>1920u||a.height>1080u||pixels>WM_COMP_MAX_PIXELS||
-           a.width>(uint32_t)wm_tab[slot].w||a.height>(uint32_t)wm_tab[slot].h||
-           !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
-           !gfx_width||!gfx_height||
-           a.x>=a.width||a.y>=a.height||!a.w||!a.h) {
+        /* Keep the rejection reason visible on serial: a failed local-surface
+         * present otherwise leaves a newly-created window looking blank and
+         * gives user-mode no way to distinguish a bad pointer from a size or
+         * window-registration mismatch. Do not index wm_tab until slot is valid. */
+        int reject=0;
+        if(slot<0) reject=1;
+        else if(!a.pixels) reject=2;
+        else if(!a.width||!a.height) reject=3;
+        else if(a.width>1920u||a.height>1080u||pixels>WM_COMP_MAX_PIXELS) reject=4;
+        else if(wm_tab[slot].w<=0||wm_tab[slot].h<=0||
+                a.width>(uint32_t)wm_tab[slot].w||
+                a.height>(uint32_t)wm_tab[slot].h) reject=5;
+        else if(!MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)) reject=6;
+        else if(!gfx_width||!gfx_height) reject=7;
+        else if(a.x>=a.width||a.y>=a.height||!a.w||!a.h) reject=8;
+        if(reject) {
+            static uint64_t wm_dbg_local_rejects;
+            uint64_t n=++wm_dbg_local_rejects;
+            if(wm_dbg_sample(n))
+                DbgPrint("[wm] local surface rejected #%llu pid=%d reason=%d slot=%d size=%ux%u window=%dx%d pixels=%p gpu=%ux%u damage=(%u,%u %ux%u)\\n",
+                         (unsigned long long)n,pid,reject,slot,a.width,a.height,
+                         slot>=0?wm_tab[slot].w:0,slot>=0?wm_tab[slot].h:0,
+                         (void*)a.pixels,gfx_width,gfx_height,a.x,a.y,a.w,a.h);
             f->rax=0;return f;
         }
         if(a.w>a.width-a.x)a.w=a.width-a.x;

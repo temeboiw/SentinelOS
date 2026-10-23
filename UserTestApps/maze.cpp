@@ -459,10 +459,18 @@ extern "C" void maze_mainCRTStartup() {
     }
     submit_virgl_stream=(VkSubmitVirGLStream_t)get_proc("vulkan.dll","SentinelVulkanSubmitVirGLStream");
     present_virgl=(VkPresentVirGL_t)get_proc("vulkan.dll","SentinelVulkanPresentVirGL");
-    gpu_scene_ready=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
-                     submit_virgl_stream && present_virgl);
-    if(gpu_scene_ready) print("maze.exe: VirGL GPU span-renderer enabled; CPU ray intersections, GPU pixel fills\n");
-    else print("maze.exe: VirGL GPU span-renderer unavailable; software fallback active\n");
+    /* Do not select the experimental VirGL span path just because its
+       transport entry points exist. The current driver does not yet prove
+       that its render target reaches scanout, which left the desktop visible
+       while Maze was running. Use the verified shared-surface software path
+       until GPU target readback/presentation is validated end-to-end. */
+    int virgl_gpu_candidate=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
+                             submit_virgl_stream && present_virgl);
+    gpu_scene_ready=0;
+    if(virgl_gpu_candidate)
+        print("maze.exe: VirGL transport detected; using visible software renderer until GPU scanout is verified\n");
+    else
+        print("maze.exe: VirGL GPU path unavailable; software renderer active\n");
     /* Harmless NOP probe is retained only when GPU rendering cannot be used. */
     int virgl_submit_ok=0;
     if(graphics_info_ok && (info.capabilities&(1u<<4)) &&

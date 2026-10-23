@@ -1674,7 +1674,7 @@ static Frame *syscall_handler(Frame *f) {
             static uint64_t wm_dbg_local_rejects;
             uint64_t n=++wm_dbg_local_rejects;
             if(wm_dbg_sample(n))
-                DbgPrint("[wm] local surface rejected #%llu pid=%d reason=%d slot=%d size=%ux%u window=%dx%d pixels=%p gpu=%ux%u damage=(%u,%u %ux%u)\\n",
+                DbgPrint("[wm] local surface rejected #%llu pid=%d reason=%d slot=%d size=%ux%u window=%dx%d pixels=%p gpu=%ux%u damage=(%u,%u %ux%u)\n",
                          (unsigned long long)n,pid,reject,slot,a.width,a.height,
                          slot>=0?wm_tab[slot].w:0,slot>=0?wm_tab[slot].h:0,
                          (void*)a.pixels,gfx_width,gfx_height,a.x,a.y,a.w,a.h);

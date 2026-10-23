@@ -228,7 +228,20 @@ extern "C" void maze_mainCRTStartup() {
         print("maze.exe: required USER32 functions missing\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
     }
-    window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x00CF0000u,70,50,900,620,0,0,0,0);
+    /* Query the active display before creating the HWND so fullscreen
+       geometry matches the real framebuffer instead of assuming 1280x800. */
+    GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;
+    if(syscall3(SYS_GRAPHICS_INFO,(u64)&info,0,0)&&info.surface_va&&info.width&&info.height&&info.pitch>=info.width*4) {
+        pixels=(u32*)(uintptr_t)info.surface_va;
+        screen_w=info.width; screen_h=info.height; pitch=info.pitch/4;
+    }
+    int display_w=screen_w?(int)screen_w:1280;
+    int display_h=screen_h?(int)screen_h:800;
+
+    /* WS_POPUP is intentional: a game that takes over the display has no
+       title bar/border, while USER32 still owns and tracks its HWND. */
+    window_handle=create_window(0,"STATIC","SentinelOS - 3D Maze",0x80000000u,
+                                0,0,display_w,display_h,0,0,0,0);
     if(!window_handle) {
         print("maze.exe: window creation failed\n");
         (void)syscall3(SYS_TERMINATE_PROCESS,1,0,0); for(;;)__asm__ volatile("pause");
@@ -241,13 +254,9 @@ extern "C" void maze_mainCRTStartup() {
         }
     }
     /* Confine pointer to the screen while the game owns mouse-look. */
-    if(clip_cursor) { ClipRect clip={0,0,1280,800}; (void)clip_cursor(&clip); }
+    if(clip_cursor) { ClipRect clip={0,0,display_w,display_h}; (void)clip_cursor(&clip); }
     if(update_window)(void)update_window(window_handle);
 
-    GraphicsBootInfo info{}; info.size=sizeof(info); info.version=1;
-    if(syscall3(SYS_GRAPHICS_INFO,(u64)&info,0,0)&&info.surface_va&&info.width&&info.height&&info.pitch>=info.width*4) {
-        pixels=(u32*)(uintptr_t)info.surface_va; screen_w=info.width;screen_h=info.height;pitch=info.pitch/4;
-    }
     if(!pixels) {
         print("maze.exe: no direct graphics surface; Vulkan loader probe completed, software scene unavailable\n");
     } else {

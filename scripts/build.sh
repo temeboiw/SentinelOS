@@ -1903,8 +1903,8 @@ fi
 
 echo "build ok -> $DISKIMG"
 
-# Keep the regular build focused on the bootable disk image. Installer ISO
-# generation is a separate, explicitly invoked task.
+# Normal build only creates the bootable disk image. Never invoke installer
+# scripts or generate an installer ISO from this entry point.
 
 if [[ $DO_RUN -eq 1 ]]; then
   exec "$ROOT/scripts/run.sh"

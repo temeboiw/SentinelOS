@@ -53,6 +53,8 @@ using VkGetDeviceQueue_t=void(__attribute__((ms_abi)) *)(void*,u32,u32,void**);
 using VkDestroyDevice_t=void(__attribute__((ms_abi)) *)(void*,const void*);
 using VkDestroyInstance_t=void(__attribute__((ms_abi)) *)(void*,const void*);
 using VkDeviceWaitIdle_t=int(__attribute__((ms_abi)) *)(void*);
+using VkSubmitVirGLStream_t=int(__attribute__((ms_abi)) *)(const u32*,u32);
+using VkPresentVirGL_t=int(__attribute__((ms_abi)) *)();
 struct VkAppInfoMaze { u32 sType; const void *pNext; const char *pApplicationName; u32 applicationVersion; const char *pEngineName; u32 engineVersion; u32 apiVersion; };
 struct VkInstanceInfoMaze { u32 sType; const void *pNext; u32 flags; const VkAppInfoMaze *pApplicationInfo; u32 enabledLayerCount; const char *const *ppEnabledLayerNames; u32 enabledExtensionCount; const char *const *ppEnabledExtensionNames; };
 struct VkQueueInfoMaze { u32 sType; const void *pNext; u32 flags; u32 queueFamilyIndex; u32 queueCount; const float *pQueuePriorities; };
@@ -60,6 +62,9 @@ struct VkDeviceInfoMaze { u32 sType; const void *pNext; u32 flags; u32 queueCrea
 struct VkQueueFamilyMaze { u32 queueFlags,queueCount,timestampValidBits; struct { i32 width,height,depth; } minImageTransferGranularity; };
 struct VkRuntimeMaze { void *instance,*physical,*device,*queue; VkDestroyDevice_t destroyDevice; VkDestroyInstance_t destroyInstance; VkDeviceWaitIdle_t waitIdle; u32 ready; };
 static VkRuntimeMaze vkrt{};
+static VkSubmitVirGLStream_t submit_virgl_stream;
+static VkPresentVirGL_t present_virgl;
+static int gpu_scene_ready=0;
 
 /* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
    followed by message, then naturally aligned WPARAM/LPARAM fields. */
@@ -172,7 +177,81 @@ static void report_frame_rate() {
     print("maze.exe: measured software-frame rate = ");print_u32(fps);print(" FPS (not GPU-rendered)\n");
     fps_window_start=now;fps_window_frames=0;
 }
+/* GPU raster path: CPU computes one ray intersection per vertical strip;
+ * VirGL/Gallium performs the actual pixel fills in its 3D render target. */
+static u32 float_bits(float f) { union { float f; u32 u; } v; v.f=f; return v.u; }
+static int gpu_append_scissor_clear(VirglStream *s,u32 x,u32 y,u32 w,u32 h,
+                                    float r,float g,float b) {
+    if(!w||!h)return 1;
+    const u32 scissor[5]={0u,x,y,x+w,y+h};
+    const u32 clear[7]={4u,float_bits(r),float_bits(g),float_bits(b),
+                        float_bits(1.0f),float_bits(1.0f),0u};
+    return virgl_stream_command(s,VIRGL_CCMD_SET_SCISSOR_STATE,VIRGL_OBJECT_NULL,scissor,5) &&
+           virgl_stream_command(s,VIRGL_CCMD_CLEAR,VIRGL_OBJECT_NULL,clear,7);
+}
+static void draw_frame_gpu() {
+    if(!screen_w||!screen_h||!submit_virgl_stream||!present_virgl)return;
+    const u32 columns=60u;
+    const u32 w=screen_w,h=screen_h;
+    const u32 status_h=h>=240u?18u:0u, view_h=h-status_h, horizon=view_h/2u;
+    u32 words[1000]; VirglStream stream{}; virgl_stream_init(&stream,words,1000);
+    const u32 fb[3]={1u,0u,1u};
+    if(!virgl_stream_command(&stream,VIRGL_CCMD_SET_FRAMEBUFFER_STATE,VIRGL_OBJECT_NULL,fb,3))return;
+    if(!gpu_append_scissor_clear(&stream,0,0,w,horizon,0.12f,0.15f,0.21f) ||
+       !gpu_append_scissor_clear(&stream,0,horizon,w,view_h-horizon,0.12f,0.10f,0.08f))return;
+    const float dx=fcos(camera_yaw),dy=fsin(camera_yaw);
+    const float plane_x=-dy*0.66f,plane_y=dx*0.66f;
+    for(u32 col=0;col<columns;col++) {
+        float camera_x=2.0f*((float)col+0.5f)/(float)columns-1.0f;
+        float ray_x=dx+plane_x*camera_x,ray_y=dy+plane_y*camera_x;
+        int map_x=(int)player_x,map_y=(int)player_y;
+        float ax=ray_x<0?-ray_x:ray_x,ay=ray_y<0?-ray_y:ray_y;
+        float delta_x=ax==0.0f?1.0e30f:1.0f/ax,delta_y=ay==0.0f?1.0e30f:1.0f/ay;
+        int step_x,step_y,hit=0,side=0;float side_x,side_y;
+        if(ray_x<0){step_x=-1;side_x=(player_x-(float)map_x)*delta_x;}
+        else{step_x=1;side_x=((float)map_x+1.0f-player_x)*delta_x;}
+        if(ray_y<0){step_y=-1;side_y=(player_y-(float)map_y)*delta_y;}
+        else{step_y=1;side_y=((float)map_y+1.0f-player_y)*delta_y;}
+        for(int n=0;n<64&&!hit;n++){
+            if(side_x<side_y){side_x+=delta_x;map_x+=step_x;side=0;}
+            else{side_y+=delta_y;map_y+=step_y;side=1;}
+            if(blocked(map_x,map_y))hit=1;
+        }
+        float dist=side==0?side_x-delta_x:side_y-delta_y;
+        if(dist<0.05f)dist=0.05f;
+        int line_h=(int)((float)view_h/dist);
+        int top=(int)horizon-line_h/2,bottom=(int)horizon+line_h/2;
+        if(top<0)top=0;if(bottom>=(int)view_h)bottom=(int)view_h-1;
+        float wall_x=side==0?player_y+dist*ray_y:player_x+dist*ray_x;
+        wall_x-=(float)(int)wall_x;
+        int stripe=(int)(wall_x*8.0f),base=side?106:139;
+        if(stripe==0||stripe==7)base-=18;
+        int shade=base-(int)(dist*9.0f);if(shade<28)shade=28;if(shade>180)shade=180;
+        float rr=(float)(side?shade-17:shade)/255.0f;
+        float gg=(float)(side?shade-8:shade-13)/255.0f;
+        float bb=(float)(side?shade-2:shade-25)/255.0f;
+        u32 x0=(col*w)/columns,x1=((col+1u)*w)/columns;
+        if(x1<=x0)x1=x0+1;
+        if(hit && bottom>=top &&
+           !gpu_append_scissor_clear(&stream,x0,(u32)top,x1-x0,(u32)(bottom-top+1),rr,gg,bb))return;
+    }
+    if(!gpu_append_scissor_clear(&stream,w/2u-5u,horizon,11u,1u,0.92f,0.92f,0.84f) ||
+       !gpu_append_scissor_clear(&stream,w/2u,horizon-5u,1u,11u,0.92f,0.92f,0.84f))return;
+    if(status_h && !gpu_append_scissor_clear(&stream,0,view_h,w,status_h,0.035f,0.055f,0.08f))return;
+    u32 bytes=virgl_stream_bytes(&stream);
+    if(!bytes || bytes>4096u-sizeof(u32)*5u) {
+        print("maze.exe: GPU frame command stream exceeded safe VirGL packet size\n");
+        gpu_scene_ready=0;return;
+    }
+    if(submit_virgl_stream(words,bytes)!=0 || present_virgl()!=0) {
+        print("maze.exe: GPU render/present failed; switching to software fallback\n");
+        gpu_scene_ready=0;return;
+    }
+    report_frame_rate();
+}
+
 static void draw_frame() {
+    if(gpu_scene_ready){draw_frame_gpu();return;}
     if(!pixels||!screen_w||!screen_h)return;
     const int w=(int)screen_w,h=(int)screen_h;
     const int status_h=h>=240?18:0;
@@ -349,8 +428,13 @@ extern "C" void maze_mainCRTStartup() {
         pixels=(u32*)(uintptr_t)info.surface_va;
         screen_w=info.width; screen_h=info.height; pitch=info.pitch/4;
     }
-    /* First exercise the real kernel-to-VirGL command path with a legal NOP.
-       This validates transport only; it is not a scene draw or GPU-render proof. */
+    submit_virgl_stream=(VkSubmitVirGLStream_t)get_proc("vulkan.dll","SentinelVulkanSubmitVirGLStream");
+    present_virgl=(VkPresentVirGL_t)get_proc("vulkan.dll","SentinelVulkanPresentVirGL");
+    gpu_scene_ready=(graphics_info_ok && (info.capabilities&(1u<<4)) &&
+                     submit_virgl_stream && present_virgl);
+    if(gpu_scene_ready) print("maze.exe: VirGL GPU span-renderer enabled; CPU ray intersections, GPU pixel fills\n");
+    else print("maze.exe: VirGL GPU span-renderer unavailable; software fallback active\n");
+    /* Harmless NOP probe is retained only when GPU rendering cannot be used. */
     int virgl_submit_ok=0;
     if(graphics_info_ok && (info.capabilities&(1u<<4)) &&
        info.virgl_buffer_va && info.virgl_buffer_size>=sizeof(u32)) {
@@ -362,8 +446,10 @@ extern "C" void maze_mainCRTStartup() {
             virgl_submit_ok=(syscall3(SYS_SUBMIT_3D,(u64)command_words,sizeof(u32),0)!=0);
         }
     }
-    if(virgl_submit_ok) print("maze.exe: VirGL command submission smoke test accepted (NOP only; scene is not GPU-rendered)\n");
-    else print("maze.exe: VirGL command submission unavailable; no GPU scene-render claim\n");
+    if(!gpu_scene_ready) {
+        if(virgl_submit_ok) print("maze.exe: VirGL NOP transport test accepted; software renderer remains active\n");
+        else print("maze.exe: VirGL command submission unavailable; software renderer remains active\n");
+    }
     int display_w=screen_w?(int)screen_w:1280;
     int display_h=screen_h?(int)screen_h:800;
 
@@ -391,7 +477,7 @@ extern "C" void maze_mainCRTStartup() {
     } else {
         draw_frame();
     }
-    if(vulkan_available) print("maze.exe: Vulkan instance/device/graphics queue initialized; ray-cast scene still uses software renderer\n");
+    if(vulkan_available) print(gpu_scene_ready ? "maze.exe: Vulkan device ready; Maze frames use VirGL GPU span rasterization\n" : "maze.exe: Vulkan device ready; Maze scene uses software fallback\n");
     else { print("maze.exe: Vulkan device initialization failed at "); print(vk_failure); print("\n"); }
     Message msg{};
     u64 hz=tsc_frequency();

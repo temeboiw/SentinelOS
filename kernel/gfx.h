@@ -40,6 +40,7 @@
 #define GFX_GPU_CMD_TRANSFER_FROM_3D 0x0206u
 #define GFX_GPU_CMD_SUBMIT_3D 0x0207u
 #define GFX_VIRTIO_GPU_F_VIRGL (1u << 0)
+#define GFX_VIRTIO_GPU_F_CONTEXT_INIT (1u << 4)
 #define GFX_GPU_RESP_OK_NODATA 0x1100u
 #define GFX_GPU_FORMAT_B8G8R8X8_UNORM 2u
 
@@ -93,6 +94,7 @@ typedef struct { GfxCtrlHdr hdr; } GfxResponse;
 static uint8_t gfx_gpu_ready;
 static uint8_t gfx_gpu_failed;
 static uint8_t gfx_virgl_supported;
+static uint8_t gfx_context_init_supported;
 static uint8_t gfx_3d_ready;
 static uint64_t gfx_surface_pa, gfx_surface_bytes, gfx_surface_pages;
 static uint64_t gfx_virgl_buffer_pa;
@@ -250,6 +252,7 @@ static int gfx_queue_init(void) {
     *(volatile uint32_t*)(c+0)=0; /* device feature selector: low word */
     uint32_t device_features_lo=*(volatile uint32_t*)(c+4);
     gfx_virgl_supported=(device_features_lo&GFX_VIRTIO_GPU_F_VIRGL)?1:0;
+    gfx_context_init_supported=(device_features_lo&GFX_VIRTIO_GPU_F_CONTEXT_INIT)?1:0;
     *(volatile uint32_t*)(c+0)=1; /* device feature selector: high word */
     uint32_t device_features_hi=*(volatile uint32_t*)(c+4);
     if(!(device_features_hi&1u)) {
@@ -257,7 +260,9 @@ static int gfx_queue_init(void) {
         return 0;
     }
     *(volatile uint32_t*)(c+8)=0; /* driver feature selector: low word */
-    *(volatile uint32_t*)(c+12)=gfx_virgl_supported?GFX_VIRTIO_GPU_F_VIRGL:0;
+    uint32_t driver_features_lo=gfx_virgl_supported?GFX_VIRTIO_GPU_F_VIRGL:0;
+    if(gfx_context_init_supported)driver_features_lo|=GFX_VIRTIO_GPU_F_CONTEXT_INIT;
+    *(volatile uint32_t*)(c+12)=driver_features_lo;
     *(volatile uint32_t*)(c+8)=1; /* driver feature selector: high word */
     *(volatile uint32_t*)(c+12)=1; /* negotiate VIRTIO_F_VERSION_1 */
     c[20]=11; /* FEATURES_OK */
@@ -335,6 +340,8 @@ static int gfx_create_virgl_context(void) {
     } ctx={0};
     ctx.hdr.type=GFX_GPU_CMD_CTX_CREATE;
     ctx.hdr.ctx_id=1;
+    /* Capset 1 is VirGL; context-init selection is only used if negotiated. */
+    ctx.context_init=gfx_context_init_supported?1u:0u;
     const char name[]="SentinelOS VirGL";
     ctx.nlen=(uint32_t)(sizeof(name)-1);
     for(uint32_t i=0;i<sizeof(name);i++)ctx.debug_name[i]=name[i];

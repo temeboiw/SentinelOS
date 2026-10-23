@@ -1706,33 +1706,30 @@ static void on_click(int x, int y) {
     }
 
     if (y >= ty) {
-        int ax = 90;
-
-        for (int i = 0; i < g_tb_n; i++) {
-            int bw = 110;
-
-            if (hit(x, y, ax, ty + 6, ax + bw, ty + 38)) {
-                sy3(SYS_WmRestore, (u64)g_tb_pids[i], 0, 0);
-
-                if (g_wnd.visible) {
-                    g_wnd.minimized = 0;
-                    sy3(SYS_WmMin, 0, 0, 0);
+        int ax=90;
+        for(int i=0;i<g_tb_n;i++) {
+            int bw=110;
+            if(hit(x,y,ax,ty+6,ax+bw,ty+38)) {
+                sy3(SYS_WmRestore,(u64)g_tb_pids[i],0,0);
+                if(g_wnd.visible) {
+                    g_wnd.minimized=0;
+                    sy3(SYS_WmMin,0,0,0);
                 }
-
-                compose();
-                return;
+                compose();return;
             }
-
-            ax += bw + 6;
+            ax+=bw+6;
         }
-
-        if (hit(x, y, 8, ty + 6, 78, ty + 38)) {
+        if(hit(x,y,8,ty+6,78,ty+38)) {
             u32_taskbar_dirty=1;
-            g_menu = !g_menu;
-            g_search_focus = 0;
+            g_menu=!g_menu;g_search_focus=0;
+            if(g_menu) {g_search_len=0;g_search_text[0]=0;g_power_menu=0;}
+            compose_region(0,ty-368,(int)g_fw,(int)g_fh);
+            return;
+        }
+    }
 
-            if (g_menu) {
-        int mw=300,mh=360,mx=8,my=ty-mh-4;
+    if(g_menu) {
+        int mw=300,mh=360,mx=8,my=ty-mh-8;
         if(my<4)my=4;
         if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
             g_search_focus=1;g_search_len=0;g_search_text[0]=0;
@@ -1740,30 +1737,27 @@ static void on_click(int x, int y) {
         }
         if(hit(x,y,mx+12,my+116,mx+144,my+164)) {
             static char files_name[]="fileexplorer.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;
-            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
-            u32_menu_launch(files_name);return;
+            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(files_name);return;
         }
         if(hit(x,y,mx+154,my+116,mx+288,my+164)) {
             static char taskmgr_name[]="taskmgr.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;
-            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
-            u32_menu_launch(taskmgr_name);return;
+            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(taskmgr_name);return;
         }
         if(hit(x,y,mx+12,my+170,mx+144,my+218)) {
             static char cmd_name[]="cmd.exe";
-            g_menu=0;g_search_focus=0;g_power_menu=0;
-            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
-            u32_menu_launch(cmd_name);return;
+            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(cmd_name);return;
         }
         if(hit(x,y,mx+12,my+258,mx+144,my+298)) {
-            g_menu=0;g_search_focus=0;g_power_menu=0;
-            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);
             show_shutdown_screen(0);sy3(SYS_Shutdown,0,0,0);return;
         }
         if(hit(x,y,mx+154,my+258,mx+288,my+298)) {
-            g_menu=0;g_search_focus=0;g_power_menu=0;
-            u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);
+            g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);
             show_shutdown_screen(1);sy3(SYS_Shutdown,1,0,0);return;
         }
         if(hit(x,y,mx+12,my+310,mx+288,my+356)) {
@@ -1774,7 +1768,7 @@ static void on_click(int x, int y) {
         g_menu=0;g_search_focus=0;g_power_menu=0;u32_taskbar_dirty=1;
         compose_region(0,my,(int)g_fw,(int)g_fh);return;
     }
-    g_menu = 0;
+    g_menu=0;
 }
 
 __attribute__((dllexport))

@@ -1252,7 +1252,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     static uint64_t wm_dbg_composed_pixels;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
     wm_dbg_composed_pixels+=damage_pixels;
-    if(w==width&&h==height) {
+    if(x==0&&y==0&&w==width&&h==height) {
         DbgPrint("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
                  (unsigned long long)dbg_n,
                  (unsigned long long)damage_pixels,
@@ -1280,6 +1280,8 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                                        wm_shared_desktop[at]);
         }
     }
+    static uint64_t wm_dbg_window_overlay_pixels;
+    uint64_t window_overlay_pixels=0;
     for(int oi=0;oi<count;oi++) {
         int slot=order[oi];
         WmEntry *e=&wm_tab[slot];
@@ -1296,6 +1298,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         if(right>(int64_t)width)right=width;
         if(bottom>(int64_t)height)bottom=height;
         if(right<=left||bottom<=top)continue;
+        window_overlay_pixels+=(uint64_t)(right-left)*(uint64_t)(bottom-top);
         uint32_t *surface=wm_shared_windows[slot];
         for(uint32_t yy=(uint32_t)top;yy<(uint32_t)bottom;yy++) {
             uint32_t row=yy*width;
@@ -1306,6 +1309,12 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             }
         }
     }
+    wm_dbg_window_overlay_pixels+=window_overlay_pixels;
+    if(wm_dbg_sample(dbg_n))
+        DbgPrint("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
+                 (unsigned long long)dbg_n,
+                 (unsigned long long)window_overlay_pixels,
+                 (unsigned long long)wm_dbg_window_overlay_pixels);
     /* Taskbar remains the top layer and is blended only once per damaged pixel. */
     for(uint32_t yy=y;yy<y+h;yy++) {
         uint32_t row=yy*width;

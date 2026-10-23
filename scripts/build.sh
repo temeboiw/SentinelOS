@@ -978,7 +978,8 @@ lld -flavor link \
   /export:FindFirstVolumeMountPointA \
   /export:FindFirstVolumeMountPointW \
   /export:FindNextVolumeMountPointA \
-  /export:FindNextVolumeMountPointW \  /export:FindVolumeMountPointClose \
+  /export:FindNextVolumeMountPointW \
+  /export:FindVolumeMountPointClose \
   /export:SetVolumeLabelA \
   /export:SetVolumeLabelW \
   /export:GetVolumeInformationByHandleW \
@@ -1477,7 +1478,8 @@ lld -flavor link \
   /export:GetWindowDisplayAffinityEx \
   /export:GetWindowDpiAwarenessContextEx \
   /export:GetDpiForMonitor \
-  /export:EnableNonClientDpiScaling \  /export:SetThreadDpiAwarenessContext \
+  /export:EnableNonClientDpiScaling \
+  /export:SetThreadDpiAwarenessContext \
   /export:GetThreadDpiAwarenessContext \
   /export:GetDpiFromDpiAwarenessContext \
   /export:SetProcessDpiAwarenessContext \

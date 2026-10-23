@@ -521,6 +521,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     if (!EFI_ERROR(bs->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **)&gop))) {
         gop_select_display_mode(sys, gop);
+        /* Restore the silent bootvid-matching gradient after any GOP mode switch. */
+        paint_firmware_background();
         bi->fb_base = gop->Mode->FrameBufferBase;
         bi->width   = gop->Mode->Info->HorizontalResolution;
         bi->height  = gop->Mode->Info->VerticalResolution;

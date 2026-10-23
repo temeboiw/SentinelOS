@@ -1132,7 +1132,7 @@ static void draw_taskbar(void) {
             draw_text(mx+42,my+72,g_search_text,COL_TEXT);
         } else draw_text(mx+42,my+72,"TYPE TO SEARCH",COL_MUTED);
         draw_text(mx+16,my+105,"PINNED",COL_TEXT);
-        draw_text(mx+mw-66,my+105,"ALL APPS",COL_ACCENT);
+        draw_text(mx+mw-66,my+105,"APPS",COL_ACCENT);
         round_fill(mx+12,my+116,132,48,5,0xFF244458);
         round_fill(mx+18,my+125,25,25,4,0xFF0A83B7);
         fill(mx+23,my+131,15,3,0xFFFFFFFF);fill(mx+23,my+138,15,3,0xFFFFFFFF);
@@ -1153,7 +1153,7 @@ static void draw_taskbar(void) {
         draw_text(mx+166,my+274,"RESTART",COL_WARN);
         fill(mx+12,my+310,mw-24,1,0xFF3A5365);
         draw_text(mx+16,my+329,"SYSTEM SETTINGS",COL_TEXT);
-        draw_text(mx+16,my+345,"POWER  |  SIGN OUT  |  HELP",COL_MUTED);
+        draw_text(mx+16,my+345,"ENVIRONMENT TOOLS NEXT",COL_MUTED);
     }
 }
 
@@ -2034,7 +2034,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_search_text[g_search_len] = 0;
                         }
 
-                        int h = (int)g_fh;
+
                         compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh-48);
                         continue;
                     }
@@ -2049,7 +2049,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         g_search_len < 30) {
                         g_search_text[g_search_len++] = key;
                         g_search_text[g_search_len] = 0;
-                        int h = (int)g_fh;
+
                         compose_region(0, ((int)g_fh-48-360-4)>4?((int)g_fh-48-360-4):4, (int)g_fw, (int)g_fh-48);
                     }
 

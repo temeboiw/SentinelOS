@@ -364,7 +364,7 @@ clang "${SOFTPIPE_CFLAGS[@]}" \
 
 lld -flavor link \
   /dll /noentry /subsystem:native /nodefaultlib \
-  /fixed:no /base:0x41800000 \
+  /fixed:no /dynamicbase /base:0x60000000 \
   /export:vkEnumerateInstanceVersion \
   /export:vkEnumerateInstanceExtensionProperties \
   /export:vkEnumerateInstanceLayerProperties \

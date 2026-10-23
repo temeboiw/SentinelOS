@@ -2089,7 +2089,7 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtUploadVirGLBuffer: {
         uint64_t bytes=f->rdi;
-        if(!gfx_3d_ready||!bytes||bytes>GFX_VIRGL_BUFFER_BYTES) { f->rax=0;return f; }
+        if(!gfx_3d_ready||!bytes||(bytes&3ULL)||bytes>GFX_VIRGL_BUFFER_BYTES) { f->rax=0;return f; }
         KPROCESS *caller=MmCurrentProcess;
         if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
         int ok=gfx_upload_virgl_buffer((uint32_t)bytes);
@@ -2110,7 +2110,8 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtSubmit3D: {
         uint64_t user_stream=f->rdi, length=f->rsi;
-        if(!length || length>4064 || !gfx_3d_ready ||
+        if(!length || (length&3ULL) || length>4064 || !gfx_3d_ready ||
+           (user_stream&3ULL) ||
            !MmValidateUserRange(MmCurrentProcess,user_stream,length,0)) {
             f->rax=0;return f;
         }

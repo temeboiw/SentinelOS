@@ -1080,6 +1080,39 @@ lld -flavor link \
 cp "$SYS32/winmm.dll" "$B/rootfs/winmm.dll"
 cp "$SYS32/winmm.dll" "$B/rootfs/Windows/System32/winmm.dll"
 
+echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
+OGL_CFLAGS=()
+for flag in "${USER_CFLAGS[@]}"; do
+  [[ "$flag" == "-mgeneral-regs-only" ]] || OGL_CFLAGS+=("$flag")
+done
+clang "${OGL_CFLAGS[@]}" -fno-builtin \
+  -c "$ROOT/user/opengl32.c" \
+  -o "$B/obj/opengl32.o"
+
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /dynamicbase /base:0x62000000 \
+  /export:glClearColor /export:glClear /export:glViewport /export:glScissor \
+  /export:glEnable /export:glDisable /export:glIsEnabled /export:glGetError \
+  /export:glGetString /export:glDrawArrays /export:glDrawElements \
+  /export:glVertexPointer /export:glColorPointer /export:glTexCoordPointer \
+  /export:glEnableClientState /export:glDisableClientState /export:glLineWidth \
+  /export:glBlendFunc /export:glPixelStorei /export:glClearStencil /export:glClearDepth \
+  /export:glDepthMask /export:glDepthFunc /export:glStencilMask /export:glStencilFunc \
+  /export:glStencilOp /export:glTexParameteri /export:glTexImage2D \
+  /export:glBindTexture /export:glGenTextures /export:glDeleteTextures \
+  /export:glGetIntegerv /export:glGetFloatv /export:glGetBooleanv /export:glReadPixels \
+  /export:glGetDoublev /export:glFinish /export:glFlush /export:wglGetProcAddress \
+  /export:wglMakeCurrent /export:wglDeleteContext /export:wglCreateContext \
+  /export:wglShareLists /export:SwapBuffers /export:glDrawBuffer /export:glReadBuffer \
+  /export:glGetTexParameteriv /export:glGetTexLevelParameteriv /export:glTexSubImage2D \
+  /export:glColor4f /export:glColor4ub /export:glClearAccum \
+  "/out:$SYS32/opengl32.dll" \
+  "$B/obj/opengl32.o"
+cp "$SYS32/opengl32.dll" "$B/rootfs/opengl32.dll"
+cp "$SYS32/opengl32.dll" "$B/rootfs/Windows/System32/opengl32.dll"
+
+
 echo "  -> Universal CRT runtime (real initializer-table execution)"
 
 clang "${USER_CFLAGS[@]}" -fno-builtin \
@@ -1958,6 +1991,7 @@ for image in \
   taskbar.dll \
   kernel32.dll \
   winmm.dll \
+  opengl32.dll \
   api-ms-win-crt-runtime-l1-1-0.dll \
   ucrtbase.dll \
   user32.dll \
@@ -1983,6 +2017,7 @@ ls -lh \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
   "$SYS32/winmm.dll" \
+  "$SYS32/opengl32.dll" \
   "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$SYS32/ucrtbase.dll" \
   "$SYS32/user32.dll" \

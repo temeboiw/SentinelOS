@@ -41,6 +41,7 @@ static const GLfloat *ogl_vertices,*ogl_colors,*ogl_texcoords;
 static GLint ogl_vertex_size=2,ogl_color_size=4,ogl_tex_size=2;
 static GLsizei ogl_vertex_stride,ogl_color_stride,ogl_tex_stride;
 static GLuint ogl_bound_texture;
+static unsigned int ogl_current_color=0xffffffffu;
 static struct { GLuint id; unsigned int used; } ogl_textures[256];
 static unsigned long long ogl_sys(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
  unsigned long long r;
@@ -63,7 +64,7 @@ static void ogl_pixel(int x,int y,unsigned int color) {
  ((unsigned int*)(unsigned long long)fb->va)[(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x]=color;
 }
 static unsigned int ogl_vertex_color(GLsizei i) {
- if(!ogl_colors)return 0xffffffffu;
+ if(!ogl_colors)return ogl_current_color;
  const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_stride(ogl_color_stride,(unsigned int)ogl_color_size);
  unsigned int r=(unsigned int)(p[0]),g=(unsigned int)(p[1]),b=(unsigned int)(p[2]),a=ogl_color_size>3?p[3]:255u;
  return (a<<24)|(r<<16)|(g<<8)|b;
@@ -141,15 +142,15 @@ __attribute__((dllexport)) void glDisableClientState(GLenum a){if(a!=GL_VERTEX_A
 __attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
 __attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if((s!=GL_SRC_ALPHA&&s!=GL_ONE&&s!=GL_ZERO)||(d!=GL_ONE_MINUS_SRC_ALPHA&&d!=GL_ONE&&d!=GL_ZERO))ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v<0)ogl_error=GL_INVALID_VALUE;}
-__attribute__((dllexport)) void glClearStencil(GLint s){(void)s;}
-__attribute__((dllexport)) void glClearDepth(double d){(void)d;}
-__attribute__((dllexport)) void glDepthMask(GLboolean b){(void)b;}
-__attribute__((dllexport)) void glDepthFunc(GLenum f){(void)f;}
-__attribute__((dllexport)) void glStencilMask(GLuint m){(void)m;}
-__attribute__((dllexport)) void glStencilFunc(GLenum f,GLint r,GLuint m){(void)f;(void)r;(void)m;}
-__attribute__((dllexport)) void glStencilOp(GLenum a,GLenum b,GLenum c){(void)a;(void)b;(void)c;}
-__attribute__((dllexport)) void glTexParameteri(GLenum t,GLenum p,GLint v){if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;(void)p;(void)v;}
-__attribute__((dllexport)) void glTexImage2D(GLenum t,GLint level,GLint internal,GLsizei w,GLsizei h,GLint border,GLenum format,GLenum type,const void *pixels){(void)level;(void)internal;(void)w;(void)h;(void)border;(void)format;(void)type;(void)pixels;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glClearStencil(GLint s){(void)s;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glClearDepth(double d){(void)d;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glDepthMask(GLboolean b){(void)b;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glDepthFunc(GLenum f){(void)f;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glStencilMask(GLuint m){(void)m;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glStencilFunc(GLenum f,GLint r,GLuint m){(void)f;(void)r;(void)m;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glStencilOp(GLenum a,GLenum b,GLenum c){(void)a;(void)b;(void)c;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glTexParameteri(GLenum t,GLenum p,GLint v){(void)p;(void)v;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;else ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glTexImage2D(GLenum t,GLint level,GLint internal,GLsizei w,GLsizei h,GLint border,GLenum format,GLenum type,const void *pixels){(void)level;(void)internal;(void)w;(void)h;(void)border;(void)format;(void)type;(void)pixels;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;else ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glBindTexture(GLenum t,GLuint id){if(t!=GL_TEXTURE_2D){ogl_error=GL_INVALID_ENUM;return;}ogl_bound_texture=id;}
 __attribute__((dllexport)) void glGenTextures(GLsizei n,GLuint *out){if(n<0||n>256||!out){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int id=ogl_next_texture++;if(!id)id=ogl_next_texture++;out[i]=id;ogl_textures[id%256].id=id;ogl_textures[id%256].used=1;}}
 __attribute__((dllexport)) void glDeleteTextures(GLsizei n,const GLuint *ids){if(n<0||n>256||(!ids&&n)){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int k=ids[i]%256;if(ogl_textures[k].id==ids[i])ogl_textures[k].used=0;if(ogl_bound_texture==ids[i])ogl_bound_texture=0;}}
@@ -157,7 +158,7 @@ __attribute__((dllexport)) void glGetIntegerv(GLenum p,GLint *v){if(!v)return;if
 __attribute__((dllexport)) void glGetFloatv(GLenum p,GLfloat *v){if(!v)return;if(p==0x0B21)v[0]=1.0f;else if(p==0x0B22)v[0]=1.0f;else v[0]=0.0f;}
 __attribute__((dllexport)) void glGetBooleanv(GLenum p,GLboolean *v){if(!v)return;*v=glIsEnabled(p);}
 __attribute__((dllexport)) void glReadPixels(GLint x,GLint y,GLsizei w,GLsizei h,GLenum format,GLenum type,void *out){OGL_FB *fb=ogl_fb();if(!fb||!out||w<0||h<0||w>4096||h>4096||format!=0x1908||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_VALUE;return;}unsigned char *d=(unsigned char*)out;unsigned int *src=(unsigned int*)(unsigned long long)fb->va;for(int j=0;j<h;j++)for(int i=0;i<w;i++){int sx=x+i,sy=y+j;unsigned int c=0;if(sx>=0&&sy>=0&&(unsigned int)sx<fb->w&&(unsigned int)sy<fb->h)c=src[(unsigned long long)sy*(fb->pitch/4u)+(unsigned int)sx];unsigned long long o=((unsigned long long)j*w+i)*4;d[o]=(unsigned char)(c>>16);d[o+1]=(unsigned char)(c>>8);d[o+2]=(unsigned char)c;d[o+3]=(unsigned char)(c>>24);}}
-__attribute__((dllexport)) void glGetDoublev(GLenum p,double *v){if(v)*v=0.0;(void)p;}
+__attribute__((dllexport)) void glGetDoublev(GLenum p,double *v){(void)p;if(v)*v=0.0;ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glFinish(void){OGL_FB *fb=ogl_fb();if(fb){OGL_RECT r={0,0,fb->w,fb->h};ogl_sys(33,(unsigned long long)&r,0,0);}}
 __attribute__((dllexport)) void glFlush(void){glFinish();}
 __attribute__((dllexport)) void *wglGetProcAddress(const char *name){(void)name;return 0;}
@@ -168,9 +169,9 @@ __attribute__((dllexport)) int wglShareLists(void *a,void *b){return a&&b;}
 __attribute__((dllexport)) int SwapBuffers(void *dc){(void)dc;glFinish();return ogl_fb()!=0;}
 __attribute__((dllexport)) void glDrawBuffer(GLenum mode){(void)mode;}
 __attribute__((dllexport)) void glReadBuffer(GLenum mode){(void)mode;}
-__attribute__((dllexport)) void glGetTexParameteriv(GLenum t,GLenum p,GLint *v){(void)t;(void)p;if(v)*v=GL_LINEAR;}
-__attribute__((dllexport)) void glGetTexLevelParameteriv(GLenum t,GLint l,GLenum p,GLint *v){(void)t;(void)l;(void)p;if(v)*v=0;}
-__attribute__((dllexport)) void glTexSubImage2D(GLenum t,GLint l,GLint x,GLint y,GLsizei w,GLsizei h,GLenum f,GLenum ty,const void *p){(void)t;(void)l;(void)x;(void)y;(void)w;(void)h;(void)f;(void)ty;(void)p;}
-__attribute__((dllexport)) void glColor4f(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;}
-__attribute__((dllexport)) void glColor4ub(unsigned char r,unsigned char g,unsigned char b,unsigned char a){(void)r;(void)g;(void)b;(void)a;}
-__attribute__((dllexport)) void glClearAccum(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;}
+__attribute__((dllexport)) void glGetTexParameteriv(GLenum t,GLenum p,GLint *v){(void)t;(void)p;if(v)*v=0;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glGetTexLevelParameteriv(GLenum t,GLint l,GLenum p,GLint *v){(void)t;(void)l;(void)p;if(v)*v=0;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glTexSubImage2D(GLenum t,GLint l,GLint x,GLint y,GLsizei w,GLsizei h,GLenum f,GLenum ty,const void *p){(void)t;(void)l;(void)x;(void)y;(void)w;(void)h;(void)f;(void)ty;(void)p;ogl_error=GL_INVALID_OPERATION;}
+__attribute__((dllexport)) void glColor4f(GLfloat r,GLfloat g,GLfloat b,GLfloat a){unsigned int R=(unsigned int)(r<0?0:r>1?255:r*255),G=(unsigned int)(g<0?0:g>1?255:g*255),B=(unsigned int)(b<0?0:b>1?255:b*255),A=(unsigned int)(a<0?0:a>1?255:a*255);ogl_current_color=(A<<24)|(R<<16)|(G<<8)|B;}
+__attribute__((dllexport)) void glColor4ub(unsigned char r,unsigned char g,unsigned char b,unsigned char a){ogl_current_color=((unsigned int)a<<24)|((unsigned int)r<<16)|((unsigned int)g<<8)|b;}
+__attribute__((dllexport)) void glClearAccum(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;ogl_error=GL_INVALID_OPERATION;}

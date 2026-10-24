@@ -3064,6 +3064,19 @@ static Frame *user_exception_handler(Frame *f) {
                      (unsigned long long)(f->rsp + si * sizeof(uint64_t)),
                      (unsigned long long)value);
         }
+        /* For an indirect CALL through a null pointer, STACK[0] is often
+         * the return address immediately after that CALL. Dump nearby bytes
+         * so the call instruction and its target operand can be identified. */
+        uint64_t callsite = user_stack[0];
+        if (callsite >= 0x10010ULL &&
+            callsite < 0x0000800000000000ULL - 16) {
+            volatile const uint8_t *code =
+                (volatile const uint8_t *)(uintptr_t)(callsite - 16);
+            DbgPrint("  CALLSITE %016llx bytes:", (unsigned long long)(callsite - 16));
+            for (unsigned int bi = 0; bi < 32; bi++)
+                DbgPrint(" %02x", (unsigned int)code[bi]);
+            DbgPrint("\\n");
+        }
     }
     /* Stop the current thread before switching away from its address space. */
     ut_exit_current();

@@ -340,7 +340,27 @@ __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
     if(!address)k32_last_error=127;else k32_last_error=0;
     return address;
 }
-__attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) { if(!name||!*name){k32_last_error=87;return 0;}for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)){k32_modules[i].refs++;return (HANDLE)&k32_modules[i];}for(int i=0;i<16;i++)if(!k32_modules[i].used){int j=0;while(name[j]&&j<63){k32_modules[i].name[j]=name[j];j++;}k32_modules[i].name[j]=0;k32_modules[i].refs=1;k32_modules[i].used=1;return (HANDLE)&k32_modules[i];}k32_last_error=8;return 0; }
+__attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) {
+    if(!name||!*name){k32_last_error=87;return 0;}
+    /* The per-process module-handle table stores the complete requested name.
+       Never truncate a long name into a different DLL identity. */
+    DWORD length=0;
+    while(name[length] && length<64) length++;
+    if(length>=64){k32_last_error=206;return 0;}
+    for(int i=0;i<16;i++) {
+        if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)) {
+            if(k32_modules[i].refs==0xFFFFFFFFu){k32_last_error=8;return 0;}
+            k32_modules[i].refs++;k32_last_error=0;
+            return (HANDLE)&k32_modules[i];
+        }
+    }
+    for(int i=0;i<16;i++)if(!k32_modules[i].used){
+        for(DWORD j=0;j<=length;j++)k32_modules[i].name[j]=name[j];
+        k32_modules[i].refs=1;k32_modules[i].used=1;k32_last_error=0;
+        return (HANDLE)&k32_modules[i];
+    }
+    k32_last_error=8;return 0;
+}
 __attribute__((dllexport)) BOOL FreeLibrary(HANDLE module) { for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){if(k32_modules[i].refs>0)k32_modules[i].refs--;if(!k32_modules[i].refs)k32_modules[i].used=0;k32_last_error=0;return 1;}k32_last_error=126;return 0; }
 __attribute__((dllexport)) BOOL VirtualFree(LPVOID address,u64 size,DWORD type) {
     if(!address||((unsigned long long)address&0xFFFULL)){k32_last_error=87;return 0;}
@@ -1422,10 +1442,14 @@ __attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){
     narrow[i]=0;
     return LoadLibraryA(narrow);
 }
-/* Search-order flags are not yet supported by the loader. */
+/* This user-mode loader does not yet implement LoadLibraryExW's alternate
+ * search paths, data-file mappings, or resource-only mappings. Accept only
+ * the ordinary load contract; reject unsupported requests rather than
+ * returning a plausible handle with the wrong semantics. */
 __attribute__((dllexport)) HANDLE LoadLibraryExW(K32_LPCWSTR name,HANDLE file,DWORD flags) {
-    (void)file;
-    (void)flags;
+    if(!name || !name[0]) { k32_last_error=87; return 0; }
+    if(file) { k32_last_error=87; return 0; }
+    if(flags!=0) { k32_last_error=50; return 0; }
     return LoadLibraryW(name);
 }
 

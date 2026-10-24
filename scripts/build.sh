@@ -168,6 +168,7 @@ for src in \
   user/sentlogon.c \
   user/taskbar.c \
   user/kernel32.c \
+  user/ucrt_runtime.c \
   user/user32.c \
   user/soft3d.c \
   user/font_ttf.h \
@@ -1049,6 +1050,26 @@ lld -flavor link \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 
+echo "  -> Universal CRT runtime (real initializer-table execution)"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/ucrt_runtime.c" \
+  -o "$B/obj/ucrt_runtime.o"
+
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /base:0x43000000 \
+  /export:_initterm_e \
+  /export:_initterm \
+  "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
+  "$B/obj/ucrt_runtime.o"
+
+# The API-set contract name is the import name used by Geometry Dash.
+# Keep the conventional UCRT name pointing at the same implementation too.
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/ucrtbase.dll"
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/api-ms-win-crt-runtime-l1-1-0.dll"
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/ucrtbase.dll"
+
 echo "  -> user32.dll"
 
 clang "${USER_CFLAGS[@]}" \
@@ -1808,6 +1829,8 @@ for image in \
   fileexplorer.exe \
   taskbar.dll \
   kernel32.dll \
+  api-ms-win-crt-runtime-l1-1-0.dll \
+  ucrtbase.dll \
   user32.dll \
   vulkan.dll \
   cmd.exe \
@@ -1830,6 +1853,8 @@ ls -lh \
   "$SYS32/fileexplorer.exe" \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
+  "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
+  "$SYS32/ucrtbase.dll" \
   "$SYS32/user32.dll" \
   "$SYS32/vulkan.dll" \
   "$SYS32/cmd.exe" \

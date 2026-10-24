@@ -107,3 +107,63 @@ __attribute__((dllexport)) void *realloc(void *p, ucrt_size_t size) {
     for (ucrt_size_t i=0;i<copy;++i)d[i]=s[i];
     free(p); return n;
 }
+
+
+/* Fundamental C runtime memory/string primitives. These are byte-accurate
+   implementations and deliberately compiled with -fno-builtin so the compiler
+   cannot rewrite their loops into recursive calls to the same exports. */
+__attribute__((dllexport)) void *memcpy(void *dst, const void *src, ucrt_size_t n) {
+    unsigned char *d=(unsigned char *)dst; const unsigned char *s=(const unsigned char *)src;
+    for(ucrt_size_t i=0;i<n;i++) d[i]=s[i];
+    return dst;
+}
+__attribute__((dllexport)) void *memmove(void *dst, const void *src, ucrt_size_t n) {
+    unsigned char *d=(unsigned char *)dst; const unsigned char *s=(const unsigned char *)src;
+    if(d==s||!n)return dst;
+    if((ucrt_size_t)d<(ucrt_size_t)s || (ucrt_size_t)d-(ucrt_size_t)s>=n) {
+        for(ucrt_size_t i=0;i<n;i++)d[i]=s[i];
+    } else {
+        for(ucrt_size_t i=n;i>0;i--)d[i-1]=s[i-1];
+    }
+    return dst;
+}
+__attribute__((dllexport)) void *memset(void *dst, int value, ucrt_size_t n) {
+    unsigned char *d=(unsigned char *)dst; unsigned char v=(unsigned char)value;
+    for(ucrt_size_t i=0;i<n;i++)d[i]=v;
+    return dst;
+}
+__attribute__((dllexport)) int memcmp(const void *a, const void *b, ucrt_size_t n) {
+    const unsigned char *x=(const unsigned char *)a,*y=(const unsigned char *)b;
+    for(ucrt_size_t i=0;i<n;i++)if(x[i]!=y[i])return (int)x[i]-(int)y[i];
+    return 0;
+}
+__attribute__((dllexport)) void *memchr(const void *s, int c, ucrt_size_t n) {
+    const unsigned char *p=(const unsigned char *)s; unsigned char v=(unsigned char)c;
+    for(ucrt_size_t i=0;i<n;i++)if(p[i]==v)return (void *)(p+i);
+    return 0;
+}
+__attribute__((dllexport)) ucrt_size_t strlen(const char *s) {
+    ucrt_size_t n=0; if(!s)return 0; while(s[n])n++; return n;
+}
+__attribute__((dllexport)) int strcmp(const char *a, const char *b) {
+    const unsigned char *x=(const unsigned char *)a,*y=(const unsigned char *)b;
+    while(*x&&*x==*y){x++;y++;} return (int)*x-(int)*y;
+}
+__attribute__((dllexport)) int strncmp(const char *a, const char *b, ucrt_size_t n) {
+    const unsigned char *x=(const unsigned char *)a,*y=(const unsigned char *)b;
+    for(ucrt_size_t i=0;i<n;i++){if(x[i]!=y[i])return (int)x[i]-(int)y[i];if(!x[i])return 0;} return 0;
+}
+__attribute__((dllexport)) char *strchr(const char *s, int c) {
+    if(!s)return 0; unsigned char v=(unsigned char)c;
+    for(;;s++){if((unsigned char)*s==v)return (char *)s;if(!*s)return 0;}
+}
+__attribute__((dllexport)) char *strstr(const char *haystack, const char *needle) {
+    if(!haystack||!needle)return 0;
+    if(!*needle)return (char *)haystack;
+    ucrt_size_t n=strlen(needle);
+    for(const char *p=haystack;*p;p++) {
+        ucrt_size_t i=0; while(i<n&&p[i]&&p[i]==needle[i])i++;
+        if(i==n)return (char *)p;
+    }
+    return 0;
+}

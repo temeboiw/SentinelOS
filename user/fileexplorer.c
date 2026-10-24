@@ -353,6 +353,10 @@ void mainCRTStartup(void) {
             else if(ch=='h'||ch=='H') {g_home=1;g_search_mode=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
             else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
         }
+        if (msg.message == 0x0100 && g_context_menu) {
+            if (msg.wParam == 0x1B) { g_context_menu=0; draw_rows(pText,pInv); }
+            continue;
+        }
         if (msg.message == 0x0100) {
             if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
             if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;

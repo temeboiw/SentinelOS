@@ -232,6 +232,22 @@ static int fe_go_root(SetCurrentDirectoryA_t pChdir) {
     return 1;
 }
 
+static int fe_build_launch_path(const char *name, char *out, int cap) {
+    int n = 0;
+    while (g_path[n] && n < cap - 1) { out[n] = g_path[n]; n++; }
+    if (g_path[n] || n >= cap - 1) return 0;
+    if (n && out[n - 1] != '\\') {
+        if (n + 1 >= cap) return 0;
+        out[n++] = '\\';
+    }
+    for (int i = 0; name[i]; ++i) {
+        if (n + 1 >= cap) return 0;
+        out[n++] = name[i];
+    }
+    out[n] = 0;
+    return 1;
+}
+
 static void fe_append_component(const char *name) {
     int n=0; while (g_path[n]) n++;
     if (n>0 && g_path[n-1]!='\\') g_path[n++]='\\';
@@ -513,8 +529,12 @@ void mainCRTStartup(void) {
                     print("fileexplorer: Enter launch ");
                     print(g_names[selected]);
                     print("\n");
-                    long long pid = (long long)sy3(SYS_CreateProcess,
-                                                   (u64)g_names[selected], 0, 0);
+                    char launch_path[160];
+                    long long pid = -1;
+                    if (fe_build_launch_path(g_names[selected], launch_path, sizeof launch_path))
+                        pid = (long long)sy3(SYS_CreateProcess, (u64)launch_path, 0, 0);
+                    else
+                        print("fileexplorer: executable path too long\n");
                     if (pid <= 0) {
                         print("fileexplorer: EXE launch failed, status=");
                         char digits[24]; int n=0; unsigned long long v=(unsigned long long)(-pid);
@@ -772,8 +792,12 @@ void mainCRTStartup(void) {
                     g_last_file_row = row;
 
                     if (double_click && ends_with(g_names[row], ".exe")) {
-                        unsigned long long pid = sy3(
-                            SYS_CreateProcess, (u64)g_names[row], 0, 0);
+                        char launch_path[160];
+                        unsigned long long pid = (unsigned long long)-1LL;
+                        if (fe_build_launch_path(g_names[row], launch_path, sizeof launch_path))
+                            pid = sy3(SYS_CreateProcess, (u64)launch_path, 0, 0);
+                        else
+                            print("fileexplorer: executable path too long\n");
                         if ((long long)pid < 0 || pid == 0) {
                             print("fileexplorer: disk executable launch failed: ");
                             print(g_names[row]);

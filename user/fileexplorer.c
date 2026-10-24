@@ -53,7 +53,15 @@ static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
 static int g_count;
 static char g_path[128];
-static int g_win_y = 40; /* must match CreateWindowEx y */
+static int g_win_x = 40, g_win_y = 40; /* live window origin */
+static int g_context_menu = 0;
+static int g_context_row = -1;
+static int g_context_start_line = 2;
+static const char *context_items[] = {
+    "Open", "Properties", "Copy (read-only)", "Cut (read-only)",
+    "Delete (read-only)", "Refresh", "Close menu"
+};
+#define CONTEXT_ITEM_COUNT ((int)(sizeof(context_items)/sizeof(context_items[0])))
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
@@ -148,6 +156,17 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     } else pText(g_window,0,1,"H: Home | /: search | S: sort | double-click to open",-1);
     for (int visible = 0; visible < VISIBLE_ROWS; visible++)
         draw_visible_row(pText, 0, visible);
+    if (g_context_menu) {
+        /* Overlay a compact in-window context menu; the backing rows are
+           redrawn when it closes, so no pixels are left behind. */
+        for (int i=0; i<CONTEXT_ITEM_COUNT; i++) {
+            char item[80]; int n=0;
+            item[n++]='>'; item[n++]=' ';
+            for (int j=0; context_items[i][j] && n<78; j++) item[n++]=context_items[i][j];
+            item[n]=0;
+            pText(g_window, 3, g_context_start_line+i, item, -1);
+        }
+    }
     if (pInv) {
         FE_RECT dirty = { 0, 0, 760, 520 };
         pInv(g_window, &dirty, 1);
@@ -247,6 +266,7 @@ void mainCRTStartup(void) {
 
     path_init();
     print("fileexplorer: create window\n");
+    g_win_x = 40;
     g_win_y = 40;
     if (pBeginBatch) pBeginBatch();
     g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
@@ -266,7 +286,10 @@ void mainCRTStartup(void) {
          * after the user moves the window; ask USER32 for its live rectangle. */
         if (pGetWindowRect) {
             FE_RECT live_rect;
-            if (pGetWindowRect(g_window, &live_rect)) g_win_y = live_rect.top;
+            if (pGetWindowRect(g_window, &live_rect)) {
+                g_win_x = live_rect.left;
+                g_win_y = live_rect.top;
+            }
         }
 
         /*
@@ -342,7 +365,99 @@ void mainCRTStartup(void) {
             draw_rows(pText, pInv);
         }
 
+        if (msg.message == 0x0204) {
+            /* WM_RBUTTONDOWN: context menu for the selected directory entry. */
+            int line = (msg.y - (g_win_y + 44)) / 16;
+            int row = line - 2;
+            if (!g_home && row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
+                g_context_row = g_scroll + row;
+                g_context_menu = 1;
+                g_context_start_line = 2 + row;
+                if (g_context_start_line + CONTEXT_ITEM_COUNT > 2 + VISIBLE_ROWS)
+                    g_context_start_line = 2 + VISIBLE_ROWS - CONTEXT_ITEM_COUNT;
+                if (g_context_start_line < 2) g_context_start_line = 2;
+                g_hover_row = g_context_row;
+                draw_rows(pText, pInv);
+            }
+        }
+
         if (msg.message == 0x0201) {
+            if (g_context_menu) {
+                int line = (msg.y - (g_win_y + 44)) / 16;
+                int item = line - g_context_start_line;
+                int selected = g_context_row;
+                g_context_menu = 0;
+                draw_rows(pText, pInv);
+                if (item >= 0 && item < CONTEXT_ITEM_COUNT && selected >= 0 && selected < g_count) {
+                    if (item == 5) { reload(pQuery, pText, pInv); continue; }
+                    if (item == 6) continue;
+                    if (item == 2 || item == 3 || item == 4) {
+                        int protected_path = 0;
+                        const char *prefix = "C:\\Windows\\System32";
+                        int j=0, same=1;
+                        while (prefix[j]) {
+                            char a=g_path[j], b=prefix[j];
+                            if (a>='a'&&a<='z')a-=32;
+                            if (b>='a'&&b<='z')b-=32;
+                            if (!a || a!=b) { same=0; break; }
+                            j++;
+                        }
+                        if (same && (g_path[j]==0 || g_path[j]=='\\')) protected_path=1;
+                        if (!protected_path && g_path[0]=='C' && g_path[1]==':' &&
+                            g_path[2]=='\\' && ends_with(g_names[selected], "\\System32")) protected_path=1;
+                        if (protected_path && item==4) {
+                            if (pMsgBox) pMsgBox(g_window, "Access denied: System32 is protected. No files were changed.", "Protected system folder", 0);
+                        } else if (pMsgBox) {
+                            pMsgBox(g_window, "This filesystem is currently read-only. The requested operation was not performed.", "File operation unavailable", 0);
+                        }
+                        continue;
+                    }
+                    if (item == 1 || (!g_isdir[selected] &&
+                        !ends_with(g_names[selected], ".exe") &&
+                        !ends_with(g_names[selected], ".msi"))) {
+                        char details[320]; int d=0;
+                        const char *label=g_isdir[selected]?"Folder":
+                            ends_with(g_names[selected],".dll")?"DLL library (not directly executable)":
+                            ends_with(g_names[selected],".msi")?"Windows Installer package":
+                            ends_with(g_names[selected],".exe")?"Windows executable":"File";
+                        const char *a="Name: "; while(a[d]){details[d]=a[d];d++;}
+                        for(int j=0;g_names[selected][j]&&d<240;j++)details[d++]=g_names[selected][j];
+                        const char *b="\\nType: ";for(int j=0;b[j]&&d<260;j++)details[d++]=b[j];
+                        for(int j=0;label[j]&&d<285;j++)details[d++]=label[j];
+                        const char *c="\\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
+                        for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
+                        details[d]=0;
+                        if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
+                        continue;
+                    }
+                    if (item == 0) {
+                        if (g_isdir[selected]) {
+                            int ok = pChdir ? pChdir(g_names[selected]) : 0;
+                            if (ok) {
+                                if (g_names[selected][0]=='.' && g_names[selected][1]=='.' && !g_names[selected][2]) {
+                                    int n=0;while(g_path[n])n++;
+                                    if(n>3){n--;while(n>2&&g_path[n]!='\\\\')n--;if(g_path[n]=='\\\\')n++;g_path[n]=0;if(n<=3)path_init();}
+                                } else {
+                                    int n=0;while(g_path[n])n++;
+                                    if(n>0&&g_path[n-1]!='\\\\')g_path[n++]='\\\\';
+                                    for(int k=0;g_names[selected][k]&&n<120;k++)g_path[n++]=g_names[selected][k];
+                                    g_path[n]=0;
+                                }
+                                g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);
+                            } else if(pMsgBox) pMsgBox(g_window,"Could not open this folder.","File Explorer",0);
+                        } else if (ends_with(g_names[selected], ".exe")) {
+                            unsigned long long pid=sy3(SYS_CreateProcess,(u64)g_names[selected],0,0);
+                            if ((!pid || (long long)pid<0) && pMsgBox) pMsgBox(g_window,"This executable could not be started.","Cannot open file",0);
+                        } else if (ends_with(g_names[selected], ".msi")) {
+                            static char msiexec_name[]="msiexec.exe";
+                            unsigned long long pid=sy3(SYS_CreateProcess,(u64)msiexec_name,(u64)g_names[selected],0);
+                            if ((!pid || (long long)pid<0) && pMsgBox) pMsgBox(g_window,"Windows Installer is not available.","Cannot open package",0);
+                        }
+                        continue;
+                    }
+                }
+                continue;
+            }
             /*
              * user32 draws line i at: wnd_y + 44 + i*16
              * lines 0,1 = path/hint; entries start at line 2

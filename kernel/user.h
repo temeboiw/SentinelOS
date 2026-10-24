@@ -105,6 +105,34 @@ static UserProc up_tab[UP_MAX];
 static int up_n;
 static int up_cur = -1;
 
+
+/* Kernel-owned crash queue. The faulting process is already terminated before
+ * the shell receives this record; no code in the failed image handles it. */
+typedef struct {
+    uint32_t pid;
+    uint32_t reserved;
+    uint64_t vector, rip, error, cr2;
+    char image_name[64];
+    char exception_name[32];
+} UserApplicationError;
+#define USER_APP_ERROR_QUEUE_SIZE 8
+static UserApplicationError user_app_errors[USER_APP_ERROR_QUEUE_SIZE];
+static unsigned int user_app_error_head, user_app_error_count;
+
+static void user_app_error_push(const UserApplicationError *event) {
+    if (!event) return;
+    unsigned int at;
+    if (user_app_error_count == USER_APP_ERROR_QUEUE_SIZE) {
+        /* Preserve the newest failures if the shell was absent for a while. */
+        user_app_error_head = (user_app_error_head + 1u) % USER_APP_ERROR_QUEUE_SIZE;
+        at = (user_app_error_head + user_app_error_count - 1u) % USER_APP_ERROR_QUEUE_SIZE;
+    } else {
+        at = (user_app_error_head + user_app_error_count) % USER_APP_ERROR_QUEUE_SIZE;
+        user_app_error_count++;
+    }
+    user_app_errors[at] = *event;
+}
+
 static void up_set_image_name(UserProc *u, const char *name) {
     if (!u) return;
     unsigned int i = 0;
@@ -855,6 +883,7 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 #define SYS_NtCloseFile 22
 #define SYS_NtQueryFileSize 25
 #define SYS_NtQueryProcessList 41
+#define SYS_NtGetApplicationError 42
 #define SYS_NtSetFilePosition 26
 typedef struct {
     uint32_t ino;
@@ -2107,6 +2136,41 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    case SYS_NtGetApplicationError: {
+        /* Only the desktop shell may consume crash notifications. Other
+         * applications cannot steal or discard the system error queue. */
+        int caller_idx = up_find_proc(MmCurrentProcess);
+        if (caller_idx < 0 ||
+            !up_tab[caller_idx].image_name[0]) {
+            f->rax = 0;
+            return f;
+        }
+        const char *caller_name = up_tab[caller_idx].image_name;
+        static const char shell_name[] = "explorer.exe";
+        int is_shell = 1;
+        for (unsigned int i = 0; i < sizeof(shell_name); i++) {
+            char a = caller_name[i], b = shell_name[i];
+            if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
+            if (a != b) { is_shell = 0; break; }
+        }
+        if (!is_shell || !f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess, f->rdi,
+                                 sizeof(UserApplicationError), 1)) {
+            f->rax = 0;
+            return f;
+        }
+        if (!user_app_error_count) {
+            f->rax = 0;
+            return f;
+        }
+        *(UserApplicationError *)(uintptr_t)f->rdi =
+            user_app_errors[user_app_error_head];
+        user_app_error_head = (user_app_error_head + 1u) % USER_APP_ERROR_QUEUE_SIZE;
+        user_app_error_count--;
+        f->rax = 1;
+        return f;
+    }
+
     case SYS_NtQueryProcessList: {
         uint64_t capacity = f->rsi;
         if (capacity > UP_MAX) capacity = UP_MAX;
@@ -2930,6 +2994,19 @@ static Frame *user_exception_handler(Frame *f) {
 
     UserProc *faulted = &up_tab[dead_idx];
     int parent_idx = faulted->parent;
+    UserApplicationError crash = {0};
+    crash.pid = (uint32_t)dying->Pid;
+    crash.vector = f->vector;
+    crash.rip = f->rip;
+    crash.error = f->error;
+    crash.cr2 = cr2;
+    for (unsigned int i = 0; i < sizeof(crash.image_name)-1 &&
+         faulted->image_name[i]; i++)
+        crash.image_name[i] = faulted->image_name[i];
+    const char *reason = f->vector < 32 ? exc_name[f->vector] : "CPU exception";
+    for (unsigned int i = 0; i < sizeof(crash.exception_name)-1 && reason[i]; i++)
+        crash.exception_name[i] = reason[i];
+    user_app_error_push(&crash);
     DbgPrint("\n[Application Error] %s (PID %u) terminated: %s (#%llu)\n",
              faulted->image_name, (unsigned int)dying->Pid,
              f->vector < 32 ? exc_name[f->vector] : "CPU exception",

@@ -2362,13 +2362,23 @@ __attribute__((dllexport)) HANDLE FindFirstFileW(K32_LPCWSTR path,K32_WIN32_FIND
     k32_ansi_to_wide(out->cFileName,260,a.cFileName);
     return h;
 }
-/* Common name-match enumeration form; extended filter modes are not supported yet. */
+/* Supported FindFirstFileExW contract:
+ * - FindExInfoStandard and FindExInfoBasic share the WIN32_FIND_DATAW layout.
+ * - FindExSearchNameMatch is implemented by the current filesystem backend.
+ * - Filter expressions and extended enumeration flags are not implemented;
+ *   reject them instead of silently pretending to honor their semantics.
+ */
 __attribute__((dllexport)) HANDLE FindFirstFileExW(K32_LPCWSTR path,int info_level,
     void *find_data,int search_op,void *filter,DWORD flags) {
-    (void)info_level;
-    (void)search_op;
-    (void)filter;
-    (void)flags;
+    if(!path || !find_data || (info_level!=0 && info_level!=1) ||
+       search_op!=0 || filter!=0) {
+        k32_last_error=87; /* ERROR_INVALID_PARAMETER */
+        return (HANDLE)(i64)-1;
+    }
+    if(flags!=0) {
+        k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+        return (HANDLE)(i64)-1;
+    }
     return FindFirstFileW(path,(K32_WIN32_FIND_DATAW *)find_data);
 }
 __attribute__((dllexport)) BOOL FindNextFileW(HANDLE h,K32_WIN32_FIND_DATAW *out) {

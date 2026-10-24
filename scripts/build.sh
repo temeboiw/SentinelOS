@@ -507,6 +507,9 @@ lld -flavor link \
   /export:ReadFile \
   /export:CloseHandle \
   /export:QueryDirectoryA \
+  /export:FindFirstFileA \
+  /export:FindNextFileA \
+  /export:FindClose \
   /export:SetCurrentDirectoryA \
   /export:GetLastError \
   /export:SetLastError \

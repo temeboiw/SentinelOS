@@ -157,6 +157,16 @@ __attribute__((dllexport)) char *strchr(const char *s, int c) {
     if(!s)return 0; unsigned char v=(unsigned char)c;
     for(;;s++){if((unsigned char)*s==v)return (char *)s;if(!*s)return 0;}
 }
+__attribute__((dllexport)) char *strrchr(const char *s, int c) {
+    if (!s) return 0;
+    unsigned char value = (unsigned char)c;
+    const char *last = 0;
+    for (;;) {
+        if ((unsigned char)*s == value) last = s;
+        if (!*s) return (char *)last;
+        ++s;
+    }
+}
 __attribute__((dllexport)) char *strstr(const char *haystack, const char *needle) {
     if(!haystack||!needle)return 0;
     if(!*needle)return (char *)haystack;

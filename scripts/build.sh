@@ -1106,6 +1106,12 @@ lld -flavor link \
   /export:_errno \
   /export:_initterm \
   /export:_initterm_e \
+  /export:_beginthreadex \
+  /export:terminate \
+  /export:__std_terminate \
+  /export:_purecall \
+  /export:abort \
+  /export:_invoke_watson \
   /export:strerror \
   /export:_configure_narrow_argv \
   /export:_initialize_narrow_environment \

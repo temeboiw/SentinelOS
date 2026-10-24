@@ -2029,24 +2029,32 @@ BOOL UpdateWindow(void *hwnd) {
 __attribute__((dllexport))
 BOOL TextOutA(void *hdc, int x, int y, LPCSTR str, int len) {
     (void)hdc;
-    (void)x;
+    if (!str) return 0;
 
     if (len < 0) {
         len = 0;
         while (str[len]) len++;
     }
 
-    if (y >= 0 && y < 40) {
-        int n = len < 79 ? len : 79;
-
+    /*
+     * SentinelOS's retained text-window backend stores rows rather than a
+     * device context. Treat x as a character-column offset in that backend:
+     * this preserves the existing row-based app contract and allows controls
+     * such as Explorer's context menu to draw at a real horizontal offset.
+     */
+    if (y >= 0 && y < 40 && x < 79 && len > 0) {
+        int col = x < 0 ? 0 : x;
+        int source = x < 0 ? -x : 0;
+        if (source > len) source = len;
+        int n = len - source;
+        if (n > 79 - col) n = 79 - col;
         for (int i = 0; i < n; i++)
-            g_lines[y][i] = str[i];
-
-        g_lines[y][n] = 0;
-
-        if (y >= g_nlines)
-            g_nlines = y + 1;    }
-
+            g_lines[y][col + i] = str[source + i];
+        int end = col + n;
+        if (end < 79) g_lines[y][end] = 0;
+        else g_lines[y][79] = 0;
+        if (y >= g_nlines) g_nlines = y + 1;
+    }
     return 1;
 }
 

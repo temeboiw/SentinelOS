@@ -649,6 +649,11 @@ lld -flavor link \
   /export:SetConsoleCP \
   /export:SetConsoleOutputCP \
   /export:GetFileSizeEx \
+  /export:CreateFileMappingA \
+  /export:CreateFileMappingW \
+  /export:MapViewOfFile \
+  /export:UnmapViewOfFile \
+  /export:FlushViewOfFile \
   /export:GetFileInformationByHandleEx \
   /export:GetFinalPathNameByHandleA \
   /export:GetFinalPathNameByHandleW \

@@ -1094,7 +1094,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
     uint32_t ino=0;
     uint64_t raw_size=0;
     if(vfs_find_regular_file(name,&ino,&raw_size)<0 ||
-       raw_size<0x100 || raw_size>16ull*1024*1024) return 0;
+       raw_size<0x100 || raw_size>64ull*1024*1024) return 0;
     uint64_t raw_pages=(raw_size+0xFFFULL)>>12;
     uint64_t raw_pa=pmm_alloc_n(raw_pages);
     if(!raw_pa)return 0;
@@ -1121,7 +1121,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
     uint32_t image_size=*(uint32_t *)(opt+56);
     uint32_t headers_size=*(uint32_t *)(opt+60);
     uint64_t sect_off=opt_off+opt_size;
-    if(image_size<0x1000 || image_size>16u*1024*1024 ||
+    if(image_size<0x1000 || image_size>64u*1024*1024 ||
        !headers_size || headers_size>raw_size || headers_size>image_size ||
        entry_rva>=image_size ||
        sect_off+(uint64_t)sections*40>raw_size)goto bad_raw;

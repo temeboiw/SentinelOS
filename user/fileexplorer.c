@@ -164,6 +164,8 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
             item[n++]='>'; item[n++]=' ';
             for (int j=0; context_items[i][j] && n<78; j++) item[n++]=context_items[i][j];
             item[n]=0;
+            pText(g_window, 0, g_context_start_line+i,
+                  "                                                                                ", -1);
             pText(g_window, 3, g_context_start_line+i, item, -1);
         }
     }
@@ -476,6 +478,7 @@ void mainCRTStartup(void) {
                     if (item == 0) {
                         if (g_isdir[selected]) {
                             int ok = pChdir ? pChdir(g_names[selected]) : 0;
+                            if (!ok) ok = (sy3(SYS_Chdir, (u64)g_names[selected], 0, 0) == 0);
                             if (ok) {
                                 if (g_names[selected][0]=='.' && g_names[selected][1]=='.' && !g_names[selected][2]) {
                                     int n=0;while(g_path[n])n++;

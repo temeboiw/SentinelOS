@@ -1120,10 +1120,10 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
      * contracts such as api-ms-win-crt-runtime-l1-1-0.dll.
      */
     int found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
-    char system_path[160];
+    char system_path[224];
     unsigned int path_len = 0;
-    while (name[path_len] && path_len < 95) path_len++;
-    if (name[path_len] != 0) return 0;
+    while (name[path_len] && path_len < 159) path_len++;
+    if (name[path_len] != 0) { DbgPrint("user: disk image path too long\n"); return 0; }
 
     const char prefix0[] = "Windows/System32/";
     const char prefix1[] = "C:/Windows/System32/";
@@ -1145,18 +1145,19 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
         system_path[i + j] = 0;
         found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
     }
-    if (!found) return 0;
-    if (raw_size < 0x100 || raw_size > 64ull*1024*1024) return 0;
+    if (!found) { DbgPrint("user: disk image not found: %s\n", name); return 0; }
+    if (raw_size < 0x100 || raw_size > 64ull*1024*1024) { DbgPrint("user: disk image size rejected: %s size=%llu\n", name, (unsigned long long)raw_size); return 0; }
     uint64_t raw_pages=(raw_size+0xFFFULL)>>12;
     uint64_t raw_pa=pmm_alloc_n(raw_pages);
     if(!raw_pa)return 0;
     uint8_t *raw=(uint8_t *)(HHDM_BASE+raw_pa);
     for(uint64_t i=0;i<raw_pages*USER_IMAGE_PAGE;i++)raw[i]=0;
     if(vfs_read_inode_at(ino,0,raw,raw_size)!=(int)raw_size) {
+        DbgPrint("user: disk image read failed: %s size=%llu\n", name, (unsigned long long)raw_size);
         for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
         return 0;
     }
-    if(raw[0]!='M'||raw[1]!='Z')goto bad_raw;
+    if(raw[0]!='M'||raw[1]!='Z') { DbgPrint("user: disk image is not MZ PE: %s\n", name); goto bad_raw; }
     int32_t lfanew=*(int32_t *)(raw+0x3C);
     if(lfanew<0 || (uint64_t)lfanew+24>raw_size ||
        *(uint32_t *)(raw+lfanew)!=0x00004550)goto bad_raw;
@@ -2080,7 +2081,7 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtCreateProcess: {
-        char name[64];
+        char name[160];
         char child_arg[64];
         child_arg[0] = 0;
         int has_child_arg = 0;
@@ -2117,6 +2118,7 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         if (!mod) {
+            DbgPrint("user: process image load failed: %s\n", name);
             MmSwitchToProcess(caller);
             f->rax = (uint64_t)-1LL;
             return f;

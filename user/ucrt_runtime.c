@@ -217,6 +217,8 @@ static void ucrt_fail_fast(unsigned int code) {
     for (;;) __asm__ volatile("pause");
 }
 __attribute__((dllexport)) void terminate(void) { ucrt_fail_fast(3); }
+__attribute__((dllexport)) void __std_terminate(void) { ucrt_fail_fast(3); }
+__attribute__((dllexport)) int _purecall(void) { ucrt_fail_fast(3); return 0; }
 __attribute__((dllexport)) void abort(void) { ucrt_fail_fast(3); }
 __attribute__((dllexport)) void _invoke_watson(const unsigned short *expression,
     const unsigned short *function, const unsigned short *file, unsigned int line,

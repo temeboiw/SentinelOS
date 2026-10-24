@@ -193,7 +193,7 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         for (int i=0; i<CONTEXT_ITEM_COUNT; i++) {
             char item[80]; int n=0;
             item[n++]='>'; item[n++]=' ';
-            for (int j=0; context_item(i)[j] && n<78; j++) item[n++]=context_items[i][j];
+            for (int j=0; context_item(i)[j] && n<78; j++) item[n++]=context_item(i)[j];
             item[n]=0;
             pText(g_window, 0, g_context_start_line+i,
                   "                                                                                ", -1);

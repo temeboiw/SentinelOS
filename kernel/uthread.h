@@ -124,7 +124,7 @@ static uint64_t ut_create(uint64_t start, uint64_t param) {
 static void ut_exit_current(void) {
     if (ut_cur < 0 || ut_cur >= UT_MAX) return;
     UThread *t = &ut_tab[ut_cur];
-    if (!t->alive) return;
+    if (!t->alive || t->proc != MmCurrentProcess) return;
     if (t->proc) {
         for (uint64_t off = 0; off < UT_STACK_SIZE; off += 0x1000ULL)
             MmUnmapAllocatedUserPage(t->proc, t->stack_base + off);

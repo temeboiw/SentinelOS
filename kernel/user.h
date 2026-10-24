@@ -679,6 +679,7 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
 static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name);
 static void pe_resolve_imports(KPROCESS *proc, BootModule *mod);
 static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func);
+static uint64_t pe_get_export_depth(KPROCESS *proc, BootModule *mod, const char *func, unsigned int depth);
 
 static uint64_t pe_get_export_ordinal(KPROCESS *proc, BootModule *mod,
                                       uint32_t ordinal, unsigned int depth) {
@@ -746,11 +747,11 @@ static uint64_t pe_get_export_ordinal(KPROCESS *proc, BootModule *mod,
         return pe_get_export_ordinal(proc, target, n, depth + 1);
     }
     /* Name lookup can itself lead to another forwarder. */
-    return pe_get_export(proc, target, symbol);
+    return pe_get_export_depth(proc, target, symbol, depth + 1);
 }
 
-static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func) {
-    if (!proc || !mod || !func) return 0;
+static uint64_t pe_get_export_depth(KPROCESS *proc, BootModule *mod, const char *func, unsigned int depth) {
+    if (!proc || !mod || !func || depth > 12) return 0;
     UserImage *image = PspGetUserImage(proc, mod);
     if (!image) return 0;
     uint8_t *bytes = PspImageBytes(image);
@@ -780,9 +781,13 @@ static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func)
         if (k >= remain || func[k] || name[k]) continue;
         uint16_t index = *(uint16_t *)(bytes + or + (uint64_t)i * 2);
         if (index >= nf) return 0;
-        return pe_get_export_ordinal(proc, mod, base + index, 0);
+        return pe_get_export_ordinal(proc, mod, base + index, depth);
     }
     return 0;
+}
+
+static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func) {
+    return pe_get_export_depth(proc, mod, func, 0);
 }
 
 /*

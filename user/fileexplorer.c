@@ -32,6 +32,9 @@ typedef long long (*DispatchMessageA_t)(const void *);
 typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
 typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
+typedef void *(*CreateFileA_t)(LPCSTR, DWORD, DWORD, void *, DWORD, DWORD, void *);
+typedef BOOL (*GetFileSizeEx_t)(void *, long long *);
+typedef BOOL (*CloseHandle_t)(void *);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
 typedef BOOL (*GetWindowRect_t)(void *, void *);
 typedef void (*BeginRedrawBatch_t)(void);
@@ -53,7 +56,15 @@ static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
 static int g_count;
 static char g_path[128];
-static int g_win_y = 40; /* must match CreateWindowEx y */
+static int g_win_y = 40; /* live window origin */
+static int g_context_menu = 0;
+static int g_context_row = -1;
+static int g_context_start_line = 2;
+static const char *context_items[] = {
+    "Open", "Properties", "Copy (read-only)", "Cut (read-only)",
+    "Delete (read-only)", "Refresh", "Close menu"
+};
+#define CONTEXT_ITEM_COUNT ((int)(sizeof(context_items)/sizeof(context_items[0])))
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
@@ -148,6 +159,19 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     } else pText(g_window,0,1,"H: Home | /: search | S: sort | double-click to open",-1);
     for (int visible = 0; visible < VISIBLE_ROWS; visible++)
         draw_visible_row(pText, 0, visible);
+    if (g_context_menu) {
+        /* Overlay a compact in-window context menu; the backing rows are
+           redrawn when it closes, so no pixels are left behind. */
+        for (int i=0; i<CONTEXT_ITEM_COUNT; i++) {
+            char item[80]; int n=0;
+            item[n++]='>'; item[n++]=' ';
+            for (int j=0; context_items[i][j] && n<78; j++) item[n++]=context_items[i][j];
+            item[n]=0;
+            pText(g_window, 0, g_context_start_line+i,
+                  "                                                                                ", -1);
+            pText(g_window, 3, g_context_start_line+i, item, -1);
+        }
+    }
     if (pInv) {
         FE_RECT dirty = { 0, 0, 760, 520 };
         pInv(g_window, &dirty, 1);
@@ -169,6 +193,27 @@ static int ends_with(const char *n, const char *ext) {
         if (a != b) return 0;
     }
     return 1;
+}
+
+/* Read-only file size query backed by the real kernel32 file-handle APIs. */
+static void append_file_size(char *details, int *pos, int cap, const char *name,
+                             CreateFileA_t pOpen, GetFileSizeEx_t pSize,
+                             CloseHandle_t pClose) {
+    if (!details || !pos || !name || !pOpen || !pSize || !pClose) return;
+    void *h = pOpen(name, 0, 0, 0, 3, 0, 0);
+    if (!h || h == (void *)-1) return;
+    long long bytes = 0;
+    if (pSize(h, &bytes) && bytes >= 0) {
+        const char *label = "\nSize: ";
+        for (int i=0; label[i] && *pos<cap-1; i++) details[(*pos)++]=label[i];
+        char digits[24]; int count=0; u64 value=(u64)bytes;
+        do { digits[count++] = (char)('0' + value % 10); value /= 10; } while (value && count < 23);
+        while (count && *pos<cap-1) details[(*pos)++]=digits[--count];
+        const char *suffix = " bytes";
+        for (int i=0; suffix[i] && *pos<cap-1; i++) details[(*pos)++]=suffix[i];
+        details[*pos]=0;
+    }
+    pClose(h);
 }
 
 static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
@@ -226,6 +271,9 @@ void mainCRTStartup(void) {
     char u32[] = {'u','s','e','r','3','2','.','d','l','l',0};
 
     QueryDirectoryA_t pQuery = (QueryDirectoryA_t)gpa(k32, "QueryDirectoryA");
+    CreateFileA_t pOpenFile = (CreateFileA_t)gpa(k32, "CreateFileA");
+    GetFileSizeEx_t pGetFileSizeEx = (GetFileSizeEx_t)gpa(k32, "GetFileSizeEx");
+    CloseHandle_t pCloseHandle = (CloseHandle_t)gpa(k32, "CloseHandle");
     SetCurrentDirectoryA_t pChdir = (SetCurrentDirectoryA_t)gpa(k32, "SetCurrentDirectoryA");
     CreateWindowExA_t pCreate = (CreateWindowExA_t)gpa(u32, "CreateWindowExA");
     ShowWindow_t pShow = (ShowWindow_t)gpa(u32, "ShowWindow");
@@ -273,7 +321,7 @@ void mainCRTStartup(void) {
          * Mouse move: update a fixed-width hover marker. The marker occupies
          * a reserved character, so row text and controls never jump sideways.
          */
-        if (msg.message == 0x0200) {
+        if (msg.message == 0x0200 && !g_context_menu) {
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
             if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= (g_home ? HOME_ITEM_COUNT : g_count)) row = -1;
@@ -308,7 +356,7 @@ void mainCRTStartup(void) {
         }
 
         /* Mouse wheel and arrow/Page keys scroll the visible directory rows. */
-        if (msg.message == 0x020A) {
+        if (msg.message == 0x020A && !g_context_menu) {
             int delta = (int)((msg.wParam >> 16) & 0xFFFF);
             if (delta & 0x8000) delta -= 0x10000;
             if (delta > 0) g_scroll -= 3;
@@ -321,7 +369,9 @@ void mainCRTStartup(void) {
         }
         if(msg.message==0x0102) {
             int ch=(int)msg.wParam;
-            if(g_search_mode) {
+            if (g_context_menu) {
+                if (ch==27) { g_context_menu=0; draw_rows(pText,pInv); }
+            } else if(g_search_mode) {
                 if(ch==8&&g_filter_len>0){g_filter[--g_filter_len]=0;if(!g_home)reload(pQuery,pText,pInv);}
                 else if(ch==13){g_search_mode=0;draw_rows(pText,pInv);}
                 else if(ch==27){g_search_mode=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}
@@ -329,6 +379,10 @@ void mainCRTStartup(void) {
             } else if(ch=='/'||ch=='?') {g_search_mode=1;g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
             else if(ch=='h'||ch=='H') {g_home=1;g_search_mode=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
             else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
+        }
+        if (msg.message == 0x0100 && g_context_menu) {
+            if (msg.wParam == 0x1B) { g_context_menu=0; draw_rows(pText,pInv); }
+            continue;
         }
         if (msg.message == 0x0100) {
             if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
@@ -342,7 +396,148 @@ void mainCRTStartup(void) {
             draw_rows(pText, pInv);
         }
 
+        if (msg.message == 0x0204) {
+            /* WM_RBUTTONDOWN: context menu for the selected directory entry. */
+            int line = (msg.y - (g_win_y + 44)) / 16;
+            int row = line - 2;
+            if (!g_home && row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
+                g_context_row = g_scroll + row;
+                g_context_menu = 1;
+                g_context_start_line = 2 + row;
+                if (g_context_start_line + CONTEXT_ITEM_COUNT > 2 + VISIBLE_ROWS)
+                    g_context_start_line = 2 + VISIBLE_ROWS - CONTEXT_ITEM_COUNT;
+                if (g_context_start_line < 2) g_context_start_line = 2;
+                g_hover_row = g_context_row;
+                draw_rows(pText, pInv);
+            }
+        }
+
         if (msg.message == 0x0201) {
+            if (g_context_menu) {
+                int line = (msg.y - (g_win_y + 44)) / 16;
+                int item = line - g_context_start_line;
+                int selected = g_context_row;
+                g_context_menu = 0;
+                draw_rows(pText, pInv);
+                if (item >= 0 && item < CONTEXT_ITEM_COUNT && selected >= 0 && selected < g_count) {
+                    if (item == 5) { reload(pQuery, pText, pInv); continue; }
+                    if (item == 6) continue;
+                    if (item == 2 || item == 3 || item == 4) {
+                        int protected_path = 0;
+                        const char *prefix = "C:\\Windows\\System32";
+                        int j=0, same=1;
+                        while (prefix[j]) {
+                            char a=g_path[j], b=prefix[j];
+                            if (a>='a'&&a<='z')a-=32;
+                            if (b>='a'&&b<='z')b-=32;
+                            if (!a || a!=b) { same=0; break; }
+                            j++;
+                        }
+                        if (same && (g_path[j]==0 || g_path[j]=='\\')) protected_path=1;
+                        /* Also protect the System32 directory itself and its Windows parent.
+                           This is only a UI guard; destructive VFS operations remain unavailable. */
+                        if (!protected_path) {
+                            const char *want="System32";
+                            int k=0, eq=1;
+                            while (want[k] || g_names[selected][k]) {
+                                char a=g_names[selected][k], b=want[k];
+                                if (a>='a'&&a<='z') a-=32;
+                                if (b>='a'&&b<='z') b-=32;
+                                if (a!=b) { eq=0; break; }
+                                k++;
+                            }
+                            if (eq) {
+                                const char *wp="C:\\Windows";
+                                int q=0, peq=1;
+                                while (wp[q] || g_path[q]) {
+                                    char a=g_path[q], b=wp[q];
+                                    if (a>='a'&&a<='z') a-=32;
+                                    if (b>='a'&&b<='z') b-=32;
+                                    if (a!=b) { peq=0; break; }
+                                    q++;
+                                }
+                                if (peq) protected_path=1;
+                            }
+                            if (!protected_path && g_names[selected][0] &&
+                                (g_names[selected][0]=='W'||g_names[selected][0]=='w')) {
+                                const char *wn="Windows";
+                                int q=0, weq=1;
+                                while (wn[q] || g_names[selected][q]) {
+                                    char a=g_names[selected][q], b=wn[q];
+                                    if (a>='a'&&a<='z') a-=32;
+                                    if (b>='a'&&b<='z') b-=32;
+                                    if (a!=b) { weq=0; break; }
+                                    q++;
+                                }
+                                if (weq) {
+                                    const char *root="C:\\";
+                                    int r=0, req=1;
+                                    while (root[r] || g_path[r]) {
+                                        char a=g_path[r], b=root[r];
+                                        if (a>='a'&&a<='z') a-=32;
+                                        if (b>='a'&&b<='z') b-=32;
+                                        if (a!=b) { req=0; break; }
+                                        r++;
+                                    }
+                                    if (req) protected_path=1;
+                                }
+                            }
+                        }
+                        if (protected_path && item==4) {
+                            if (pMsgBox) pMsgBox(g_window, "Access denied: System32 is protected. No files were changed.", "Protected system folder", 0);
+                        } else if (pMsgBox) {
+                            pMsgBox(g_window, "This filesystem is currently read-only. The requested operation was not performed.", "File operation unavailable", 0);
+                        }
+                        continue;
+                    }
+                    if (item == 1 || (!g_isdir[selected] &&
+                        !ends_with(g_names[selected], ".exe") &&
+                        !ends_with(g_names[selected], ".msi"))) {
+                        char details[512]; int d=0;
+                        const char *label=g_isdir[selected]?"Folder":
+                            ends_with(g_names[selected],".dll")?"DLL library (not directly executable)":
+                            ends_with(g_names[selected],".msi")?"Windows Installer package":
+                            ends_with(g_names[selected],".exe")?"Windows executable":"File";
+                        const char *a="Name: "; while(a[d]){details[d]=a[d];d++;}
+                        for(int j=0;g_names[selected][j]&&d<240;j++)details[d++]=g_names[selected][j];
+                        const char *b="\nType: ";for(int j=0;b[j]&&d<260;j++)details[d++]=b[j];
+                        for(int j=0;label[j]&&d<285;j++)details[d++]=label[j];
+                        const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
+                        for(int j=0;g_path[j]&&d<470;j++)details[d++]=g_path[j];
+                        details[d]=0;
+                        if (!g_isdir[selected]) append_file_size(details,&d,512,g_names[selected],pOpenFile,pGetFileSizeEx,pCloseHandle);
+                        if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
+                        continue;
+                    }
+                    if (item == 0) {
+                        if (g_isdir[selected]) {
+                            int ok = pChdir ? pChdir(g_names[selected]) : 0;
+                            if (!ok) ok = (sy3(SYS_Chdir, (u64)g_names[selected], 0, 0) == 0);
+                            if (ok) {
+                                if (g_names[selected][0]=='.' && g_names[selected][1]=='.' && !g_names[selected][2]) {
+                                    int n=0;while(g_path[n])n++;
+                                    if(n>3){n--;while(n>2&&g_path[n]!='\\')n--;if(g_path[n]=='\\')n++;g_path[n]=0;if(n<=3)path_init();}
+                                } else {
+                                    int n=0;while(g_path[n])n++;
+                                    if(n>0&&g_path[n-1]!='\\')g_path[n++]='\\';
+                                    for(int k=0;g_names[selected][k]&&n<120;k++)g_path[n++]=g_names[selected][k];
+                                    g_path[n]=0;
+                                }
+                                g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);
+                            } else if(pMsgBox) pMsgBox(g_window,"Could not open this folder.","File Explorer",0);
+                        } else if (ends_with(g_names[selected], ".exe")) {
+                            unsigned long long pid=sy3(SYS_CreateProcess,(u64)g_names[selected],0,0);
+                            if ((!pid || (long long)pid<0) && pMsgBox) pMsgBox(g_window,"This executable could not be started.","Cannot open file",0);
+                        } else if (ends_with(g_names[selected], ".msi")) {
+                            static char msiexec_name[]="msiexec.exe";
+                            unsigned long long pid=sy3(SYS_CreateProcess,(u64)msiexec_name,(u64)g_names[selected],0);
+                            if ((!pid || (long long)pid<0) && pMsgBox) pMsgBox(g_window,"Windows Installer is not available.","Cannot open package",0);
+                        }
+                        continue;
+                    }
+                }
+                continue;
+            }
             /*
              * user32 draws line i at: wnd_y + 44 + i*16
              * lines 0,1 = path/hint; entries start at line 2
@@ -445,7 +640,7 @@ void mainCRTStartup(void) {
                         }
                         g_last_file_row = -1;
                     } else if (double_click) {
-                        char details[320];int d=0;
+                        char details[512];int d=0;
                         const char *label=ends_with(g_names[row],".dll")?"DLL library (not directly executable)":
                             ends_with(g_names[row],".msi")?"Windows Installer package":
                             ends_with(g_names[row],".exe")?"Windows executable":"File";
@@ -454,8 +649,9 @@ void mainCRTStartup(void) {
                         const char *b="\nType: ";for(int j=0;b[j]&&d<270;j++)details[d++]=b[j];
                         for(int j=0;label[j]&&d<290;j++)details[d++]=label[j];
                         const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
-                        for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
+                        for(int j=0;g_path[j]&&d<470;j++)details[d++]=g_path[j];
                         details[d]=0;
+                        append_file_size(details,&d,512,g_names[row],pOpenFile,pGetFileSizeEx,pCloseHandle);
                         if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
                         g_last_file_row=-1;
                     }

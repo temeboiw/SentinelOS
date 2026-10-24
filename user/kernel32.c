@@ -2080,3 +2080,127 @@ __attribute__((dllexport)) LONG RtlStringCbCatA(char*d,u64 cb,const char*s){retu
 __attribute__((dllexport)) LONG RtlStringCbCatW(K32_WCHAR*d,u64 cb,const K32_WCHAR*s){return RtlStringCchCatW(d,cb/2,s);}
 
 __attribute__((dllexport)) LONG RtlStringCchCopyNA(char*d,u64 cap,const char*s,u64 n){return k32x_copy(d,cap,s,n);}
+
+
+/* Synchronization and thread-local APIs required by modern Win32 runtimes.
+   Critical sections and SRW locks use the first aligned 32-bit word of the
+   caller-owned Windows-compatible storage as their lock state. */
+typedef struct { volatile unsigned int lock; unsigned int recursion; unsigned long long owner; } K32_CRIT_PREFIX;
+typedef struct { volatile unsigned int state; } K32_SRW_PREFIX;
+static void *k32_tls_values[1088];
+static unsigned char k32_tls_used[1088];
+static unsigned int k32_tls_hint;
+
+__attribute__((dllexport)) void InitializeCriticalSection(void *section) {
+    if (!section) { k32_last_error=87; return; }
+    K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
+    c->lock=0; c->recursion=0; c->owner=0;
+}
+__attribute__((dllexport)) BOOL InitializeCriticalSectionAndSpinCount(void *section,DWORD spin) {
+    (void)spin; if(!section){k32_last_error=87;return 0;}
+    InitializeCriticalSection(section); return 1;
+}
+__attribute__((dllexport)) BOOL InitializeCriticalSectionEx(void *section,DWORD spin,DWORD flags) {
+    (void)flags; return InitializeCriticalSectionAndSpinCount(section,spin);
+}
+__attribute__((dllexport)) void EnterCriticalSection(void *section) {
+    if(!section){k32_last_error=87;return;}
+    K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
+    unsigned long long tid=GetCurrentThreadId();
+    if(c->owner==tid && c->lock){c->recursion++;return;}
+    while(__sync_lock_test_and_set(&c->lock,1u)) Sleep(0);
+    c->owner=tid; c->recursion=1;
+}
+__attribute__((dllexport)) BOOL TryEnterCriticalSection(void *section) {
+    if(!section){k32_last_error=87;return 0;}
+    K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
+    unsigned long long tid=GetCurrentThreadId();
+    if(c->owner==tid && c->lock){c->recursion++;return 1;}
+    if(__sync_lock_test_and_set(&c->lock,1u))return 0;
+    c->owner=tid;c->recursion=1;return 1;
+}
+__attribute__((dllexport)) void LeaveCriticalSection(void *section) {
+    if(!section)return;
+    K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
+    if(c->owner!=(unsigned long long)GetCurrentThreadId()||!c->lock)return;
+    if(c->recursion>1){c->recursion--;return;}
+    c->recursion=0;c->owner=0;__sync_lock_release(&c->lock);
+}
+__attribute__((dllexport)) void DeleteCriticalSection(void *section) {
+    if(!section)return;
+    K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
+    if(!c->lock){c->recursion=0;c->owner=0;}
+}
+__attribute__((dllexport)) void InitializeSRWLock(void *lock) {
+    if(lock)((K32_SRW_PREFIX *)lock)->state=0;
+}
+__attribute__((dllexport)) void AcquireSRWLockExclusive(void *lock) {
+    if(!lock)return; K32_SRW_PREFIX *l=(K32_SRW_PREFIX *)lock;
+    while(__sync_lock_test_and_set(&l->state,1u))Sleep(0);
+}
+__attribute__((dllexport)) BOOL TryAcquireSRWLockExclusive(void *lock) {
+    if(!lock)return 0; return __sync_lock_test_and_set(&((K32_SRW_PREFIX *)lock)->state,1u)==0;
+}
+__attribute__((dllexport)) void ReleaseSRWLockExclusive(void *lock) {
+    if(lock)__sync_lock_release(&((K32_SRW_PREFIX *)lock)->state);
+}
+__attribute__((dllexport)) void AcquireSRWLockShared(void *lock) { AcquireSRWLockExclusive(lock); }
+__attribute__((dllexport)) BOOL TryAcquireSRWLockShared(void *lock) { return TryAcquireSRWLockExclusive(lock); }
+__attribute__((dllexport)) void ReleaseSRWLockShared(void *lock) { ReleaseSRWLockExclusive(lock); }
+__attribute__((dllexport)) void InitializeConditionVariable(void *cv) { if(cv)*(volatile unsigned int *)cv=0; }
+__attribute__((dllexport)) void WakeConditionVariable(void *cv) { if(cv)__sync_add_and_fetch((volatile unsigned int *)cv,1u); }
+__attribute__((dllexport)) void WakeAllConditionVariable(void *cv) { if(cv)__sync_add_and_fetch((volatile unsigned int *)cv,1u); }
+__attribute__((dllexport)) BOOL SleepConditionVariableSRW(void *cv,void *lock,DWORD ms,DWORD flags) {
+    (void)flags; if(!cv||!lock){k32_last_error=87;return 0;}
+    volatile unsigned int *seq=(volatile unsigned int *)cv; unsigned int before=*seq;
+    ReleaseSRWLockExclusive(lock); DWORD elapsed=0;
+    while(*seq==before) {
+        if(ms!=0xFFFFFFFFu && elapsed>=ms){AcquireSRWLockExclusive(lock);k32_last_error=1460;return 0;}
+        Sleep(1); if(ms!=0xFFFFFFFFu)elapsed++;
+    }
+    AcquireSRWLockExclusive(lock); return 1;
+}
+__attribute__((dllexport)) DWORD TlsAlloc(void) {
+    for(unsigned int n=0;n<1088;n++){unsigned int i=(k32_tls_hint+n)%1088;if(!k32_tls_used[i]){k32_tls_used[i]=1;k32_tls_values[i]=0;k32_tls_hint=(i+1)%1088;return i;}}
+    k32_last_error=8;return 0xFFFFFFFFu;
+}
+__attribute__((dllexport)) BOOL TlsFree(DWORD index) {
+    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
+    k32_tls_used[index]=0;k32_tls_values[index]=0;k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) LPVOID TlsGetValue(DWORD index) {
+    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
+    k32_last_error=0;return k32_tls_values[index];
+}
+__attribute__((dllexport)) BOOL TlsSetValue(DWORD index,LPVOID value) {
+    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
+    k32_tls_values[index]=value;k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) void InitializeSListHead(void *head) { if(head){volatile unsigned long long *p=(volatile unsigned long long *)head;*p=0;} }
+__attribute__((dllexport)) BOOL DisableThreadLibraryCalls(HANDLE module) { if(!module){k32_last_error=87;return 0;}k32_last_error=0;return 1; }
+typedef struct { unsigned long long control_pc; unsigned long long image_base; void *function_entry; unsigned long long *context; void *history; } K32_DISPATCHER_CONTEXT_MIN;
+__attribute__((dllexport)) void *RtlLookupFunctionEntry(unsigned long long pc,unsigned long long *image_base,void *history) {
+    (void)pc;(void)history;if(image_base)*image_base=0;return 0;
+}
+__attribute__((dllexport)) void RtlVirtualUnwind(unsigned int handler_type,unsigned long long image_base,unsigned long long control_pc,void *function_entry,void *context,void **handler_data,unsigned long long *establisher_frame,void *context_pointers) {
+    (void)handler_type;(void)image_base;(void)control_pc;(void)function_entry;(void)context;(void)context_pointers;
+    if(handler_data)*handler_data=0;if(establisher_frame)*establisher_frame=0;
+}
+typedef struct { unsigned long long p1,p2,p3,p4; } K32_EXCEPTION_POINTERS_MIN;
+static void *k32_unhandled_filter;
+__attribute__((dllexport)) LONG UnhandledExceptionFilter(K32_EXCEPTION_POINTERS_MIN *info) { (void)info; return 0; }
+__attribute__((dllexport)) void *SetUnhandledExceptionFilter(void *filter) { void *old=k32_unhandled_filter;k32_unhandled_filter=filter;return old; }
+__attribute__((dllexport)) void RtlCaptureContext(void *context) {
+    if(!context)return;
+    /* CONTEXT x64: preserve flags and general-purpose registers in the public
+       structure's leading fields; unsupported extended state remains zeroed. */
+    unsigned long long *p=(unsigned long long *)context;
+    for(unsigned int i=0;i<64;i++)p[i]=0;
+    __asm__ volatile("pushfq; popq %0":"=r"(p[0]));
+    p[1]=(unsigned long long)__builtin_return_address(0);
+    p[2]=(unsigned long long)__builtin_frame_address(0);
+}
+__attribute__((dllexport)) DWORD GetExitCodeThread(HANDLE thread,DWORD *code) {
+    if(!code|| (thread!=GetCurrentThread()&&thread!=(HANDLE)1)){k32_last_error=87;return 0;}
+    *code=259u;k32_last_error=0;return 1;
+}

@@ -1065,6 +1065,21 @@ lld -flavor link \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 
+echo "  -> winmm.dll"
+
+clang "${USER_CFLAGS[@]}" -fno-builtin \
+  -c "$ROOT/user/winmm.c" \
+  -o "$B/obj/winmm.o"
+
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /base:0x43200000 \
+  /export:timeGetTime \
+  "/out:$SYS32/winmm.dll" \
+  "$B/obj/winmm.o"
+cp "$SYS32/winmm.dll" "$B/rootfs/winmm.dll"
+cp "$SYS32/winmm.dll" "$B/rootfs/Windows/System32/winmm.dll"
+
 echo "  -> Universal CRT runtime (real initializer-table execution)"
 
 clang "${USER_CFLAGS[@]}" -fno-builtin \
@@ -1942,6 +1957,7 @@ for image in \
   fileexplorer.exe \
   taskbar.dll \
   kernel32.dll \
+  winmm.dll \
   api-ms-win-crt-runtime-l1-1-0.dll \
   ucrtbase.dll \
   user32.dll \
@@ -1966,6 +1982,7 @@ ls -lh \
   "$SYS32/fileexplorer.exe" \
   "$SYS32/taskbar.dll" \
   "$SYS32/kernel32.dll" \
+  "$SYS32/winmm.dll" \
   "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$SYS32/ucrtbase.dll" \
   "$SYS32/user32.dll" \

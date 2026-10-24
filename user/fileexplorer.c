@@ -57,9 +57,45 @@ static int g_win_y = 40; /* must match CreateWindowEx y */
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
+static int g_home = 1;
+static int g_sort_mode = 0;
+static char g_filter[64];
+static int g_filter_len = 0;
 static void *g_window;
 
 static int ends_with(const char *n, const char *ext);
+static int name_contains_ci(const char *name, const char *needle) {
+    if (!needle || !needle[0]) return 1;
+    for (int i=0; name[i]; i++) {
+        int j=0;
+        while (needle[j] && name[i+j]) {
+            char a=name[i+j], b=needle[j];
+            if(a>='A'&&a<='Z')a+=32;
+            if(b>='A'&&b<='Z')b+=32;
+            if(a!=b)break;
+            j++;
+        }
+        if(!needle[j])return 1;
+    }
+    return 0;
+}
+static int name_compare_ci(const char *a,const char *b) {
+    int i=0;
+    while(a[i]&&b[i]) {
+        char x=a[i],y=b[i];
+        if(x>='A'&&x<='Z')x+=32;
+        if(y>='A'&&y<='Z')y+=32;
+        if(x!=y)return x-y;
+        i++;
+    }
+    return (unsigned char)a[i]-(unsigned char)b[i];
+}
+static const char *home_items[] = {
+    "Quick access", "Desktop", "Documents", "Downloads", "Pictures",
+    "This PC (C:)", "Windows", "System32 (protected)", "Users", "Program Files"
+};
+#define HOME_ITEM_COUNT ((int)(sizeof(home_items)/sizeof(home_items[0])))
+
 
 /* Draw one visible row and invalidate only that row. */
 static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visible) {
@@ -67,8 +103,15 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
     int i = g_scroll + visible;
     char line[80];
     int p = 0;
-    if (i >= g_count) {
+    int item_count = g_home ? HOME_ITEM_COUNT : g_count;
+    if (i >= item_count) {
         line[0]=' '; line[1]=0;
+    } else if (g_home) {
+        line[p++] = (i == g_hover_row) ? '>' : ' ';
+        const char *hn=home_items[i];
+        line[p++]='[';line[p++]='P';line[p++]='I';line[p++]='N';line[p++]=']';line[p++]=' ';
+        for(int j=0;hn[j]&&p<78;j++)line[p++]=hn[j];
+        line[p]=0;
     } else {
         line[p++] = (i == g_hover_row) ? '>' : ' ';
         if (g_isdir[i]) {
@@ -94,8 +137,14 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
 }
 
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
-    pText(g_window, 0, 0, g_path, -1);
-    pText(g_window, 0, 1, "Click folders | double-click EXE/MSI | .. goes up", -1);
+    pText(g_window, 0, 0, g_home ? "Home | Quick access" : g_path, -1);
+    if(g_home) pText(g_window,0,1,"Pinned locations | H: Home | /: search | S: sort",-1);
+    else if(g_filter_len) {
+        char hint[80];int q=0;const char *prefix="Search: ";
+        while(prefix[q]){hint[q]=prefix[q];q++;}
+        for(int j=0;g_filter[j]&&q<78;j++)hint[q++]=g_filter[j];
+        hint[q]=0;pText(g_window,0,1,hint,-1);
+    } else pText(g_window,0,1,"H: Home | /: search | S: sort | double-click to open",-1);
     for (int visible = 0; visible < VISIBLE_ROWS; visible++)
         draw_visible_row(pText, 0, visible);
     if (pInv) {
@@ -125,6 +174,7 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
     g_count = 0;
     g_hover_row = -1;
     g_scroll = 0;
+    if(g_home){draw_rows(pText,pInv);return;}
 
     /* Always provide a parent-directory entry, even if the VFS omits it. */
     g_names[g_count][0] = '.';
@@ -146,8 +196,24 @@ static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t 
         for (; name[k] && k < 255; k++) g_names[g_count][k] = name[k];
         g_names[g_count][k] = 0;
         /* Trust the filesystem's entry type; names without extensions are files too. */
+        if(g_filter_len&&!name_contains_ci(name,g_filter))continue;
         g_isdir[g_count] = (t == 2);
         g_count++;
+    }
+    if(g_sort_mode) {
+        for(int a=1;a<g_count;a++) {
+            char nm[256];int isd=g_isdir[a],z=0,b=a-1;
+            while(g_names[a][z]&&z<255){nm[z]=g_names[a][z];z++;}nm[z]=0;
+            while(b>=0) {
+                int move=(g_sort_mode==1)?
+                    (g_isdir[b]<isd||(g_isdir[b]==isd&&name_compare_ci(g_names[b],nm)>0)):
+                    (name_compare_ci(g_names[b],nm)>0);
+                if(!move)break;
+                int q=0;while(g_names[b][q]&&q<255){g_names[b+1][q]=g_names[b][q];q++;}g_names[b+1][q]=0;
+                g_isdir[b+1]=g_isdir[b];b--;
+            }
+            z=0;while(nm[z]){g_names[b+1][z]=nm[z];z++;}g_names[b+1][z]=0;g_isdir[b+1]=isd;
+        }
     }
 
     /* TextOut lines: 0=path 1=hint 2..=entries => click row = line - 2. */
@@ -252,6 +318,15 @@ void mainCRTStartup(void) {
             g_hover_row = -1;
             draw_rows(pText, pInv);
         }
+        if(msg.message==0x0102) {
+            int ch=(int)msg.wParam;
+            if(ch==8&&g_filter_len>0){g_filter[--g_filter_len]=0;if(!g_home)reload(pQuery,pText,pInv);else draw_rows(pText,pInv);}
+            else if(ch==27){g_filter_len=0;g_filter[0]=0;g_home=0;reload(pQuery,pText,pInv);}
+            else if(ch=='/'||ch=='?'){g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
+            else if(ch=='h'||ch=='H'){g_home=1;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
+            else if(ch=='s'||ch=='S'){g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
+            else if(ch>=32&&ch<127&&g_filter_len<62){g_home=0;g_filter[g_filter_len++]=(char)ch;g_filter[g_filter_len]=0;reload(pQuery,pText,pInv);}
+        }
         if (msg.message == 0x0100) {
             if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
             if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;
@@ -272,8 +347,41 @@ void mainCRTStartup(void) {
              */
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
-            if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
+            int row_limit=g_home?HOME_ITEM_COUNT:g_count;
+            if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < row_limit) {
                 row += g_scroll;
+                if(g_home) {
+                    const char *target=0;
+                    if(row==1)target="C:\\Users\\Desktop";
+                    else if(row==2)target="C:\\Users\\Documents";
+                    else if(row==3)target="C:\\Users\\Downloads";
+                    else if(row==4)target="C:\\Users\\Pictures";
+                    else if(row==5)target="C:\\";
+                    else if(row==6)target="C:\\Windows";
+                    else if(row==7)target="C:\\Windows\\System32";
+                    else if(row==8)target="C:\\Users";
+                    else if(row==9)target="C:\\Program Files";
+                    if(row==0){g_home=0;reload(pQuery,pText,pInv);continue;}
+                    if(target) {
+                        int plen=0;while(g_path[plen])plen++;
+                        while(plen>3) {
+                            if(!pChdir||!pChdir(".."))break;
+                            plen--;while(plen>3&&g_path[plen-1]!='\\')plen--;
+                            g_path[plen]=0;
+                        }
+                        int ti=3,ok=1;
+                        while(target[ti]&&ok) {
+                            char component[128];int ci=0;
+                            while(target[ti]&&target[ti]!='\\'&&ci<126)component[ci++]=target[ti++];
+                            component[ci]=0;if(target[ti]=='\\')ti++;
+                            if(ci&&pChdir&&!pChdir(component))ok=0;
+                            if(ok&&ci){int n=0;while(g_path[n])n++;if(n>3&&g_path[n-1]!='\\')g_path[n++]='\\';for(int j=0;component[j]&&n<126;j++)g_path[n++]=component[j];g_path[n]=0;}
+                        }
+                        if(ok){g_home=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}
+                        else if(pMsgBox)pMsgBox(g_window,"That pinned folder is not available on this volume.","Quick access",0);
+                    }
+                    continue;
+                }
                 print("fileexplorer: click ");
                 print(g_names[row]);
                 print("\n");
@@ -334,11 +442,19 @@ void mainCRTStartup(void) {
                         }
                         g_last_file_row = -1;
                     } else if (double_click) {
-                        if (pMsgBox) pMsgBox(0, g_names[row],
-                            ends_with(g_names[row], ".dll") ?
-                            "DLL library (not directly executable)" :
-                            "File", 0);
-                        g_last_file_row = -1;
+                        char details[320];int d=0;
+                        const char *label=ends_with(g_names[row],".dll")?"DLL library (not directly executable)":
+                            ends_with(g_names[row],".msi")?"Windows Installer package":
+                            ends_with(g_names[row],".exe")?"Windows executable":"File";
+                        const char *a="Name: ";while(a[d]){details[d]=a[d];d++;}
+                        for(int j=0;g_names[row][j]&&d<250;j++)details[d++]=g_names[row][j];
+                        const char *b="\nType: ";for(int j=0;b[j]&&d<270;j++)details[d++]=b[j];
+                        for(int j=0;label[j]&&d<290;j++)details[d++]=label[j];
+                        const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
+                        for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
+                        details[d]=0;
+                        if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
+                        g_last_file_row=-1;
                     }
                 }
             }

@@ -32,6 +32,8 @@ jobs:
           "$RUNNER_TEMP/soft3d-test"
       - name: Build SentinelOS
         run: EDK2="$RUNNER_TEMP/edk2" JOBS="$(nproc)" bash ./scripts/build.sh
+      - name: Validate compatibility DLL exports and packaging
+        run: bash tests/compatibility_exports_test.sh build/rootfs
       - name: Boot smoke test with VirtIO-VGA
         shell: bash
         run: |

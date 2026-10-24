@@ -1098,6 +1098,12 @@ lld -flavor link \
   /export:qsort \
   /export:rand \
   /export:srand \
+  /export:_initialize_onexit_table \
+  /export:_execute_onexit_table \
+  /export:_cexit \
+  /export:_get_errno \
+  /export:_set_errno \
+  /export:strerror \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 

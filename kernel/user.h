@@ -787,6 +787,23 @@ static uint64_t pe_get_export_depth(KPROCESS *proc, BootModule *mod, const char 
 }
 
 static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func) {
+    if (!proc || !mod || !func || !func[0]) return 0;
+
+    /* GetProcAddress encodes an ordinal as a low-valued pointer. The user-mode
+       wrapper converts that pointer to "#<ordinal>" before crossing the syscall
+       boundary, so support the same representation in the PE export resolver. */
+    if (func[0] == '#') {
+        uint32_t ordinal = 0;
+        if (!func[1]) return 0;
+        for (uint32_t i = 1; func[i]; i++) {
+            if (func[i] < '0' || func[i] > '9') return 0;
+            uint32_t digit = (uint32_t)(func[i] - '0');
+            if (ordinal > (UINT32_MAX - digit) / 10u) return 0;
+            ordinal = ordinal * 10u + digit;
+        }
+        return pe_get_export_ordinal(proc, mod, ordinal, 0);
+    }
+
     return pe_get_export_depth(proc, mod, func, 0);
 }
 

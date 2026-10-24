@@ -104,7 +104,14 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
             uint8_t namelen = buf[o + 6];
             if (E32(buf, o) && namelen == nl) {
                 int i = 0;
-                while (i < nl && buf[o + 8 + i] == (uint8_t)name[i]) i++;
+                while (i < nl) {
+                    char a = (char)buf[o + 8 + i];
+                    char b = name[i];
+                    if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
+                    if (b >= 'A' && b <= 'Z') b = (char)(b + ('a' - 'A'));
+                    if (a != b) break;
+                    i++;
+                }
                 if (i == nl) return E32(buf, o);
             }
             o += rl;

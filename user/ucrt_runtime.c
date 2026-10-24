@@ -278,8 +278,8 @@ __attribute__((dllexport)) int __C_specific_handler(void *exception_record,
 /* Utility and conversion exports shared by the UCRT API-set contracts. */
 __attribute__((dllexport)) int atoi(const char *s) {
     if (!s) return 0;
-    while (*s == ' ' || *s == '\\t' || *s == '\\r' || *s == '\\n' ||
-           *s == '\\f' || *s == '\\v') ++s;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' ||
+           *s == '\f' || *s == '\v') ++s;
     int sign = 1;
     if (*s == '+' || *s == '-') { if (*s++ == '-') sign = -1; }
     unsigned int value = 0;

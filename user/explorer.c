@@ -30,54 +30,6 @@ typedef void (*BeginRedrawBatch_t)(void);
 typedef void (*EndRedrawBatch_t)(void);
 typedef struct { int left, top, right, bottom; } EXPLORER_RECT;
 
-typedef struct {
-    u32 pid;
-    u32 reserved;
-    u64 vector, rip, error, cr2;
-    char image_name[64];
-    char exception_name[32];
-} EXPLORER_APP_ERROR;
-typedef int (*MessageBoxA_t)(void *, const char *, const char *, u32);
-static MessageBoxA_t pMessageBox;
-static EXPLORER_APP_ERROR g_app_error;
-
-static int append_text(char *dst, int at, int cap, const char *src) {
-    if (!dst || !src || cap <= 0) return at;
-    while (*src && at < cap - 1) dst[at++] = *src++;
-    dst[at] = 0;
-    return at;
-}
-static int append_u32(char *dst, int at, int cap, u32 value) {
-    char digits[10];
-    int n = 0;
-    do { digits[n++] = (char)('0' + value % 10u); value /= 10u; } while (value && n < 10);
-    while (n && at < cap - 1) dst[at++] = digits[--n];
-    dst[at] = 0;
-    return at;
-}
-static int append_hex64(char *dst, int at, int cap, u64 value) {
-    static const char hex[] = "0123456789ABCDEF";
-    for (int shift = 60; shift >= 0 && at < cap - 1; shift -= 4)
-        dst[at++] = hex[(value >> shift) & 15u];
-    dst[at] = 0;
-    return at;
-}
-static void poll_application_error(void) {
-    if (!pMessageBox) return;
-    if (!sy3(SYS_NtGetApplicationError, (u64)&g_app_error, 0, 0)) return;
-    char body[256] = {0};
-    int n = 0;
-    n = append_text(body, n, sizeof(body), g_app_error.image_name);
-    n = append_text(body, n, sizeof(body),
-        " was closed after an unrecoverable CPU exception.\n\nException: ");
-    n = append_text(body, n, sizeof(body), g_app_error.exception_name);
-    n = append_text(body, n, sizeof(body), "\nProcess ID: ");
-    n = append_u32(body, n, sizeof(body), g_app_error.pid);
-    n = append_text(body, n, sizeof(body), "\nInstruction address: 0x");
-    n = append_hex64(body, n, sizeof(body), g_app_error.rip);
-    (void)pMessageBox(0, body, "Application Error", 0x10u);
-}
-
 static CreateWindowExA_t pCreate;
 static ShowWindow_t pShow;
 static GetMessageA_t pGet;
@@ -242,7 +194,6 @@ void explorer_main(void) {
     pUpd    = (UpdateWindow_t)NtGetProcAddress(u32n, "UpdateWindow");
     pBeginBatch = (BeginRedrawBatch_t)NtGetProcAddress(u32n, "BeginRedrawBatch");
     pEndBatch = (EndRedrawBatch_t)NtGetProcAddress(u32n, "EndRedrawBatch");
-    pMessageBox = (MessageBoxA_t)NtGetProcAddress(u32n, "MessageBoxA");
 
     if (!pGet) {
         NtWriteConsole("explorer: no user32 keyboard API\n");
@@ -253,10 +204,7 @@ void explorer_main(void) {
     redraw_desktop(&hwnd);
     /* Refresh the RTC-backed taskbar clock once per minute without repainting
        the wallpaper or spinning a permanent polling loop. */
-    if (pSetTimer && hwnd) {
-        (void)pSetTimer(hwnd, 1, 60000, 0);
-        (void)pSetTimer(hwnd, 2, 500, 0); /* system-generated crash dialogs */
-    }
+    if (pSetTimer && hwnd) (void)pSetTimer(hwnd, 1, 60000, 0);
 
     NtWriteConsole("explorer: modern desktop ready; search supports cmd and taskmgr\n");
 
@@ -268,8 +216,7 @@ void explorer_main(void) {
 
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
-        if (msg.message == 0x0113 && pBar && msg.wParam == 1) pBar(); /* clock/date */
-        if (msg.message == 0x0113 && msg.wParam == 2) poll_application_error();
+        if (msg.message == 0x0113 && pBar) pBar(); /* WM_TIMER: refresh clock/date */
 
         handle_search_key(&msg, &hwnd);
 

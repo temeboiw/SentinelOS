@@ -180,16 +180,6 @@ __attribute__((dllexport)) char *strstr(const char *haystack, const char *needle
 
 
 /* Additional exports used by current MSVC-built DLLs. */
-__attribute__((dllexport)) char *strrchr(const char *s, int c) {
-    if (!s) return 0;
-    const char *last = 0;
-    unsigned char target = (unsigned char)c;
-    for (;;) {
-        if ((unsigned char)*s == target) last = s;
-        if (!*s) return (char *)last;
-        ++s;
-    }
-}
 __attribute__((dllexport)) int _configure_narrow_argv(int mode) {
     /* The host supplies a single ANSI command line; argument expansion is
        performed by the process startup layer. Accept supported CRT modes. */

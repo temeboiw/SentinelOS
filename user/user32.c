@@ -817,6 +817,10 @@ static void cursor_save_draw(int x, int y) {
 static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if(!g_scanout)return;
+    /* A single owner paints the pointer on the shared GPU scanout. Other
+     * processes can receive the same mouse messages, but must not manipulate
+     * cursor save-under pixels or paint duplicate cursors into that scanout. */
+    if (g_gpu_surface && !u32_is_desktop_window()) return;
 
     /* Repaint the old cursor footprint from the scene, rather than restoring
      * saved-under pixels: other windows/processes may have updated that area
@@ -1330,7 +1334,10 @@ static void compose(void) {
      * can leave the old cursor in scanout, and the next cursor_save_draw()
      * saves cursor pixels as its own underlay. Rebuild that footprint through
      * the kernel's persistent Z-ordered surfaces first. */
-    if (g_gpu_surface && cur_on)
+    /* The cursor belongs to the desktop compositor, not each process's
+     * private USER32 instance. An app repaint must never restore or repaint
+     * the shared screen-space pointer using that app's private layer state. */
+    if (g_gpu_surface && cur_on && u32_is_desktop_window())
         cursor_restore();
 
     /* A forced drag redraw must also discard any clip inherited from an
@@ -1662,9 +1669,14 @@ static void compose(void) {
     /* Do not overwrite cur_ox/cur_oy here: they identify the old cursor's
      * saved-under rectangle. cursor_save_draw restores that rectangle first,
      * then records the new pointer position and paints the final overlay. */
-    cursor_save_draw(g_mx,g_my);
-    if(g_scanout && g_scan_pitch && g_fw && g_fh)
-        u32_flush_raw(g_mx,g_my,16,16);
+    /* On the shared GPU scanout only the desktop owner may draw the
+     * system cursor. App-local compose() calls otherwise leave stale copies
+     * of the pointer behind when their window contents are repainted. */
+    if (!g_gpu_surface || u32_is_desktop_window()) {
+        cursor_save_draw(g_mx,g_my);
+        if(g_scanout && g_scan_pitch && g_fw && g_fh)
+            u32_flush_raw(g_mx,g_my,16,16);
+    }
     if(u32_force_full_compose) {
         u32_render_clip=force_saved_clip;
         u32_clip_x0=force_saved_x0; u32_clip_y0=force_saved_y0;

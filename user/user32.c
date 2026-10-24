@@ -1628,11 +1628,9 @@ static void compose(void) {
                         u32_taskbar_dirty=0;
                 }
             }
-            /* cursor_restore() ran before layer submission, so this scanout
-             * now contains clean scene pixels. Save that underlay and draw the
-             * CPU cursor once after the kernel has completed Z-order composition. */
-            cursor_save_draw(g_mx,g_my);
-            u32_flush_raw(g_mx,g_my,16,16);
+            /* Cursor is rendered exactly once below, after every layer is
+             * submitted. Drawing it here as well caused duplicate save-under
+             * cycles and was a source of stale pixels/trails. */
         }
     }
 

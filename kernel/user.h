@@ -1010,25 +1010,60 @@ static void vfs_close_user_file(uint64_t handle) {
 }
 
 
-/* Read a file from the current ext4 directory into a kernel buffer. */
+/*
+ * Resolve a regular file by walking ext4 directory inodes directly. The
+ * cached vfs_ents list is intentionally bounded for UI enumeration, so it
+ * must not be used as the authority for DLL loading: important files can be
+ * beyond its first VFS_MAX_ENT entries. Accept Windows drive prefixes and
+ * either slash style, and use case-insensitive lookup for Windows paths.
+ */
 static int vfs_find_regular_file(const char *name, uint32_t *ino_out,
                                  uint64_t *size_out) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
-    for (int i=0;i<vfs_nent;i++) {
-        const char *a=vfs_ents[i].name,*b=name;
-        int same=1;
-        while (*a || *b) {
-            char ca=*a++,cb=*b++;
-            if(ca>='A'&&ca<='Z')ca=(char)(ca+32);
-            if(cb>='A'&&cb<='Z')cb=(char)(cb+32);
-            if(ca!=cb){same=0;break;}
-        }
-        if(!same || vfs_ents[i].is_dir) continue;
+
+    char path[256];
+    unsigned int n = 0;
+    while (name[n] && n < sizeof(path) - 1) {
+        char c = name[n];
+        path[n] = c == '\\' ? '/' : c;
+        n++;
+    }
+    if (name[n] != 0 || n == 0) return -1;
+    path[n] = 0;
+
+    /* "C:/..." is a DOS path, not a directory named "C:". */
+    unsigned int start = 0;
+    if (n >= 2 && path[1] == ':') start = 2;
+    while (path[start] == '/') start++;
+    if (start >= n) return -1;
+
+    uint32_t current = 2; /* ext4 root inode */
+    unsigned int pos = start;
+    while (pos < n) {
+        unsigned int end = pos;
+        while (end < n && path[end] != '/') end++;
+        if (end == pos) { pos++; continue; }
+        char component[256];
+        unsigned int len = end - pos;
+        if (len >= sizeof(component)) return -1;
+        for (unsigned int i = 0; i < len; i++) component[i] = path[pos + i];
+        component[len] = 0;
+
+        uint32_t child = e4_lookup(&g_ext4, current, component);
+        if (!child) return -1;
         uint8_t inode[256];
-        if(e4_inode(&g_ext4,vfs_ents[i].ino,inode)<0 ||
-           (E16(inode,0)&0xF000)!=0x8000) return -1;
-        if(ino_out)*ino_out=vfs_ents[i].ino;
-        if(size_out)*size_out=e4_size(inode);
+        if (e4_inode(&g_ext4, child, inode) < 0) return -1;
+        uint16_t mode = E16(inode, 0) & 0xF000;
+        if (end < n) {
+            if (mode != 0x4000) return -1;
+            current = child;
+            pos = end + 1;
+            while (path[pos] == '/') pos++;
+            continue;
+        }
+        if (mode != 0x8000) return -1;
+        if (ino_out) *ino_out = child;
+        if (size_out) *size_out = e4_size(inode);
         return 0;
     }
     return -1;

@@ -86,6 +86,16 @@ static void ogl_line(int x0,int y0,int x1,int y1,unsigned int c) {
  int dy=y1>y0?y0-y1:y1-y0, sy=y0<y1?1:-1,err=dx+dy;
  for(;;){ogl_pixel(x0,y0,c);if(x0==x1&&y0==y1)break;int e=2*err;if(e>=dy){err+=dy;x0+=sx;}if(e<=dx){err+=dx;y0+=sy;}}
 }
+static int ogl_find_texture(GLuint id){for(int i=0;i<8;i++)if(ogl_textures[i].used&&ogl_textures[i].id==id)return i;return -1;}
+static float ogl_get_texcoord(GLsizei i,int axis){if(!ogl_texcoords)return 0.0f;const GLfloat *p=(const GLfloat*)((const unsigned char*)ogl_texcoords+(unsigned long long)i*ogl_stride(ogl_tex_stride,(unsigned int)ogl_tex_size));return p[axis<ogl_tex_size?axis:0];}
+static unsigned int ogl_sample_texture(float u,float v){
+ int k=ogl_find_texture(ogl_bound_texture);if(k<0)return 0xffffffffu;
+ unsigned int w=ogl_textures[k].width,h=ogl_textures[k].height;if(!w||!h)return 0xffffffffu;
+ if(ogl_textures[k].wrap_s==GL_REPEAT){u=u-(float)(int)u;if(u<0)u+=1.0f;}else{if(u<0)u=0;if(u>1)u=1;}
+ if(ogl_textures[k].wrap_t==GL_REPEAT){v=v-(float)(int)v;if(v<0)v+=1.0f;}else{if(v<0)v=0;if(v>1)v=1;}
+ unsigned int x=(unsigned int)(u*(float)(w-1)),y=(unsigned int)((1.0f-v)*(float)(h-1));
+ return ogl_texture_pixels[k][(unsigned long long)y*w+x];
+}
 static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
  int x0=ogl_coord(a,0),y0=ogl_coord(a,1),x1=ogl_coord(b,0),y1=ogl_coord(b,1),x2=ogl_coord(c,0),y2=ogl_coord(c,1);
  unsigned int color=ogl_vertex_color(a);
@@ -97,7 +107,20 @@ static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
   long long w0=(long long)(x1-x)*(y2-y)-(long long)(y1-y)*(x2-x);
   long long w1=(long long)(x2-x)*(y0-y)-(long long)(y2-y)*(x0-x);
   long long w2=(long long)(x0-x)*(y1-y)-(long long)(y0-y)*(x1-x);
-  if((area>0&&w0>=0&&w1>=0&&w2>=0)||(area<0&&w0<=0&&w1<=0&&w2<=0))ogl_pixel(x,y,color);
+  if((area>0&&w0>=0&&w1>=0&&w2>=0)||(area<0&&w0<=0&&w1<=0&&w2<=0)){
+   unsigned int out=color;
+   if((ogl_enabled&GL_TEXTURE_2D)&&ogl_tex_array_enabled&&ogl_texcoords&&ogl_find_texture(ogl_bound_texture)>=0){
+    float wa=(float)w0/(float)area,wb=(float)w1/(float)area,wc=(float)w2/(float)area;
+    float u=ogl_get_texcoord(a,0)*wa+ogl_get_texcoord(b,0)*wb+ogl_get_texcoord(c,0)*wc;
+    float v=ogl_get_texcoord(a,1)*wa+ogl_get_texcoord(b,1)*wb+ogl_get_texcoord(c,1)*wc;
+    unsigned int t=ogl_sample_texture(u,v);
+    unsigned int tr=(t>>16)&255,tg=(t>>8)&255,tb=t&255,ta=t>>24;
+    unsigned int cr=(color>>16)&255,cg=(color>>8)&255,cb=color&255,ca=color>>24;
+    out=((ta*ca/255)<<24)|((tr*cr/255)<<16)|((tg*cg/255)<<8)|(tb*cb/255);
+   }
+   if(ogl_enabled&GL_BLEND){OGL_FB *fb=ogl_fb();if(fb&&x>=0&&y>=0&&(unsigned int)x<fb->w&&(unsigned int)y<fb->h){unsigned int *dp=(unsigned int*)(unsigned long long)fb->va+(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x;unsigned int dst=*dp,a=out>>24,ia=255-a;unsigned int rr=(((out>>16)&255)*a+((dst>>16)&255)*ia)/255,gg=(((out>>8)&255)*a+((dst>>8)&255)*ia)/255,bb=((out&255)*a+(dst&255)*ia)/255;out=0xff000000u|(rr<<16)|(gg<<8)|bb;}}
+   ogl_pixel(x,y,out);
+  }
  }
 }
 __attribute__((dllexport)) void glClearColor(GLclampf r,GLclampf g,GLclampf b,GLclampf a) {

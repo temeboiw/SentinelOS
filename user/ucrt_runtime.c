@@ -41,6 +41,74 @@ void _initterm(_PVFV *first, _PVFV *last)
 static int ucrt_errno_value;
 __attribute__((dllexport)) int *_errno(void) { return &ucrt_errno_value; }
 
+/* MSVC on-exit table ABI: three pointers (first, last, end). */
+typedef void (*UCRT_ONEXIT_FN)(void);
+typedef struct {
+    UCRT_ONEXIT_FN *first;
+    UCRT_ONEXIT_FN *last;
+    UCRT_ONEXIT_FN *end;
+} UCRT_ONEXIT_TABLE;
+static UCRT_ONEXIT_TABLE ucrt_process_onexit_table;
+
+__attribute__((dllexport)) int _initialize_onexit_table(UCRT_ONEXIT_TABLE *table) {
+    if (!table) return -1;
+    table->first = 0;
+    table->last = 0;
+    table->end = 0;
+    return 0;
+}
+__attribute__((dllexport)) int _execute_onexit_table(UCRT_ONEXIT_TABLE *table) {
+    if (!table) return -1;
+    if (!table->first && !table->last && !table->end) return 0;
+    if (!table->first || !table->last || !table->end ||
+        table->first > table->last || table->last > table->end) return -1;
+    while (table->last > table->first) {
+        UCRT_ONEXIT_FN fn = *--table->last;
+        if (fn) fn();
+    }
+    table->first = 0;
+    table->last = 0;
+    table->end = 0;
+    return 0;
+}
+__attribute__((dllexport)) void _cexit(void) {
+    (void)_execute_onexit_table(&ucrt_process_onexit_table);
+}
+__attribute__((dllexport)) int _get_errno(int *out) {
+    if (!out) return 22;
+    *out = ucrt_errno_value;
+    return 0;
+}
+__attribute__((dllexport)) int _set_errno(int value) {
+    ucrt_errno_value = value;
+    return 0;
+}
+__attribute__((dllexport)) char *strerror(int error) {
+    static char unknown[32];
+    const char *message = 0;
+    switch (error) {
+        case 0: message = "No error"; break;
+        case 2: message = "No such file or directory"; break;
+        case 12: message = "Not enough memory"; break;
+        case 13: message = "Permission denied"; break;
+        case 22: message = "Invalid argument"; break;
+        case 28: message = "No space left on device"; break;
+        case 34: message = "Result out of range"; break;
+        default: break;
+    }
+    if (message) return (char *)message;
+    const char prefix[] = "Unknown error ";
+    unsigned int i = 0;
+    while (prefix[i]) { unknown[i] = prefix[i]; ++i; }
+    char digits[12]; unsigned int n = 0;
+    unsigned int value = error < 0 ? (unsigned int)(-(error + 1)) + 1u : (unsigned int)error;
+    do { digits[n++] = (char)('0' + value % 10u); value /= 10u; } while (value && n < sizeof(digits));
+    if (error < 0) unknown[i++] = '-';
+    while (n) unknown[i++] = digits[--n];
+    unknown[i] = 0;
+    return unknown;
+}
+
 /* Small heap allocator using the process virtual-memory syscall. Each block
    owns page-rounded memory, with its mapping base kept immediately before the
    aligned user pointer so free/realloc can release the correct mapping. */

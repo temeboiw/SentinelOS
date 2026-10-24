@@ -504,6 +504,41 @@ void mainCRTStartup(void) {
             if (msg.wParam == 0x1B) { g_context_menu=0; draw_rows(pText,pInv); }
             continue;
         }
+        if (msg.message == 0x0100 && msg.wParam == 0x0D && !g_context_menu) {
+            /* Enter activates the file from the most recent single click.
+               Double-click remains supported for normal mouse use. */
+            int selected = g_last_file_row;
+            if (selected >= 0 && selected < g_count && !g_isdir[selected]) {
+                if (ends_with(g_names[selected], ".exe")) {
+                    print("fileexplorer: Enter launch ");
+                    print(g_names[selected]);
+                    print("\n");
+                    long long pid = (long long)sy3(SYS_CreateProcess,
+                                                   (u64)g_names[selected], 0, 0);
+                    if (pid <= 0) {
+                        print("fileexplorer: EXE launch failed, status=");
+                        char digits[24]; int n=0; unsigned long long v=(unsigned long long)(-pid);
+                        do { digits[n++]=(char)('0'+v%10); v/=10; } while(v && n<22);
+                        while(n) { char one[2]={digits[--n],0}; print(one); }
+                        print("\n");
+                        if (pMsgBox) pMsgBox(g_window,
+                            "SentinelOS could not load this executable. Check the serial log for the loader failure reason.",
+                            "Cannot launch executable", 0x10);
+                    }
+                    g_last_file_row = -1;
+                } else if (ends_with(g_names[selected], ".msi")) {
+                    static char enter_msiexec_name[] = "msiexec.exe";
+                    long long pid = (long long)sy3(SYS_CreateProcess,
+                        (u64)enter_msiexec_name, (u64)g_names[selected], 0);
+                    if (pid <= 0 && pMsgBox)
+                        pMsgBox(g_window, "Windows Installer could not open this package.",
+                                "Cannot open package", 0x10);
+                    g_last_file_row = -1;
+                }
+            }
+            continue;
+        }
+
         if (msg.message == 0x0100) {
             if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
             if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;
@@ -743,9 +778,9 @@ void mainCRTStartup(void) {
                             print("fileexplorer: disk executable launch failed: ");
                             print(g_names[row]);
                             print("\n");
-                            if (pMsgBox) pMsgBox(0,
-                                "This EXE could not be loaded. Check the disk path and PE compatibility.",
-                                "Cannot launch executable", 0);
+                            if (pMsgBox) pMsgBox(g_window,
+                                "This EXE could not be loaded. Check the disk path and PE compatibility. See the serial log for details.",
+                                "Cannot launch executable", 0x10);
                         }
                         g_last_file_row = -1;
                     } else if (double_click && ends_with(g_names[row], ".msi")) {
@@ -755,9 +790,9 @@ void mainCRTStartup(void) {
                             (u64)g_names[row], 0);
                         if ((long long)pid < 0 || pid == 0) {
                             print("fileexplorer: msiexec.exe is not loaded\n");
-                            if (pMsgBox) pMsgBox(0,
+                            if (pMsgBox) pMsgBox(g_window,
                                 "MSI package inspection is not available yet.",
-                                "Windows Installer", 0);
+                                "Windows Installer", 0x10);
                         }
                         g_last_file_row = -1;
                     } else if (double_click) {

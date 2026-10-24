@@ -189,7 +189,8 @@ typedef struct {
     uint64_t source_pages;
     int used;
 } UserDiskModule;
-static UserDiskModule user_disk_modules[UP_MAX];
+#define USER_DISK_MODULE_MAX 64
+static UserDiskModule user_disk_modules[USER_DISK_MODULE_MAX];
 
 
 static uint64_t user_fb_base;
@@ -771,6 +772,8 @@ static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod,
  * resolving/resolved flags prevent dependency cycles such as A -> B -> A.
  * DLL images and their import address tables are process-private too.
  */
+static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name);
+
 static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
     if (!proc || !mod)
         return;
@@ -825,12 +828,40 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
 
         const char *dll = (const char *)(phys + name_rva);
         BootModule *dep = PspFindModule(user_bootinfo, dll);
-
         if (!dep)
-            continue;
+            dep = PspLoadProcessDiskDependency(proc, dll);
 
-        if (PspMapUserImage(proc, dep) != 0)
+        /* A missing DLL must never leave an IMAGE_IMPORT_BY_NAME RVA in
+           the IAT: executing that small RVA causes a jump into unmapped VA. */
+        if (!dep) {
+            uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
+            if (look_rva < size) {
+                uint64_t count = (size - look_rva) / 8;
+                uint64_t iat_count = (size - ft_rva) / 8;
+                if (count > iat_count) count = iat_count;
+                for (uint64_t i = 0; i < count; i++) {
+                    uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
+                    if (!look) break;
+                    *(uint64_t *)(phys + ft_rva + i * 8) = 0;
+                }
+            }
             continue;
+        }
+
+        if (PspMapUserImage(proc, dep) != 0) {
+            uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
+            if (look_rva < size) {
+                uint64_t count = (size - look_rva) / 8;
+                uint64_t iat_count = (size - ft_rva) / 8;
+                if (count > iat_count) count = iat_count;
+                for (uint64_t i = 0; i < count; i++) {
+                    uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
+                    if (!look) break;
+                    *(uint64_t *)(phys + ft_rva + i * 8) = 0;
+                }
+            }
+            continue;
+        }
 
         pe_resolve_imports(proc, dep);
 
@@ -1051,7 +1082,7 @@ static void PspFreeDiskModule(UserDiskModule *d) {
 }
 static void PspForgetDiskModule(KPROCESS *owner) {
     if(!owner)return;
-    for(int i=0;i<UP_MAX;i++)
+    for(int i=0;i<USER_DISK_MODULE_MAX;i++)
         if(user_disk_modules[i].used && user_disk_modules[i].owner==owner)
             PspFreeDiskModule(&user_disk_modules[i]);
 }
@@ -1116,7 +1147,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
         for(uint32_t j=0;j<copy;j++)image[va+j]=raw[rawoff+j];
     }
     for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
-    for(int i=0;i<UP_MAX;i++)if(!user_disk_modules[i].used) {
+    for(int i=0;i<USER_DISK_MODULE_MAX;i++)if(!user_disk_modules[i].used) {
         UserDiskModule *d=&user_disk_modules[i];
         d->used=1; d->owner=0; d->source_phys=image_pa;
         d->source_pages=image_pages;
@@ -1133,6 +1164,27 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
 bad_raw:
     for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
     return 0;
+}
+
+static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name) {
+    if (!proc || !name || !name[0]) return 0;
+    for (int i = 0; i < USER_DISK_MODULE_MAX; i++) {
+        UserDiskModule *d = &user_disk_modules[i];
+        if (!d->used || d->owner != proc) continue;
+        const char *a = d->module.name, *b = name;
+        int same = 1;
+        for (int k = 0; a[k] || b[k]; k++) {
+            char ca = a[k], cb = b[k];
+            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + ('a' - 'A'));
+            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
+            if (ca != cb) { same = 0; break; }
+        }
+        if (same) return &d->module;
+    }
+    UserDiskModule *d = PspLoadDiskModule(name);
+    if (!d) return 0;
+    d->owner = proc;
+    return &d->module;
 }
 
 typedef struct { uint16_t wYear,wMonth,wDayOfWeek,wDay,wHour,wMinute,wSecond,wMilliseconds; } UserSystemTime;

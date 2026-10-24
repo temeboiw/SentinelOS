@@ -204,7 +204,6 @@ typedef struct {
     char cls[24], text[96];
 } U32_CHILDWND;
 static U32_CHILDWND u32_child_windows[64];
-static unsigned int u32_child_next_id=0x1000u;
 static int u32_class_name_equal(const char *a,const char *b);
 static U32_CHILDWND *u32_child_from_hwnd(void *hwnd) {
     unsigned long long v=(unsigned long long)hwnd;

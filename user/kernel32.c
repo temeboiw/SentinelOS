@@ -588,10 +588,17 @@ __attribute__((dllexport)) DWORD GetFileType(HANDLE h){if(!h||h==INVALID_HANDLE_
 __attribute__((dllexport)) K32_LPWSTR GetCommandLineW(void) { return (K32_LPWSTR)k32_cmdline_w; }
 __attribute__((dllexport)) HANDLE GetModuleHandleW(K32_LPCWSTR name){char n[256];if(!name)return GetModuleHandleA(0);k32_wide_to_ansi(n,sizeof(n),name);return GetModuleHandleA(n);}
 __attribute__((dllexport)) DWORD GetModuleFileNameW(HANDLE module, K32_LPWSTR out, DWORD cap) {
-    char narrow[512]; DWORD n=GetModuleFileNameA(module,narrow,sizeof(narrow));
-    if (!out || !cap) return 0;
-    DWORD copied=k32_ansi_to_wide(out,cap,narrow);
-    return copied+1<n ? cap : copied;
+    char narrow[512];
+    if (!out || !cap) { k32_last_error=87; return 0; }
+    out[0]=0;
+    DWORD n=GetModuleFileNameA(module,narrow,sizeof(narrow));
+    if (!n) return 0;
+    DWORD i=0;
+    while (narrow[i] && i+1<cap) { out[i]=(unsigned char)narrow[i]; i++; }
+    out[i]=0;
+    if (narrow[i]) { k32_last_error=122; return cap; }
+    k32_last_error=0;
+    return i;
 }
 __attribute__((dllexport)) HANDLE CreateFileW(K32_LPCWSTR name, DWORD access, DWORD share, void *security, DWORD creation, DWORD flags, HANDLE template_file) {
     char narrow[512]; if (!name) return INVALID_HANDLE_VALUE;

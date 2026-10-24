@@ -637,7 +637,14 @@ static void cursor_restore(void) {
     }
 
     u32_repaint_scene_rect(cur_ox, cur_oy, cur_ox + 16, cur_oy + 16);
+    /*
+     * Recomposition replaces the cursor footprint with clean scene pixels.
+     * Mark the saved-under buffer invalid immediately: keeping cur_on set
+     * makes the next paint restore stale pixels captured before composition,
+     * which produces trails when the compositor changes beneath the pointer.
+     */
     cur_on = 0;
+    for (int i=0;i<16*16;i++) cur_paint[i]=0;
 }
 
 /* Select a stock cursor from geometry. The arrow remains the original

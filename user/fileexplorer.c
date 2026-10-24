@@ -32,6 +32,9 @@ typedef long long (*DispatchMessageA_t)(const void *);
 typedef int (*MessageBoxA_t)(void *, LPCSTR, LPCSTR, DWORD);
 typedef DWORD (*QueryDirectoryA_t)(DWORD, char *, DWORD);
 typedef BOOL (*SetCurrentDirectoryA_t)(LPCSTR);
+typedef void *(*CreateFileA_t)(LPCSTR, DWORD, DWORD, void *, DWORD, DWORD, void *);
+typedef BOOL (*GetFileSizeEx_t)(void *, long long *);
+typedef BOOL (*CloseHandle_t)(void *);
 typedef BOOL (*InvalidateRect_t)(void *, void *, BOOL);
 typedef BOOL (*GetWindowRect_t)(void *, void *);
 typedef void (*BeginRedrawBatch_t)(void);
@@ -192,6 +195,27 @@ static int ends_with(const char *n, const char *ext) {
     return 1;
 }
 
+/* Read-only file size query backed by the real kernel32 file-handle APIs. */
+static void append_file_size(char *details, int *pos, int cap, const char *name,
+                             CreateFileA_t pOpen, GetFileSizeEx_t pSize,
+                             CloseHandle_t pClose) {
+    if (!details || !pos || !name || !pOpen || !pSize || !pClose) return;
+    void *h = pOpen(name, 0, 0, 0, 3, 0, 0);
+    if (!h || h == (void *)-1) return;
+    long long bytes = 0;
+    if (pSize(h, &bytes) && bytes >= 0) {
+        const char *label = "\nSize: ";
+        for (int i=0; label[i] && *pos<cap-1; i++) details[(*pos)++]=label[i];
+        char digits[24]; int count=0; u64 value=(u64)bytes;
+        do { digits[count++] = (char)('0' + value % 10); value /= 10; } while (value && count < 23);
+        while (count && *pos<cap-1) details[(*pos)++]=digits[--count];
+        const char *suffix = " bytes";
+        for (int i=0; suffix[i] && *pos<cap-1; i++) details[(*pos)++]=suffix[i];
+        details[*pos]=0;
+    }
+    pClose(h);
+}
+
 static void reload(QueryDirectoryA_t pQuery, TextOutA_t pText, InvalidateRect_t pInv) {
     g_count = 0;
     g_hover_row = -1;
@@ -247,6 +271,9 @@ void mainCRTStartup(void) {
     char u32[] = {'u','s','e','r','3','2','.','d','l','l',0};
 
     QueryDirectoryA_t pQuery = (QueryDirectoryA_t)gpa(k32, "QueryDirectoryA");
+    CreateFileA_t pOpenFile = (CreateFileA_t)gpa(k32, "CreateFileA");
+    GetFileSizeEx_t pGetFileSizeEx = (GetFileSizeEx_t)gpa(k32, "GetFileSizeEx");
+    CloseHandle_t pCloseHandle = (CloseHandle_t)gpa(k32, "CloseHandle");
     SetCurrentDirectoryA_t pChdir = (SetCurrentDirectoryA_t)gpa(k32, "SetCurrentDirectoryA");
     CreateWindowExA_t pCreate = (CreateWindowExA_t)gpa(u32, "CreateWindowExA");
     ShowWindow_t pShow = (ShowWindow_t)gpa(u32, "ShowWindow");
@@ -466,7 +493,7 @@ void mainCRTStartup(void) {
                     if (item == 1 || (!g_isdir[selected] &&
                         !ends_with(g_names[selected], ".exe") &&
                         !ends_with(g_names[selected], ".msi"))) {
-                        char details[320]; int d=0;
+                        char details[512]; int d=0;
                         const char *label=g_isdir[selected]?"Folder":
                             ends_with(g_names[selected],".dll")?"DLL library (not directly executable)":
                             ends_with(g_names[selected],".msi")?"Windows Installer package":
@@ -476,8 +503,9 @@ void mainCRTStartup(void) {
                         const char *b="\nType: ";for(int j=0;b[j]&&d<260;j++)details[d++]=b[j];
                         for(int j=0;label[j]&&d<285;j++)details[d++]=label[j];
                         const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
-                        for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
+                        for(int j=0;g_path[j]&&d<470;j++)details[d++]=g_path[j];
                         details[d]=0;
+                        if (!g_isdir[selected]) append_file_size(details,&d,512,g_names[selected],pOpenFile,pGetFileSizeEx,pCloseHandle);
                         if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
                         continue;
                     }
@@ -612,7 +640,7 @@ void mainCRTStartup(void) {
                         }
                         g_last_file_row = -1;
                     } else if (double_click) {
-                        char details[320];int d=0;
+                        char details[512];int d=0;
                         const char *label=ends_with(g_names[row],".dll")?"DLL library (not directly executable)":
                             ends_with(g_names[row],".msi")?"Windows Installer package":
                             ends_with(g_names[row],".exe")?"Windows executable":"File";
@@ -621,8 +649,9 @@ void mainCRTStartup(void) {
                         const char *b="\nType: ";for(int j=0;b[j]&&d<270;j++)details[d++]=b[j];
                         for(int j=0;label[j]&&d<290;j++)details[d++]=label[j];
                         const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
-                        for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
+                        for(int j=0;g_path[j]&&d<470;j++)details[d++]=g_path[j];
                         details[d]=0;
+                        append_file_size(details,&d,512,g_names[row],pOpenFile,pGetFileSizeEx,pCloseHandle);
                         if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
                         g_last_file_row=-1;
                     }

@@ -2158,7 +2158,14 @@ typedef struct {
     char exception_name[32];
 } U32_APP_ERROR;
 __attribute__((dllexport)) int MessageBoxA(void *, LPCSTR, LPCSTR, u32);
+static u64 u32_last_app_error_poll_tick;
 static int u32_poll_application_error(void) {
+    /* GetMessageA is a polling loop in this OS. Rate-limit the kernel query
+     * to the clock's 1-second resolution instead of issuing a syscall on
+     * every empty input iteration. */
+    u64 now = u32_tick_now();
+    if (now && now == u32_last_app_error_poll_tick) return 0;
+    if (now) u32_last_app_error_poll_tick = now;
     U32_APP_ERROR event = {0};
     if (!sy3(SYS_NtGetApplicationError, (u64)&event, 0, 0)) return 0;
     char body[256] = {0};

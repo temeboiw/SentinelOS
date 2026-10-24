@@ -2108,7 +2108,7 @@ __attribute__((dllexport)) void EnterCriticalSection(void *section) {
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
     unsigned long long tid=GetCurrentThreadId();
     if(c->owner==(void *)tid && c->recursion>0){c->recursion++;return;}
-    for(;;){int old=__sync_fetch_and_add(&c->lock_count,1);if(old==-1)break;while(c->lock_count>=0)Sleep(0);}
+    for(;;){int expected=-1;if(__sync_bool_compare_and_swap(&c->lock_count,expected,0))break;Sleep(0);}
     c->owner=(void *)tid; c->recursion=1;
 }
 __attribute__((dllexport)) BOOL TryEnterCriticalSection(void *section) {
@@ -2124,7 +2124,7 @@ __attribute__((dllexport)) void LeaveCriticalSection(void *section) {
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
     if(c->owner!=(void *)(unsigned long long)GetCurrentThreadId()||c->recursion<=0)return;
     if(c->recursion>1){c->recursion--;return;}
-    c->recursion=0;c->owner=0;__sync_fetch_and_sub(&c->lock_count,1);
+    c->recursion=0;c->owner=0;__sync_lock_test_and_set(&c->lock_count,-1);
 }
 __attribute__((dllexport)) void DeleteCriticalSection(void *section) {
     if(!section)return;

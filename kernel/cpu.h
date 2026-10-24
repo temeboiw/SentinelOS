@@ -66,6 +66,11 @@ static void cpu_set_gs_base(CpuLocal *cpu) {
     uint64_t v = (uint64_t)(uintptr_t)cpu;
     __asm__ volatile("wrmsr" :: "c"(0xC0000101), "a"((uint32_t)v), "d"((uint32_t)(v >> 32)));
 }
+/* With kernel GS active, this becomes the user GS base after SWAPGS. */
+static void cpu_set_user_gs_base(uint64_t base) {
+    __asm__ volatile("wrmsr" :: "c"(0xC0000102), "a"((uint32_t)base),
+                     "d"((uint32_t)(base >> 32)));
+}
 #define ki_need_resched (cpu_local_current()->need_resched)
 
 // ---- per-vector stubs: push (fake) error code + vector, then share isr_common ----
@@ -100,13 +105,23 @@ __asm__(
     " push rax\n push rbx\n push rcx\n push rdx\n push rsi\n push rdi\n push rbp\n"
     " push r8\n push r9\n push r10\n push r11\n push r12\n push r13\n push r14\n push r15\n"
     " cld\n"
-    " mov rcx, rsp\n"                 // Frame* -> first arg (Win64 ABI)
-    " sub rsp, 32\n"                  // shadow space (keeps rsp 16-byte aligned here)
+    /* User-origin interrupts need kernel GS before entering C. */
+    " test byte ptr [rsp + 144], 3\n"
+    " jz 1f\n"
+    " swapgs\n"
+    "1:\n"
+    " mov rcx, rsp\n"
+    " sub rsp, 32\n"
     " call isr_handler\n"
-    " mov rsp, rax\n"                 // isr_handler returns the frame to resume (maybe another thread's)
+    " mov rsp, rax\n"
+    /* The scheduler may select a user frame even for a kernel-origin interrupt. */
+    " test byte ptr [rsp + 144], 3\n"
+    " jz 2f\n"
+    " swapgs\n"
+    "2:\n"
     " pop r15\n pop r14\n pop r13\n pop r12\n pop r11\n pop r10\n pop r9\n pop r8\n"
     " pop rbp\n pop rdi\n pop rsi\n pop rdx\n pop rcx\n pop rbx\n pop rax\n"
-    " add rsp, 16\n"                  // drop vector + error code
+    " add rsp, 16\n"
     " iretq\n"
     ".att_syntax prefix\n"
 );

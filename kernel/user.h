@@ -840,8 +840,50 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
         if (!oft && !name_rva && !ft) break;
         if (!name_rva || !ft || name_rva >= size || ft >= size) continue;
         const char *dll_name = (const char *)(phys + name_rva);
-        BootModule *dep = PspFindModule(user_bootinfo, dll_name);
-        if (!dep) dep = PspLoadProcessDiskDependency(proc, dll_name);
+
+        /*
+         * The api-ms-win-crt-* names are API-set contracts, not independent
+         * runtime images. The build currently packages several contracts as
+         * copies of the same minimal CRT PE. Mapping each copy separately
+         * collides at the same preferred ImageBase (and those copies have no
+         * relocation directory). Resolve the contract to the single shared
+         * CRT implementation instead. Keep the original name for diagnostics.
+         */
+        char dependency_name[64];
+        unsigned int dll_len = 0;
+        while (dll_name[dll_len] && dll_len + 1 < sizeof(dependency_name)) {
+            char ch = dll_name[dll_len];
+            dependency_name[dll_len] = (ch >= 'A' && ch <= 'Z')
+                ? (char)(ch + ('a' - 'A')) : ch;
+            dll_len++;
+        }
+        dependency_name[dll_len] = 0;
+        int is_crt_contract =
+            dll_len >= 15 &&
+            dependency_name[0] == 'a' && dependency_name[1] == 'p' &&
+            dependency_name[2] == 'i' && dependency_name[3] == '-' &&
+            dependency_name[4] == 'm' && dependency_name[5] == 's' &&
+            dependency_name[6] == '-' && dependency_name[7] == 'w' &&
+            dependency_name[8] == 'i' && dependency_name[9] == 'n' &&
+            dependency_name[10] == '-' && dependency_name[11] == 'c' &&
+            dependency_name[12] == 'r' && dependency_name[13] == 't' &&
+            dependency_name[14] == '-';
+        if (is_crt_contract) {
+            const char crt_runtime[] = "api-ms-win-crt-runtime-l1-1-0.dll";
+            unsigned int j = 0;
+            while (crt_runtime[j] && j + 1 < sizeof(dependency_name)) {
+                dependency_name[j] = crt_runtime[j];
+                j++;
+            }
+            dependency_name[j] = 0;
+        } else if (dll_len == 0 || dll_len + 1 >= sizeof(dependency_name)) {
+            dependency_name[0] = 0;
+        }
+
+        BootModule *dep = dependency_name[0]
+            ? PspFindModule(user_bootinfo, dependency_name) : 0;
+        if (!dep && dependency_name[0])
+            dep = PspLoadProcessDiskDependency(proc, dependency_name);
         if (!dep && unresolved_logged < 32) {
             DbgPrint("user: unresolved DLL import image=%s pid=%lu dll=%s\n",
                      mod->name, (unsigned long)proc->Pid, dll_name);

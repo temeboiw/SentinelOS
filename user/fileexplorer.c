@@ -149,16 +149,25 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
 }
 
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
+    if (!pText) { print("fileexplorer: draw_rows missing TextOutA\n"); return; }
+    print("fileexplorer: draw_rows stage=title-before\n");
     pText(g_window, 0, 0, g_home ? "Home | Quick access" : g_path, -1);
-    if(g_home) pText(g_window,0,1,"Pinned locations | H: Home | /: search | S: sort",-1);
-    else if(g_filter_len) {
+    print("fileexplorer: draw_rows stage=title-after\n");
+    if(g_home) {
+        print("fileexplorer: draw_rows stage=hint-before\n");
+        pText(g_window,0,1,"Pinned locations | H: Home | /: search | S: sort",-1);
+        print("fileexplorer: draw_rows stage=hint-after\n");
+    } else if(g_filter_len) {
         char hint[80];int q=0;const char *prefix="Search: ";
         while(prefix[q]){hint[q]=prefix[q];q++;}
         for(int j=0;g_filter[j]&&q<78;j++)hint[q++]=g_filter[j];
         hint[q]=0;pText(g_window,0,1,hint,-1);
     } else pText(g_window,0,1,"H: Home | /: search | S: sort | double-click to open",-1);
-    for (int visible = 0; visible < VISIBLE_ROWS; visible++)
+    for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
+        if (visible == 0) print("fileexplorer: draw_rows stage=first-row-before\n");
         draw_visible_row(pText, 0, visible);
+        if (visible == 0) print("fileexplorer: draw_rows stage=first-row-after\n");
+    }
     if (g_context_menu) {
         /* Overlay a compact in-window context menu; the backing rows are
            redrawn when it closes, so no pixels are left behind. */

@@ -145,6 +145,7 @@ static void irq_stub_eoi(Frame *f) { (void)f; }
 // vectors >= 32 are dispatched (then the scheduler may hand back a different thread's frame).
 // Forward decls for usermode (defined in user.h)
 static Frame *syscall_handler(Frame *f);
+static Frame *user_exception_handler(Frame *f);
 static void user_set_kernel_stack(uint64_t rsp0);
 
 __attribute__((used)) Frame *isr_handler(Frame *f) {
@@ -164,6 +165,12 @@ __attribute__((used)) Frame *isr_handler(Frame *f) {
         DbgPrint("[#BP] breakpoint, rip=%016llx\n", f->rip);
         return f;
     }
+    /* A fault from ring 3 is an application failure, not a kernel failure.
+     * Give the process manager a chance to terminate the offending process
+     * and resume its parent before the kernel panic path is considered. */
+    if ((f->cs & 3u) == 3u)
+        return user_exception_handler(f);
+
     uint64_t cr2, cr3;
     __asm__ volatile("movq %%cr2, %0" : "=r"(cr2));
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));

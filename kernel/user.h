@@ -672,233 +672,173 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
 }
 
 /*
- * Return an export address from the requesting process's private DLL.
+ * Resolve PE exports by name or ordinal and follow forwarded exports.
+ * Forwarders are used throughout Windows DLLs; returning their RVA as if it
+ * were executable code leads directly to null or invalid indirect calls.
  */
-static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod,
-                              const char *func) {
-    if (!proc || !mod || !func)
-        return 0;
+static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name);
+static void pe_resolve_imports(KPROCESS *proc, BootModule *mod);
+static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func);
 
+static uint64_t pe_get_export_ordinal(KPROCESS *proc, BootModule *mod,
+                                      uint32_t ordinal, unsigned int depth) {
+    if (!proc || !mod || depth > 12) return 0;
     UserImage *image = PspGetUserImage(proc, mod);
-    if (!image)
-        return 0;
-
-    uint8_t *phys = PspImageBytes(image);
+    if (!image) return 0;
+    uint8_t *bytes = PspImageBytes(image);
     uint64_t size = image->size;
+    if (!pe_is_image(bytes, size)) return 0;
+    int32_t peoff = *(int32_t *)(bytes + 0x3C);
+    uint8_t *opt = bytes + peoff + 4 + 20;
+    uint32_t er = *(uint32_t *)(opt + 112);
+    if (!er || er >= size || size - er < 40) return 0;
+    uint32_t es = *(uint32_t *)(opt + 112 + 4);
+    if (es < 40 || es > size - er) return 0;
+    uint8_t *exp = bytes + er;
+    uint32_t base = *(uint32_t *)(exp + 16);
+    uint32_t nf = *(uint32_t *)(exp + 20);
+    uint32_t fr = *(uint32_t *)(exp + 28);
+    if (ordinal < base || ordinal - base >= nf || fr >= size ||
+        (uint64_t)nf * 4 > size - fr) return 0;
+    uint32_t rva = *(uint32_t *)(bytes + fr + (uint64_t)(ordinal - base) * 4);
+    if (!rva || rva >= size) return 0;
+    if (rva < er || (uint64_t)rva >= (uint64_t)er + es)
+        return image->base + rva;
 
-    if (!pe_is_image(phys, size))
-        return 0;
-
-    int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *opt = phys + lfanew + 4 + 20;
-
-    uint32_t exp_rva = *(uint32_t *)(opt + 112);
-    if (!exp_rva || exp_rva > size || size - exp_rva < 40)
-        return 0;
-
-    uint8_t *exp = phys + exp_rva;
-    uint32_t nfuncs = *(uint32_t *)(exp + 20);
-    uint32_t nnames = *(uint32_t *)(exp + 24);
-    uint32_t funcs_rva = *(uint32_t *)(exp + 28);
-    uint32_t names_rva = *(uint32_t *)(exp + 32);
-    uint32_t ords_rva  = *(uint32_t *)(exp + 36);
-
-    if (funcs_rva >= size || names_rva >= size || ords_rva >= size)
-        return 0;
-
-    if ((uint64_t)nnames * 4 > size - names_rva ||
-        (uint64_t)nnames * 2 > size - ords_rva ||
-        (uint64_t)nfuncs * 4 > size - funcs_rva) {
-        return 0;
+    const char *fwd = (const char *)(bytes + rva);
+    uint64_t remain = (uint64_t)er + es - rva, len = 0, dot = UINT64_MAX;
+    while (len < remain && fwd[len]) {
+        if (fwd[len] == '.') dot = len;
+        len++;
     }
-
-    for (uint32_t i = 0; i < nnames; i++) {
-        uint32_t nrva = *(uint32_t *)(phys + names_rva + i * 4);
-
-        if (nrva >= size)
-            continue;
-
-        const char *n = (const char *)(phys + nrva);
-        uint64_t remaining = size - nrva;
-        int match = 1;
-        int terminated = 0;
-
-        for (uint64_t k = 0; k < remaining; k++) {
-            if (func[k] != n[k]) {
-                match = 0;
-                break;
-            }
-
-            if (!func[k] && !n[k]) {
-                terminated = 1;
-                break;
-            }
-
-            if (!func[k] || !n[k]) {
-                match = 0;
-                break;
-            }
-        }
-
-        if (!match || !terminated)
-            continue;
-
-        uint16_t ord = *(uint16_t *)(phys + ords_rva + i * 2);
-        if (ord >= nfuncs)
-            return 0;
-
-        uint32_t frva = *(uint32_t *)(phys + funcs_rva + ord * 4);
-        if (!frva || frva >= size)
-            return 0;
-
-        /*
-         * Forwarded exports are not handled here. A forwarded export's
-         * RVA points back inside the export directory.
-         */
-        if (frva >= exp_rva &&
-            frva < exp_rva + 40) {
-            return 0;
-        }
-
-        return image->base + frva;
+    if (!len || len >= remain || dot == UINT64_MAX || dot == 0 ||
+        dot + 1 >= len || dot > 59) return 0;
+    char dll[64];
+    for (uint64_t i = 0; i < dot; i++) dll[i] = fwd[i];
+    dll[dot] = 0;
+    int has_dll = 0;
+    if (dot >= 4) {
+        const char *x = dll + dot - 4;
+        has_dll = x[0] == '.' &&
+            (x[1] == 'd' || x[1] == 'D') &&
+            (x[2] == 'l' || x[2] == 'L') &&
+            (x[3] == 'l' || x[3] == 'L');
     }
+    if (!has_dll) {
+        if (dot + 4 >= sizeof(dll)) return 0;
+        dll[dot] = '.'; dll[dot+1] = 'd'; dll[dot+2] = 'l';
+        dll[dot+3] = 'l'; dll[dot+4] = 0;
+    }
+    BootModule *target = PspFindModule(user_bootinfo, dll);
+    if (!target) target = PspLoadProcessDiskDependency(proc, dll);
+    if (!target || PspMapUserImage(proc, target) != 0) return 0;
+    pe_resolve_imports(proc, target);
 
+    const char *symbol = fwd + dot + 1;
+    if (symbol[0] == '#') {
+        uint32_t n = 0;
+        if (symbol[1] == 0) return 0;
+        for (uint64_t i = 1; i < len - dot - 1; i++) {
+            if (symbol[i] < '0' || symbol[i] > '9') return 0;
+            if (n > (UINT32_MAX - 9u) / 10u) return 0;
+            n = n * 10u + (uint32_t)(symbol[i] - '0');
+        }
+        return pe_get_export_ordinal(proc, target, n, depth + 1);
+    }
+    /* Name lookup can itself lead to another forwarder. */
+    return pe_get_export(proc, target, symbol);
+}
+
+static uint64_t pe_get_export(KPROCESS *proc, BootModule *mod, const char *func) {
+    if (!proc || !mod || !func) return 0;
+    UserImage *image = PspGetUserImage(proc, mod);
+    if (!image) return 0;
+    uint8_t *bytes = PspImageBytes(image);
+    uint64_t size = image->size;
+    if (!pe_is_image(bytes, size)) return 0;
+    int32_t peoff = *(int32_t *)(bytes + 0x3C);
+    uint8_t *opt = bytes + peoff + 4 + 20;
+    uint32_t er = *(uint32_t *)(opt + 112);
+    if (!er || er >= size || size - er < 40) return 0;
+    uint8_t *exp = bytes + er;
+    uint32_t nf = *(uint32_t *)(exp + 20);
+    uint32_t nn = *(uint32_t *)(exp + 24);
+    uint32_t fr = *(uint32_t *)(exp + 28);
+    uint32_t nr = *(uint32_t *)(exp + 32);
+    uint32_t or = *(uint32_t *)(exp + 36);
+    uint32_t base = *(uint32_t *)(exp + 16);
+    if (fr >= size || nr >= size || or >= size ||
+        (uint64_t)nf * 4 > size - fr ||
+        (uint64_t)nn * 4 > size - nr ||
+        (uint64_t)nn * 2 > size - or) return 0;
+    for (uint32_t i = 0; i < nn; i++) {
+        uint32_t name_rva = *(uint32_t *)(bytes + nr + (uint64_t)i * 4);
+        if (name_rva >= size) continue;
+        const char *name = (const char *)(bytes + name_rva);
+        uint64_t k = 0, remain = size - name_rva;
+        while (k < remain && func[k] && name[k] && func[k] == name[k]) k++;
+        if (k >= remain || func[k] || name[k]) continue;
+        uint16_t index = *(uint16_t *)(bytes + or + (uint64_t)i * 2);
+        if (index >= nf) return 0;
+        return pe_get_export_ordinal(proc, mod, base + index, 0);
+    }
     return 0;
 }
 
 /*
- * Resolve imports in the process-local image.
- *
- * resolving/resolved flags prevent dependency cycles such as A -> B -> A.
- * DLL images and their import address tables are process-private too.
+ * Resolve imports in process-private images. Missing imports stay null rather
+ * than becoming a bogus RVA; supported forwarders and ordinal imports are
+ * resolved above.
  */
-static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name);
-
 static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
-    if (!proc || !mod)
-        return;
-
+    if (!proc || !mod) return;
     UserImage *image = PspGetUserImage(proc, mod);
-    if (!image || image->resolved || image->resolving)
-        return;
-
+    if (!image || image->resolved || image->resolving) return;
     uint8_t *phys = PspImageBytes(image);
     uint64_t size = image->size;
-
-    if (!pe_is_image(phys, size)) {
-        image->resolved = 1;
-        return;
-    }
-
+    if (!pe_is_image(phys, size)) { image->resolved = 1; return; }
     image->resolving = 1;
-
-    int32_t lfanew = *(int32_t *)(phys + 0x3C);
-    uint8_t *opt = phys + lfanew + 4 + 20;
-
-    uint32_t imp_rva = *(uint32_t *)(opt + 112 + 1 * 8);
-    uint32_t imp_sz  = *(uint32_t *)(opt + 112 + 1 * 8 + 4);
-
-    if (!imp_rva || imp_rva >= size ||
-        (imp_sz && imp_sz > size - imp_rva)) {
-        image->resolving = 0;
-        image->resolved = 1;
-        return;
+    int32_t peoff = *(int32_t *)(phys + 0x3C);
+    uint8_t *opt = phys + peoff + 4 + 20;
+    uint32_t imp = *(uint32_t *)(opt + 112 + 8);
+    uint32_t imp_size = *(uint32_t *)(opt + 112 + 12);
+    if (!imp || imp >= size || (imp_size && imp_size > size - imp)) {
+        image->resolving = 0; image->resolved = 1; return;
     }
-
-    uint64_t max_desc = imp_sz ? imp_sz / 20 : (size - imp_rva) / 20;
-
-    for (uint64_t d = 0; d < max_desc; d++) {
-        uint64_t desc_off = (uint64_t)imp_rva + d * 20;
-
-        if (desc_off > size || size - desc_off < 20)
-            break;
-
-        uint8_t *desc = phys + desc_off;
-
-        uint32_t oft_rva  = *(uint32_t *)(desc + 0);
+    uint64_t desc_count = imp_size ? imp_size / 20 : (size - imp) / 20;
+    for (uint64_t d = 0; d < desc_count; d++) {
+        uint64_t off = (uint64_t)imp + d * 20;
+        if (off > size || size - off < 20) break;
+        uint8_t *desc = phys + off;
+        uint32_t oft = *(uint32_t *)(desc + 0);
         uint32_t name_rva = *(uint32_t *)(desc + 12);
-        uint32_t ft_rva   = *(uint32_t *)(desc + 16);
-
-        if (!name_rva && !ft_rva && !oft_rva)
-            break;
-
-        if (!name_rva || !ft_rva ||
-            name_rva >= size || ft_rva >= size)
-            continue;
-
-        const char *dll = (const char *)(phys + name_rva);
-        BootModule *dep = PspFindModule(user_bootinfo, dll);
-        if (!dep)
-            dep = PspLoadProcessDiskDependency(proc, dll);
-
-        /* A missing DLL must never leave an IMAGE_IMPORT_BY_NAME RVA in
-           the IAT: executing that small RVA causes a jump into unmapped VA. */
-        if (!dep) {
-            uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
-            if (look_rva < size) {
-                uint64_t count = (size - look_rva) / 8;
-                uint64_t iat_count = (size - ft_rva) / 8;
-                if (count > iat_count) count = iat_count;
-                for (uint64_t i = 0; i < count; i++) {
-                    uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
-                    if (!look) break;
-                    *(uint64_t *)(phys + ft_rva + i * 8) = 0;
-                }
-            }
-            continue;
-        }
-
-        if (PspMapUserImage(proc, dep) != 0) {
-            uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
-            if (look_rva < size) {
-                uint64_t count = (size - look_rva) / 8;
-                uint64_t iat_count = (size - ft_rva) / 8;
-                if (count > iat_count) count = iat_count;
-                for (uint64_t i = 0; i < count; i++) {
-                    uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
-                    if (!look) break;
-                    *(uint64_t *)(phys + ft_rva + i * 8) = 0;
-                }
-            }
-            continue;
-        }
-
-        pe_resolve_imports(proc, dep);
-
-        uint32_t look_rva = oft_rva ? oft_rva : ft_rva;
-
-        if (look_rva >= size)
-            continue;
-
-        uint64_t max_thunks = (size - look_rva) / 8;
-        uint64_t max_iat = (size - ft_rva) / 8;
-        if (max_thunks > max_iat)
-            max_thunks = max_iat;
-
-        for (uint64_t i = 0; i < max_thunks; i++) {
-            uint64_t look_off = (uint64_t)look_rva + i * 8;
-            uint64_t iat_off = (uint64_t)ft_rva + i * 8;
-
-            uint64_t look = *(uint64_t *)(phys + look_off);
-            if (!look)
-                break;
-
+        uint32_t ft = *(uint32_t *)(desc + 16);
+        if (!oft && !name_rva && !ft) break;
+        if (!name_rva || !ft || name_rva >= size || ft >= size) continue;
+        BootModule *dep = PspFindModule(user_bootinfo, (const char *)(phys + name_rva));
+        if (!dep) dep = PspLoadProcessDiskDependency(proc, (const char *)(phys + name_rva));
+        uint32_t look_rva = oft ? oft : ft;
+        if (look_rva >= size) continue;
+        uint64_t count = (size - look_rva) / 8;
+        uint64_t iat_count = (size - ft) / 8;
+        if (count > iat_count) count = iat_count;
+        if (dep && PspMapUserImage(proc, dep) == 0) pe_resolve_imports(proc, dep);
+        for (uint64_t i = 0; i < count; i++) {
+            uint64_t look = *(uint64_t *)(phys + look_rva + i * 8);
+            if (!look) break;
             uint64_t addr = 0;
-
-            /* Ordinal imports are not implemented by this loader. */
-            if (!(look & 0x8000000000000000ULL)) {
-                uint32_t name_off = (uint32_t)look;
-
-                if (name_off <= size && size - name_off >= 3) {
-                    const char *fn = (const char *)(phys + name_off + 2);
-                    addr = pe_get_export(proc, dep, fn);
+            if (dep && PspGetUserImage(proc, dep)) {
+                if (look & 0x8000000000000000ULL)
+                    addr = pe_get_export_ordinal(proc, dep, (uint32_t)(look & 0xFFFFu), 0);
+                else {
+                    uint32_t name_off = (uint32_t)look;
+                    if (name_off <= size && size - name_off >= 3)
+                        addr = pe_get_export(proc, dep, (const char *)(phys + name_off + 2));
                 }
             }
-
-            *(uint64_t *)(phys + iat_off) = addr;
+            *(uint64_t *)(phys + ft + i * 8) = addr;
         }
     }
-
     image->resolving = 0;
     image->resolved = 1;
 }

@@ -205,3 +205,94 @@ __attribute__((dllexport)) int __C_specific_handler(void *exception_record,
     /* Continue search rather than claiming an exception was handled. */
     return 0;
 }
+
+
+/* Utility and conversion exports shared by the UCRT API-set contracts. */
+__attribute__((dllexport)) int atoi(const char *s) {
+    if (!s) return 0;
+    while (*s == ' ' || *s == '\\t' || *s == '\\r' || *s == '\\n' ||
+           *s == '\\f' || *s == '\\v') ++s;
+    int sign = 1;
+    if (*s == '+' || *s == '-') { if (*s++ == '-') sign = -1; }
+    unsigned int value = 0;
+    while (*s >= '0' && *s <= '9') {
+        unsigned int digit = (unsigned int)(*s++ - '0');
+        if (value > 214748364u ||
+            (value == 214748364u && digit > (sign < 0 ? 8u : 7u)))
+            return sign < 0 ? (-2147483647 - 1) : 2147483647;
+        value = value * 10u + digit;
+    }
+    return sign < 0 ? (value == 2147483648u ? (-2147483647 - 1) : -(int)value)
+                    : (int)value;
+}
+__attribute__((dllexport)) int isprint(int c) {
+    unsigned char ch = (unsigned char)c;
+    return ch >= 0x20u && ch <= 0x7Eu;
+}
+__attribute__((dllexport)) unsigned long long strspn(const char *s, const char *accept) {
+    if (!s || !accept) return 0;
+    unsigned long long n = 0;
+    for (; s[n]; ++n) {
+        int found = 0;
+        for (unsigned long long j = 0; accept[j]; ++j)
+            if (s[n] == accept[j]) { found = 1; break; }
+        if (!found) break;
+    }
+    return n;
+}
+__attribute__((dllexport)) unsigned long long strcspn(const char *s, const char *reject) {
+    if (!s || !reject) return 0;
+    unsigned long long n = 0;
+    for (; s[n]; ++n) {
+        for (unsigned long long j = 0; reject[j]; ++j)
+            if (s[n] == reject[j]) return n;
+    }
+    return n;
+}
+typedef int (*UCRT_COMPARE)(const void *, const void *);
+__attribute__((dllexport)) void *bsearch(const void *key, const void *base,
+                                        unsigned long long count,
+                                        unsigned long long width,
+                                        UCRT_COMPARE compare) {
+    if (!key || !base || !width || !compare) return 0;
+    const unsigned char *bytes = (const unsigned char *)base;
+    unsigned long long lo = 0, hi = count;
+    while (lo < hi) {
+        unsigned long long mid = lo + (hi - lo) / 2;
+        int order = compare(key, bytes + mid * width);
+        if (order == 0) return (void *)(bytes + mid * width);
+        if (order < 0) hi = mid; else lo = mid + 1;
+    }
+    return 0;
+}
+static void ucrt_swap_records(unsigned char *a, unsigned char *b,
+                              unsigned long long width) {
+    for (unsigned long long i = 0; i < width; ++i) {
+        unsigned char t = a[i]; a[i] = b[i]; b[i] = t;
+    }
+}
+/* In-place insertion sort is deterministic and avoids recursion on user data. */
+__attribute__((dllexport)) void qsort(void *base, unsigned long long count,
+                                      unsigned long long width,
+                                      UCRT_COMPARE compare) {
+    if (!base || count < 2 || !width || !compare ||
+        count > 0xFFFFFFFFFFFFF000ULL / width) return;
+    unsigned char *items = (unsigned char *)base;
+    for (unsigned long long i = 1; i < count; ++i) {
+        unsigned long long j = i;
+        while (j > 0 && compare(items + (j - 1) * width,
+                                items + j * width) > 0) {
+            ucrt_swap_records(items + (j - 1) * width,
+                              items + j * width, width);
+            --j;
+        }
+    }
+}
+static unsigned int ucrt_rand_state = 1u;
+__attribute__((dllexport)) int rand(void) {
+    ucrt_rand_state = ucrt_rand_state * 1103515245u + 12345u;
+    return (int)((ucrt_rand_state >> 16) & 0x7FFFu);
+}
+__attribute__((dllexport)) void srand(unsigned int seed) {
+    ucrt_rand_state = seed;
+}

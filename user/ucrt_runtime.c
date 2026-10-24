@@ -177,3 +177,41 @@ __attribute__((dllexport)) char *strstr(const char *haystack, const char *needle
     }
     return 0;
 }
+
+
+/* Additional exports used by current MSVC-built DLLs. */
+__attribute__((dllexport)) char *strrchr(const char *s, int c) {
+    if (!s) return 0;
+    const char *last = 0;
+    unsigned char target = (unsigned char)c;
+    for (;;) {
+        if ((unsigned char)*s == target) last = s;
+        if (!*s) return (char *)last;
+        ++s;
+    }
+}
+__attribute__((dllexport)) int _configure_narrow_argv(int mode) {
+    /* The host supplies a single ANSI command line; argument expansion is
+       performed by the process startup layer. Accept supported CRT modes. */
+    if (mode < 0 || mode > 2) return  EINVAL;
+    return 0;
+}
+__attribute__((dllexport)) int _initialize_narrow_environment(void) { return 0; }
+__attribute__((dllexport)) int _seh_filter_dll(unsigned int code, void *exception_info) {
+    (void)code; (void)exception_info;
+    /* No language-specific handler is installed by this minimal CRT. */
+    return 0;
+}
+__attribute__((dllexport)) void __std_type_info_destroy_list(void *list) {
+    /* The C++ runtime owns the opaque node layout. Do not free guessed
+       pointers: that can corrupt the process heap during DLL detach. */
+    (void)list;
+}
+__attribute__((dllexport)) int __C_specific_handler(void *exception_record,
+    unsigned long long establisher_frame, void *context_record,
+    void *dispatcher_context) {
+    (void)exception_record; (void)establisher_frame;
+    (void)context_record; (void)dispatcher_context;
+    /* Continue search rather than claiming an exception was handled. */
+    return 0;
+}

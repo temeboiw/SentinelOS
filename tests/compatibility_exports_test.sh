@@ -61,4 +61,13 @@ for symbol in SetStdHandle LoadLibraryExW FindFirstFileExW; do
   require_export "$ROOT/magic/System32/kernel32.dll" "$symbol"
 done
 
+
+# OpenGL is a real bounded framebuffer renderer, not a full OpenGL driver.
+for file in "$ROOT/opengl32.dll" "$ROOT/Windows/System32/opengl32.dll" "$ROOT/magic/System32/opengl32.dll"; do
+  require_file "$file"
+  for symbol in glClearColor glClear glViewport glDrawArrays glDrawElements glGetString glGetError glGenTextures glBindTexture glDeleteTextures wglCreateContext wglMakeCurrent wglGetProcAddress SwapBuffers; do
+    require_export "$file" "$symbol"
+  done
+done
+
 echo "Compatibility DLL export/package regression checks passed."

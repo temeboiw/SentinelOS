@@ -823,7 +823,13 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
      * while the cursor was there. Then draw the cursor exactly once at its
      * new position and flush that footprint. */
     int rendered_x=cur_ox, rendered_y=cur_oy;
-    if (cur_on) cursor_restore_fast();
+    if (cur_on) {
+        if (g_gpu_surface && u32_is_desktop_window()) {
+            u32_repaint_scene_rect(rendered_x,rendered_y,rendered_x+16,rendered_y+16);
+            cur_on=0;
+            for(int i=0;i<16*16;i++)cur_paint[i]=0;
+        } else cursor_restore_fast();
+    }
     cur_ox=x; cur_oy=y;
     cursor_save_draw(x,y);
     /* Present old and new cursor footprints together. Two separate flushes

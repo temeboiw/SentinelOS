@@ -2291,3 +2291,37 @@ __attribute__((dllexport)) BOOL FindClose(HANDLE h) {
     if(!st->used){k32_last_error=6;return 0;}
     st->used=0;k32_last_error=0;return 1;
 }
+
+
+typedef struct {
+    DWORD dwFileAttributes;
+    K32_FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+    DWORD nFileSizeHigh, nFileSizeLow, dwReserved0, dwReserved1;
+    K32_WCHAR cFileName[260];
+    K32_WCHAR cAlternateFileName[14];
+} K32_WIN32_FIND_DATAW;
+__attribute__((dllexport)) HANDLE FindFirstFileW(K32_LPCWSTR path,K32_WIN32_FIND_DATAW *out) {
+    char narrow[768];
+    if(!path||!out){k32_last_error=87;return (HANDLE)(i64)-1;}
+    k32_wide_to_ansi(narrow,sizeof(narrow),path);
+    K32_WIN32_FIND_DATAA a;
+    HANDLE h=FindFirstFileA(narrow,&a);
+    if(h==(HANDLE)(i64)-1)return h;
+    for(unsigned int i=0;i<sizeof(*out);i++)((unsigned char*)out)[i]=0;
+    out->dwFileAttributes=a.dwFileAttributes;
+    out->ftCreationTime=a.ftCreationTime;out->ftLastAccessTime=a.ftLastAccessTime;out->ftLastWriteTime=a.ftLastWriteTime;
+    out->nFileSizeHigh=a.nFileSizeHigh;out->nFileSizeLow=a.nFileSizeLow;
+    k32_ansi_to_wide(out->cFileName,260,a.cFileName);
+    return h;
+}
+__attribute__((dllexport)) BOOL FindNextFileW(HANDLE h,K32_WIN32_FIND_DATAW *out) {
+    if(!out){k32_last_error=87;return 0;}
+    K32_WIN32_FIND_DATAA a;
+    if(!FindNextFileA(h,&a))return 0;
+    for(unsigned int i=0;i<sizeof(*out);i++)((unsigned char*)out)[i]=0;
+    out->dwFileAttributes=a.dwFileAttributes;
+    out->ftCreationTime=a.ftCreationTime;out->ftLastAccessTime=a.ftLastAccessTime;out->ftLastWriteTime=a.ftLastWriteTime;
+    out->nFileSizeHigh=a.nFileSizeHigh;out->nFileSizeLow=a.nFileSizeLow;
+    k32_ansi_to_wide(out->cFileName,260,a.cFileName);
+    return 1;
+}

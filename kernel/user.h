@@ -2550,23 +2550,24 @@ static Frame *syscall_handler(Frame *f) {
         if (copy_user_str(f->rsi, func, sizeof func) != 0)
             func[0] = 0;
 
+        KPROCESS *cur = MmCurrentProcess;
         BootModule *mod = PspFindModule(user_bootinfo, dll);
+        /*
+         * GetProcAddress is also used on DLLs loaded from the application's
+         * own directory (Geometry Dash ships most of its engine this way).
+         * Those images are private to the process and are not in boot modules.
+         */
+        if (!mod)
+            mod = PspLoadProcessDiskDependency(cur, dll);
+
         uint64_t addr = 0;
-
-        if (mod) {
-            KPROCESS *cur = MmCurrentProcess;
-
+        if (mod && cur && cur != PspSystemProcess) {
             MmSwitchToProcess(PspSystemProcess);
-
             if (PspMapUserImage(cur, mod) == 0) {
                 pe_resolve_imports(cur, mod);
                 addr = pe_get_export(cur, mod, func);
             }
-
             MmSwitchToProcess(cur);
-
-            DbgPrint("user: GetProcAddress %s!%s = %p",
-                     dll, func, (void *)addr);
         }
 
         f->rax = addr;

@@ -2377,6 +2377,9 @@ __attribute__((dllexport)) HANDLE CreateFileMappingA(HANDLE file,void *security,
     }
     for(u64 i=copy_size;i<size;i++)((unsigned char*)base)[i]=0;
     SetFilePointerEx(file,old_pos,0,0u);
+    if(protect==0x02u && !sy3(SYS_ProtectVirtualMemory,(u64)base,size,0x02u)) {
+        sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);k32_last_error=5;return 0;
+    }
     K32_FILE_MAPPING *m=&k32_file_mappings[slot];
     m->used=1;m->handle=(HANDLE)(unsigned long long)(0x71000000u+slot);m->base=base;m->size=size;m->protect=protect;
     k32_last_error=0;return m->handle;

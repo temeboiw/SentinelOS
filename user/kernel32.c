@@ -2204,3 +2204,25 @@ __attribute__((dllexport)) DWORD GetExitCodeThread(HANDLE thread,DWORD *code) {
     if(!code|| (thread!=GetCurrentThread()&&thread!=(HANDLE)1)){k32_last_error=87;return 0;}
     *code=259u;k32_last_error=0;return 1;
 }
+
+
+// User-profile directory APIs. SentinelOS currently exposes the public user
+// profile at C:\\Users\\user; size values follow Win32's required-size rules.
+__attribute__((dllexport)) BOOL GetUserProfileDirectoryA(HANDLE token, LPSTR out, DWORD *size) {
+    (void)token;
+    const char *path="C:\\Users\\user";
+    DWORD n=0; while(path[n]) n++;
+    if(!size){k32_last_error=87;return 0;}
+    if(!out || *size<=n){*size=n+1;k32_last_error=122;return 0;}
+    for(DWORD i=0;i<=n;i++)out[i]=path[i];
+    *size=n;k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) BOOL GetUserProfileDirectoryW(HANDLE token, K32_LPWSTR out, DWORD *size) {
+    (void)token;
+    const char *path="C:\\Users\\user";
+    DWORD n=0; while(path[n]) n++;
+    if(!size){k32_last_error=87;return 0;}
+    if(!out || *size<=n){*size=n+1;k32_last_error=122;return 0;}
+    k32_ansi_to_wide(out,*size,path);
+    *size=n;k32_last_error=0;return 1;
+}

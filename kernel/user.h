@@ -188,6 +188,9 @@ typedef struct {
     uint64_t source_phys;
     uint64_t source_pages;
     char image_path[224];
+    /* Full requested basename; BootModule.name is only 32 bytes and truncates
+       API-set names, which otherwise defeats dependency-cache comparisons. */
+    char dependency_name[160];
     int used;
 } UserDiskModule;
 #define USER_DISK_MODULE_MAX 64
@@ -1143,6 +1146,7 @@ static void PspFreeDiskModule(UserDiskModule *d) {
     d->module.base=0; d->owner=0; d->source_phys=0;
     d->source_pages=0;
     for (int i=0;i<(int)sizeof(d->image_path);i++) d->image_path[i]=0;
+    for (int i=0;i<(int)sizeof(d->dependency_name);i++) d->dependency_name[i]=0;
     d->used=0;
 }
 static void PspForgetDiskModule(KPROCESS *owner) {
@@ -1298,6 +1302,9 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
         for (n=0;n<(int)sizeof(d->image_path)-1 && name[n];n++)
             d->image_path[n]=name[n];
         d->image_path[n]=0;
+        for (n=0;n<(int)sizeof(d->dependency_name)-1 && name[n];n++)
+            d->dependency_name[n]=name[n];
+        d->dependency_name[n]=0;
         return d;
     }
     for(uint64_t i=0;i<image_pages;i++)pmm_free(image_pa+i*USER_IMAGE_PAGE);
@@ -1312,7 +1319,7 @@ static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name
     for (int i = 0; i < USER_DISK_MODULE_MAX; i++) {
         UserDiskModule *d = &user_disk_modules[i];
         if (!d->used || d->owner != proc) continue;
-        const char *a = d->module.name, *b = name;
+        const char *a = d->dependency_name[0] ? d->dependency_name : d->module.name, *b = name;
         int same = 1;
         for (int k = 0; a[k] || b[k]; k++) {
             char ca = a[k], cb = b[k];

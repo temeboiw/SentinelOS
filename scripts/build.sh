@@ -1061,6 +1061,12 @@ lld -flavor link \
   /fixed:no /base:0x43000000 \
   /export:_initterm_e \
   /export:_initterm \
+  /export:_errno \
+  /export:malloc \
+  /export:calloc \
+  /export:realloc \
+  /export:free \
+  /export:_msize \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 

@@ -2137,23 +2137,12 @@ static Frame *syscall_handler(Frame *f) {
     }
 
     case SYS_NtGetApplicationError: {
-        /* Only the desktop shell may consume crash notifications. Other
-         * applications cannot steal or discard the system error queue. */
-        int caller_idx = up_find_proc(MmCurrentProcess);
-        if (caller_idx < 0 ||
-            !up_tab[caller_idx].image_name[0]) {
-            f->rax = 0;
-            return f;
-        }
-        const char *caller_name = up_tab[caller_idx].image_name;
-        static const char shell_name[] = "explorer.exe";
-        int is_shell = 1;
-        for (unsigned int i = 0; i < sizeof(shell_name); i++) {
-            char a = caller_name[i], b = shell_name[i];
-            if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
-            if (a != b) { is_shell = 0; break; }
-        }
-        if (!is_shell || !f->rdi ||
+        /* Deliver a kernel-owned crash record to the currently running UI
+         * process. USER32 consumes it from GetMessageA, so a child launched
+         * by File Explorer gets the same OS error dialog as one launched by
+         * the desktop shell. The failed process never handles its own fault. */
+        if (!MmCurrentProcess || MmCurrentProcess == PspSystemProcess ||
+            !f->rdi ||
             !MmValidateUserRange(MmCurrentProcess, f->rdi,
                                  sizeof(UserApplicationError), 1)) {
             f->rax = 0;

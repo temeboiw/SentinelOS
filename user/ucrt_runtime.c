@@ -9,7 +9,6 @@
 typedef int (*_PIFV)(void);
 typedef void (*_PVFV)(void);
 
-__declspec(dllexport)
 int _initterm_e(_PIFV *first, _PIFV *last)
 {
     if (!first || !last || last < first)
@@ -26,7 +25,6 @@ int _initterm_e(_PIFV *first, _PIFV *last)
     return 0;
 }
 
-__declspec(dllexport)
 void _initterm(_PVFV *first, _PVFV *last)
 {
     if (!first || !last || last < first)

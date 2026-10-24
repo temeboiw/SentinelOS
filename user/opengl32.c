@@ -1,0 +1,176 @@
+/*
+ * SentinelOS OpenGL 1.1 compatibility runtime.
+ *
+ * This is a bounded software implementation over SentinelOS's mapped
+ * framebuffer. It intentionally reports only the subset implemented here;
+ * it is not a claim of complete desktop OpenGL conformance.
+ */
+typedef unsigned int GLenum;
+typedef unsigned int GLuint;
+typedef int GLint;
+typedef int GLsizei;
+typedef unsigned char GLboolean;
+typedef unsigned char GLubyte;
+typedef unsigned int GLbitfield;
+typedef float GLfloat;
+typedef float GLclampf;
+typedef void GLvoid;
+typedef struct { unsigned long long va; unsigned int w,h,pitch; } OGL_FB;
+typedef struct { unsigned int x,y,w,h; } OGL_RECT;
+enum {
+ GL_FALSE=0, GL_TRUE=1, GL_COLOR_BUFFER_BIT=0x4000, GL_DEPTH_BUFFER_BIT=0x0100,
+ GL_STENCIL_BUFFER_BIT=0x0400, GL_TRIANGLES=4, GL_TRIANGLE_STRIP=5,
+ GL_TRIANGLE_FAN=6, GL_QUADS=7, GL_LINES=1, GL_LINE_STRIP=3, GL_POINTS=0,
+ GL_FLOAT=0x1406, GL_UNSIGNED_BYTE=0x1401, GL_UNSIGNED_SHORT=0x1403,
+ GL_VERTEX_ARRAY=0x8074, GL_COLOR_ARRAY=0x8076, GL_TEXTURE_COORD_ARRAY=0x8078,
+ GL_TEXTURE_2D=0x0DE1, GL_BLEND=0x0BE2, GL_DEPTH_TEST=0x0B71,
+ GL_SCISSOR_TEST=0x0C11, GL_STENCIL_TEST=0x0B90, GL_DITHER=0x0BD0,
+ GL_SRC_ALPHA=0x0302, GL_ONE_MINUS_SRC_ALPHA=0x0303, GL_ONE=1, GL_ZERO=0,
+ GL_TEXTURE_MIN_FILTER=0x2801, GL_TEXTURE_MAG_FILTER=0x2800,
+ GL_TEXTURE_WRAP_S=0x2802, GL_TEXTURE_WRAP_T=0x2803, GL_NEAREST=0x2600,
+ GL_LINEAR=0x2601, GL_CLAMP=0x2900, GL_REPEAT=0x2901,
+ GL_VENDOR=0x1F00, GL_RENDERER=0x1F01, GL_VERSION=0x1F02,
+ GL_EXTENSIONS=0x1F03, GL_NO_ERROR=0, GL_INVALID_ENUM=0x0500,
+ GL_INVALID_VALUE=0x0501, GL_INVALID_OPERATION=0x0502
+};
+static unsigned int ogl_error, ogl_clear_color, ogl_enabled, ogl_next_texture=1;
+static unsigned int ogl_view_x,ogl_view_y,ogl_view_w,ogl_view_h;
+static unsigned int ogl_sc_x,ogl_sc_y,ogl_sc_w,ogl_sc_h;
+static int ogl_sc_set, ogl_current;
+static const GLfloat *ogl_vertices,*ogl_colors,*ogl_texcoords;
+static GLint ogl_vertex_size=2,ogl_color_size=4,ogl_tex_size=2;
+static GLsizei ogl_vertex_stride,ogl_color_stride,ogl_tex_stride;
+static GLuint ogl_bound_texture;
+static struct { GLuint id; unsigned int used; } ogl_textures[256];
+static unsigned long long ogl_sys(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
+ unsigned long long r;
+ __asm__ volatile("mov %[n], %%rax\nmov %[a], %%rdi\nmov %[b], %%rsi\nmov %[c], %%rdx\nint $0x80\nmov %%rax, %[r]"
+  : [r]"=r"(r):[n]"r"(n),[a]"r"(a),[b]"r"(b),[c]"r"(c):"rax","rdi","rsi","rdx","memory","cc");
+ return r;
+}
+static OGL_FB *ogl_fb(void) {
+ static OGL_FB fb;
+ if (!fb.va || !fb.w || !fb.h) {
+  if (!ogl_sys(8,(unsigned long long)&fb,0,0) || !fb.va || !fb.w || !fb.h || fb.pitch<fb.w*4u) return 0;
+  ogl_view_w=fb.w; ogl_view_h=fb.h; ogl_sc_w=fb.w; ogl_sc_h=fb.h;
+ }
+ return &fb;
+}
+static unsigned int ogl_stride(GLsizei stride,unsigned int size) { return stride?(unsigned int)stride:size*4u; }
+static void ogl_pixel(int x,int y,unsigned int color) {
+ OGL_FB *fb=ogl_fb(); if(!fb||x<0||y<0||(unsigned int)x>=fb->w||(unsigned int)y>=fb->h)return;
+ if(ogl_sc_set&&(x<(int)ogl_sc_x||y<(int)ogl_sc_y||x>=(int)(ogl_sc_x+ogl_sc_w)||y>=(int)(ogl_sc_y+ogl_sc_h)))return;
+ ((unsigned int*)(unsigned long long)fb->va)[(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x]=color;
+}
+static unsigned int ogl_vertex_color(GLsizei i) {
+ if(!ogl_colors)return 0xffffffffu;
+ const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_stride(ogl_color_stride,(unsigned int)ogl_color_size);
+ unsigned int r=(unsigned int)(p[0]),g=(unsigned int)(p[1]),b=(unsigned int)(p[2]),a=ogl_color_size>3?p[3]:255u;
+ return (a<<24)|(r<<16)|(g<<8)|b;
+}
+static int ogl_coord(GLsizei i,int axis) {
+ if(!ogl_vertices)return 0;
+ const GLfloat *p=(const GLfloat*)((const unsigned char*)ogl_vertices+(unsigned long long)i*ogl_stride(ogl_vertex_stride,(unsigned int)ogl_vertex_size));
+ GLfloat q=p[axis];
+ OGL_FB *fb=ogl_fb(); if(!fb)return 0;
+ if(q>=-1.01f&&q<=1.01f) q=(q+1.0f)*(float)(axis?ogl_view_h:ogl_view_w)*0.5f;
+ if(axis) q=(float)ogl_view_h-q;
+ if(q>32767.0f)q=32767.0f;if(q< -32768.0f)q=-32768.0f;
+ return (int)q;
+}
+static void ogl_line(int x0,int y0,int x1,int y1,unsigned int c) {
+ int dx=x1>x0?x1-x0:x0-x1, sx=x0<x1?1:-1;
+ int dy=y1>y0?y0-y1:y1-y0, sy=y0<y1?1:-1,err=dx+dy;
+ for(;;){ogl_pixel(x0,y0,c);if(x0==x1&&y0==y1)break;int e=2*err;if(e>=dy){err+=dy;x0+=sx;}if(e<=dx){err+=dx;y0+=sy;}}
+}
+static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
+ int x0=ogl_coord(a,0),y0=ogl_coord(a,1),x1=ogl_coord(b,0),y1=ogl_coord(b,1),x2=ogl_coord(c,0),y2=ogl_coord(c,1);
+ unsigned int color=ogl_vertex_color(a);
+ int minx=x0<x1?x0:x1,maxx=x0>x1?x0:x1,miny=y0<y1?y0:y1,maxy=y0>y1?y0:y1;
+ if(x2<minx)minx=x2;if(x2>maxx)maxx=x2;if(y2<miny)miny=y2;if(y2>maxy)maxy=y2;
+ if(maxx-minx>4096||maxy-miny>4096)return;
+ long long area=(long long)(x1-x0)*(y2-y0)-(long long)(y1-y0)*(x2-x0);if(!area)return;
+ for(int y=miny;y<=maxy;y++)for(int x=minx;x<=maxx;x++){
+  long long w0=(long long)(x1-x)*(y2-y)-(long long)(y1-y)*(x2-x);
+  long long w1=(long long)(x2-x)*(y0-y)-(long long)(y2-y)*(x0-x);
+  long long w2=(long long)(x0-x)*(y1-y)-(long long)(y0-y)*(x1-x);
+  if((area>0&&w0>=0&&w1>=0&&w2>=0)||(area<0&&w0<=0&&w1<=0&&w2<=0))ogl_pixel(x,y,color);
+ }
+}
+__attribute__((dllexport)) void glClearColor(GLclampf r,GLclampf g,GLclampf b,GLclampf a) {
+ unsigned int R=(unsigned int)(r<0?0:r>1?255:r*255),G=(unsigned int)(g<0?0:g>1?255:g*255),B=(unsigned int)(b<0?0:b>1?255:b*255),A=(unsigned int)(a<0?0:a>1?255:a*255);
+ ogl_clear_color=(A<<24)|(R<<16)|(G<<8)|B;
+}
+__attribute__((dllexport)) void glClear(GLbitfield mask) {
+ if(!(mask&GL_COLOR_BUFFER_BIT))return;OGL_FB *fb=ogl_fb();if(!fb)return;
+ unsigned int *p=(unsigned int*)(unsigned long long)fb->va;
+ for(unsigned int y=0;y<fb->h;y++)for(unsigned int x=0;x<fb->w;x++)
+  if(!ogl_sc_set||(x>=ogl_sc_x&&y>=ogl_sc_y&&x<ogl_sc_x+ogl_sc_w&&y<ogl_sc_y+ogl_sc_h))p[(unsigned long long)y*(fb->pitch/4u)+x]=ogl_clear_color;
+}
+__attribute__((dllexport)) void glViewport(GLint x,GLint y,GLsizei w,GLsizei h){if(w<0||h<0){ogl_error=GL_INVALID_VALUE;return;}ogl_view_x=x<0?0:(unsigned int)x;ogl_view_y=y<0?0:(unsigned int)y;ogl_view_w=(unsigned int)w;ogl_view_h=(unsigned int)h;}
+__attribute__((dllexport)) void glScissor(GLint x,GLint y,GLsizei w,GLsizei h){if(w<0||h<0){ogl_error=GL_INVALID_VALUE;return;}ogl_sc_x=x<0?0:(unsigned int)x;ogl_sc_y=y<0?0:(unsigned int)y;ogl_sc_w=(unsigned int)w;ogl_sc_h=(unsigned int)h;ogl_sc_set=1;}
+__attribute__((dllexport)) void glEnable(GLenum c){if(c==GL_SCISSOR_TEST)ogl_sc_set=1;else if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D)ogl_enabled|=c;else ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glDisable(GLenum c){if(c==GL_SCISSOR_TEST)ogl_sc_set=0;else if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D)ogl_enabled&=~c;else ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) GLboolean glIsEnabled(GLenum c){if(c==GL_SCISSOR_TEST)return (GLboolean)ogl_sc_set;return (GLboolean)((ogl_enabled&c)!=0);}
+__attribute__((dllexport)) GLenum glGetError(void){unsigned int e=ogl_error;ogl_error=0;return e;}
+__attribute__((dllexport)) const GLubyte *glGetString(GLenum n){static const GLubyte vendor[]="SentinelOS";static const GLubyte renderer[]="SentinelOS framebuffer software rasterizer";static const GLubyte version[]="1.1 SentinelOS subset";static const GLubyte ext[]="";if(n==GL_VENDOR)return vendor;if(n==GL_RENDERER)return renderer;if(n==GL_VERSION)return version;if(n==GL_EXTENSIONS)return ext;ogl_error=GL_INVALID_ENUM;return 0;}
+__attribute__((dllexport)) void glDrawArrays(GLenum mode,GLint first,GLsizei count){
+ if(first<0||count<0||count>100000||!ogl_vertices){ogl_error=GL_INVALID_VALUE;return;}
+ if(mode==GL_TRIANGLES){for(int i=0;i+2<count;i+=3)ogl_triangle(first+i,first+i+1,first+i+2);}
+ else if(mode==GL_TRIANGLE_STRIP){for(int i=0;i+2<count;i++)if(i&1)ogl_triangle(first+i+1,first+i,first+i+2);else ogl_triangle(first+i,first+i+1,first+i+2);}
+ else if(mode==GL_TRIANGLE_FAN){for(int i=1;i+1<count;i++)ogl_triangle(first,first+i,first+i+1);}
+ else if(mode==GL_LINES){for(int i=0;i+1<count;i+=2)ogl_line(ogl_coord(first+i,0),ogl_coord(first+i,1),ogl_coord(first+i+1,0),ogl_coord(first+i+1,1),ogl_vertex_color(first+i));}
+ else if(mode==GL_LINE_STRIP){for(int i=0;i+1<count;i++)ogl_line(ogl_coord(first+i,0),ogl_coord(first+i,1),ogl_coord(first+i+1,0),ogl_coord(first+i+1,1),ogl_vertex_color(first+i));}
+ else if(mode==GL_POINTS){for(int i=0;i<count;i++)ogl_pixel(ogl_coord(first+i,0),ogl_coord(first+i,1),ogl_vertex_color(first+i));}
+ else if(mode==GL_QUADS){for(int i=0;i+3<count;i+=4){ogl_triangle(first+i,first+i+1,first+i+2);ogl_triangle(first+i,first+i+2,first+i+3);}}
+ else ogl_error=GL_INVALID_ENUM;
+}
+__attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum type,const void *indices){
+ if(!indices||count<0||count>100000){ogl_error=GL_INVALID_VALUE;return;}
+ const unsigned char *p=(const unsigned char*)indices;
+ for(int i=0;i<count;){unsigned int ix;if(type==GL_UNSIGNED_SHORT){ix=((const unsigned short*)p)[i];}else if(type==GL_UNSIGNED_BYTE){ix=p[i];}else{ogl_error=GL_INVALID_ENUM;return;}
+  if(mode==GL_TRIANGLES&&i+2<count){unsigned int ib=type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i+1]:p[i+1],ic=type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i+2]:p[i+2];ogl_triangle((int)ix,(int)ib,(int)ic);i+=3;}
+  else {ogl_pixel(ogl_coord((int)ix,0),ogl_coord((int)ix,1),ogl_vertex_color((int)ix));i++;}
+ }
+}
+__attribute__((dllexport)) void glVertexPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<2||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_vertex_size=size;ogl_vertex_stride=stride;ogl_vertices=(const GLfloat*)p;}
+__attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||(type!=GL_UNSIGNED_BYTE&&type!=GL_FLOAT)){ogl_error=GL_INVALID_VALUE;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}
+__attribute__((dllexport)) void glTexCoordPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<1||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_tex_size=size;ogl_tex_stride=stride;ogl_texcoords=(const GLfloat*)p;}
+__attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_VERTEX_ARRAY||a==GL_COLOR_ARRAY||a==GL_TEXTURE_COORD_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glDisableClientState(GLenum a){if(a!=GL_VERTEX_ARRAY&&a!=GL_COLOR_ARRAY&&a!=GL_TEXTURE_COORD_ARRAY)ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
+__attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if((s!=GL_SRC_ALPHA&&s!=GL_ONE&&s!=GL_ZERO)||(d!=GL_ONE_MINUS_SRC_ALPHA&&d!=GL_ONE&&d!=GL_ZERO))ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v<0)ogl_error=GL_INVALID_VALUE;}
+__attribute__((dllexport)) void glClearStencil(GLint s){(void)s;}
+__attribute__((dllexport)) void glClearDepth(double d){(void)d;}
+__attribute__((dllexport)) void glDepthMask(GLboolean b){(void)b;}
+__attribute__((dllexport)) void glDepthFunc(GLenum f){(void)f;}
+__attribute__((dllexport)) void glStencilMask(GLuint m){(void)m;}
+__attribute__((dllexport)) void glStencilFunc(GLenum f,GLint r,GLuint m){(void)f;(void)r;(void)m;}
+__attribute__((dllexport)) void glStencilOp(GLenum a,GLenum b,GLenum c){(void)a;(void)b;(void)c;}
+__attribute__((dllexport)) void glTexParameteri(GLenum t,GLenum p,GLint v){if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;(void)p;(void)v;}
+__attribute__((dllexport)) void glTexImage2D(GLenum t,GLint level,GLint internal,GLsizei w,GLsizei h,GLint border,GLenum format,GLenum type,const void *pixels){(void)level;(void)internal;(void)w;(void)h;(void)border;(void)format;(void)type;(void)pixels;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glBindTexture(GLenum t,GLuint id){if(t!=GL_TEXTURE_2D){ogl_error=GL_INVALID_ENUM;return;}ogl_bound_texture=id;}
+__attribute__((dllexport)) void glGenTextures(GLsizei n,GLuint *out){if(n<0||n>256||!out){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int id=ogl_next_texture++;if(!id)id=ogl_next_texture++;out[i]=id;ogl_textures[id%256].id=id;ogl_textures[id%256].used=1;}}
+__attribute__((dllexport)) void glDeleteTextures(GLsizei n,const GLuint *ids){if(n<0||n>256||(!ids&&n)){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int k=ids[i]%256;if(ogl_textures[k].id==ids[i])ogl_textures[k].used=0;if(ogl_bound_texture==ids[i])ogl_bound_texture=0;}}
+__attribute__((dllexport)) void glGetIntegerv(GLenum p,GLint *v){if(!v)return;if(p==0x0BA2){v[0]=(GLint)ogl_view_x;v[1]=(GLint)ogl_view_y;v[2]=(GLint)ogl_view_w;v[3]=(GLint)ogl_view_h;}else if(p==0x0C10){v[0]=(GLint)ogl_sc_x;v[1]=(GLint)ogl_sc_y;v[2]=(GLint)ogl_sc_w;v[3]=(GLint)ogl_sc_h;}else if(p==0x0D33)v[0]=4096;else if(p==0x0D3A){v[0]=1;v[1]=1;}else v[0]=0;}
+__attribute__((dllexport)) void glGetFloatv(GLenum p,GLfloat *v){if(!v)return;if(p==0x0B21)v[0]=1.0f;else if(p==0x0B22)v[0]=1.0f;else v[0]=0.0f;}
+__attribute__((dllexport)) void glGetBooleanv(GLenum p,GLboolean *v){if(!v)return;*v=glIsEnabled(p);}
+__attribute__((dllexport)) void glReadPixels(GLint x,GLint y,GLsizei w,GLsizei h,GLenum format,GLenum type,void *out){OGL_FB *fb=ogl_fb();if(!fb||!out||w<0||h<0||w>4096||h>4096||format!=0x1908||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_VALUE;return;}unsigned char *d=(unsigned char*)out;unsigned int *src=(unsigned int*)(unsigned long long)fb->va;for(int j=0;j<h;j++)for(int i=0;i<w;i++){int sx=x+i,sy=y+j;unsigned int c=0;if(sx>=0&&sy>=0&&(unsigned int)sx<fb->w&&(unsigned int)sy<fb->h)c=src[(unsigned long long)sy*(fb->pitch/4u)+(unsigned int)sx];unsigned long long o=((unsigned long long)j*w+i)*4;d[o]=(unsigned char)(c>>16);d[o+1]=(unsigned char)(c>>8);d[o+2]=(unsigned char)c;d[o+3]=(unsigned char)(c>>24);}}
+__attribute__((dllexport)) void glGetDoublev(GLenum p,double *v){if(v)*v=0.0;(void)p;}
+__attribute__((dllexport)) void glFinish(void){OGL_FB *fb=ogl_fb();if(fb){OGL_RECT r={0,0,fb->w,fb->h};ogl_sys(33,(unsigned long long)&r,0,0);}}
+__attribute__((dllexport)) void glFlush(void){glFinish();}
+__attribute__((dllexport)) void *wglGetProcAddress(const char *name){(void)name;return 0;}
+__attribute__((dllexport)) int wglMakeCurrent(void *dc,void *rc){(void)dc;ogl_current=rc!=0;return ogl_current;}
+__attribute__((dllexport)) int wglDeleteContext(void *rc){(void)rc;ogl_current=0;return 1;}
+__attribute__((dllexport)) void *wglCreateContext(void *dc){(void)dc;if(!ogl_fb())return 0;ogl_current=1;return (void*)1;}
+__attribute__((dllexport)) int wglShareLists(void *a,void *b){return a&&b;}
+__attribute__((dllexport)) int SwapBuffers(void *dc){(void)dc;glFinish();return ogl_fb()!=0;}
+__attribute__((dllexport)) void glDrawBuffer(GLenum mode){(void)mode;}
+__attribute__((dllexport)) void glReadBuffer(GLenum mode){(void)mode;}
+__attribute__((dllexport)) void glGetTexParameteriv(GLenum t,GLenum p,GLint *v){(void)t;(void)p;if(v)*v=GL_LINEAR;}
+__attribute__((dllexport)) void glGetTexLevelParameteriv(GLenum t,GLint l,GLenum p,GLint *v){(void)t;(void)l;(void)p;if(v)*v=0;}
+__attribute__((dllexport)) void glTexSubImage2D(GLenum t,GLint l,GLint x,GLint y,GLsizei w,GLsizei h,GLenum f,GLenum ty,const void *p){(void)t;(void)l;(void)x;(void)y;(void)w;(void)h;(void)f;(void)ty;(void)p;}
+__attribute__((dllexport)) void glColor4f(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;}
+__attribute__((dllexport)) void glColor4ub(unsigned char r,unsigned char g,unsigned char b,unsigned char a){(void)r;(void)g;(void)b;(void)a;}
+__attribute__((dllexport)) void glClearAccum(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;}

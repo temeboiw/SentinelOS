@@ -177,6 +177,54 @@ __attribute__((dllexport)) void *realloc(void *p, ucrt_size_t size) {
 }
 
 
+
+/*
+ * Thread/process failure entry points used by the MSVC CRT.
+ * _beginthreadex delegates to the OS thread service through kernel32's
+ * existing CreateThread implementation, preserving the native thread handle
+ * and optional thread ID. Failure paths return zero as the CRT contract
+ * requires; they do not fabricate a handle.
+ */
+typedef unsigned int (*UCRT_THREAD_START)(void *);
+typedef void *(*UCRT_CREATE_THREAD)(void *, ucrt_size_t, void *, void *,
+                                    unsigned int, unsigned int *);
+static ucrt_size_t ucrt_sys3(ucrt_size_t number, ucrt_size_t a,
+                             ucrt_size_t b, ucrt_size_t c) {
+    ucrt_size_t result;
+    __asm__ volatile("int $0x80" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c)
+                     : "memory", "cc");
+    return result;
+}
+__attribute__((dllexport)) ucrt_size_t _beginthreadex(
+    void *security, unsigned int stack_size, UCRT_THREAD_START start,
+    void *argument, unsigned int initflag, unsigned int *thread_id) {
+    if (!start) { ucrt_errno_value = 22; return 0; }
+    UCRT_CREATE_THREAD create = (UCRT_CREATE_THREAD)ucrt_sys3(
+        9, (ucrt_size_t)"kernel32.dll", (ucrt_size_t)"CreateThread", 0);
+    if (!create) { ucrt_errno_value = 38; return 0; }
+    void *handle = create(security, (ucrt_size_t)stack_size,
+                          (void *)start, argument, initflag, thread_id);
+    if (!handle) { ucrt_errno_value = 11; return 0; }
+    ucrt_errno_value = 0;
+    return (ucrt_size_t)handle;
+}
+typedef void (*UCRT_EXIT_PROCESS)(unsigned int);
+static void ucrt_fail_fast(unsigned int code) {
+    UCRT_EXIT_PROCESS exit_process = (UCRT_EXIT_PROCESS)ucrt_sys3(
+        9, (ucrt_size_t)"kernel32.dll", (ucrt_size_t)"ExitProcess", 0);
+    if (exit_process) exit_process(code);
+    for (;;) __asm__ volatile("pause");
+}
+__attribute__((dllexport)) void terminate(void) { ucrt_fail_fast(3); }
+__attribute__((dllexport)) void abort(void) { ucrt_fail_fast(3); }
+__attribute__((dllexport)) void _invoke_watson(const unsigned short *expression,
+    const unsigned short *function, const unsigned short *file, unsigned int line,
+    ucrt_size_t reserved) {
+    (void)expression; (void)function; (void)file; (void)line; (void)reserved;
+    ucrt_fail_fast(3);
+}
+
 /* Fundamental C runtime memory/string primitives. These are byte-accurate
    implementations and deliberately compiled with -fno-builtin so the compiler
    cannot rewrite their loops into recursive calls to the same exports. */

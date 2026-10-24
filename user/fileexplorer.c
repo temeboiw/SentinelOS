@@ -60,11 +60,20 @@ static int g_win_y = 40; /* live window origin */
 static int g_context_menu = 0;
 static int g_context_row = -1;
 static int g_context_start_line = 2;
-static const char *context_items[] = {
-    "Open", "Properties", "Copy (read-only)", "Cut (read-only)",
-    "Delete (read-only)", "Refresh", "Close menu"
-};
-#define CONTEXT_ITEM_COUNT ((int)(sizeof(context_items)/sizeof(context_items[0])))
+/* Switch-based strings avoid absolute pointers in PE read-only data. */
+#define CONTEXT_ITEM_COUNT 7
+static const char *context_item(int i) {
+    switch (i) {
+        case 0: return "Open";
+        case 1: return "Properties";
+        case 2: return "Copy (read-only)";
+        case 3: return "Cut (read-only)";
+        case 4: return "Delete (read-only)";
+        case 5: return "Refresh";
+        case 6: return "Close menu";
+        default: return "";
+    }
+}
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
@@ -102,12 +111,22 @@ static int name_compare_ci(const char *a,const char *b) {
     }
     return (unsigned char)a[i]-(unsigned char)b[i];
 }
-static const char *home_items[] = {
-    "Quick access", "Desktop", "Documents", "Downloads", "Pictures",
-    "This PC (C:)", "Windows", "System32 (protected)", "Users", "Program Files"
-};
-#define HOME_ITEM_COUNT ((int)(sizeof(home_items)/sizeof(home_items[0])))
-
+#define HOME_ITEM_COUNT 10
+static const char *home_item(int i) {
+    switch (i) {
+        case 0: return "Quick access";
+        case 1: return "Desktop";
+        case 2: return "Documents";
+        case 3: return "Downloads";
+        case 4: return "Pictures";
+        case 5: return "This PC (C:)";
+        case 6: return "Windows";
+        case 7: return "System32 (protected)";
+        case 8: return "Users";
+        case 9: return "Program Files";
+        default: return "";
+    }
+}
 
 /* Draw one visible row and invalidate only that row. */
 static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visible) {
@@ -120,7 +139,7 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
         line[0]=' '; line[1]=0;
     } else if (g_home) {
         line[p++] = (i == g_hover_row) ? '>' : ' ';
-        const char *hn=home_items[i];
+        const char *hn=home_item(i);
         line[p++]='[';line[p++]='P';line[p++]='I';line[p++]='N';line[p++]=']';line[p++]=' ';
         for(int j=0;hn[j]&&p<78;j++)line[p++]=hn[j];
         line[p]=0;
@@ -174,7 +193,7 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         for (int i=0; i<CONTEXT_ITEM_COUNT; i++) {
             char item[80]; int n=0;
             item[n++]='>'; item[n++]=' ';
-            for (int j=0; context_items[i][j] && n<78; j++) item[n++]=context_items[i][j];
+            for (int j=0; context_item(i)[j] && n<78; j++) item[n++]=context_items[i][j];
             item[n]=0;
             pText(g_window, 0, g_context_start_line+i,
                   "                                                                                ", -1);

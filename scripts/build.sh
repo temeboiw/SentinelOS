@@ -510,6 +510,8 @@ lld -flavor link \
   /export:FindFirstFileA \
   /export:FindNextFileA \
   /export:FindClose \
+  /export:FindFirstFileW \
+  /export:FindNextFileW \
   /export:SetCurrentDirectoryA \
   /export:GetLastError \
   /export:SetLastError \

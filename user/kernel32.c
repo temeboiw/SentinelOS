@@ -383,9 +383,14 @@ __attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) {
        Never truncate a long name into a different DLL identity. */
     DWORD length=0;
     while(name[length] && length<64) length++;
-    if(length>=64){k32_last_error=206;return 0;}
+    /* The kernel syscall's bounded string copy needs the NUL inside its
+       64-byte buffer, so a 63-character name is already too long. */
+    if(length>=63){k32_last_error=206;return 0;}
+    const char *requested_leaf=k32_module_leaf(name);
     for(int i=0;i<16;i++) {
-        if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name)) {
+        if(k32_modules[i].used &&
+           (k32_eqi(k32_modules[i].name,name) ||
+            k32_eqi(k32_module_leaf(k32_modules[i].name),requested_leaf))) {
             if(k32_modules[i].refs==0xFFFFFFFFu){k32_last_error=8;return 0;}
             k32_modules[i].refs++;k32_last_error=0;
             return (HANDLE)&k32_modules[i];

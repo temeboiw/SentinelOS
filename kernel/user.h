@@ -3005,6 +3005,28 @@ static Frame *user_exception_handler(Frame *f) {
     DbgPrint("  RIP=%016llx error=%016llx CR2=%016llx RSP=%016llx\n",
              (unsigned long long)f->rip, (unsigned long long)f->error,
              (unsigned long long)cr2, (unsigned long long)f->rsp);
+    DbgPrint("  REG RAX=%016llx RBX=%016llx RCX=%016llx RDX=%016llx\n",
+             (unsigned long long)f->rax, (unsigned long long)f->rbx,
+             (unsigned long long)f->rcx, (unsigned long long)f->rdx);
+    DbgPrint("  REG RSI=%016llx RDI=%016llx RBP=%016llx R8=%016llx\n",
+             (unsigned long long)f->rsi, (unsigned long long)f->rdi,
+             (unsigned long long)f->rbp, (unsigned long long)f->r8);
+    DbgPrint("  REG R9=%016llx R10=%016llx R11=%016llx R12=%016llx\n",
+             (unsigned long long)f->r9, (unsigned long long)f->r10,
+             (unsigned long long)f->r11, (unsigned long long)f->r12);
+    DbgPrint("  REG R13=%016llx R14=%016llx R15=%016llx\n",
+             (unsigned long long)f->r13, (unsigned long long)f->r14,
+             (unsigned long long)f->r15);
+    /* Capture instruction bytes while the faulting address space is still
+     * active. This lets us identify the exact memory operand causing the
+     * game fault instead of guessing from CR2 alone. */
+    if (f->rip >= 0x10000ULL && f->rip < 0x0000800000000000ULL) {
+        volatile const uint8_t *ip = (volatile const uint8_t *)(uintptr_t)f->rip;
+        DbgPrint("  CODE");
+        for (unsigned int bi = 0; bi < 16; bi++)
+            DbgPrint(" %02x", (unsigned int)ip[bi]);
+        DbgPrint("\\n");
+    }
 
     /* Stop the current thread before switching away from its address space. */
     ut_exit_current();

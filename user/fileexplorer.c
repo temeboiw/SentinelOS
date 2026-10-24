@@ -170,18 +170,21 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     if (!pText) { print("fileexplorer: draw_rows missing TextOutA\n"); return; }
     print("fileexplorer: draw_rows stage=title-before\n");
-    pText(g_window, 0, 0, g_home ? "Home | Quick access" : g_path, -1);
-    print("fileexplorer: draw_rows stage=title-after\n");
-    if(g_home) {
-        print("fileexplorer: draw_rows stage=hint-before\n");
-        pText(g_window,0,1,"Pinned locations | H: Home | /: search | S: sort",-1);
-        print("fileexplorer: draw_rows stage=hint-after\n");
-    } else if(g_filter_len) {
-        char hint[80];int q=0;const char *prefix="Search: ";
-        while(prefix[q]){hint[q]=prefix[q];q++;}
-        for(int j=0;g_filter[j]&&q<78;j++)hint[q++]=g_filter[j];
-        hint[q]=0;pText(g_window,0,1,hint,-1);
-    } else pText(g_window,0,1,"H: Home | /: search | S: sort | double-click to open",-1);
+    pText(g_window, 0, 0, g_home ? "File Explorer  >  Home" : "File Explorer", -1);
+    {
+        char toolbar[80]; int q=0;
+        const char *prefix="Back  Forward  Up  Refresh  |  Address: ";
+        while(prefix[q] && q<78) { toolbar[q]=prefix[q]; q++; }
+        const char *address=g_home ? "Quick access" : g_path;
+        for(int j=0;address[j] && q<78;j++) toolbar[q++]=address[j];
+        if(g_filter_len && q<68) {
+            const char *search="  |  Search: ";
+            for(int j=0;search[j] && q<78;j++) toolbar[q++]=search[j];
+            for(int j=0;g_filter[j] && q<78;j++) toolbar[q++]=g_filter[j];
+        }
+        toolbar[q]=0;
+        pText(g_window,0,1,toolbar,-1);
+    }
     for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
         if (visible == 0) print("fileexplorer: draw_rows stage=first-row-before\n");
         draw_visible_row(pText, 0, visible);

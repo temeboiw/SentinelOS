@@ -122,7 +122,16 @@ static uint64_t ut_create(uint64_t start, uint64_t param) {
     return (uint64_t)t->handle;
 }
 static void ut_exit_current(void) {
-    if (ut_cur >= 0 && ut_cur < UT_MAX) ut_tab[ut_cur].alive = 0;
+    if (ut_cur < 0 || ut_cur >= UT_MAX) return;
+    UThread *t = &ut_tab[ut_cur];
+    if (!t->alive) return;
+    if (t->proc) {
+        for (uint64_t off = 0; off < UT_STACK_SIZE; off += 0x1000ULL)
+            MmUnmapAllocatedUserPage(t->proc, t->stack_base + off);
+        if (t->teb_base)
+            MmUnmapAllocatedUserPage(t->proc, t->teb_base);
+    }
+    t->alive = 0;
 }
 static uint64_t ut_wait(Frame *f, int handle, uint32_t ms) {
     int idx = ut_find_handle(handle);

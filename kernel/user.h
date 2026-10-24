@@ -50,7 +50,7 @@
 #define SYS_NtUploadVirGLBuffer            36
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
-#define SYS_NtLoadLibrary                    41
+#define SYS_NtLoadLibrary                    43
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)

@@ -275,7 +275,7 @@ void mainCRTStartup(void) {
         if (msg.message == 0x0200) {
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
-            if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= g_count) row = -1;
+            if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= (g_home ? HOME_ITEM_COUNT : g_count)) row = -1;
             else row += g_scroll;
             if (row != g_hover_row) {
                 int old_row = g_hover_row;

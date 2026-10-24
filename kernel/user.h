@@ -260,6 +260,7 @@ static void up_load(Frame *f, int idx) {
 
     if (ki_current) ki_current->Process = u->proc;
     MmSwitchToProcess(u->proc);
+    cpu_set_user_gs_base(USER_TEB_BASE);
 
     f->cs = USER_CS;
     f->ss = USER_DS;
@@ -2088,6 +2089,15 @@ static Frame *syscall_handler(Frame *f) {
             }
         }
 
+        if (!user_setup_teb(proc, USER_STACK_TOP - 0x10000ULL, USER_STACK_TOP)) {
+            PspForgetUserImages(proc);
+            MmDeleteAddressSpace(proc);
+            if (disk_mod) PspFreeDiskModule(disk_mod);
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+
         /* Optional single command-line argument at a stable user VA. */
         if (has_child_arg && MmUserRangeUnmapped(proc, 0x6FF00000ULL, USER_IMAGE_PAGE)) {
             uint64_t arg_pa = pmm_alloc_zeroed();
@@ -3208,6 +3218,15 @@ static void user_enter(BootInfo *bi) {
         }
     }
 
+    if (!user_setup_teb(proc, USER_STACK_TOP - 0x10000ULL, USER_STACK_TOP)) {
+        MmSwitchToProcess(PspSystemProcess);
+        if (ki_current) ki_current->Process = PspSystemProcess;
+        PspForgetUserImages(proc);
+        MmDeleteAddressSpace(proc);
+        return;
+    }
+
+    cpu_set_user_gs_base(USER_TEB_BASE);
     MmSwitchToProcess(proc);
 
     __asm__ volatile(
@@ -3215,6 +3234,7 @@ static void user_enter(BootInfo *bi) {
         "mov %%rcx, %[rip]\n"
         "mov %%rsp, %[rsp]\n"
         "mov %[frame], %%rsp\n"
+        "swapgs\n"
         "iretq\n"
         "1:\n"
         : [rip] "=m"(user_saved_rip), [rsp] "=m"(user_saved_ksp)

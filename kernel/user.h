@@ -54,7 +54,6 @@
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
 #define USER_IMAGE_PAGE 0x1000ULL
-#define USER_TEB_BASE 0x000000007FFF0000ULL
 #define USER_PEB_BASE 0x000000007FFF1000ULL
 #define USER_VM_ALLOCATION_MAX 64
 typedef struct { KPROCESS *process; uint64_t base,size; uint32_t allocation_protect; int used; } UserVmAllocation;

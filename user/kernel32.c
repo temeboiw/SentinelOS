@@ -2085,7 +2085,7 @@ __attribute__((dllexport)) LONG RtlStringCchCopyNA(char*d,u64 cap,const char*s,u
 /* Synchronization and thread-local APIs required by modern Win32 runtimes.
    Critical sections and SRW locks use the first aligned 32-bit word of the
    caller-owned Windows-compatible storage as their lock state. */
-typedef struct { volatile unsigned int lock; unsigned int recursion; unsigned long long owner; } K32_CRIT_PREFIX;
+typedef struct { void *debug_info; volatile int lock_count; int recursion; void *owner; void *semaphore; unsigned long long spin_count; } K32_CRIT_PREFIX;
 typedef struct { volatile unsigned int state; } K32_SRW_PREFIX;
 static void *k32_tls_values[1088];
 static unsigned char k32_tls_used[1088];
@@ -2094,7 +2094,7 @@ static unsigned int k32_tls_hint;
 __attribute__((dllexport)) void InitializeCriticalSection(void *section) {
     if (!section) { k32_last_error=87; return; }
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
-    c->lock=0; c->recursion=0; c->owner=0;
+    c->lock_count=-1; c->recursion=0; c->owner=0;
 }
 __attribute__((dllexport)) BOOL InitializeCriticalSectionAndSpinCount(void *section,DWORD spin) {
     (void)spin; if(!section){k32_last_error=87;return 0;}
@@ -2107,29 +2107,29 @@ __attribute__((dllexport)) void EnterCriticalSection(void *section) {
     if(!section){k32_last_error=87;return;}
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
     unsigned long long tid=GetCurrentThreadId();
-    if(c->owner==tid && c->lock){c->recursion++;return;}
-    while(__sync_lock_test_and_set(&c->lock,1u)) Sleep(0);
-    c->owner=tid; c->recursion=1;
+    if(c->owner==(void *)tid && c->recursion>0){c->recursion++;return;}
+    for(;;){int old=__sync_fetch_and_add(&c->lock_count,1);if(old==-1)break;while(c->lock_count>=0)Sleep(0);}
+    c->owner=(void *)tid; c->recursion=1;
 }
 __attribute__((dllexport)) BOOL TryEnterCriticalSection(void *section) {
     if(!section){k32_last_error=87;return 0;}
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
     unsigned long long tid=GetCurrentThreadId();
-    if(c->owner==tid && c->lock){c->recursion++;return 1;}
-    if(__sync_lock_test_and_set(&c->lock,1u))return 0;
-    c->owner=tid;c->recursion=1;return 1;
+    if(c->owner==(void *)tid && c->recursion>0){c->recursion++;return 1;}
+    int expected=-1;if(!__sync_bool_compare_and_swap(&c->lock_count,expected,0))return 0;
+    c->owner=(void *)tid;c->recursion=1;return 1;
 }
 __attribute__((dllexport)) void LeaveCriticalSection(void *section) {
     if(!section)return;
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
-    if(c->owner!=(unsigned long long)GetCurrentThreadId()||!c->lock)return;
+    if(c->owner!=(void *)(unsigned long long)GetCurrentThreadId()||c->recursion<=0)return;
     if(c->recursion>1){c->recursion--;return;}
-    c->recursion=0;c->owner=0;__sync_lock_release(&c->lock);
+    c->recursion=0;c->owner=0;__sync_fetch_and_sub(&c->lock_count,1);
 }
 __attribute__((dllexport)) void DeleteCriticalSection(void *section) {
     if(!section)return;
     K32_CRIT_PREFIX *c=(K32_CRIT_PREFIX *)section;
-    if(!c->lock){c->recursion=0;c->owner=0;}
+    if(c->lock_count<0){c->recursion=0;c->owner=0;c->debug_info=0;}
 }
 __attribute__((dllexport)) void InitializeSRWLock(void *lock) {
     if(lock)((K32_SRW_PREFIX *)lock)->state=0;

@@ -2905,6 +2905,103 @@ static Frame *syscall_handler(Frame *f) {
     }
 }
 
+/* Handle CPU exceptions raised by ring-3 code as process termination.
+ * Never return to the faulting instruction: tear down its address space,
+ * remove its windows/threads, and resume its parent or another runnable app. */
+static Frame *user_exception_handler(Frame *f) {
+    KPROCESS *dying = MmCurrentProcess;
+    int dead_idx = up_find_proc(dying);
+    uint64_t cr2 = 0;
+    __asm__ volatile("movq %%cr2, %0" : "=r"(cr2));
+
+    if (!dying || dying == PspSystemProcess || dead_idx < 0) {
+        DbgPrint("[user-exception] untracked ring-3 fault vector=%llu rip=%016llx; refusing to resume faulting code\n",
+                 (unsigned long long)f->vector, (unsigned long long)f->rip);
+        /* No safe user process record exists to resume. This is a kernel
+         * process-manager invariant failure, so use the fatal diagnostics. */
+        uint64_t cr3;
+        __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
+        DbgPrint("error=%016llx cs=%04llx rsp=%016llx cr2=%016llx cr3=%016llx\n",
+                 (unsigned long long)f->error, (unsigned long long)f->cs,
+                 (unsigned long long)f->rsp, (unsigned long long)cr2,
+                 (unsigned long long)cr3);
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+
+    UserProc *faulted = &up_tab[dead_idx];
+    int parent_idx = faulted->parent;
+    DbgPrint("\n[Application Error] %s (PID %u) terminated: %s (#%llu)\n",
+             faulted->image_name, (unsigned int)dying->Pid,
+             f->vector < 32 ? exc_name[f->vector] : "CPU exception",
+             (unsigned long long)f->vector);
+    DbgPrint("  RIP=%016llx error=%016llx CR2=%016llx RSP=%016llx\n",
+             (unsigned long long)f->rip, (unsigned long long)f->error,
+             (unsigned long long)cr2, (unsigned long long)f->rsp);
+
+    /* Stop the current thread before switching away from its address space. */
+    ut_exit_current();
+    int dead_pid = (int)dying->Pid;
+    int dead_slot = wm_shared_window_slot(dead_pid);
+    int dx = 0, dy = 0, dw = (int)wm_shared_width, dh = (int)wm_shared_height;
+    if (dead_slot >= 0) {
+        dx = wm_tab[dead_slot].x - 12;
+        dy = wm_tab[dead_slot].y - 12;
+        dw = wm_tab[dead_slot].w + 24;
+        dh = wm_tab[dead_slot].h + 28;
+    }
+
+    MmSwitchToProcess(PspSystemProcess);
+    if (ki_current) ki_current->Process = PspSystemProcess;
+    if (dead_slot >= 0 && wm_shared_windows[dead_slot]) {
+        kfree(wm_shared_windows[dead_slot]);
+        wm_shared_windows[dead_slot] = 0;
+    }
+    if (dead_slot >= 0 && wm_shared_local_windows[dead_slot]) {
+        kfree(wm_shared_local_windows[dead_slot]);
+        wm_shared_local_windows[dead_slot] = 0;
+        wm_shared_local_width[dead_slot] = wm_shared_local_height[dead_slot] = 0;
+    }
+    wm_unregister(dead_pid);
+    if (dx < 0) { dw += dx; dx = 0; }
+    if (dy < 0) { dh += dy; dy = 0; }
+    if (dw > 0 && dh > 0)
+        wm_shared_compose((uint32_t)dx, (uint32_t)dy, (uint32_t)dw, (uint32_t)dh);
+
+    for (int i = 0; i < UP_MAX; i++) {
+        if (up_tab[i].proc == dying) {
+            up_tab[i].alive = 0;
+            up_tab[i].parent = -1;
+        }
+    }
+    for (int i = 0; i < UT_MAX; i++) {
+        if (ut_tab[i].proc == dying) {
+            ut_tab[i].alive = 0;
+            ut_tab[i].proc = 0;
+        }
+    }
+    PspForgetUserImages(dying);
+    PspForgetDiskModule(dying);
+    user_vm_forget_process(dying);
+    MmDeleteAddressSpace(dying);
+
+    int next = -1;
+    if (parent_idx >= 0 && parent_idx < UP_MAX &&
+        up_tab[parent_idx].alive && up_tab[parent_idx].proc)
+        next = parent_idx;
+    if (next < 0) next = up_pick_next();
+    if (next >= 0) {
+        DbgPrint("[user-exception] recovered; resuming PID %u\n",
+                 (unsigned int)up_tab[next].proc->Pid);
+        up_load(f, next);
+        return f;
+    }
+
+    DbgPrint("[user-exception] no runnable user process remains\n");
+    MmSwitchToProcess(PspSystemProcess);
+    if (ki_current) ki_current->Process = PspSystemProcess;
+    for (;;) __asm__ volatile("cli; hlt");
+}
+
 /* ------------------------------------------------------------ user entry */
 
 static void user_enter(BootInfo *bi) {

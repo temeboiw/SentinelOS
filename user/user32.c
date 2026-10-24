@@ -2391,6 +2391,20 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
         round_fill(bx,by,78,28,4,0xFF559EBB);
         round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
         draw_text(bx+26,by+9,"OK",0xFF164E68);
+
+        /* A modal MessageBox temporarily replaces g_wnd with its own title.
+         * compose() intentionally paints the pointer only for the desktop
+         * owner, so that title switch must not make the pointer vanish.
+         * The scene was just repainted; discard the previous save-under
+         * rather than restoring stale pixels over the dialog, then overlay
+         * the cursor on top of the freshly composed modal frame. */
+        cur_on=0;
+        for(int ci=0;ci<16*16;ci++)cur_paint[ci]=0;
+        cur_ox=g_mx; cur_oy=g_my;
+        cursor_save_draw(g_mx,g_my);
+        if(g_scanout && g_scan_pitch && g_fw && g_fh)
+            u32_flush_raw(g_mx,g_my,16,16);
+
         InputEvent ev={0};
         if(!sy3(SYS_GetInput,(u64)&ev,0,0))continue;
         if(ev.type==1) {

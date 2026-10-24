@@ -54,6 +54,8 @@
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
 #define USER_IMAGE_PAGE 0x1000ULL
+#define USER_TEB_BASE 0x000000007FFF0000ULL
+#define USER_PEB_BASE 0x000000007FFF1000ULL
 #define USER_VM_ALLOCATION_MAX 64
 typedef struct { KPROCESS *process; uint64_t base,size; uint32_t allocation_protect; int used; } UserVmAllocation;
 static UserVmAllocation user_vm_allocations[USER_VM_ALLOCATION_MAX];
@@ -95,6 +97,22 @@ typedef struct {
     char image_name[64];
     uint64_t gpr[14];
 } UserProc;
+
+/* Minimal x64 thread environment used by Windows startup code. */
+static int user_setup_teb(KPROCESS *proc, uint64_t stack_lo, uint64_t stack_top) {
+    if (!proc) return 0;
+    uint64_t teb_pa = pmm_alloc_zeroed();
+    uint64_t peb_pa = pmm_alloc_zeroed();
+    if (!teb_pa || !peb_pa) return 0;
+    map_4k_in(proc->Pml4, USER_TEB_BASE, teb_pa, PTE_U | PTE_RW | PTE_OWNED);
+    map_4k_in(proc->Pml4, USER_PEB_BASE, peb_pa, PTE_U | PTE_RW | PTE_OWNED);
+    uint64_t *teb = (uint64_t *)(uintptr_t)PHYS_TO_VIRT(teb_pa);
+    teb[1] = stack_top;
+    teb[2] = stack_lo;
+    teb[6] = USER_TEB_BASE;
+    teb[12] = USER_PEB_BASE;
+    return 1;
+}
 
 typedef struct {
     uint32_t pid, parent_pid, state, reserved;
@@ -3005,29 +3023,6 @@ static Frame *user_exception_handler(Frame *f) {
     DbgPrint("  RIP=%016llx error=%016llx CR2=%016llx RSP=%016llx\n",
              (unsigned long long)f->rip, (unsigned long long)f->error,
              (unsigned long long)cr2, (unsigned long long)f->rsp);
-    DbgPrint("  REG RAX=%016llx RBX=%016llx RCX=%016llx RDX=%016llx\n",
-             (unsigned long long)f->rax, (unsigned long long)f->rbx,
-             (unsigned long long)f->rcx, (unsigned long long)f->rdx);
-    DbgPrint("  REG RSI=%016llx RDI=%016llx RBP=%016llx R8=%016llx\n",
-             (unsigned long long)f->rsi, (unsigned long long)f->rdi,
-             (unsigned long long)f->rbp, (unsigned long long)f->r8);
-    DbgPrint("  REG R9=%016llx R10=%016llx R11=%016llx R12=%016llx\n",
-             (unsigned long long)f->r9, (unsigned long long)f->r10,
-             (unsigned long long)f->r11, (unsigned long long)f->r12);
-    DbgPrint("  REG R13=%016llx R14=%016llx R15=%016llx\n",
-             (unsigned long long)f->r13, (unsigned long long)f->r14,
-             (unsigned long long)f->r15);
-    /* Capture instruction bytes while the faulting address space is still
-     * active. This lets us identify the exact memory operand causing the
-     * game fault instead of guessing from CR2 alone. */
-    if (f->rip >= 0x10000ULL && f->rip < 0x0000800000000000ULL) {
-        volatile const uint8_t *ip = (volatile const uint8_t *)(uintptr_t)f->rip;
-        DbgPrint("  CODE");
-        for (unsigned int bi = 0; bi < 16; bi++)
-            DbgPrint(" %02x", (unsigned int)ip[bi]);
-        DbgPrint("\\n");
-    }
-
     /* Stop the current thread before switching away from its address space. */
     ut_exit_current();
     int dead_pid = (int)dying->Pid;

@@ -28,6 +28,7 @@ typedef struct { uint32_t r0; uint64_t rsp[3]; uint64_t r1; uint64_t ist[7]; uin
 #define KERNEL_DS  0x10
 #define USER_CS    0x1B
 #define USER_DS    0x23
+#define USER_TEB_BASE 0x000000007FFF0000ULL
 #define TSS_SEL    0x28
 
 #define CPU_MAX 64

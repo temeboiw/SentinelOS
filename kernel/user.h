@@ -3050,6 +3050,21 @@ static Frame *user_exception_handler(Frame *f) {
     DbgPrint("  RIP=%016llx error=%016llx CR2=%016llx RSP=%016llx\n",
              (unsigned long long)f->rip, (unsigned long long)f->error,
              (unsigned long long)cr2, (unsigned long long)f->rsp);
+    /* A null RIP hides the indirect-call site. Dump a few user stack
+     * words while the faulting process address space is still active so
+     * the last return addresses can identify the caller chain. */
+    if (f->rsp >= 0x10000ULL &&
+        f->rsp < 0x0000800000000000ULL &&
+        f->rsp <= 0x0000800000000000ULL - 4 * sizeof(uint64_t)) {
+        volatile const uint64_t *user_stack =
+            (volatile const uint64_t *)(uintptr_t)f->rsp;
+        for (unsigned int si = 0; si < 4; si++) {
+            uint64_t value = user_stack[si];
+            DbgPrint("  STACK[%u] %016llx: %016llx\n", si,
+                     (unsigned long long)(f->rsp + si * sizeof(uint64_t)),
+                     (unsigned long long)value);
+        }
+    }
     /* Stop the current thread before switching away from its address space. */
     ut_exit_current();
     int dead_pid = (int)dying->Pid;

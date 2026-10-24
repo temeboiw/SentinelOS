@@ -42,7 +42,9 @@ static GLint ogl_vertex_size=2,ogl_color_size=4,ogl_tex_size=2;
 static GLsizei ogl_vertex_stride,ogl_color_stride,ogl_tex_stride;
 static GLuint ogl_bound_texture;
 static unsigned int ogl_current_color=0xffffffffu;
-static struct { GLuint id; unsigned int used; } ogl_textures[256];
+static struct { GLuint id; unsigned int used, width, height, min_filter, mag_filter, wrap_s, wrap_t; } ogl_textures[8];
+static unsigned int ogl_texture_pixels[8][512u*512u];
+static int ogl_tex_array_enabled;
 static unsigned long long ogl_sys(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
  unsigned long long r;
  __asm__ volatile("mov %[n], %%rax\nmov %[a], %%rdi\nmov %[b], %%rsi\nmov %[c], %%rdx\nint $0x80\nmov %%rax, %[r]"
@@ -137,8 +139,8 @@ __attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum 
 __attribute__((dllexport)) void glVertexPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<2||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_vertex_size=size;ogl_vertex_stride=stride;ogl_vertices=(const GLfloat*)p;}
 __attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}
 __attribute__((dllexport)) void glTexCoordPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<1||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_tex_size=size;ogl_tex_stride=stride;ogl_texcoords=(const GLfloat*)p;}
-__attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_VERTEX_ARRAY||a==GL_COLOR_ARRAY||a==GL_TEXTURE_COORD_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
-__attribute__((dllexport)) void glDisableClientState(GLenum a){if(a!=GL_VERTEX_ARRAY&&a!=GL_COLOR_ARRAY&&a!=GL_TEXTURE_COORD_ARRAY)ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=1;return;}if(a==GL_VERTEX_ARRAY||a==GL_COLOR_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glDisableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=0;return;}if(a!=GL_VERTEX_ARRAY&&a!=GL_COLOR_ARRAY)ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
 __attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if((s!=GL_SRC_ALPHA&&s!=GL_ONE&&s!=GL_ZERO)||(d!=GL_ONE_MINUS_SRC_ALPHA&&d!=GL_ONE&&d!=GL_ZERO))ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v<0)ogl_error=GL_INVALID_VALUE;}
@@ -152,8 +154,8 @@ __attribute__((dllexport)) void glStencilOp(GLenum a,GLenum b,GLenum c){(void)a;
 __attribute__((dllexport)) void glTexParameteri(GLenum t,GLenum p,GLint v){(void)p;(void)v;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;else ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glTexImage2D(GLenum t,GLint level,GLint internal,GLsizei w,GLsizei h,GLint border,GLenum format,GLenum type,const void *pixels){(void)level;(void)internal;(void)w;(void)h;(void)border;(void)format;(void)type;(void)pixels;if(t!=GL_TEXTURE_2D)ogl_error=GL_INVALID_ENUM;else ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glBindTexture(GLenum t,GLuint id){if(t!=GL_TEXTURE_2D){ogl_error=GL_INVALID_ENUM;return;}ogl_bound_texture=id;}
-__attribute__((dllexport)) void glGenTextures(GLsizei n,GLuint *out){if(n<0||n>256||!out){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int id=ogl_next_texture++;if(!id)id=ogl_next_texture++;out[i]=id;ogl_textures[id%256].id=id;ogl_textures[id%256].used=1;}}
-__attribute__((dllexport)) void glDeleteTextures(GLsizei n,const GLuint *ids){if(n<0||n>256||(!ids&&n)){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){unsigned int k=ids[i]%256;if(ogl_textures[k].id==ids[i])ogl_textures[k].used=0;if(ogl_bound_texture==ids[i])ogl_bound_texture=0;}}
+__attribute__((dllexport)) void glGenTextures(GLsizei n,GLuint *out){if(n<0||n>8||!out){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){int slot=-1;for(int j=0;j<8;j++)if(!ogl_textures[j].used){slot=j;break;}if(slot<0){out[i]=0;ogl_error=GL_INVALID_OPERATION;continue;}unsigned int id=ogl_next_texture++;if(!id)id=ogl_next_texture++;ogl_textures[slot].id=id;ogl_textures[slot].used=1;ogl_textures[slot].width=ogl_textures[slot].height=0;ogl_textures[slot].min_filter=ogl_textures[slot].mag_filter=GL_LINEAR;ogl_textures[slot].wrap_s=ogl_textures[slot].wrap_t=GL_REPEAT;out[i]=id;}}
+__attribute__((dllexport)) void glDeleteTextures(GLsizei n,const GLuint *ids){if(n<0||n>8||(!ids&&n)){ogl_error=GL_INVALID_VALUE;return;}for(int i=0;i<n;i++){int k=-1;for(int j=0;j<8;j++)if(ogl_textures[j].used&&ogl_textures[j].id==ids[i])k=j;if(k>=0){ogl_textures[k].used=0;ogl_textures[k].width=ogl_textures[k].height=0;}if(ogl_bound_texture==ids[i])ogl_bound_texture=0;}}
 __attribute__((dllexport)) void glGetIntegerv(GLenum p,GLint *v){if(!v)return;if(p==0x0BA2){v[0]=(GLint)ogl_view_x;v[1]=(GLint)ogl_view_y;v[2]=(GLint)ogl_view_w;v[3]=(GLint)ogl_view_h;}else if(p==0x0C10){v[0]=(GLint)ogl_sc_x;v[1]=(GLint)ogl_sc_y;v[2]=(GLint)ogl_sc_w;v[3]=(GLint)ogl_sc_h;}else if(p==0x0D33)v[0]=4096;else if(p==0x0D3A){v[0]=1;v[1]=1;}else v[0]=0;}
 __attribute__((dllexport)) void glGetFloatv(GLenum p,GLfloat *v){if(!v)return;if(p==0x0B21)v[0]=1.0f;else if(p==0x0B22)v[0]=1.0f;else v[0]=0.0f;}
 __attribute__((dllexport)) void glGetBooleanv(GLenum p,GLboolean *v){if(!v)return;*v=glIsEnabled(p);}

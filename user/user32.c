@@ -2150,6 +2150,40 @@ BOOL InvalidateRect(void *hwnd, void *rc, BOOL erase) {
     return 1;
 }
 
+typedef struct {
+    u32 pid;
+    u32 reserved;
+    u64 vector, rip, error, cr2;
+    char image_name[64];
+    char exception_name[32];
+} U32_APP_ERROR;
+__attribute__((dllexport)) int MessageBoxA(void *, LPCSTR, LPCSTR, u32);
+static int u32_poll_application_error(void) {
+    U32_APP_ERROR event = {0};
+    if (!sy3(SYS_NtGetApplicationError, (u64)&event, 0, 0)) return 0;
+    char body[256] = {0};
+    unsigned int n = 0;
+    const char *s = event.image_name;
+    while (*s && n < sizeof(body)-1) body[n++] = *s++;
+    const char *tail = " was closed after an unrecoverable CPU exception.\n\nException: ";
+    while (*tail && n < sizeof(body)-1) body[n++] = *tail++;
+    s = event.exception_name;
+    while (*s && n < sizeof(body)-1) body[n++] = *s++;
+    const char *pid_text = "\nProcess ID: ";
+    while (*pid_text && n < sizeof(body)-1) body[n++] = *pid_text++;
+    char digits[10]; unsigned int count = 0, pid = event.pid;
+    do { digits[count++] = (char)('0' + pid % 10u); pid /= 10u; } while (pid && count < sizeof(digits));
+    while (count && n < sizeof(body)-1) body[n++] = digits[--count];
+    const char *rip_text = "\nInstruction address: 0x";
+    while (*rip_text && n < sizeof(body)-1) body[n++] = *rip_text++;
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0 && n < sizeof(body)-1; shift -= 4)
+        body[n++] = hex[(event.rip >> shift) & 15u];
+    body[n] = 0;
+    (void)MessageBoxA(0, body, "Application Error", 0x10u);
+    return 1;
+}
+
 __attribute__((dllexport))
 BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
     if (!msg) return 0;
@@ -2157,6 +2191,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
 
     for (;;) {
         u32_pump_timers();
+        (void)u32_poll_application_error();
         if (u32_msg_take_filtered(msg,hwnd,min,max,1)) return msg->message == 0x0012 ? 0 : 1;
         InputEvent ev = {0};
 

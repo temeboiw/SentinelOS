@@ -1070,6 +1070,13 @@ cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/ucrtbase.dll"
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/api-ms-win-crt-runtime-l1-1-0.dll"
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/ucrtbase.dll"
 
+# The current kernel VFS dependency lookup enumerates the mounted root
+# directory only; it does not yet walk Windows/System32 subdirectories.
+# Publish these runtime DLL names at the root as well so PE imports can find
+# them by their normal basename while recursive directory lookup is unfinished.
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/api-ms-win-crt-runtime-l1-1-0.dll"
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/ucrtbase.dll"
+
 echo "  -> user32.dll"
 
 clang "${USER_CFLAGS[@]}" \

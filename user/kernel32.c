@@ -2396,8 +2396,9 @@ __attribute__((dllexport)) LPVOID MapViewOfFile(HANDLE mapping,DWORD access,DWOR
     if((offset&0xFFFFu)!=0||offset>=m->size){k32_last_error=87;return 0;}
     if(!bytes)bytes=m->size-offset;
     if(bytes>m->size-offset){k32_last_error=87;return 0;}
-    if((access==0x0002u||access==0x000F001Fu)&&m->protect==0x02u){k32_last_error=5;return 0;}
-    if(access==0x0004u&&m->protect!=0x02u&&m->protect!=0x04u&&m->protect!=0x08u){k32_last_error=5;return 0;}
+    if(access==0x0001u&&m->protect!=0x08u){k32_last_error=5;return 0;}
+    if(access==0x0002u&&m->protect!=0x04u&&m->protect!=0x08u){k32_last_error=5;return 0;}
+    if(access==0x000F001Fu&&m->protect!=0x04u){k32_last_error=5;return 0;}
     k32_last_error=0;return (unsigned char*)m->base+offset;
 }
 __attribute__((dllexport)) BOOL UnmapViewOfFile(LPCVOID address) {

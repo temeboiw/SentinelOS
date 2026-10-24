@@ -298,7 +298,7 @@ static const char *k32_module_leaf(const char *name) {
     const char *leaf=name;
     if(!name)return 0;
     for(const char *p=name;*p;p++)
-        if(*p=='\\\\' || *p=='/') leaf=p+1;
+        if(*p=='\\' || *p=='/') leaf=p+1;
     return leaf;
 }
 __attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) {

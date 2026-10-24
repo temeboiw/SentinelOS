@@ -357,8 +357,22 @@ __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
         unsigned int pos=0; ordinal_name[pos++]='#';
         while(digits)ordinal_name[pos++]=reversed[--digits];
         ordinal_name[pos]=0; lookup_name=ordinal_name;
-    } else if(!*name) {k32_last_error=87;return 0;}
+    } else {
+        /* The kernel copies export names through a 64-byte syscall buffer.
+           Reject oversized names here so they cannot be silently truncated
+           or reported as a misleading missing export. */
+        DWORD name_len=0;
+        while(name[name_len] && name_len<64) name_len++;
+        if(name_len==0){k32_last_error=87;return 0;}
+        if(name_len>=64){k32_last_error=127;return 0;}
+    }
 
+    /* The kernel export resolver identifies private dependencies by DLL
+       basename. Handles may have been created from a full filesystem path. */
+    if(module && (unsigned long long)module!=1) {
+        const char *leaf=k32_module_leaf(dll);
+        if(leaf && *leaf) dll=leaf;
+    }
     void *address=(void*)sy3(SYS_GetProcAddress,(u64)dll,(u64)lookup_name,0);
     if(!address)k32_last_error=127;else k32_last_error=0;
     return address;

@@ -50,6 +50,7 @@
 #define SYS_NtUploadVirGLBuffer            36
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
+#define SYS_NtLoadLibrary                    41
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -2742,6 +2743,33 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         f->rax = uva;
+        return f;
+    }
+
+    case SYS_NtLoadLibrary: {
+        char dll[64];
+        if (copy_user_str(f->rdi, dll, sizeof dll) != 0 || !dll[0]) {
+            f->rax = 0;
+            return f;
+        }
+        KPROCESS *cur = MmCurrentProcess;
+        if (!cur || cur == PspSystemProcess) {
+            f->rax = 0;
+            return f;
+        }
+        BootModule *mod = PspFindModule(user_bootinfo, dll);
+        if (!mod)
+            mod = PspLoadProcessDiskDependency(cur, dll);
+        int loaded = 0;
+        if (mod) {
+            MmSwitchToProcess(PspSystemProcess);
+            if (PspMapUserImage(cur, mod) == 0) {
+                pe_resolve_imports(cur, mod);
+                loaded = PspGetUserImage(cur, mod) != 0;
+            }
+            MmSwitchToProcess(cur);
+        }
+        f->rax = loaded ? 1 : 0;
         return f;
     }
 

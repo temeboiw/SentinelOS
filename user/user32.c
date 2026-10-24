@@ -2386,20 +2386,20 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
 
     int done=0;
     while(!done) {
+        /* Remove the previous cursor before repainting the modal scene.
+         * Keep cur_on/save-under valid until cursor_restore_fast() restores
+         * exactly the pixels beneath that cursor. Clearing cur_on first
+         * leaves the old cursor pixels in scanout, and the next cursor draw
+         * then saves those cursor pixels as its underlay, producing a trail. */
+        if(cur_on) cursor_restore_fast();
         compose();
         int bx=g_wnd.x+g_wnd.w-100, by=g_wnd.y+g_wnd.h-42;
         round_fill(bx,by,78,28,4,0xFF559EBB);
         round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
         draw_text(bx+26,by+9,"OK",0xFF164E68);
 
-        /* A modal MessageBox temporarily replaces g_wnd with its own title.
-         * compose() intentionally paints the pointer only for the desktop
-         * owner, so that title switch must not make the pointer vanish.
-         * The scene was just repainted; discard the previous save-under
-         * rather than restoring stale pixels over the dialog, then overlay
-         * the cursor on top of the freshly composed modal frame. */
-        cur_on=0;
-        for(int ci=0;ci<16*16;ci++)cur_paint[ci]=0;
+        /* The modal title is not "Desktop", so compose() does not paint the
+         * pointer. Repaint it as the final overlay after the dialog is ready. */
         cur_ox=g_mx; cur_oy=g_my;
         cursor_save_draw(g_mx,g_my);
         if(g_scanout && g_scan_pitch && g_fw && g_fh)

@@ -283,10 +283,25 @@ __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DW
     while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
 }
 __attribute__((dllexport)) void *GetProcAddress(HANDLE module, LPCSTR name) {
-    if(!name||!*name){k32_last_error=87;return 0;}
+    if(!name){k32_last_error=87;return 0;}
     const char *dll="sentinel.exe";
     if(module&&(unsigned long long)module!=1){int found=0;for(int i=0;i<16;i++)if(module==(HANDLE)&k32_modules[i]&&k32_modules[i].used){dll=k32_modules[i].name;found=1;break;}if(!found){k32_last_error=126;return 0;}}
-    void *address=(void*)sy3(SYS_GetProcAddress,(u64)dll,(u64)name,0);
+
+    /* Win32 permits MAKEINTRESOURCEA-style ordinal arguments. Never
+       dereference such a low-valued pointer as though it were a C string. */
+    char ordinal_name[16];
+    u64 raw_name=(u64)name;
+    const char *lookup_name=name;
+    if(raw_name<=0xFFFFULL) {
+        if(raw_name==0){k32_last_error=87;return 0;}
+        char reversed[5]; unsigned int digits=0; u64 value=raw_name;
+        while(value&&digits<sizeof(reversed)){reversed[digits++]=(char)('0'+value%10);value/=10;}
+        unsigned int pos=0; ordinal_name[pos++]='#';
+        while(digits)ordinal_name[pos++]=reversed[--digits];
+        ordinal_name[pos]=0; lookup_name=ordinal_name;
+    } else if(!*name) {k32_last_error=87;return 0;}
+
+    void *address=(void*)sy3(SYS_GetProcAddress,(u64)dll,(u64)lookup_name,0);
     if(!address)k32_last_error=127;else k32_last_error=0;
     return address;
 }

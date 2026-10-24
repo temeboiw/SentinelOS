@@ -2187,6 +2187,16 @@ static int u32_poll_application_error(void) {
     for (int shift = 60; shift >= 0 && n < sizeof(body)-1; shift -= 4)
         body[n++] = hex[(event.rip >> shift) & 15u];
     body[n] = 0;
+
+    /* Mirror the exact dialog text to the serial console so launch/crash
+       reports can be copied from the emulator log even if the UI is stuck. */
+    static const char serial_begin[] = "\n========== APPLICATION ERROR DIALOG BEGIN ==========\n";
+    static const char serial_end[] = "\n========== APPLICATION ERROR DIALOG END ============\n";
+    (void)sy3(SYS_Write, 1, (u64)serial_begin, sizeof(serial_begin) - 1);
+    (void)sy3(SYS_Write, 1, (u64)body, n);
+    (void)sy3(SYS_Write, 1, (u64)"\n", 1);
+    (void)sy3(SYS_Write, 1, (u64)serial_end, sizeof(serial_end) - 1);
+
     (void)MessageBoxA(0, body, "Application Error", 0x10u);
     return 1;
 }

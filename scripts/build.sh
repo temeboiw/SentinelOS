@@ -1103,6 +1103,9 @@ lld -flavor link \
   /export:_cexit \
   /export:_get_errno \
   /export:_set_errno \
+  /export:_errno \
+  /export:_initterm \
+  /export:_initterm_e \
   /export:strerror \
   /export:_configure_narrow_argv \
   /export:_initialize_narrow_environment \

@@ -61,6 +61,7 @@ static int g_home = 1;
 static int g_sort_mode = 0;
 static char g_filter[64];
 static int g_filter_len = 0;
+static int g_search_mode = 0;
 static void *g_window;
 
 static int ends_with(const char *n, const char *ext);
@@ -320,12 +321,14 @@ void mainCRTStartup(void) {
         }
         if(msg.message==0x0102) {
             int ch=(int)msg.wParam;
-            if(ch==8&&g_filter_len>0){g_filter[--g_filter_len]=0;if(!g_home)reload(pQuery,pText,pInv);else draw_rows(pText,pInv);}
-            else if(ch==27){g_filter_len=0;g_filter[0]=0;g_home=0;reload(pQuery,pText,pInv);}
-            else if(ch=='/'||ch=='?'){g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
-            else if(ch=='h'||ch=='H'){g_home=1;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
-            else if(ch=='s'||ch=='S'){g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
-            else if(ch>=32&&ch<127&&g_filter_len<62){g_home=0;g_filter[g_filter_len++]=(char)ch;g_filter[g_filter_len]=0;reload(pQuery,pText,pInv);}
+            if(g_search_mode) {
+                if(ch==8&&g_filter_len>0){g_filter[--g_filter_len]=0;if(!g_home)reload(pQuery,pText,pInv);}
+                else if(ch==13){g_search_mode=0;draw_rows(pText,pInv);}
+                else if(ch==27){g_search_mode=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}
+                else if(ch>=32&&ch<127&&g_filter_len<62){g_home=0;g_filter[g_filter_len++]=(char)ch;g_filter[g_filter_len]=0;reload(pQuery,pText,pInv);}
+            } else if(ch=='/'||ch=='?') {g_search_mode=1;g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
+            else if(ch=='h'||ch=='H') {g_home=1;g_search_mode=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
+            else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
         }
         if (msg.message == 0x0100) {
             if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;

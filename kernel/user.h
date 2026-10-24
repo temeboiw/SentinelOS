@@ -101,7 +101,11 @@ static int user_setup_teb(KPROCESS *proc, uint64_t stack_lo, uint64_t stack_top)
     if (!proc) return 0;
     uint64_t teb_pa = pmm_alloc_zeroed();
     uint64_t peb_pa = pmm_alloc_zeroed();
-    if (!teb_pa || !peb_pa) return 0;
+    if (!teb_pa || !peb_pa) {
+        if (teb_pa) pmm_free(teb_pa);
+        if (peb_pa) pmm_free(peb_pa);
+        return 0;
+    }
     map_4k_in(proc->Pml4, USER_TEB_BASE, teb_pa, PTE_U | PTE_RW | PTE_OWNED);
     map_4k_in(proc->Pml4, USER_PEB_BASE, peb_pa, PTE_U | PTE_RW | PTE_OWNED);
     uint64_t *teb = (uint64_t *)(uintptr_t)PHYS_TO_VIRT(teb_pa);

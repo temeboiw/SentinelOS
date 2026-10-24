@@ -828,6 +828,7 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
         image->resolving = 0; image->resolved = 1; return;
     }
     uint64_t desc_count = imp_size ? imp_size / 20 : (size - imp) / 20;
+    unsigned int unresolved_logged = 0;
     for (uint64_t d = 0; d < desc_count; d++) {
         uint64_t off = (uint64_t)imp + d * 20;
         if (off > size || size - off < 20) break;
@@ -837,8 +838,14 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
         uint32_t ft = *(uint32_t *)(desc + 16);
         if (!oft && !name_rva && !ft) break;
         if (!name_rva || !ft || name_rva >= size || ft >= size) continue;
-        BootModule *dep = PspFindModule(user_bootinfo, (const char *)(phys + name_rva));
-        if (!dep) dep = PspLoadProcessDiskDependency(proc, (const char *)(phys + name_rva));
+        const char *dll_name = (const char *)(phys + name_rva);
+        BootModule *dep = PspFindModule(user_bootinfo, dll_name);
+        if (!dep) dep = PspLoadProcessDiskDependency(proc, dll_name);
+        if (!dep && unresolved_logged < 32) {
+            DbgPrint("user: unresolved DLL import image=%s pid=%lu dll=%s\n",
+                     mod->name, (unsigned long)proc->Pid, dll_name);
+            unresolved_logged++;
+        }
         uint32_t look_rva = oft ? oft : ft;
         if (look_rva >= size) continue;
         uint64_t count = (size - look_rva) / 8;
@@ -857,6 +864,22 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
                     if (name_off <= size && size - name_off >= 3)
                         addr = pe_get_export(proc, dep, (const char *)(phys + name_off + 2));
                 }
+            }
+            if (!addr && unresolved_logged < 32) {
+                if (look & 0x8000000000000000ULL) {
+                    DbgPrint("user: unresolved import image=%s pid=%lu dll=%s ordinal=%u iat=%p\n",
+                             mod->name, (unsigned long)proc->Pid, dll_name,
+                             (unsigned)(look & 0xFFFFu),
+                             (void *)(uintptr_t)(image->base + ft + i * 8));
+                } else {
+                    uint32_t name_off = (uint32_t)look;
+                    const char *symbol = (name_off <= size && size - name_off >= 3)
+                        ? (const char *)(phys + name_off + 2) : "<bad-import-name>";
+                    DbgPrint("user: unresolved import image=%s pid=%lu dll=%s symbol=%s iat=%p\n",
+                             mod->name, (unsigned long)proc->Pid, dll_name, symbol,
+                             (void *)(uintptr_t)(image->base + ft + i * 8));
+                }
+                unresolved_logged++;
             }
             *(uint64_t *)(phys + ft + i * 8) = addr;
         }

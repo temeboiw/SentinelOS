@@ -1172,6 +1172,9 @@ lld -flavor link \
   /export:realloc \
   /export:free \
   /export:_msize \
+  /export:_purecall \
+  /export:__std_terminate \
+  /export:_invoke_watson \
   "/out:$SYS32/vcruntime140.dll" \
   "$B/obj/ucrt_runtime.o"
 cp "$SYS32/vcruntime140.dll" "$B/rootfs/Windows/System32/vcruntime140.dll"

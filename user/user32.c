@@ -817,10 +817,11 @@ static void cursor_save_draw(int x, int y) {
 static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if(!g_scanout)return;
-    /* A single owner paints the pointer on the shared GPU scanout. Other
-     * processes can receive the same mouse messages, but must not manipulate
-     * cursor save-under pixels or paint duplicate cursors into that scanout. */
-    if (g_gpu_surface && !u32_is_desktop_window()) return;
+    /* Mouse input may be serviced by the foreground USER32 process after
+     * the Explorer shell starts. Keep pointer movement independent of the
+     * desktop window title/identity: the input path must always be able to
+     * restore the old footprint and paint the current system cursor. Full
+     * compose() remains desktop-only for cursor painting to avoid duplicates. */
 
     /* Repaint the old cursor footprint from the scene, rather than restoring
      * saved-under pixels: other windows/processes may have updated that area

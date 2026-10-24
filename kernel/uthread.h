@@ -10,6 +10,7 @@ typedef struct {
     uint64_t param;
     uint64_t rip, rsp, rflags;
     uint64_t stack_base;
+    uint64_t teb_base;
     int alive;
     int fresh;
     int handle;
@@ -40,7 +41,7 @@ static void ut_load(Frame *f, int idx) {
     UThread *t = &ut_tab[idx];
     if (ki_current) ki_current->Process = t->proc;
     MmSwitchToProcess(t->proc);
-    cpu_set_user_gs_base(USER_TEB_BASE);
+    cpu_set_user_gs_base(t->teb_base ? t->teb_base : USER_TEB_BASE);
     f->cs = USER_CS;
     f->ss = USER_DS;
     if (t->fresh) {
@@ -87,12 +88,29 @@ static uint64_t ut_create(uint64_t start, uint64_t param) {
         MmSwitchToProcess(proc);
         return (uint64_t)-1LL;
     }
+    uint64_t teb_va = USER_THREAD_TEB_BASE + (uint64_t)slot * 0x2000ULL;
+    uint64_t teb_pa = pmm_alloc_zeroed();
+    if (!teb_pa) {
+        while (mapped) {
+            mapped -= 0x1000;
+            MmUnmapAllocatedUserPage(proc, stack_va + mapped);
+        }
+        MmSwitchToProcess(proc);
+        return (uint64_t)-1LL;
+    }
+    map_4k_in(proc->Pml4, teb_va, teb_pa, PTE_U | PTE_RW | PTE_OWNED);
+    uint64_t *teb = (uint64_t *)(uintptr_t)PHYS_TO_VIRT(teb_pa);
+    teb[1] = stack_va + UT_STACK_SIZE;
+    teb[2] = stack_va;
+    teb[6] = teb_va;
+    teb[12] = USER_PEB_BASE;
     MmSwitchToProcess(proc);
     UThread *t = &ut_tab[slot];
     t->proc = proc;
     t->entry = start;
     t->param = param;
     t->stack_base = stack_va;
+    t->teb_base = teb_va;
     t->rip = start;
     t->rsp = stack_va + UT_STACK_SIZE - 0x28;
     t->rflags = 0x202;

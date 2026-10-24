@@ -983,11 +983,25 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
         typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
         int desktop_owner=u32_is_desktop_window();
         U32_PRESENT_LAYER a;
-        a.pixels=(u64)(desktop_owner?u32_taskbar_layer:u32_window_layer);
-        a.layer=desktop_owner?3u:2u;
         a.x=(u32)x0;a.y=(u32)y0;a.w=(u32)(x1-x0);a.h=(u32)(y1-y0);
         a.width=g_fw;a.height=g_fh;
-        (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+        if (desktop_owner) {
+            /*
+             * Rebuild the old cursor rectangle in the same Z order as the
+             * real scene. Presenting only the taskbar layer here painted
+             * taskbar pixels over windows and left stale cursor/save-under
+             * pixels behind when the pointer crossed layer boundaries.
+             */
+            a.layer=1;a.pixels=(u64)u32_desktop_layer;
+            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+            a.layer=2;a.pixels=(u64)u32_window_layer;
+            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+            a.layer=3;a.pixels=(u64)u32_taskbar_layer;
+            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+        } else {
+            a.layer=2;a.pixels=(u64)u32_window_layer;
+            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
+        }
         return;
     }
     if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;

@@ -53,7 +53,7 @@ static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
 static int g_count;
 static char g_path[128];
-static int g_win_x = 40, g_win_y = 40; /* live window origin */
+static int g_win_y = 40; /* live window origin */
 static int g_context_menu = 0;
 static int g_context_row = -1;
 static int g_context_start_line = 2;
@@ -266,7 +266,6 @@ void mainCRTStartup(void) {
 
     path_init();
     print("fileexplorer: create window\n");
-    g_win_x = 40;
     g_win_y = 40;
     if (pBeginBatch) pBeginBatch();
     g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
@@ -286,17 +285,14 @@ void mainCRTStartup(void) {
          * after the user moves the window; ask USER32 for its live rectangle. */
         if (pGetWindowRect) {
             FE_RECT live_rect;
-            if (pGetWindowRect(g_window, &live_rect)) {
-                g_win_x = live_rect.left;
-                g_win_y = live_rect.top;
-            }
+            if (pGetWindowRect(g_window, &live_rect)) g_win_y = live_rect.top;
         }
 
         /*
          * Mouse move: update a fixed-width hover marker. The marker occupies
          * a reserved character, so row text and controls never jump sideways.
          */
-        if (msg.message == 0x0200) {
+        if (msg.message == 0x0200 && !g_context_menu) {
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
             if (row < 0 || row >= VISIBLE_ROWS || g_scroll + row >= (g_home ? HOME_ITEM_COUNT : g_count)) row = -1;

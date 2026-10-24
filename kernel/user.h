@@ -1078,8 +1078,51 @@ static void PspForgetDiskModule(KPROCESS *owner) {
 static UserDiskModule *PspLoadDiskModule(const char *name) {
     uint32_t ino=0;
     uint64_t raw_size=0;
-    if(vfs_find_regular_file(name,&ino,&raw_size)<0 ||
-       raw_size<0x100 || raw_size>64ull*1024*1024) return 0;
+
+    /*
+     * Dependencies shipped beside an EXE are found by their basename, while
+     * OS DLLs live under the Windows System32 directory.  Search both layouts:
+     * the old basename lookup remains first so app-local DLLs keep precedence.
+     * vfs_find_regular_file accepts VFS paths, and the variants below cover
+     * the slash styles used by the FAT/rootfs and Win32 callers.
+     */
+    char system_path[160];
+    const char *candidates[5];
+    candidates[0] = name;
+    candidates[1] = system_path;
+    candidates[2] = 0;
+    candidates[3] = 0;
+    candidates[4] = 0;
+    unsigned int path_len = 0;
+    while (name[path_len] && path_len < 95) path_len++;
+    if (name[path_len] != 0) return 0;
+
+    const char prefix1[] = "Windows/System32/";
+    const char prefix2[] = "C:/Windows/System32/";
+    const char prefix3[] = "C:\\Windows\\System32\\";
+    const char prefix4[] = "System32/";
+    const char *prefixes[] = { prefix1, prefix2, prefix3, prefix4 };
+    for (unsigned int p = 0; p < 4; ++p) {
+        unsigned int i = 0;
+        while (prefixes[p][i] && i + path_len + 1 < sizeof(system_path)) {
+            system_path[i] = prefixes[p][i];
+            i++;
+        }
+        unsigned int j = 0;
+        while (j < path_len && i + j + 1 < sizeof(system_path)) {
+            system_path[i + j] = name[j];
+            j++;
+        }
+        if (j != path_len) continue;
+        system_path[i + j] = 0;
+        if (p == 0) candidates[1] = system_path;
+        /* Try each spelling immediately; one scratch buffer is reused. */
+        if (vfs_find_regular_file(system_path, &ino, &raw_size) == 0)
+            goto dependency_found;
+    }
+    if (vfs_find_regular_file(name, &ino, &raw_size) < 0) return 0;
+dependency_found:
+    if (raw_size < 0x100 || raw_size > 64ull*1024*1024) return 0;
     uint64_t raw_pages=(raw_size+0xFFFULL)>>12;
     uint64_t raw_pa=pmm_alloc_n(raw_pages);
     if(!raw_pa)return 0;

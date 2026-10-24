@@ -91,11 +91,26 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
     sy3(SYS_Exit, code, 0, 0);
     for(;;) __asm__ volatile("hlt");
 }
+static HANDLE k32_std_overrides[3];
 __attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) {
-    if(n==0xFFFFFFF6u)return (HANDLE)3;
-    if(n==0xFFFFFFF5u)return (HANDLE)1;
-    if(n==0xFFFFFFF4u)return (HANDLE)2;
-    k32_last_error=87;return 0;
+    unsigned int slot;
+    if(n==0xFFFFFFF6u)slot=0;
+    else if(n==0xFFFFFFF5u)slot=1;
+    else if(n==0xFFFFFFF4u)slot=2;
+    else { k32_last_error=87; return 0; }
+    if(k32_std_overrides[slot])return k32_std_overrides[slot];
+    k32_last_error=0;
+    return slot==0?(HANDLE)3:(slot==1?(HANDLE)1:(HANDLE)2);
+}
+__attribute__((dllexport)) BOOL SetStdHandle(DWORD n,HANDLE h) {
+    unsigned int slot;
+    if(n==0xFFFFFFF6u)slot=0;
+    else if(n==0xFFFFFFF5u)slot=1;
+    else if(n==0xFFFFFFF4u)slot=2;
+    else { k32_last_error=87; return 0; }
+    k32_std_overrides[slot]=h;
+    k32_last_error=0;
+    return 1;
 }
 __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWORD *w, void *ov) {
     (void)ov;
@@ -1407,6 +1422,12 @@ __attribute__((dllexport)) HANDLE LoadLibraryW(K32_LPCWSTR name){
     narrow[i]=0;
     return LoadLibraryA(narrow);
 }
+/* Search-order flags are not yet supported by the loader. */
+__attribute__((dllexport)) HANDLE LoadLibraryExW(K32_LPCWSTR name,HANDLE file,DWORD flags) {
+    (void)file;
+    (void)flags;
+    return LoadLibraryW(name);
+}
 
 __attribute__((dllexport)) void FreeLibraryAndExitThread(HANDLE module,DWORD code){FreeLibrary(module);ExitProcess(code);}
 
@@ -2340,6 +2361,15 @@ __attribute__((dllexport)) HANDLE FindFirstFileW(K32_LPCWSTR path,K32_WIN32_FIND
     out->nFileSizeHigh=a.nFileSizeHigh;out->nFileSizeLow=a.nFileSizeLow;
     k32_ansi_to_wide(out->cFileName,260,a.cFileName);
     return h;
+}
+/* Common name-match enumeration form; extended filter modes are not supported yet. */
+__attribute__((dllexport)) HANDLE FindFirstFileExW(K32_LPCWSTR path,int info_level,
+    void *find_data,int search_op,void *filter,DWORD flags) {
+    (void)info_level;
+    (void)search_op;
+    (void)filter;
+    (void)flags;
+    return FindFirstFileW(path,(K32_WIN32_FIND_DATAW *)find_data);
 }
 __attribute__((dllexport)) BOOL FindNextFileW(HANDLE h,K32_WIN32_FIND_DATAW *out) {
     if(!out){k32_last_error=87;return 0;}

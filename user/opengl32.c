@@ -65,7 +65,7 @@ static void ogl_pixel(int x,int y,unsigned int color) {
 }
 static unsigned int ogl_vertex_color(GLsizei i) {
  if(!ogl_colors)return ogl_current_color;
- const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_stride(ogl_color_stride,(unsigned int)ogl_color_size);
+ const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*(ogl_color_stride?(unsigned int)ogl_color_stride:(unsigned int)ogl_color_size);
  unsigned int r=(unsigned int)(p[0]),g=(unsigned int)(p[1]),b=(unsigned int)(p[2]),a=ogl_color_size>3?p[3]:255u;
  return (a<<24)|(r<<16)|(g<<8)|b;
 }
@@ -75,7 +75,7 @@ static int ogl_coord(GLsizei i,int axis) {
  GLfloat q=p[axis];
  OGL_FB *fb=ogl_fb(); if(!fb)return 0;
  if(q>=-1.01f&&q<=1.01f) q=(q+1.0f)*(float)(axis?ogl_view_h:ogl_view_w)*0.5f;
- if(axis) q=(float)ogl_view_h-q;
+ if(axis) q=(float)ogl_view_h-q; q+=(float)(axis?ogl_view_y:ogl_view_x);
  if(q>32767.0f)q=32767.0f;if(q< -32768.0f)q=-32768.0f;
  return (int)q;
 }
@@ -116,7 +116,7 @@ __attribute__((dllexport)) GLboolean glIsEnabled(GLenum c){if(c==GL_SCISSOR_TEST
 __attribute__((dllexport)) GLenum glGetError(void){unsigned int e=ogl_error;ogl_error=0;return e;}
 __attribute__((dllexport)) const GLubyte *glGetString(GLenum n){static const GLubyte vendor[]="SentinelOS";static const GLubyte renderer[]="SentinelOS framebuffer software rasterizer";static const GLubyte version[]="1.1 SentinelOS subset";static const GLubyte ext[]="";if(n==GL_VENDOR)return vendor;if(n==GL_RENDERER)return renderer;if(n==GL_VERSION)return version;if(n==GL_EXTENSIONS)return ext;ogl_error=GL_INVALID_ENUM;return 0;}
 __attribute__((dllexport)) void glDrawArrays(GLenum mode,GLint first,GLsizei count){
- if(first<0||count<0||count>100000||!ogl_vertices){ogl_error=GL_INVALID_VALUE;return;}
+ if(first<0||first>1000000||count<0||count>100000||!ogl_vertices){ogl_error=GL_INVALID_VALUE;return;}
  if(mode==GL_TRIANGLES){for(int i=0;i+2<count;i+=3)ogl_triangle(first+i,first+i+1,first+i+2);}
  else if(mode==GL_TRIANGLE_STRIP){for(int i=0;i+2<count;i++)if(i&1)ogl_triangle(first+i+1,first+i,first+i+2);else ogl_triangle(first+i,first+i+1,first+i+2);}
  else if(mode==GL_TRIANGLE_FAN){for(int i=1;i+1<count;i++)ogl_triangle(first,first+i,first+i+1);}
@@ -135,7 +135,7 @@ __attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum 
  }
 }
 __attribute__((dllexport)) void glVertexPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<2||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_vertex_size=size;ogl_vertex_stride=stride;ogl_vertices=(const GLfloat*)p;}
-__attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||(type!=GL_UNSIGNED_BYTE&&type!=GL_FLOAT)){ogl_error=GL_INVALID_VALUE;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}
+__attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}
 __attribute__((dllexport)) void glTexCoordPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<1||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_tex_size=size;ogl_tex_stride=stride;ogl_texcoords=(const GLfloat*)p;}
 __attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_VERTEX_ARRAY||a==GL_COLOR_ARRAY||a==GL_TEXTURE_COORD_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glDisableClientState(GLenum a){if(a!=GL_VERTEX_ARRAY&&a!=GL_COLOR_ARRAY&&a!=GL_TEXTURE_COORD_ARRAY)ogl_error=GL_INVALID_ENUM;}

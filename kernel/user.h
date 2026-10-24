@@ -187,6 +187,7 @@ typedef struct {
     KPROCESS *owner;
     uint64_t source_phys;
     uint64_t source_pages;
+    char image_path[224];
     int used;
 } UserDiskModule;
 #define USER_DISK_MODULE_MAX 64
@@ -1098,7 +1099,9 @@ static void PspFreeDiskModule(UserDiskModule *d) {
         pmm_free(d->source_phys+i*USER_IMAGE_PAGE);
     d->module.phys=0; d->module.size=0; d->module.entry=0;
     d->module.base=0; d->owner=0; d->source_phys=0;
-    d->source_pages=0; d->used=0;
+    d->source_pages=0;
+    for (int i=0;i<(int)sizeof(d->image_path);i++) d->image_path[i]=0;
+    d->used=0;
 }
 static void PspForgetDiskModule(KPROCESS *owner) {
     if(!owner)return;
@@ -1110,20 +1113,60 @@ static void PspForgetDiskModule(KPROCESS *owner) {
  * Load an on-disk x64 PE32+ file into image layout. This handles PE headers
  * and section copies; imports still resolve only against boot-loaded DLLs.
  */
-static UserDiskModule *PspLoadDiskModule(const char *name) {
+static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     uint32_t ino=0;
     uint64_t raw_size=0;
-
-    /*
-     * Preserve app-local DLL precedence, then search the Windows System32
-     * locations used by the OS image. This is important for API-set CRT
-     * contracts such as api-ms-win-crt-runtime-l1-1-0.dll.
-     */
-    int found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
     char system_path[224];
     unsigned int path_len = 0;
     while (name[path_len] && path_len < 159) path_len++;
     if (name[path_len] != 0) { DbgPrint("user: disk image path too long\n"); return 0; }
+
+    /*
+     * Windows searches the executable's directory before System32. Keep the
+     * full launch path with the process-owned disk image so private DLLs can
+     * be found beside GeometryDash.exe even when imports contain bare names.
+     */
+    int found = 0;
+    if (owner) {
+        const char *app_dir = 0;
+        for (int k=0;k<USER_DISK_MODULE_MAX;k++) {
+            UserDiskModule *main = &user_disk_modules[k];
+            if (!main->used || main->owner != owner) continue;
+            int has_sep = 0;
+            for (int j=0;main->image_path[j];j++)
+                if (main->image_path[j]=='/' || main->image_path[j]=='\\') has_sep=1;
+            if (has_sep) { app_dir = main->image_path; break; }
+        }
+        if (app_dir) {
+            unsigned int dir_len=0;
+            while (app_dir[dir_len] && dir_len+1<sizeof(system_path)) dir_len++;
+            while (dir_len>0 && app_dir[dir_len-1]!='/' && app_dir[dir_len-1]!='\\') dir_len--;
+            if (dir_len>0 && dir_len+path_len+1<=sizeof(system_path)) {
+                for (unsigned int j=0;j<dir_len;j++)
+                    system_path[j]=(app_dir[j]=='\\')?'/':app_dir[j];
+                for (unsigned int j=0;j<path_len;j++)
+                    system_path[dir_len+j]=(name[j]=='\\')?'/':name[j];
+                system_path[dir_len+path_len]=0;
+                found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
+                if (!found) {
+                    /* Some VFS paths are rooted relative to the current volume. */
+                    unsigned int start=0;
+                    if (dir_len>=2 && system_path[1]==':') start=2;
+                    while (system_path[start]=='/') start++;
+                    if (start && system_path[start]) {
+                        char relative_path[224];
+                        unsigned int n=0;
+                        while (system_path[start+n] && n+1<sizeof(relative_path)) {
+                            relative_path[n]=system_path[start+n]; n++;
+                        }
+                        relative_path[n]=0;
+                        found = vfs_find_regular_file(relative_path, &ino, &raw_size) >= 0;
+                    }
+                }
+            }
+        }
+    }
+    if (!found) found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
 
     const char prefix0[] = "Windows/System32/";
     const char prefix1[] = "C:/Windows/System32/";
@@ -1210,6 +1253,9 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
         int n=0; for(;name[n]&&n<31;n++)d->module.name[n]=name[n];
         d->module.name[n]=0;
         for(n++;n<32;n++)d->module.name[n]=0;
+        for (n=0;n<(int)sizeof(d->image_path)-1 && name[n];n++)
+            d->image_path[n]=name[n];
+        d->image_path[n]=0;
         return d;
     }
     for(uint64_t i=0;i<image_pages;i++)pmm_free(image_pa+i*USER_IMAGE_PAGE);
@@ -1234,7 +1280,7 @@ static BootModule *PspLoadProcessDiskDependency(KPROCESS *proc, const char *name
         }
         if (same) return &d->module;
     }
-    UserDiskModule *d = PspLoadDiskModule(name);
+    UserDiskModule *d = PspLoadDiskModule(name, proc);
     if (!d) return 0;
     d->owner = proc;
     return &d->module;
@@ -2113,7 +2159,7 @@ static Frame *syscall_handler(Frame *f) {
         BootModule *mod = PspFindModule(user_bootinfo, name);
         UserDiskModule *disk_mod = 0;
         if (!mod) {
-            disk_mod = PspLoadDiskModule(name);
+            disk_mod = PspLoadDiskModule(name, 0);
             if (disk_mod) mod = &disk_mod->module;
         }
 

@@ -161,7 +161,30 @@ __attribute__((dllexport)) void glReadPixels(GLint x,GLint y,GLsizei w,GLsizei h
 __attribute__((dllexport)) void glGetDoublev(GLenum p,double *v){(void)p;if(v)*v=0.0;ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glFinish(void){OGL_FB *fb=ogl_fb();if(fb){OGL_RECT r={0,0,fb->w,fb->h};ogl_sys(33,(unsigned long long)&r,0,0);}}
 __attribute__((dllexport)) void glFlush(void){glFinish();}
-__attribute__((dllexport)) void *wglGetProcAddress(const char *name){(void)name;return 0;}
+static int ogl_streq(const char *a,const char *b){if(!a||!b)return 0;while(*a&&*a==*b){a++;b++;}return *a==*b;}
+__attribute__((dllexport)) void *wglGetProcAddress(const char *name){
+ if(ogl_streq(name,"glClear"))return (void*)glClear;
+ if(ogl_streq(name,"glClearColor"))return (void*)glClearColor;
+ if(ogl_streq(name,"glViewport"))return (void*)glViewport;
+ if(ogl_streq(name,"glScissor"))return (void*)glScissor;
+ if(ogl_streq(name,"glEnable"))return (void*)glEnable;
+ if(ogl_streq(name,"glDisable"))return (void*)glDisable;
+ if(ogl_streq(name,"glIsEnabled"))return (void*)glIsEnabled;
+ if(ogl_streq(name,"glGetError"))return (void*)glGetError;
+ if(ogl_streq(name,"glGetString"))return (void*)glGetString;
+ if(ogl_streq(name,"glDrawArrays"))return (void*)glDrawArrays;
+ if(ogl_streq(name,"glDrawElements"))return (void*)glDrawElements;
+ if(ogl_streq(name,"glBindTexture"))return (void*)glBindTexture;
+ if(ogl_streq(name,"glGenTextures"))return (void*)glGenTextures;
+ if(ogl_streq(name,"glDeleteTextures"))return (void*)glDeleteTextures;
+ if(ogl_streq(name,"glTexImage2D"))return (void*)glTexImage2D;
+ if(ogl_streq(name,"glTexParameteri"))return (void*)glTexParameteri;
+ if(ogl_streq(name,"glReadPixels"))return (void*)glReadPixels;
+ if(ogl_streq(name,"glBlendFunc"))return (void*)glBlendFunc;
+ if(ogl_streq(name,"glFinish"))return (void*)glFinish;
+ if(ogl_streq(name,"glFlush"))return (void*)glFlush;
+ return 0;
+}
 __attribute__((dllexport)) int wglMakeCurrent(void *dc,void *rc){(void)dc;ogl_current=rc!=0;return ogl_current;}
 __attribute__((dllexport)) int wglDeleteContext(void *rc){(void)rc;ogl_current=0;return 1;}
 __attribute__((dllexport)) void *wglCreateContext(void *dc){(void)dc;if(!ogl_fb())return 0;ogl_current=1;return (void*)1;}

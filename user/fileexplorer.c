@@ -403,8 +403,55 @@ void mainCRTStartup(void) {
                             j++;
                         }
                         if (same && (g_path[j]==0 || g_path[j]=='\\')) protected_path=1;
-                        if (!protected_path && g_path[0]=='C' && g_path[1]==':' &&
-                            g_path[2]=='\\' && ends_with(g_names[selected], "\\System32")) protected_path=1;
+                        /* Also protect the System32 directory itself and its Windows parent.
+                           This is only a UI guard; destructive VFS operations remain unavailable. */
+                        if (!protected_path) {
+                            const char *want="System32";
+                            int k=0, eq=1;
+                            while (want[k] || g_names[selected][k]) {
+                                char a=g_names[selected][k], b=want[k];
+                                if (a>='a'&&a<='z') a-=32;
+                                if (b>='a'&&b<='z') b-=32;
+                                if (a!=b) { eq=0; break; }
+                                k++;
+                            }
+                            if (eq) {
+                                const char *wp="C:\\Windows";
+                                int q=0, peq=1;
+                                while (wp[q] || g_path[q]) {
+                                    char a=g_path[q], b=wp[q];
+                                    if (a>='a'&&a<='z') a-=32;
+                                    if (b>='a'&&b<='z') b-=32;
+                                    if (a!=b) { peq=0; break; }
+                                    q++;
+                                }
+                                if (peq) protected_path=1;
+                            }
+                            if (!protected_path && g_names[selected][0] &&
+                                (g_names[selected][0]=='W'||g_names[selected][0]=='w')) {
+                                const char *wn="Windows";
+                                int q=0, weq=1;
+                                while (wn[q] || g_names[selected][q]) {
+                                    char a=g_names[selected][q], b=wn[q];
+                                    if (a>='a'&&a<='z') a-=32;
+                                    if (b>='a'&&b<='z') b-=32;
+                                    if (a!=b) { weq=0; break; }
+                                    q++;
+                                }
+                                if (weq) {
+                                    const char *root="C:\\";
+                                    int r=0, req=1;
+                                    while (root[r] || g_path[r]) {
+                                        char a=g_path[r], b=root[r];
+                                        if (a>='a'&&a<='z') a-=32;
+                                        if (b>='a'&&b<='z') b-=32;
+                                        if (a!=b) { req=0; break; }
+                                        r++;
+                                    }
+                                    if (req) protected_path=1;
+                                }
+                            }
+                        }
                         if (protected_path && item==4) {
                             if (pMsgBox) pMsgBox(g_window, "Access denied: System32 is protected. No files were changed.", "Protected system folder", 0);
                         } else if (pMsgBox) {
@@ -422,9 +469,9 @@ void mainCRTStartup(void) {
                             ends_with(g_names[selected],".exe")?"Windows executable":"File";
                         const char *a="Name: "; while(a[d]){details[d]=a[d];d++;}
                         for(int j=0;g_names[selected][j]&&d<240;j++)details[d++]=g_names[selected][j];
-                        const char *b="\\nType: ";for(int j=0;b[j]&&d<260;j++)details[d++]=b[j];
+                        const char *b="\nType: ";for(int j=0;b[j]&&d<260;j++)details[d++]=b[j];
                         for(int j=0;label[j]&&d<285;j++)details[d++]=label[j];
-                        const char *c="\\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
+                        const char *c="\nLocation: ";for(int j=0;c[j]&&d<300;j++)details[d++]=c[j];
                         for(int j=0;g_path[j]&&d<318;j++)details[d++]=g_path[j];
                         details[d]=0;
                         if(pMsgBox)pMsgBox(g_window,details,"Properties",0);
@@ -436,10 +483,10 @@ void mainCRTStartup(void) {
                             if (ok) {
                                 if (g_names[selected][0]=='.' && g_names[selected][1]=='.' && !g_names[selected][2]) {
                                     int n=0;while(g_path[n])n++;
-                                    if(n>3){n--;while(n>2&&g_path[n]!='\\\\')n--;if(g_path[n]=='\\\\')n++;g_path[n]=0;if(n<=3)path_init();}
+                                    if(n>3){n--;while(n>2&&g_path[n]!='\\')n--;if(g_path[n]=='\\')n++;g_path[n]=0;if(n<=3)path_init();}
                                 } else {
                                     int n=0;while(g_path[n])n++;
-                                    if(n>0&&g_path[n-1]!='\\\\')g_path[n++]='\\\\';
+                                    if(n>0&&g_path[n-1]!='\\')g_path[n++]='\\';
                                     for(int k=0;g_names[selected][k]&&n<120;k++)g_path[n++]=g_names[selected][k];
                                     g_path[n]=0;
                                 }

@@ -193,7 +193,7 @@ __attribute__((dllexport)) char *strrchr(const char *s, int c) {
 __attribute__((dllexport)) int _configure_narrow_argv(int mode) {
     /* The host supplies a single ANSI command line; argument expansion is
        performed by the process startup layer. Accept supported CRT modes. */
-    if (mode < 0 || mode > 2) return  EINVAL;
+    if (mode < 0 || mode > 2) return 22;
     return 0;
 }
 __attribute__((dllexport)) int _initialize_narrow_environment(void) { return 0; }

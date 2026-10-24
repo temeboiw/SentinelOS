@@ -240,6 +240,7 @@ static u32 u32_wnd_style, u32_wnd_exstyle, u32_wnd_id;
 static void *u32_wnd_proc, *u32_wnd_userdata, *u32_wnd_menu, *u32_wnd_parent;
 static unsigned long long u32_context_help_id;
 static long u32_class_style; static void *u32_class_proc;
+static char u32_wnd_class_name[96];
 static long u32_class_extra[2];
 static int u32_scroll_min[2],u32_scroll_max[2],u32_scroll_page[2],u32_scroll_pos[2],u32_scroll_visible[2];
 static unsigned int u32_double_click_time=500;
@@ -1925,6 +1926,7 @@ void *CreateWindowExA(
      * application's WM_NCCREATE/WM_CREATE initialization (many games then
      * never initialized their renderer or first frame). */
     u32_wnd_registered=0;
+    { unsigned int ci=0; while(cls && (u64)cls>0xFFFFu && cls[ci] && ci+1<sizeof(u32_wnd_class_name)){u32_wnd_class_name[ci]=cls[ci];ci++;} u32_wnd_class_name[ci]=0; }
     u32_wnd_style=style; u32_wnd_exstyle=ex; u32_wnd_id=0;
     u32_wnd_proc=u32_class_proc; u32_wnd_userdata=0; u32_wnd_menu=menu; u32_wnd_parent=parent;
     u32_context_help_id=0;
@@ -2724,9 +2726,14 @@ __attribute__((dllexport)) BOOL SetWindowTextA(void *hwnd, LPCSTR title) {
     while (title[i] && i<63) { g_wnd.title[i]=title[i]; i++; } g_wnd.title[i]=0; compose(); return 1;
 }
 __attribute__((dllexport)) int GetClassNameA(void *hwnd, LPSTR out, int cap) {
-    const char *s="SentinelWindow"; int i=0; (void)hwnd;
-    if (!out || cap<=0) return 0;
-    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i;
+    int i=0;
+    if (!out || cap<=0 || !IsWindow(hwnd)) return 0;
+    U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
+    const char *s=child?child->cls:u32_wnd_class_name;
+    if(!s[0])s="SentinelWindow";
+    while (s[i] && i+1<cap) { out[i]=s[i]; i++; }
+    out[i]=0;
+    return i;
 }
 typedef struct { int used; unsigned short atom; U32_WNDCLASSA wc; char name[96], menu[96]; } U32_CLASSREG;
 static U32_CLASSREG u32_classes[16];
@@ -3190,8 +3197,15 @@ __attribute__((dllexport)) BOOL EnumWindows(U32_ENUMWINDOWSPROC callback, long l
     return 1;
 }
 __attribute__((dllexport)) BOOL EnumChildWindows(void *parent, U32_ENUMWINDOWSPROC callback, long long param) {
-    if (!callback) return 0;
-    (void)parent; (void)param;
+    if(!callback || !IsWindow(parent))return 0;
+    /* Snapshot handles first because callbacks may destroy child windows. */
+    void *snapshot[64]; int count=0;
+    for(int i=0;i<64;i++)if(u32_child_windows[i].used&&u32_child_windows[i].parent==parent)
+        snapshot[count++]=(void *)(unsigned long long)(0x1000u+(unsigned)i);
+    for(int i=0;i<count;i++) {
+        U32_CHILDWND *child=u32_child_from_hwnd(snapshot[i]);
+        if(child && child->parent==parent && !callback(snapshot[i],param))return 0;
+    }
     return 1;
 }
 __attribute__((dllexport)) BOOL EnumThreadWindows(u32 thread_id, U32_ENUMWINDOWSPROC callback, long long param) {

@@ -209,6 +209,82 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
 static void path_init(void) {
     g_path[0]='C'; g_path[1]=':'; g_path[2]='\\'; g_path[3]=0;
 }
+
+static int fe_chdir(SetCurrentDirectoryA_t pChdir, const char *name) {
+    if (pChdir && pChdir(name)) return 1;
+    return sy3(SYS_Chdir, (u64)name, 0, 0) == 0;
+}
+
+/* Move to the real volume root and keep the displayed breadcrumb in sync. */
+static int fe_go_root(SetCurrentDirectoryA_t pChdir) {
+    int guard=0;
+    while (g_path[3] && guard++<32) {
+        if (!fe_chdir(pChdir, "..")) return 0;
+        int n=0; while (g_path[n]) n++;
+        while (n>3 && g_path[n-1]!='\\') n--;
+        if (n>3) n--;
+        g_path[n]=0;
+    }
+    path_init();
+    return 1;
+}
+
+static void fe_append_component(const char *name) {
+    int n=0; while (g_path[n]) n++;
+    if (n>0 && g_path[n-1]!='\\') g_path[n++]='\\';
+    for (int i=0; name[i] && n<126; i++) g_path[n++]=name[i];
+    g_path[n]=0;
+}
+
+/* Resolve Quick Access pins against the actual directory layout. User
+ * profiles are optional on this early filesystem, so try C:\\Users\\X
+ * first and then C:\\X rather than reporting a false missing-folder error. */
+static int fe_open_pin(int row, SetCurrentDirectoryA_t pChdir) {
+    if (row==5) return fe_go_root(pChdir);
+    if (!fe_go_root(pChdir)) return 0;
+
+    if (row>=1 && row<=4) {
+        const char *folder = row==1 ? "Desktop" :
+                             row==2 ? "Documents" :
+                             row==3 ? "Downloads" : "Pictures";
+        if (fe_chdir(pChdir, "Users")) {
+            fe_append_component("Users");
+            if (fe_chdir(pChdir, folder)) {
+                fe_append_component(folder);
+                return 1;
+            }
+        }
+        if (!fe_go_root(pChdir)) return 0;
+        if (fe_chdir(pChdir, folder)) {
+            fe_append_component(folder);
+            return 1;
+        }
+        return 0;
+    }
+    if (row==6) {
+        if (!fe_chdir(pChdir, "Windows")) return 0;
+        fe_append_component("Windows");
+        return 1;
+    }
+    if (row==7) {
+        if (!fe_chdir(pChdir, "Windows")) return 0;
+        fe_append_component("Windows");
+        if (!fe_chdir(pChdir, "System32")) { (void)fe_go_root(pChdir); return 0; }
+        fe_append_component("System32");
+        return 1;
+    }
+    if (row==8) {
+        if (!fe_chdir(pChdir, "Users")) return 0;
+        fe_append_component("Users");
+        return 1;
+    }
+    if (row==9) {
+        if (!fe_chdir(pChdir, "Program Files")) return 0;
+        fe_append_component("Program Files");
+        return 1;
+    }
+    return 0;
+}
 static int ends_with(const char *n, const char *ext) {
     int i = 0, j = 0;
     while (n[i]) i++;
@@ -602,22 +678,23 @@ void mainCRTStartup(void) {
                     else if(row==9)target="C:\\Program Files";
                     if(row==0){g_home=0;reload(pQuery,pText,pInv);continue;}
                     if(target) {
-                        int plen=0;while(g_path[plen])plen++;
-                        while(plen>3) {
-                            if(!pChdir||!pChdir(".."))break;
-                            plen--;while(plen>3&&g_path[plen-1]!='\\')plen--;
-                            g_path[plen]=0;
+                        /*
+                         * Use the pin ID as the source of truth, not a hard-coded
+                         * absolute path. Several SentinelOS disk images do not yet
+                         * have a Windows-style Users profile hierarchy.
+                         */
+                        int ok=fe_open_pin(row,pChdir);
+                        if(ok) {
+                            g_home=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;
+                            reload(pQuery,pText,pInv);
+                        } else {
+                            /* Keep the breadcrumb and current directory coherent
+                             * if a partial traversal failed. */
+                            (void)fe_go_root(pChdir);
+                            if(pMsgBox)pMsgBox(g_window,
+                                "This pinned location does not exist on this volume yet.",
+                                "Quick access",0);
                         }
-                        int ti=3,ok=1;
-                        while(target[ti]&&ok) {
-                            char component[128];int ci=0;
-                            while(target[ti]&&target[ti]!='\\'&&ci<126)component[ci++]=target[ti++];
-                            component[ci]=0;if(target[ti]=='\\')ti++;
-                            if(ci&&pChdir&&!pChdir(component))ok=0;
-                            if(ok&&ci){int n=0;while(g_path[n])n++;if(n>3&&g_path[n-1]!='\\')g_path[n++]='\\';for(int j=0;component[j]&&n<126;j++)g_path[n++]=component[j];g_path[n]=0;}
-                        }
-                        if(ok){g_home=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}
-                        else if(pMsgBox)pMsgBox(g_window,"That pinned folder is not available on this volume.","Quick access",0);
                     }
                     continue;
                 }

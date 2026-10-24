@@ -1067,6 +1067,16 @@ lld -flavor link \
   /export:realloc \
   /export:free \
   /export:_msize \
+  /export:memcpy \
+  /export:memmove \
+  /export:memset \
+  /export:memcmp \
+  /export:memchr \
+  /export:strlen \
+  /export:strcmp \
+  /export:strncmp \
+  /export:strchr \
+  /export:strstr \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 
@@ -1082,6 +1092,22 @@ cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/ucrtba
 # them by their normal basename while recursive directory lookup is unfinished.
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/api-ms-win-crt-runtime-l1-1-0.dll"
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/ucrtbase.dll"
+
+# These API-set names are separate import contracts on Windows. SentinelOS
+# currently provides one shared implementation for the overlapping CRT
+# memory, string, allocator, and initializer entry points.
+for contract in \
+  api-ms-win-crt-heap-l1-1-0.dll \
+  api-ms-win-crt-string-l1-1-0.dll \
+  api-ms-win-crt-stdio-l1-1-0.dll \
+  api-ms-win-crt-math-l1-1-0.dll \
+  api-ms-win-crt-convert-l1-1-0.dll \
+  api-ms-win-crt-environment-l1-1-0.dll
+do
+  cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/$contract"
+  cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/$contract"
+  cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/$contract"
+done
 
 # VCRUNTIME140 imports these standard memory/string primitives. Publish a
 # separate module under that contract name rather than assuming API-set

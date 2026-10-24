@@ -951,7 +951,13 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
                 }
                 unresolved_logged++;
             }
-            *(uint64_t *)(phys + ft + i * 8) = addr;
+            /*
+             * Never replace an unresolved import with NULL. Keep the original
+             * thunk contents for diagnostics/retry; process creation below
+             * rejects images whose required imports did not resolve.
+             */
+            if (addr)
+                *(uint64_t *)(phys + ft + i * 8) = addr;
         }
     }
     image->resolving = 0;
@@ -2280,6 +2286,22 @@ static Frame *syscall_handler(Frame *f) {
         pe_resolve_imports(proc, mod);
 
         UserImage *main_image = PspGetUserImage(proc, mod);
+
+        /*
+         * Do not start a process with unresolved imports. Previously the
+         * resolver wrote zero IAT entries and the process later faulted at
+         * RIP=0, obscuring the actual missing dependency.
+         */
+        if (main_image && main_image->import_failed) {
+            DbgPrint("user: refusing to start '%s': unresolved PE imports\n",
+                     name);
+            PspForgetUserImages(proc);
+            MmDeleteAddressSpace(proc);
+            if (disk_mod) PspFreeDiskModule(disk_mod);
+            MmSwitchToProcess(caller);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
 
         if (!main_image) {
             PspForgetUserImages(proc);

@@ -1052,7 +1052,7 @@ lld -flavor link \
 
 echo "  -> Universal CRT runtime (real initializer-table execution)"
 
-clang "${USER_CFLAGS[@]}" \
+clang "${USER_CFLAGS[@]}" -fno-builtin \
   -c "$ROOT/user/ucrt_runtime.c" \
   -o "$B/obj/ucrt_runtime.o"
 
@@ -1082,6 +1082,32 @@ cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/ucrtba
 # them by their normal basename while recursive directory lookup is unfinished.
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/api-ms-win-crt-runtime-l1-1-0.dll"
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/ucrtbase.dll"
+
+# VCRUNTIME140 imports these standard memory/string primitives. Publish a
+# separate module under that contract name rather than assuming API-set
+# forwarding exists in the PE loader.
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /base:0x43100000 \
+  /export:memcpy \
+  /export:memmove \
+  /export:memset \
+  /export:memcmp \
+  /export:memchr \
+  /export:strlen \
+  /export:strcmp \
+  /export:strncmp \
+  /export:strchr \
+  /export:strstr \
+  /export:malloc \
+  /export:calloc \
+  /export:realloc \
+  /export:free \
+  /export:_msize \
+  "/out:$SYS32/vcruntime140.dll" \
+  "$B/obj/ucrt_runtime.o"
+cp "$SYS32/vcruntime140.dll" "$B/rootfs/Windows/System32/vcruntime140.dll"
+cp "$SYS32/vcruntime140.dll" "$B/rootfs/vcruntime140.dll"
 
 echo "  -> user32.dll"
 

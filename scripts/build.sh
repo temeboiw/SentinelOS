@@ -1090,6 +1090,14 @@ lld -flavor link \
   /export:strchr \
   /export:strstr \
   /export:strrchr \
+  /export:atoi \
+  /export:isprint \
+  /export:strspn \
+  /export:strcspn \
+  /export:bsearch \
+  /export:qsort \
+  /export:rand \
+  /export:srand \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 

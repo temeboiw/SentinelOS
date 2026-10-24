@@ -178,6 +178,7 @@ typedef struct {
     uint64_t size;
     int resolving;
     int resolved;
+    int import_failed;
 } UserImage;
 
 
@@ -823,14 +824,27 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
     if (!image || image->resolved || image->resolving) return;
     uint8_t *phys = PspImageBytes(image);
     uint64_t size = image->size;
-    if (!pe_is_image(phys, size)) { image->resolved = 1; return; }
+    if (!pe_is_image(phys, size)) {
+        image->import_failed = 1;
+        image->resolved = 1;
+        return;
+    }
+    image->import_failed = 0;
     image->resolving = 1;
     int32_t peoff = *(int32_t *)(phys + 0x3C);
     uint8_t *opt = phys + peoff + 4 + 20;
     uint32_t imp = *(uint32_t *)(opt + 112 + 8);
     uint32_t imp_size = *(uint32_t *)(opt + 112 + 12);
+    if (!imp && !imp_size) {
+        image->resolving = 0;
+        image->resolved = 1;
+        return; /* valid PE image with no import directory */
+    }
     if (!imp || imp >= size || (imp_size && imp_size > size - imp)) {
-        image->resolving = 0; image->resolved = 1; return;
+        image->import_failed = 1;
+        image->resolving = 0;
+        image->resolved = 1;
+        return;
     }
     uint64_t desc_count = imp_size ? imp_size / 20 : (size - imp) / 20;
     unsigned int unresolved_logged = 0;
@@ -842,7 +856,10 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
         uint32_t name_rva = *(uint32_t *)(desc + 12);
         uint32_t ft = *(uint32_t *)(desc + 16);
         if (!oft && !name_rva && !ft) break;
-        if (!name_rva || !ft || name_rva >= size || ft >= size) continue;
+        if (!name_rva || !ft || name_rva >= size || ft >= size) {
+            image->import_failed = 1;
+            continue;
+        }
         const char *dll_name = (const char *)(phys + name_rva);
 
         /*
@@ -888,10 +905,13 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
             ? PspFindModule(user_bootinfo, dependency_name) : 0;
         if (!dep && dependency_name[0])
             dep = PspLoadProcessDiskDependency(proc, dependency_name);
-        if (!dep && unresolved_logged < 32) {
-            DbgPrint("user: unresolved DLL import image=%s pid=%lu dll=%s\n",
-                     mod->name, (unsigned long)proc->Pid, dll_name);
-            unresolved_logged++;
+        if (!dep) {
+            image->import_failed = 1;
+            if (unresolved_logged < 32) {
+                DbgPrint("user: unresolved DLL import image=%s pid=%lu dll=%s\n",
+                         mod->name, (unsigned long)proc->Pid, dll_name);
+                unresolved_logged++;
+            }
         }
         uint32_t look_rva = oft ? oft : ft;
         if (look_rva >= size) continue;
@@ -911,6 +931,9 @@ static void pe_resolve_imports(KPROCESS *proc, BootModule *mod) {
                     if (name_off <= size && size - name_off >= 3)
                         addr = pe_get_export(proc, dep, (const char *)(phys + name_off + 2));
                 }
+            }
+            if (!addr) {
+                image->import_failed = 1;
             }
             if (!addr && unresolved_logged < 32) {
                 if (look & 0x8000000000000000ULL) {
@@ -2765,7 +2788,9 @@ static Frame *syscall_handler(Frame *f) {
             MmSwitchToProcess(PspSystemProcess);
             if (PspMapUserImage(cur, mod) == 0) {
                 pe_resolve_imports(cur, mod);
-                loaded = PspGetUserImage(cur, mod) != 0;
+                UserImage *loaded_image = PspGetUserImage(cur, mod);
+                loaded = loaded_image && loaded_image->resolved &&
+                         !loaded_image->import_failed;
             }
             MmSwitchToProcess(cur);
         }

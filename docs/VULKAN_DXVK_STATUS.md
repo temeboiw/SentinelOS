@@ -193,3 +193,37 @@ Moved the cross-region alias test after the original fill/update submission and 
 Added an explicitly experimental SentinelOS-only `SentinelVulkanCmdDrawTriangle` command that records three pre-transformed vertices into a command buffer and executes them through the CPU triangle rasterizer on a bound color-attachment image. It validates command-buffer state, device ownership, image usage/format/size, memory binding, and rasterizer outcome. The queue advertises graphics capability and supported RGBA/BGRA formats advertise color-attachment support. CI now compiles the Vulkan smoke test with the rasterizer and checks a covered pixel plus an untouched pixel after queue submission.
 
 **Tracked implementation milestone: 75% (engineering estimate, not Vulkan conformance).** This is a small real rendering bridge, not core Vulkan graphics-pipeline support: standard `vkCmdDraw`, shader-driven vertex processing, pipeline state, descriptor sets, render passes/framebuffers, and presentation/swapchains remain unimplemented. DXVK compatibility remains unverified.
+
+
+## DXVK source integration started (2026-10-24)
+
+The upstream `doitsujin/dxvk` repository is registered as the Git submodule
+`third_party/dxvk`, pinned to upstream commit `cbd2206d72d3d9dd9941d5d868bb03a858e85f9b`.
+The root `.gitmodules` file records its canonical URL. Initialize it with:
+
+```sh
+git submodule update --init --recursive third_party/dxvk
+```
+
+This makes the real upstream source available for porting; it does **not** mean
+DXVK is built into SentinelOS or runnable yet. The current SentinelOS build is a
+freestanding PE build and its Vulkan runtime is a bounded CPU software subset.
+The upstream DXVK build expects a substantially richer Windows runtime/Vulkan
+ABI and a normal C++/MinGW build environment. Do not add DXVK DLLs to the OS
+image or claim Direct3D support until the ABI/runtime audit, build integration,
+and end-to-end Direct3D rendering tests pass.
+
+### First integration gates
+
+1. Build and run the existing Vulkan regression suite; inventory every Vulkan
+   entry point DXVK needs and compare it with SentinelOS's implemented subset.
+2. Audit the PE loader and C++ runtime requirements (TLS, exception/unwind
+   handling, thread primitives, atomics, allocation, and DLL import resolution).
+3. Choose a narrow first target, preferably D3D9, and add only the real Vulkan
+   and Win32 ABI prerequisites required by that path.
+4. Build upstream DXVK for SentinelOS without pretending unsupported Vulkan
+   calls succeeded; run a minimal D3D9 test app through it and verify a visible
+   frame before trying Geometry Dash.
+
+Current status remains **source registered; build integration and runtime
+compatibility not yet implemented or verified**.

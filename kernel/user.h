@@ -1084,7 +1084,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
      * locations used by the OS image. This is important for API-set CRT
      * contracts such as api-ms-win-crt-runtime-l1-1-0.dll.
      */
-    int found = vfs_find_regular_file(name, &ino, &raw_size) == 0;
+    int found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
     char system_path[160];
     unsigned int path_len = 0;
     while (name[path_len] && path_len < 95) path_len++;
@@ -1108,7 +1108,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name) {
         }
         if (j != path_len) continue;
         system_path[i + j] = 0;
-        found = vfs_find_regular_file(system_path, &ino, &raw_size) == 0;
+        found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
     }
     if (!found) return 0;
     if (raw_size < 0x100 || raw_size > 64ull*1024*1024) return 0;

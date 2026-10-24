@@ -2226,3 +2226,68 @@ __attribute__((dllexport)) BOOL GetUserProfileDirectoryW(HANDLE token, K32_LPWST
     k32_ansi_to_wide(out,*size,path);
     *size=n;k32_last_error=0;return 1;
 }
+
+
+/* Win32 FindFirstFile/FindNextFile backed by SentinelOS directory enumeration. */
+typedef struct {
+    DWORD dwFileAttributes;
+    K32_FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+    DWORD nFileSizeHigh, nFileSizeLow, dwReserved0, dwReserved1;
+    char cFileName[260];
+    char cAlternateFileName[14];
+} K32_WIN32_FIND_DATAA;
+typedef struct { int used; DWORD index; char pattern[256]; } K32_FIND_STATE;
+static K32_FIND_STATE k32_find_states[16];
+static int k32_find_wildmatch(const char *pat,const char *s) {
+    while(*pat) {
+        if(*pat=='*') { pat++; if(!*pat)return 1; while(*s){if(k32_find_wildmatch(pat,s))return 1;s++;}return k32_find_wildmatch(pat,s); }
+        if(*pat=='?') { if(!*s)return 0; pat++;s++;continue; }
+        char a=*pat,b=*s;
+        if(a>='A'&&a<='Z')a=(char)(a+32);
+        if(b>='A'&&b<='Z')b=(char)(b+32);
+        if(a!=b||!*s)return 0;
+        pat++;s++;
+    }
+    return *s==0;
+}
+static int k32_find_fill(K32_FIND_STATE *st,K32_WIN32_FIND_DATAA *out) {
+    char name[256];
+    for(unsigned int tries=0;tries<4096;tries++) {
+        DWORD type=QueryDirectoryA(st->index++,name,sizeof(name));
+        if(!type)return 0;
+        if(!k32_find_wildmatch(st->pattern,name))continue;
+        for(unsigned int i=0;i<sizeof(*out);i++)((unsigned char*)out)[i]=0;
+        out->dwFileAttributes=(type==2)?0x10u:0x80u;
+        unsigned int i=0;while(name[i]&&i<259){out->cFileName[i]=name[i];i++;}
+        out->cFileName[i]=0;return 1;
+    }
+    return 0;
+}
+__attribute__((dllexport)) HANDLE FindFirstFileA(LPCSTR path,K32_WIN32_FIND_DATAA *out) {
+    if(!path||!*path||!out){k32_last_error=87;return (HANDLE)(i64)-1;}
+    char pattern[256];DWORD n=0;const char *base=path;
+    for(const char *p=path;*p;p++)if(*p=='/'||*p=='\\')base=p+1;
+    while(base[n]&&n<255){pattern[n]=base[n];n++;}pattern[n]=0;
+    if(!n){k32_last_error=123;return (HANDLE)(i64)-1;}
+    for(unsigned int slot=0;slot<16;slot++)if(!k32_find_states[slot].used){
+        K32_FIND_STATE *st=&k32_find_states[slot];st->used=1;st->index=0;
+        for(unsigned int i=0;i<=n;i++)st->pattern[i]=pattern[i];
+        if(k32_find_fill(st,out)){k32_last_error=0;return (HANDLE)(unsigned long long)(0x70000000u+slot);}
+        st->used=0;break;
+    }
+    k32_last_error=2;return (HANDLE)(i64)-1;
+}
+__attribute__((dllexport)) BOOL FindNextFileA(HANDLE h,K32_WIN32_FIND_DATAA *out) {
+    unsigned long long v=(unsigned long long)h;
+    if(v<0x70000000u||v>=0x70000010u||!out){k32_last_error=6;return 0;}
+    K32_FIND_STATE *st=&k32_find_states[v-0x70000000u];
+    if(!st->used||!k32_find_fill(st,out)){k32_last_error=18;return 0;}
+    k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) BOOL FindClose(HANDLE h) {
+    unsigned long long v=(unsigned long long)h;
+    if(v<0x70000000u||v>=0x70000010u){k32_last_error=6;return 0;}
+    K32_FIND_STATE *st=&k32_find_states[v-0x70000000u];
+    if(!st->used){k32_last_error=6;return 0;}
+    st->used=0;k32_last_error=0;return 1;
+}

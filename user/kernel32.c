@@ -294,7 +294,30 @@ __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2
 __attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
 __attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
 __attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
-__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name){if(!name||k32_eqi(name,"sentinel.exe")||k32_eqi(name,"C:\\sentinel.exe"))return (HANDLE)1;for(int i=0;i<16;i++)if(k32_modules[i].used&&k32_eqi(k32_modules[i].name,name))return (HANDLE)&k32_modules[i];k32_last_error=126;return 0;}
+static const char *k32_module_leaf(const char *name) {
+    const char *leaf=name;
+    if(!name)return 0;
+    for(const char *p=name;*p;p++)
+        if(*p=='\\\\' || *p=='/') leaf=p+1;
+    return leaf;
+}
+__attribute__((dllexport)) HANDLE GetModuleHandleA(LPCSTR name) {
+    if(!name || !*name || k32_eqi(k32_module_leaf(name),"sentinel.exe")) {
+        k32_last_error=0;
+        return (HANDLE)1;
+    }
+    const char *leaf=k32_module_leaf(name);
+    for(int i=0;i<16;i++) {
+        if(k32_modules[i].used &&
+           (k32_eqi(k32_modules[i].name,name) ||
+            k32_eqi(k32_module_leaf(k32_modules[i].name),leaf))) {
+            k32_last_error=0;
+            return (HANDLE)&k32_modules[i];
+        }
+    }
+    k32_last_error=126; /* ERROR_MOD_NOT_FOUND */
+    return 0;
+}
 __attribute__((dllexport)) LPSTR GetCommandLineA(void) { return k32_cmdline; }
 __attribute__((dllexport)) DWORD GetModuleFileNameA(HANDLE module, LPSTR out, DWORD cap) {
     const char *path = "C:\\sentinel.exe";

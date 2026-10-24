@@ -297,10 +297,23 @@ void mainCRTStartup(void) {
     print("fileexplorer: create window\n");
     g_win_y = 40;
     if (pBeginBatch) pBeginBatch();
+    print("fileexplorer: startup stage=before-create\n");
     g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
+    print(g_window ? "fileexplorer: startup stage=after-create hwnd-valid\n"
+                   : "fileexplorer: startup stage=create-failed\n");
+    if (!g_window) {
+        if (pEndBatch) pEndBatch();
+        print("fileexplorer: aborting startup after CreateWindowExA failure\n");
+        for (;;) __asm__ volatile("pause");
+    }
+    print("fileexplorer: startup stage=before-show\n");
     if (pShow) pShow(g_window, 1);
+    print("fileexplorer: startup stage=after-show\n");
+    print("fileexplorer: startup stage=before-reload\n");
     reload(pQuery, pText, pInv);
+    print("fileexplorer: startup stage=after-reload\n");
     if (pUpdate) pUpdate(g_window);
+    print("fileexplorer: startup stage=after-update\n");
     if (pEndBatch) pEndBatch();
     print("fileexplorer: ready\n");
 

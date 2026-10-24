@@ -501,6 +501,9 @@ lld -flavor link \
   "/implib:$B/obj/kernel32.lib" \
   /export:ExitProcess \
   /export:GetStdHandle \
+  /export:SetStdHandle \
+  /export:LoadLibraryExW \
+  /export:FindFirstFileExW \
   /export:WriteFile \
   /export:VirtualAlloc \
   /export:CreateFileA \

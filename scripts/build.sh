@@ -545,6 +545,8 @@ lld -flavor link \
   /export:GetEnvironmentVariableA \
   /export:SetEnvironmentVariableA \
   /export:GetComputerNameA \
+  /export:GetUserProfileDirectoryA \
+  /export:GetUserProfileDirectoryW \
   /export:GetSystemInfo \
   /export:GetVersion \
   /export:QueryPerformanceCounter \

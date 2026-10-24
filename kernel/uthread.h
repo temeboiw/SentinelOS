@@ -40,6 +40,7 @@ static void ut_load(Frame *f, int idx) {
     UThread *t = &ut_tab[idx];
     if (ki_current) ki_current->Process = t->proc;
     MmSwitchToProcess(t->proc);
+    cpu_set_user_gs_base(USER_TEB_BASE);
     f->cs = USER_CS;
     f->ss = USER_DS;
     if (t->fresh) {

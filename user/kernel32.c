@@ -75,7 +75,7 @@ static void k32_untrack_path(HANDLE h) {
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29, SYS_QueryFileMetadata=30, SYS_QueryVolumeMetadata=31
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29, SYS_QueryFileMetadata=30, SYS_QueryVolumeMetadata=31, SYS_LoadLibrary=41
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -392,6 +392,13 @@ __attribute__((dllexport)) HANDLE LoadLibraryA(LPCSTR name) {
         }
     }
     for(int i=0;i<16;i++)if(!k32_modules[i].used){
+        /* Do not manufacture a module handle for a DLL the kernel cannot
+           locate and map into this process. The kernel also resolves the
+           newly mapped image's imports before reporting success. */
+        if(!sy3(SYS_LoadLibrary,(u64)name,0,0)) {
+            k32_last_error=126; /* ERROR_MOD_NOT_FOUND */
+            return 0;
+        }
         for(DWORD j=0;j<=length;j++)k32_modules[i].name[j]=name[j];
         k32_modules[i].refs=1;k32_modules[i].used=1;k32_last_error=0;
         return (HANDLE)&k32_modules[i];

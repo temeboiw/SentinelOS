@@ -2046,12 +2046,14 @@ static Frame *syscall_handler(Frame *f) {
 
         uint64_t entry = main_image->entry;
 
-        /* Map the child's 64 KiB stack. */
+        /* Map the child's 64 KiB stack plus the Windows x64 home/shadow-space
+         * page above initial RSP. RSP starts at USER_STACK_TOP-8, so the
+         * 32-byte home area crosses USER_STACK_TOP and must be mapped. */
         {
             uint64_t stack_sz = 0x10000ULL;
             uint64_t stack_lo = USER_STACK_TOP - stack_sz;
 
-            for (uint64_t off = 0; off < stack_sz; off += USER_IMAGE_PAGE) {
+            for (uint64_t off = 0; off <= stack_sz; off += USER_IMAGE_PAGE) {
                 uint64_t pa = pmm_alloc_zeroed();
 
                 if (!pa) {
@@ -3168,12 +3170,12 @@ static void user_enter(BootInfo *bi) {
     *--s = USER_CS;
     *--s = entry;
 
-    /* Map the initial process's 64 KiB user stack. */
+    /* Include the initial Windows x64 home/shadow-space page above RSP. */
     {
         uint64_t stack_sz = 0x10000ULL;
         uint64_t stack_lo = USER_STACK_TOP - stack_sz;
 
-        for (uint64_t off = 0; off < stack_sz; off += USER_IMAGE_PAGE) {
+        for (uint64_t off = 0; off <= stack_sz; off += USER_IMAGE_PAGE) {
             uint64_t pa = pmm_alloc_zeroed();
 
             if (!pa) {

@@ -2354,26 +2354,29 @@ __attribute__((dllexport)) HANDLE CreateFileMappingA(HANDLE file,void *security,
     if(lo==0xFFFFFFFFu&&GetLastError()!=0)return 0;
     u64 file_size=((u64)hi<<32)|lo;
     u64 size=requested?requested:file_size;
-    if(!size||size<file_size){k32_last_error=87;return 0;}
+    if(!size){k32_last_error=87;return 0;}
     if(size>0xFFFFFFFFULL){k32_last_error=8;return 0;}
     unsigned int slot=16;
     for(unsigned int i=0;i<16;i++)if(!k32_file_mappings[i].used){slot=i;break;}
     if(slot==16){k32_last_error=8;return 0;}
     LPVOID base=(LPVOID)sy3(SYS_Alloc,0,size,(protect==0x02u)?0x04u:0x04u);
     if(!base){k32_last_error=8;return 0;}
-    DWORD old_pos=SetFilePointer(file,0,0,1u);
-    if(old_pos==0xFFFFFFFFu&&GetLastError()!=0){sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);return 0;}
-    if(SetFilePointer(file,0,0,0u)==0xFFFFFFFFu&&GetLastError()!=0){sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);return 0;}
-    u64 done=0;
-    while(done<file_size) {
-        DWORD chunk=(DWORD)((file_size-done)>65536ULL?65536ULL:(file_size-done)),got=0;
+    K32_LARGE_INTEGER zero_pos={0},old_pos={0};
+    if(!SetFilePointerEx(file,zero_pos,&old_pos,1u) ||
+       !SetFilePointerEx(file,zero_pos,0,0u)) {
+        sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);return 0;
+    }
+    u64 copy_size=file_size<size?file_size:size,done=0;
+    while(done<copy_size) {
+        DWORD chunk=(DWORD)((copy_size-done)>65536ULL?65536ULL:(copy_size-done)),got=0;
         if(!ReadFile(file,(unsigned char*)base+done,chunk,&got,0)||got!=chunk) {
-            SetFilePointer(file,(LONG)old_pos,0,0u);
+            SetFilePointerEx(file,old_pos,0,0u);
             sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);k32_last_error=30;return 0;
         }
         done+=got;
     }
-    SetFilePointer(file,(LONG)old_pos,0,0u);
+    for(u64 i=copy_size;i<size;i++)((unsigned char*)base)[i]=0;
+    SetFilePointerEx(file,old_pos,0,0u);
     K32_FILE_MAPPING *m=&k32_file_mappings[slot];
     m->used=1;m->handle=(HANDLE)(unsigned long long)(0x71000000u+slot);m->base=base;m->size=size;m->protect=protect;
     k32_last_error=0;return m->handle;
@@ -2390,7 +2393,8 @@ __attribute__((dllexport)) LPVOID MapViewOfFile(HANDLE mapping,DWORD access,DWOR
     if((offset&0xFFFFu)!=0||offset>=m->size){k32_last_error=87;return 0;}
     if(!bytes)bytes=m->size-offset;
     if(bytes>m->size-offset){k32_last_error=87;return 0;}
-    if(access==0x0002u&&m->protect==0x02u){k32_last_error=5;return 0;}
+    if((access==0x0002u||access==0x000F001Fu)&&m->protect==0x02u){k32_last_error=5;return 0;}
+    if(access==0x0004u&&m->protect!=0x02u&&m->protect!=0x04u&&m->protect!=0x08u){k32_last_error=5;return 0;}
     k32_last_error=0;return (unsigned char*)m->base+offset;
 }
 __attribute__((dllexport)) BOOL UnmapViewOfFile(LPCVOID address) {

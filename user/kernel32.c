@@ -53,6 +53,9 @@ static HANDLE k32_pipe_handle(unsigned int slot,unsigned int side) {
 static DWORD k32_console_mode=0x0007u; static BOOL k32_cursor_visible=1; static DWORD k32_cursor_size=25; static unsigned short k32_console_attr=7;
 typedef struct { HANDLE handle; char path[260]; int used; } K32_OPEN_PATH;
 static K32_OPEN_PATH k32_open_paths[32];
+typedef struct { int used; HANDLE handle; LPVOID base; u64 size; DWORD protect; } K32_FILE_MAPPING;
+static K32_FILE_MAPPING k32_file_mappings[16];
+static int k32_mapping_close(HANDLE h);
 static void k32_track_path(HANDLE h,const char *path) {
     if(!h||h==INVALID_HANDLE_VALUE||!path)return;
     int slot=-1;
@@ -171,6 +174,7 @@ __attribute__((dllexport)) BOOL CloseHandle(HANDLE h) {
         k32_last_error=0;return 1;
     }
     if(h==(HANDLE)1||h==(HANDLE)2||h==(HANDLE)3){k32_last_error=6;return 0;}
+    { int mapped=k32_mapping_close(h); if(mapped>=0)return mapped; }
     K32_SYNC_OBJECT *sync=k32_sync_get(h);if(sync){sync->used=0;sync->signaled=0;sync->timer_active=0;k32_last_error=0;return 1;}
     if(sy3(SYS_CloseFile, (u64)h, 0, 0) == 0){k32_last_error=6;return 0;}
     k32_untrack_path(h);k32_last_error=0;return 1;
@@ -2324,4 +2328,88 @@ __attribute__((dllexport)) BOOL FindNextFileW(HANDLE h,K32_WIN32_FIND_DATAW *out
     out->nFileSizeHigh=a.nFileSizeHigh;out->nFileSizeLow=a.nFileSizeLow;
     k32_ansi_to_wide(out->cFileName,260,a.cFileName);
     return 1;
+}
+
+
+/* File-backed, read-oriented memory mappings. The current filesystem ABI has
+ * no write-to-file syscall, so writable mappings are private in-memory copies
+ * and are deliberately not advertised as write-through mappings. */
+static K32_FILE_MAPPING *k32_mapping_find(HANDLE h) {
+    for(unsigned int i=0;i<16;i++) if(k32_file_mappings[i].used&&k32_file_mappings[i].handle==h)return &k32_file_mappings[i];
+    return 0;
+}
+static int k32_mapping_close(HANDLE h) {
+    K32_FILE_MAPPING *m=k32_mapping_find(h);
+    if(!m)return -1;
+    if(m->base)sy3(SYS_FreeVirtualMemory,(u64)m->base,0,0x8000u);
+    m->used=0;m->handle=0;m->base=0;m->size=0;
+    k32_last_error=0;return 1;
+}
+__attribute__((dllexport)) HANDLE CreateFileMappingA(HANDLE file,void *security,DWORD protect,DWORD max_size_high,DWORD max_size_low,LPCSTR name) {
+    (void)security;(void)name;
+    if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    if(protect!=0x02u&&protect!=0x04u&&protect!=0x08u){k32_last_error=87;return 0;}
+    u64 requested=((u64)max_size_high<<32)|max_size_low;
+    DWORD hi=0,lo=GetFileSize(file,&hi);
+    if(lo==0xFFFFFFFFu&&GetLastError()!=0)return 0;
+    u64 file_size=((u64)hi<<32)|lo;
+    u64 size=requested?requested:file_size;
+    if(!size||size<file_size){k32_last_error=87;return 0;}
+    if(size>0xFFFFFFFFULL){k32_last_error=8;return 0;}
+    unsigned int slot=16;
+    for(unsigned int i=0;i<16;i++)if(!k32_file_mappings[i].used){slot=i;break;}
+    if(slot==16){k32_last_error=8;return 0;}
+    LPVOID base=(LPVOID)sy3(SYS_Alloc,0,size,(protect==0x02u)?0x04u:0x04u);
+    if(!base){k32_last_error=8;return 0;}
+    DWORD old_pos=SetFilePointer(file,0,0,1u);
+    if(old_pos==0xFFFFFFFFu&&GetLastError()!=0){sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);return 0;}
+    if(SetFilePointer(file,0,0,0u)==0xFFFFFFFFu&&GetLastError()!=0){sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);return 0;}
+    u64 done=0;
+    while(done<file_size) {
+        DWORD chunk=(DWORD)((file_size-done)>65536ULL?65536ULL:(file_size-done)),got=0;
+        if(!ReadFile(file,(unsigned char*)base+done,chunk,&got,0)||got!=chunk) {
+            SetFilePointer(file,(LONG)old_pos,0,0u);
+            sy3(SYS_FreeVirtualMemory,(u64)base,0,0x8000u);k32_last_error=30;return 0;
+        }
+        done+=got;
+    }
+    SetFilePointer(file,(LONG)old_pos,0,0u);
+    K32_FILE_MAPPING *m=&k32_file_mappings[slot];
+    m->used=1;m->handle=(HANDLE)(unsigned long long)(0x71000000u+slot);m->base=base;m->size=size;m->protect=protect;
+    k32_last_error=0;return m->handle;
+}
+__attribute__((dllexport)) HANDLE CreateFileMappingW(HANDLE file,void *security,DWORD protect,DWORD high,DWORD low,K32_LPCWSTR name) {
+    char narrow[260];k32_wide_to_ansi(narrow,sizeof(narrow),name);
+    return CreateFileMappingA(file,security,protect,high,low,name?narrow:0);
+}
+__attribute__((dllexport)) LPVOID MapViewOfFile(HANDLE mapping,DWORD access,DWORD offset_high,DWORD offset_low,u64 bytes) {
+    K32_FILE_MAPPING *m=k32_mapping_find(mapping);
+    if(!m){k32_last_error=6;return 0;}
+    if(access!=0x0001u&&access!=0x0002u&&access!=0x0004u&&access!=0x000F001Fu){k32_last_error=87;return 0;}
+    u64 offset=((u64)offset_high<<32)|offset_low;
+    if((offset&0xFFFFu)!=0||offset>=m->size){k32_last_error=87;return 0;}
+    if(!bytes)bytes=m->size-offset;
+    if(bytes>m->size-offset){k32_last_error=87;return 0;}
+    if(access==0x0002u&&m->protect==0x02u){k32_last_error=5;return 0;}
+    k32_last_error=0;return (unsigned char*)m->base+offset;
+}
+__attribute__((dllexport)) BOOL UnmapViewOfFile(LPCVOID address) {
+    if(!address){k32_last_error=87;return 0;}
+    for(unsigned int i=0;i<16;i++) {
+        K32_FILE_MAPPING *m=&k32_file_mappings[i];
+        if(m->used&&(u64)address>=(u64)m->base&&(u64)address<(u64)m->base+m->size) {k32_last_error=0;return 1;}
+    }
+    k32_last_error=87;return 0;
+}
+__attribute__((dllexport)) BOOL FlushViewOfFile(LPCVOID address,u64 bytes) {
+    (void)bytes;
+    if(!address){k32_last_error=87;return 0;}
+    for(unsigned int i=0;i<16;i++) {
+        K32_FILE_MAPPING *m=&k32_file_mappings[i];
+        if(m->used&&(u64)address>=(u64)m->base&&(u64)address<(u64)m->base+m->size) {
+            if(m->protect==0x02u){k32_last_error=0;return 1;}
+            k32_last_error=50;return 0;
+        }
+    }
+    k32_last_error=87;return 0;
 }

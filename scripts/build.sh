@@ -1104,6 +1104,11 @@ lld -flavor link \
   /export:_get_errno \
   /export:_set_errno \
   /export:strerror \
+  /export:_configure_narrow_argv \
+  /export:_initialize_narrow_environment \
+  /export:_seh_filter_dll \
+  /export:__std_type_info_destroy_list \
+  /export:__C_specific_handler \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 

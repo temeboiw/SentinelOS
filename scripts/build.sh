@@ -1077,6 +1077,7 @@ lld -flavor link \
   /export:strncmp \
   /export:strchr \
   /export:strstr \
+  /export:strrchr \
   "/out:$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" \
   "$B/obj/ucrt_runtime.o"
 
@@ -1125,6 +1126,7 @@ lld -flavor link \
   /export:strncmp \
   /export:strchr \
   /export:strstr \
+  /export:strrchr \
   /export:malloc \
   /export:calloc \
   /export:realloc \

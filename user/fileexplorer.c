@@ -329,7 +329,7 @@ void mainCRTStartup(void) {
         }
 
         /* Mouse wheel and arrow/Page keys scroll the visible directory rows. */
-        if (msg.message == 0x020A) {
+        if (msg.message == 0x020A && !g_context_menu) {
             int delta = (int)((msg.wParam >> 16) & 0xFFFF);
             if (delta & 0x8000) delta -= 0x10000;
             if (delta > 0) g_scroll -= 3;
@@ -342,7 +342,9 @@ void mainCRTStartup(void) {
         }
         if(msg.message==0x0102) {
             int ch=(int)msg.wParam;
-            if(g_search_mode) {
+            if (g_context_menu) {
+                if (ch==27) { g_context_menu=0; draw_rows(pText,pInv); }
+            } else if(g_search_mode) {
                 if(ch==8&&g_filter_len>0){g_filter[--g_filter_len]=0;if(!g_home)reload(pQuery,pText,pInv);}
                 else if(ch==13){g_search_mode=0;draw_rows(pText,pInv);}
                 else if(ch==27){g_search_mode=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}

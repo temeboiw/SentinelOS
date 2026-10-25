@@ -414,3 +414,95 @@ __attribute__((dllexport)) int rand(void) {
 __attribute__((dllexport)) void srand(unsigned int seed) {
     ucrt_rand_state = seed;
 }
+
+
+/* Locale-independent numeric conversion used by common C/C++ libraries. */
+static int ucrt_space(unsigned char c) {
+    return c==' ' || c=='\\t' || c=='\\r' || c=='\\n' || c=='\\f' || c=='\\v';
+}
+static int ucrt_digit_value(unsigned char c) {
+    if(c>='0'&&c<='9') return (int)(c-'0');
+    if(c>='a'&&c<='z') return (int)(c-'a')+10;
+    if(c>='A'&&c<='Z') return (int)(c-'A')+10;
+    return -1;
+}
+__attribute__((dllexport)) long strtol(const char *s, char **end, int base) {
+    const char *p=s; unsigned long value=0; int neg=0,any=0,overflow=0;
+    const unsigned long limit=neg?(unsigned long)LONG_MIN:(unsigned long)LONG_MAX;
+    if(!s){if(end)*end=(char*)s;return 0;}
+    while(ucrt_space((unsigned char)*p))++p;
+    if(*p=='+'||*p=='-'){neg=*p=='-';++p;}
+    if(base && (base<2||base>36)){if(end)*end=(char*)s;return 0;}
+    if((base==0||base==16)&&p[0]=='0'&&(p[1]=='x'||p[1]=='X')&&ucrt_digit_value((unsigned char)p[2])>=0&&ucrt_digit_value((unsigned char)p[2])<16){p+=2;base=16;}
+    else if(base==0)base=(*p=='0')?8:10;
+    unsigned long maxmag=neg?(unsigned long)(-(LONG_MIN+1L))+1UL:(unsigned long)LONG_MAX;
+    while(*p){int d=ucrt_digit_value((unsigned char)*p);if(d<0||d>=base)break;any=1;if(value>(maxmag-(unsigned long)d)/(unsigned long)base)overflow=1;else if(!overflow)value=value*(unsigned long)base+(unsigned long)d;++p;}
+    if(!any){if(end)*end=(char*)s;return 0;}
+    if(end)*end=(char*)p;
+    if(overflow)return neg?LONG_MIN:LONG_MAX;
+    return neg?(value==(unsigned long)(-(LONG_MIN+1L))+1UL?LONG_MIN:-(long)value):(long)value;
+}
+__attribute__((dllexport)) unsigned long strtoul(const char *s, char **end, int base) {
+    const char *p=s; unsigned long value=0; int neg=0,any=0,overflow=0;
+    if(!s){if(end)*end=(char*)s;return 0;}
+    while(ucrt_space((unsigned char)*p))++p;
+    if(*p=='+'||*p=='-'){neg=*p=='-';++p;}
+    if(base && (base<2||base>36)){if(end)*end=(char*)s;return 0;}
+    if((base==0||base==16)&&p[0]=='0'&&(p[1]=='x'||p[1]=='X')&&ucrt_digit_value((unsigned char)p[2])>=0&&ucrt_digit_value((unsigned char)p[2])<16){p+=2;base=16;}
+    else if(base==0)base=(*p=='0')?8:10;
+    while(*p){int d=ucrt_digit_value((unsigned char)*p);if(d<0||d>=base)break;any=1;if(value>(ULONG_MAX-(unsigned long)d)/(unsigned long)base)overflow=1;else if(!overflow)value=value*(unsigned long)base+(unsigned long)d;++p;}
+    if(!any){if(end)*end=(char*)s;return 0;}
+    if(end)*end=(char*)p;
+    if(overflow)value=ULONG_MAX;
+    return neg?(unsigned long)(0UL-value):value;
+}
+__attribute__((dllexport)) long long strtoll(const char *s, char **end, int base) {
+    /* x64 Windows long long uses the same width as this runtime's long long. */
+    const char *p=s; unsigned long long value=0; int neg=0,any=0,overflow=0;
+    if(!s){if(end)*end=(char*)s;return 0;}
+    while(ucrt_space((unsigned char)*p))++p;
+    if(*p=='+'||*p=='-'){neg=*p=='-';++p;}
+    if(base && (base<2||base>36)){if(end)*end=(char*)s;return 0;}
+    if((base==0||base==16)&&p[0]=='0'&&(p[1]=='x'||p[1]=='X')&&ucrt_digit_value((unsigned char)p[2])>=0&&ucrt_digit_value((unsigned char)p[2])<16){p+=2;base=16;}
+    else if(base==0)base=(*p=='0')?8:10;
+    unsigned long long maxmag=neg?0x8000000000000000ULL:0x7FFFFFFFFFFFFFFFULL;
+    while(*p){int d=ucrt_digit_value((unsigned char)*p);if(d<0||d>=base)break;any=1;if(value>(maxmag-(unsigned long long)d)/(unsigned long long)base)overflow=1;else if(!overflow)value=value*(unsigned long long)base+(unsigned long long)d;++p;}
+    if(!any){if(end)*end=(char*)s;return 0;}
+    if(end)*end=(char*)p;
+    if(overflow)return neg?(-9223372036854775807LL-1LL):9223372036854775807LL;
+    if(neg)return value==0x8000000000000000ULL?(-9223372036854775807LL-1LL):-(long long)value;
+    return (long long)value;
+}
+__attribute__((dllexport)) unsigned long long strtoull(const char *s, char **end, int base) {
+    const char *p=s; unsigned long long value=0; int neg=0,any=0,overflow=0;
+    if(!s){if(end)*end=(char*)s;return 0;}
+    while(ucrt_space((unsigned char)*p))++p;
+    if(*p=='+'||*p=='-'){neg=*p=='-';++p;}
+    if(base && (base<2||base>36)){if(end)*end=(char*)s;return 0;}
+    if((base==0||base==16)&&p[0]=='0'&&(p[1]=='x'||p[1]=='X')&&ucrt_digit_value((unsigned char)p[2])>=0&&ucrt_digit_value((unsigned char)p[2])<16){p+=2;base=16;}
+    else if(base==0)base=(*p=='0')?8:10;
+    while(*p){int d=ucrt_digit_value((unsigned char)*p);if(d<0||d>=base)break;any=1;if(value>(0xFFFFFFFFFFFFFFFFULL-(unsigned long long)d)/(unsigned long long)base)overflow=1;else if(!overflow)value=value*(unsigned long long)base+(unsigned long long)d;++p;}
+    if(!any){if(end)*end=(char*)s;return 0;}
+    if(end)*end=(char*)p;
+    if(overflow)value=0xFFFFFFFFFFFFFFFFULL;
+    return neg?0ULL-value:value;
+}
+__attribute__((dllexport)) int wcstombs(char *dst, const unsigned short *src, unsigned long long cap) {
+    if(!src)return (int)-1;
+    unsigned long long n=0;
+    while(src[n] && n<cap){unsigned int c=src[n];if(c<0x80){if(dst)dst[n]=(char)c;}else if(c<0x800){if(n+2>cap)break;if(dst){dst[n]=(char)(0xC0|(c>>6));dst[n+1]=(char)(0x80|(c&0x3F));}n++;}else if(c>=0xD800&&c<=0xDBFF){unsigned int lo=src[n+1];if(lo<0xDC00||lo>0xDFFF)return (int)-1;unsigned int cp=0x10000+((c-0xD800)<<10)+(lo-0xDC00);if(n+4>cap)break;if(dst){dst[n]=(char)(0xF0|(cp>>18));dst[n+1]=(char)(0x80|((cp>>12)&0x3F));dst[n+2]=(char)(0x80|((cp>>6)&0x3F));dst[n+3]=(char)(0x80|(cp&0x3F));}n+=3;}else{if(n+3>cap)break;if(dst){dst[n]=(char)(0xE0|(c>>12));dst[n+1]=(char)(0x80|((c>>6)&0x3F));dst[n+2]=(char)(0x80|(c&0x3F));}n+=2;}n++;}
+    if(dst && n<cap)dst[n]=0;
+    return n>(unsigned long long)0x7FFFFFFF?(int)-1:(int)n;
+}
+__attribute__((dllexport)) unsigned long long mbstowcs(unsigned short *dst, const char *src, unsigned long long cap) {
+    if(!src)return (unsigned long long)-1;
+    unsigned long long i=0,o=0;
+    while(src[i] && o<cap){unsigned char c=(unsigned char)src[i++];unsigned int cp;unsigned int need;
+      if(c<0x80){cp=c;need=0;}else if((c&0xE0)==0xC0){cp=c&0x1F;need=1;}else if((c&0xF0)==0xE0){cp=c&0x0F;need=2;}else if((c&0xF8)==0xF0){cp=c&7;need=3;}else return (unsigned long long)-1;
+      for(unsigned int j=0;j<need;j++){unsigned char q=(unsigned char)src[i++];if(!q||(q&0xC0)!=0x80)return (unsigned long long)-1;cp=(cp<<6)|(q&0x3F);}
+      if(cp>0x10FFFF||(cp>=0xD800&&cp<=0xDFFF)||(need==1&&cp<0x80)||(need==2&&cp<0x800)||(need==3&&cp<0x10000))return (unsigned long long)-1;
+      if(cp<=0xFFFF){if(dst)dst[o]=(unsigned short)cp;o++;}else{if(o+2>cap)break;cp-=0x10000;if(dst){dst[o]=(unsigned short)(0xD800+(cp>>10));dst[o+1]=(unsigned short)(0xDC00+(cp&0x3FF));}o+=2;}
+    }
+    if(dst&&o<cap)dst[o]=0;
+    return o;
+}

@@ -112,7 +112,7 @@ __attribute__((dllexport)) int WSAStartup(WORD version, WSADATA *data) {
     if (!data) return WSAEFAULT;
     if ((requested & 255u)<1 || (requested & 255u)>2 || (requested>>8)>2)
         return 10092; /* WSAVERNOTSUPPORTED */
-    data->wVersion=0x0202;
+    data->wVersion=(WORD)requested;
     data->wHighVersion=0x0202;
     ws2_copy(data->szDescription,"SentinelOS Winsock 2.2",sizeof(data->szDescription));
     ws2_copy(data->szSystemStatus,"Winsock utilities available; kernel network backend unavailable",sizeof(data->szSystemStatus));
@@ -153,12 +153,12 @@ __attribute__((dllexport)) u32 inet_addr(const char *s) {
         s++;
     }
     if(part!=3 || !digits) return 0xffffffffu;
-    return (oct[0]<<24)|(oct[1]<<16)|(oct[2]<<8)|oct[3];
+    return (oct[0])|(oct[1]<<8)|(oct[2]<<16)|(oct[3]<<24);
 }
 __attribute__((dllexport)) const char *inet_ntoa(IN_ADDR addr) {
     char *out=ws2_ntoa_buf[(ws2_ntoa_slot++)&3u];
     u32 a=addr.s_addr;
-    unsigned int oct[4]={(a>>24)&255u,(a>>16)&255u,(a>>8)&255u,a&255u};
+    unsigned int oct[4]={a&255u,(a>>8)&255u,(a>>16)&255u,(a>>24)&255u};
     unsigned int p=0;
     for(unsigned int i=0;i<4;i++) {
         unsigned int v=oct[i],div=100,started=0;
@@ -172,7 +172,7 @@ __attribute__((dllexport)) int inet_pton(int family, const char *src, void *dst)
     if(family==AF_INET) {
         u32 value=inet_addr(src);
         if(value==0xffffffffu && !ws2_eq(src,"255.255.255.255")) return 0;
-        u8 *p=(u8*)dst; p[0]=(u8)(value>>24);p[1]=(u8)(value>>16);p[2]=(u8)(value>>8);p[3]=(u8)value;
+        u8 *p=(u8*)dst; p[0]=(u8)value;p[1]=(u8)(value>>8);p[2]=(u8)(value>>16);p[3]=(u8)(value>>24);
         return 1;
     }
     if(family!=AF_INET6) { ws2_last_error=WSAEAFNOSUPPORT; return -1; }
@@ -224,7 +224,7 @@ __attribute__((dllexport)) const char *inet_ntop(int family,const void *src,char
 }
 __attribute__((dllexport)) int gethostname(char *name,int len) {
     if(!name||len<=0){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
-    if(len<10){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    if(len<9){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
     ws2_copy(name,"sentinel", (unsigned int)len);ws2_last_error=0;return 0;
 }
 __attribute__((dllexport)) int getaddrinfo(const char *node,const char *service,const void *hints,void **result) {

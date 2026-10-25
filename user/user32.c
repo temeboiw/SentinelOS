@@ -39,7 +39,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42, SYS_RepaintRect=44
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -829,7 +829,9 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
      * new position and flush that footprint. */
     int rendered_x=cur_ox, rendered_y=cur_oy;
     if (cur_on) {
-        if (g_gpu_surface && u32_is_desktop_window()) {
+        if (g_gpu_surface) {
+            /* The compositor must rebuild the old pointer footprint even
+             * when an application-owned modal window has focus. */
             u32_repaint_scene_rect(rendered_x,rendered_y,rendered_x+16,rendered_y+16);
             cur_on=0;
             for(int i=0;i<16*16;i++)cur_paint[i]=0;
@@ -981,32 +983,11 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
     if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
     if(x0>=x1||y0>=y1)return;
     if(g_gpu_surface) {
-        /* The kernel owns the shared GPU scanout. Re-submit only the already
-         * rendered layer covering the cursor's old footprint; the kernel then
-         * reconstructs the underlay from its persistent Z-ordered buffers.
-         * Never restore wallpaper directly over a window or taskbar. */
-        typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
-        int desktop_owner=u32_is_desktop_window();
-        U32_PRESENT_LAYER a;
-        a.x=(u32)x0;a.y=(u32)y0;a.w=(u32)(x1-x0);a.h=(u32)(y1-y0);
-        a.width=g_fw;a.height=g_fh;
-        if (desktop_owner) {
-            /*
-             * Rebuild the old cursor rectangle in the same Z order as the
-             * real scene. Presenting only the taskbar layer here painted
-             * taskbar pixels over windows and left stale cursor/save-under
-             * pixels behind when the pointer crossed layer boundaries.
-             */
-            a.layer=1;a.pixels=(u64)u32_desktop_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-            a.layer=2;a.pixels=(u64)u32_window_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-            a.layer=3;a.pixels=(u64)u32_taskbar_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-        } else {
-            a.layer=2;a.pixels=(u64)u32_window_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-        }
+        /* Restore damage from the kernel's persistent Z-order, not this
+         * process's private window layer; the latter creates pointer trails. */
+        typedef struct { u32 x,y,w,h; } U32_REPAINT_RECT;
+        U32_REPAINT_RECT a={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
+        (void)sy3(SYS_RepaintRect,(u64)&a,0,0);
         return;
     }
     if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;

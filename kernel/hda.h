@@ -107,12 +107,9 @@ static int hda_codec_verb(uint8_t cad, uint8_t nid,
     ((volatile uint32_t *)(HHDM_BASE + hda_corb_pa))[next] = command;
     __asm__ volatile("mfence" ::: "memory");
 
-hda_write16(HDA_CORBWP, next);
+    hda_write16(HDA_CORBWP, next);
     __asm__ volatile("mfence" ::: "memory");
-    uint16_t wp_readback = hda_read16(HDA_CORBWP);
     hda_corb_wp = next;
-
-    (void)wp_readback;
 
     int corb_consumed = 0;
 
@@ -150,7 +147,7 @@ hda_write16(HDA_CORBWP, next);
             /* Acknowledge response interrupt and reset QEMU's count. */
             hda_write8(0x5D, 0x01);
 
-if (((response >> 32) & 0x0F) != cad)
+            if (((response >> 32) & 0x0F) != cad)
                 continue;
 
             if (result)

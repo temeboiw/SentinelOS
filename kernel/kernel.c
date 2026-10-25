@@ -11,6 +11,7 @@
 #include "virtio_blk.h"
 #include "hda.h"
 #include "smp.h"
+#include "pci_network.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -35,6 +36,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
             bi->desc_size ? bi->mmap_size / bi->desc_size : 0);
 
     cpu_init();
+    PciScanNetworkDevices();
     uint16_t cs; uint64_t sp;
     __asm__ volatile("movw %%cs, %0" : "=r"(cs));
     __asm__ volatile("movq %%rsp, %0" : "=r"(sp));

@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -42,6 +42,8 @@ static u32 *mini_fat;
 static u8 *mini_stream;
 static u8 *table_buffer;
 static u8 *string_data;
+static u8 *extract_buffer;
+static char extraction_status[96]="Embedded payload: not extracted";
 static u32 string_offset[MSI_MAX_STRINGS], string_length[MSI_MAX_STRINGS];
 static u32 string_count, string_data_size;
 static u32 mini_fat_count, mini_stream_size, mini_sector_count;
@@ -90,6 +92,7 @@ static int init_msi_workspace(void) {
     out("msiexec: allocating table workspace\n");
     MSI_WS(table_buffer,u8,MAX_TABLE_STREAM);
     MSI_WS(string_data,u8,MAX_TABLE_STREAM);
+    MSI_WS(extract_buffer,u8,1024u*1024u);
     out("msiexec: parser workspace ready\n");
 #undef MSI_WS
     return 1;
@@ -551,6 +554,120 @@ static int parse_msi_catalog(void) {
     msi_db_ok=1;
     return 1;
 }
+static void set_extraction_status(const char *s) {
+    u32 i=0;
+    if (!s) s="";
+    while (s[i] && i+1<sizeof(extraction_status)) {
+        extraction_status[i]=s[i];
+        i++;
+    }
+    extraction_status[i]=0;
+}
+static int payload_read(const u8 *entry, u64 size, u32 *ids, u32 sectors,
+                        u64 offset, u32 len) {
+    return cfb_stream_read_list(ids,sectors,size,offset,extract_buffer,len);
+}
+static int inspect_embedded_pe(const u8 *p, u32 n, u64 total_size) {
+    if (!p || n<0x40 || p[0]!='M' || p[1]!='Z') {
+        out("msiexec: embedded installer does not start with an MZ executable header\n");
+        return 0;
+    }
+    u32 pe=rd32(p+0x3c);
+    if (pe>n || n-pe<24 || p[pe]!='P' || p[pe+1]!='E' ||
+        p[pe+2]!=0 || p[pe+3]!=0) {
+        out("msiexec: embedded MZ payload has no valid PE header in first 1 MiB\n");
+        return 0;
+    }
+    u16 machine=rd16(p+pe+4), sections=rd16(p+pe+6);
+    u16 opt_size=rd16(p+pe+20);
+    if ((u64)pe+24+opt_size>n || opt_size<2) {
+        out("msiexec: embedded PE optional header is truncated or unsupported\n");
+        return 0;
+    }
+    u16 magic=rd16(p+pe+24);
+    if (magic!=0x20b && magic!=0x10b) {
+        out("msiexec: embedded PE optional-header magic is unsupported\n");
+        return 0;
+    }
+    out("Embedded payload PE header:\n  Machine: ");
+    if (machine==0x8664) out("x86-64 (AMD64)");
+    else if (machine==0x14c) out("x86 (I386)");
+    else if (machine==0xaa64) out("ARM64");
+    else { out("unknown ("); out_u32(machine); out(")"); }
+    out("\n  PE kind: "); out(magic==0x20b?"PE32+":"PE32");
+    out("\n  Sections: "); out_u32(sections);
+    out("\n  Stream size: "); out_u32((u32)total_size); out(" bytes\n");
+    if (machine!=0x8664 || magic!=0x20b || !sections || sections>96) {
+        out("msiexec: payload is not a supported x64 PE32+ executable\n");
+        return 0;
+    }
+    return 1;
+}
+static int extract_embedded_installer(void) {
+    const u8 *entry=find_stream_entry("Binary.GoogleChromeInstaller",0);
+    if (!entry) {
+        set_extraction_status("Embedded Google installer stream not found");
+        out("msiexec: no Binary.GoogleChromeInstaller stream; nothing extracted\n");
+        return 0;
+    }
+    u64 size=rd64(entry+120);
+    if (size<0x100 || size>0xFFFFFFFFULL || size<mini_cutoff) {
+        set_extraction_status("Embedded installer stream size unsupported");
+        out("msiexec: embedded installer size/stream type is unsupported\n");
+        return 0;
+    }
+    u32 sectors=cfb_stream_sector_list(entry,cab_sector_ids,MAX_FAT);
+    if (!sectors || (u64)sectors*sector_size<size) {
+        set_extraction_status("Embedded installer stream chain is invalid");
+        out("msiexec: embedded installer FAT chain is invalid\n");
+        return 0;
+    }
+    u32 head=(u32)(size<1024u*1024u?size:1024u*1024u);
+    if (!payload_read(entry,size,cab_sector_ids,sectors,0,head) ||
+        !inspect_embedded_pe(extract_buffer,head,size)) {
+        set_extraction_status("Embedded payload failed PE validation");
+        return 0;
+    }
+    const char *out_name="GoogleChromeInstaller.exe";
+    out("msiexec: creating "); out(out_name); out(" in the current directory\n");
+    u64 h=sy3(SYS_CreateOutputFile,(u64)out_name,0,0);
+    if ((long long)h<0) {
+        set_extraction_status("Cannot create output file in current directory");
+        out("msiexec: cannot create output file (check writable ext4 and filename collision)\n");
+        return 0;
+    }
+    u64 offset=0;
+    u32 next_report=16u*1024u*1024u;
+    int ok=1;
+    while (offset<size) {
+        u32 n=(u32)((size-offset)>1024u*1024u?1024u*1024u:(size-offset));
+        if (!payload_read(entry,size,cab_sector_ids,sectors,offset,n)) {
+            out("msiexec: stream read failed at offset "); out_u32((u32)offset); out("\n");
+            ok=0; break;
+        }
+        u64 wrote=sy3(SYS_WriteOutputFile,h,(u64)extract_buffer,n);
+        if ((long long)wrote<0 || wrote!=n) {
+            out("msiexec: filesystem write failed at offset "); out_u32((u32)offset); out("\n");
+            ok=0; break;
+        }
+        offset+=n;
+        if (offset>=next_report) {
+            out("msiexec: extracted "); out_u32((u32)offset); out(" bytes\n");
+            next_report+=16u*1024u*1024u;
+        }
+    }
+    (void)sy3(SYS_CloseFile,h,0,0);
+    if (!ok || offset!=size) {
+        set_extraction_status("Extraction failed; output may be incomplete");
+        out("msiexec: embedded installer extraction FAILED; do not launch partial file\n");
+        return 0;
+    }
+    set_extraction_status("Extracted GoogleChromeInstaller.exe (validated PE)");
+    out("msiexec: extraction complete: "); out(out_name); out(" (");
+    out_u32((u32)size); out(" bytes)\n");
+    out("msiexec: this is the embedded installer, not yet confirmed to be chrome.exe\n");
+    return 1;
+}
 static void inspect_msi(void) {
     static const u8 signature[8]={0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1};
     if (file_size<512) { out("msiexec: file is too small for an MSI compound database\n"); return; }
@@ -615,7 +732,6 @@ static void inspect_msi(void) {
     } else {
         out("MSI catalog decoding failed or exceeded the current bounded buffers.\n");
     }
-    out("File extraction, install sequencing, and writable storage are still pending; no files were changed.\n");
     out("Custom actions were not executed.\n");
 }
 typedef struct {
@@ -684,11 +800,11 @@ static void show_installer_window(const char *name) {
     entries[en]=0;
     msi_ui_line(text,hwnd,10,entries);
     msi_ui_line(text,hwnd,11,msi_db_ok?"MSI database catalog: DECODED":"MSI database catalog: UNSUPPORTED");
-    msi_ui_line(text,hwnd,12,"Installation: NOT STARTED");
-    msi_ui_line(text,hwnd,13,"This build reads the container and decodes the table catalog.");
-    msi_ui_line(text,hwnd,14,"File extraction, component state, install sequences,");
-    msi_ui_line(text,hwnd,15,"rollback, and safe writable storage are not yet implemented.");
-    msi_ui_line(text,hwnd,16,"No files have been changed.");
+    msi_ui_line(text,hwnd,12,extraction_status);
+    msi_ui_line(text,hwnd,13,"Embedded installer payload extraction only.");
+    msi_ui_line(text,hwnd,14,"MSI install sequencing is not implemented.");
+    msi_ui_line(text,hwnd,15,"Custom actions are never executed by this reader.");
+    msi_ui_line(text,hwnd,16,"The extracted payload is not yet Chrome itself.");
     msi_ui_line(text,hwnd,17,"");
     msi_ui_line(text,hwnd,18,"Press Esc or click X to close.");
     (void)invalidate(hwnd,0,1);
@@ -781,6 +897,7 @@ void mainCRTStartup(void) {
     file_bytes=buf; file_size=total;
     inspect_msi();
     if (msi_ok) {
+        if (msi_db_ok) (void)extract_embedded_installer();
         show_installer_window(name);
         (void)sy3(SYS_Exit,0,0,0);
         for (;;) __asm__ volatile("pause");

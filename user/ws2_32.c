@@ -87,6 +87,31 @@ static int ws2_last_error;
 static char ws2_ntoa_buf[4][16];
 static unsigned int ws2_ntoa_slot;
 
+#define SYS_NtSocketCreate 44
+#define SYS_NtSocketClose 45
+#define SYS_NtSocketBind 46
+#define SYS_NtSocketSendTo 47
+#define SYS_NtSocketRecvFrom 48
+static unsigned long long ws2_syscall6(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,unsigned long long e,unsigned long long f) {
+    unsigned long long r;
+    __asm__ volatile(
+        "mov %[n], %%rax\nmov %[a], %%rdi\nmov %[b], %%rsi\nmov %[c], %%rdx\nmov %[d], %%rcx\nmov %[e], %%r8\nmov %[f], %%r9\nint $0x80\nmov %%rax, %[r]"
+        : [r]"=r"(r)
+        : [n]"r"(n),[a]"r"(a),[b]"r"(b),[c]"r"(c),[d]"r"(d),[e]"r"(e),[f]"r"(f)
+        : "rax","rdi","rsi","rdx","rcx","r8","r9","memory","cc");
+    return r;
+}
+static unsigned long long ws2_syscall3(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
+    return ws2_syscall6(n,a,b,c,0,0,0);
+}
+typedef struct { unsigned long long s; SOCKADDR_IN peer; int connected; } WS2_PEER;
+static WS2_PEER ws2_peers[32];
+static int ws2_peer_slot(SOCKET s,int create) {
+    for(int i=0;i<32;i++) if(ws2_peers[i].s==s && ws2_peers[i].s) return i;
+    if(create) for(int i=0;i<32;i++) if(!ws2_peers[i].s) { ws2_peers[i].s=s; return i; }
+    return -1;
+}
+
 static void ws2_copy(char *d, const char *s, unsigned int n) {
     unsigned int i=0;
     if (!d || !n) return;
@@ -240,21 +265,58 @@ __attribute__((dllexport)) int getnameinfo(const SOCKADDR *sa,unsigned int salen
 }
 
 /*
- * Socket operations fail explicitly until the kernel exposes packet I/O and
- * per-process socket handles. These are not fake successful sockets.
+ * UDP sockets use the kernel's per-process socket table and Ethernet/IPv4/UDP
+ * stack. TCP remains unsupported until the kernel TCP state machine exists.
  */
-static SOCKET ws2_no_socket(void) { ws2_last_error=ws2_started?WSAENETDOWN:WSANOTINITIALISED; return INVALID_SOCKET; }
-static int ws2_no_io(void) { ws2_last_error=ws2_started?WSAENETDOWN:WSANOTINITIALISED; return SOCKET_ERROR; }
-__attribute__((dllexport)) SOCKET socket(int af,int type,int protocol) { (void)af;(void)type;(void)protocol;return ws2_no_socket(); }
-__attribute__((dllexport)) int closesocket(SOCKET s) { (void)s;return ws2_no_io(); }
-__attribute__((dllexport)) int connect(SOCKET s,const SOCKADDR *a,int n) { (void)s;(void)a;(void)n;return ws2_no_io(); }
-__attribute__((dllexport)) int bind(SOCKET s,const SOCKADDR *a,int n) { (void)s;(void)a;(void)n;return ws2_no_io(); }
+static SOCKET ws2_no_socket(void) { ws2_last_error=ws2_started?WSAEOPNOTSUPP:WSANOTINITIALISED; return INVALID_SOCKET; }
+static int ws2_no_io(void) { ws2_last_error=ws2_started?WSAEOPNOTSUPP:WSANOTINITIALISED; return SOCKET_ERROR; }
+__attribute__((dllexport)) SOCKET socket(int af,int type,int protocol) {
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return INVALID_SOCKET;}
+    if(af!=AF_INET||(type!=SOCK_DGRAM&&type!=SOCK_STREAM)||(protocol&&protocol!=(type==SOCK_DGRAM?IPPROTO_UDP:IPPROTO_TCP))){ws2_last_error=WSAEAFNOSUPPORT;return INVALID_SOCKET;}
+    if(type==SOCK_STREAM){ws2_last_error=WSAEOPNOTSUPP;return INVALID_SOCKET;}
+    SOCKET s=(SOCKET)ws2_syscall3(SYS_NtSocketCreate,af,type,protocol);
+    if(s==INVALID_SOCKET){ws2_last_error=WSAENOBUFS;return INVALID_SOCKET;}
+    (void)ws2_peer_slot(s,1);ws2_last_error=0;return s;
+}
+__attribute__((dllexport)) int closesocket(SOCKET s) {
+    if(ws2_syscall3(SYS_NtSocketClose,s,0,0)!=(unsigned long long)0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+    int p=ws2_peer_slot(s,0);if(p>=0){ws2_peers[p].s=0;ws2_peers[p].connected=0;}
+    ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) int connect(SOCKET s,const SOCKADDR *a,int n) {
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(!a||n<(int)sizeof(SOCKADDR_IN)||a->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int p=ws2_peer_slot(s,0);if(p<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+    ws2_peers[p].peer=*(const SOCKADDR_IN *)a;ws2_peers[p].connected=1;ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) int bind(SOCKET s,const SOCKADDR *a,int n) {
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(!a||n<(int)sizeof(SOCKADDR_IN)||a->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int r=(int)ws2_syscall3(SYS_NtSocketBind,s,a,n);
+    if(r<0){ws2_last_error=WSAEADDRINUSE;return SOCKET_ERROR;}ws2_last_error=0;return 0;
+}
 __attribute__((dllexport)) int listen(SOCKET s,int backlog) { (void)s;(void)backlog;return ws2_no_io(); }
 __attribute__((dllexport)) SOCKET accept(SOCKET s,SOCKADDR *a,int *n) { (void)s;(void)a;(void)n;return ws2_no_socket(); }
-__attribute__((dllexport)) int send(SOCKET s,const char *b,int n,int f) { (void)s;(void)b;(void)n;(void)f;return ws2_no_io(); }
-__attribute__((dllexport)) int recv(SOCKET s,char *b,int n,int f) { (void)s;(void)b;(void)n;(void)f;return ws2_no_io(); }
-__attribute__((dllexport)) int sendto(SOCKET s,const char *b,int n,int f,const SOCKADDR *a,int al) { (void)s;(void)b;(void)n;(void)f;(void)a;(void)al;return ws2_no_io(); }
-__attribute__((dllexport)) int recvfrom(SOCKET s,char *b,int n,int f,SOCKADDR *a,int *al) { (void)s;(void)b;(void)n;(void)f;(void)a;(void)al;return ws2_no_io(); }
+__attribute__((dllexport)) int send(SOCKET s,const char *b,int n,int f) {
+    (void)f;int p=ws2_peer_slot(s,0);if(p<0||!ws2_peers[p].connected){ws2_last_error=WSAEDESTADDRREQ;return SOCKET_ERROR;}
+    return sendto(s,b,n,0,(const SOCKADDR *)&ws2_peers[p].peer,sizeof(SOCKADDR_IN));
+}
+__attribute__((dllexport)) int recv(SOCKET s,char *b,int n,int f) { (void)f;return recvfrom(s,b,n,0,0,0); }
+__attribute__((dllexport)) int sendto(SOCKET s,const char *b,int n,int f,const SOCKADDR *a,int al) {
+    (void)f;if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(n<0||(!b&&n)||!a||al<(int)sizeof(SOCKADDR_IN)||a->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int r=(int)ws2_syscall6(SYS_NtSocketSendTo,s,(unsigned long long)b,(unsigned long long)n,0,(unsigned long long)a,(unsigned long long)al);
+    if(r<0){ws2_last_error=(r==-3)?WSAEWOULDBLOCK:WSAENETUNREACH;return SOCKET_ERROR;}
+    ws2_last_error=0;return r;
+}
+__attribute__((dllexport)) int recvfrom(SOCKET s,char *b,int n,int f,SOCKADDR *a,int *al) {
+    (void)f;if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(n<0||(!b&&n)){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int r=(int)ws2_syscall6(SYS_NtSocketRecvFrom,s,(unsigned long long)b,(unsigned long long)n,0,(unsigned long long)a,(unsigned long long)al);
+    if(r<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+    if(r==0){ws2_last_error=WSAEWOULDBLOCK;return SOCKET_ERROR;}
+    ws2_last_error=0;return r;
+}
 __attribute__((dllexport)) int shutdown(SOCKET s,int how) { (void)s;(void)how;return ws2_no_io(); }
 __attribute__((dllexport)) int select(int nfds,void *r,void *w,void *e,const void *t) { (void)nfds;(void)r;(void)w;(void)e;(void)t;return ws2_no_io(); }
 __attribute__((dllexport)) int ioctlsocket(SOCKET s,long cmd,unsigned long *arg) { (void)s;(void)cmd;(void)arg;return ws2_no_io(); }

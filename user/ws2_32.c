@@ -302,6 +302,7 @@ __attribute__((dllexport)) int send(SOCKET s,const char *b,int n,int f) {
     (void)f;int p=ws2_peer_slot(s,0);if(p<0||!ws2_peers[p].connected){ws2_last_error=WSAEDESTADDRREQ;return SOCKET_ERROR;}
     return sendto(s,b,n,0,(const SOCKADDR *)&ws2_peers[p].peer,sizeof(SOCKADDR_IN));
 }
+__attribute__((dllexport)) int recvfrom(SOCKET s,char *b,int n,int f,SOCKADDR *a,int *al);
 __attribute__((dllexport)) int recv(SOCKET s,char *b,int n,int f) { (void)f;return recvfrom(s,b,n,0,0,0); }
 __attribute__((dllexport)) int sendto(SOCKET s,const char *b,int n,int f,const SOCKADDR *a,int al) {
     (void)f;if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}

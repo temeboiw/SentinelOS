@@ -35,6 +35,7 @@ static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
 }
 
 static uint64_t e4_size(uint8_t *inode);
+static uint64_t e4_map(Ext4k *fs, uint8_t *inode, uint32_t lb);
 
 /*
  * Write bytes into already allocated extents of an existing inode.

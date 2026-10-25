@@ -732,6 +732,9 @@ void mainCRTStartup(void) {
     const u64 buffer_base=0x50000000ULL;
     u8 *buf=(u8 *)buffer_base;
     u32 capacity=0, total=0;
+    /* Console output is expensive in the current UI. Report progress every
+     * 16 MiB rather than issuing a write for every 1 MiB read syscall. */
+    u32 next_report=16u*1024u*1024u;
     int read_error=0;
     for (;;) {
         if (total==capacity) {
@@ -757,7 +760,17 @@ void mainCRTStartup(void) {
         if ((long long)n<0) { read_error=1; break; }
         if (!n) break;
         total+=(u32)n;
-        if ((total & 0xFFFFFu) < (u32)n) { out("msiexec: read "); out_u32(total); out(" bytes\n"); }
+        if (total>=next_report) {
+            out("msiexec: read "); out_u32(total); out(" bytes\\n");
+            /* Advance past every crossed threshold without repeated prints. */
+            do {
+                if (next_report>0xFFFFFFFFu-(16u*1024u*1024u)) {
+                    next_report=0xFFFFFFFFu;
+                    break;
+                }
+                next_report+=16u*1024u*1024u;
+            } while (next_report<=total);
+        }
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     if (read_error) {

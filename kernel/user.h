@@ -1755,7 +1755,16 @@ static Frame *syscall_handler(Frame *f) {
         if(i<0 || nt_socket_slots[i].type!=2 || !nt_socket_slots[i].local_port ||
            !f->rsi || f->rdx>1472 || !MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,1)) { f->rax=(uint64_t)-1LL; return f; }
         NetPoll();
-        int got=NetUdpReceive(nt_socket_slots[i].local_port,(void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        uint32_t source_ip=0; uint16_t source_port=0;
+        int got=NetUdpReceiveFrom(nt_socket_slots[i].local_port,(void *)(uint64_t)f->rsi,(unsigned)f->rdx,&source_ip,&source_port);
+        if(got>0 && f->r8 && f->r9 &&
+           MmValidateUserRange(MmCurrentProcess,f->r8,16,1) &&
+           MmValidateUserRange(MmCurrentProcess,f->r9,sizeof(int),1)) {
+            uint8_t *sa=(uint8_t *)(uint64_t)f->r8;
+            *(uint16_t *)sa=2; sa[2]=(uint8_t)(source_port>>8); sa[3]=(uint8_t)source_port;
+            *(uint32_t *)(sa+4)=source_ip;
+            *(int *)(uint64_t)f->r9=16;
+        }
         f->rax=(uint64_t)(int64_t)got; return f;
     }
     case NT_SYS_QUERY_INFORMATION_PROCESS: {

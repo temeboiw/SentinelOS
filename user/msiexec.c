@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -668,6 +668,10 @@ static int extract_embedded_installer(void) {
             ok=0; break;
         }
         offset+=n;
+        /* Extraction is a long-running user task. Cooperatively yield after
+           each bounded read/write pair so input, window management, and other
+           user processes are not starved for the entire 169 MiB operation. */
+        (void)sy3(SYS_NtYield,0,0,0);
         if (offset>=next_report) {
             out("msiexec: extracted "); out_u32((u32)offset); out(" bytes\n");
             next_report+=16u*1024u*1024u;
@@ -893,6 +897,8 @@ void mainCRTStartup(void) {
         if ((long long)n<0) { read_error=1; break; }
         if (!n) break;
         total+=(u32)n;
+        /* Package reads must not monopolize the cooperative user scheduler. */
+        (void)sy3(SYS_NtYield,0,0,0);
         if (total>=next_report) {
             out("msiexec: read "); out_u32(total); out(" bytes\n");
             /* Advance past every crossed threshold without repeated prints. */

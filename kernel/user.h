@@ -1329,7 +1329,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     const char prefix3[] = "Windows/System32/";
     const char prefix4[] = "C:/Windows/System32/";
     const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3, prefix4 };
-    for (unsigned int p = 0; !found && p < 4; ++p) {
+    for (unsigned int p = 0; !found && p < sizeof(prefixes)/sizeof(prefixes[0]); ++p) {
         unsigned int i = 0;
         while (prefixes[p][i] && i + path_len + 1 < sizeof(system_path)) {
             system_path[i] = prefixes[p][i];

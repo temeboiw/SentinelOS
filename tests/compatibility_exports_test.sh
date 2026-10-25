@@ -47,7 +47,7 @@ for file in \
   require_file "$file"
 done
 
-for symbol in memcpy memmove memset memcmp strlen strcmp malloc free _beginthreadex; do
+for symbol in memcpy memmove memset memcmp strlen strcmp malloc free _beginthreadex strtol strtoul strtoll strtoull wcstombs mbstowcs; do
   require_export "$ROOT/ucrtbase.dll" "$symbol"
 done
 for symbol in memcpy memmove memset memcmp _purecall __std_terminate _invoke_watson; do

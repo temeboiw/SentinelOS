@@ -125,13 +125,25 @@ if [[ ! -f "$VARS" ]]; then
     dd if=/dev/zero of="$VARS" bs=1M count=2 status=none
 fi
 
+# Allow explicit RAM sizing for physical-memory testing. Keep the existing
+# 1 GiB default so the normal phone/PRoot workflow remains lightweight.
+RAM_MB="${SENTINELOS_RAM_MB:-1024}"
+if [[ ! "$RAM_MB" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: SENTINELOS_RAM_MB must be a positive integer (MiB)." >&2
+    exit 1
+fi
+if (( RAM_MB > 131072 )); then
+    echo "Error: this kernel build manages at most 131072 MiB (128 GiB) of RAM." >&2
+    exit 1
+fi
+
 echo "SentinelOS: starting QEMU"
-echo "Machine: Q35 | RAM: 1024 MiB"
+echo "Machine: Q35 | RAM: $RAM_MB MiB"
 
 exec qemu-system-x86_64 \
     -machine q35 \
     -smp 4 \
-    -m 1024 \
+    -m "$RAM_MB" \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$VARS" \
     -drive file="$DISKIMG",format=raw,if=none,id=d0 \

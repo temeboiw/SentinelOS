@@ -1056,25 +1056,22 @@ static int vfs_open_user_file(const char *name) {
 
 static int vfs_create_user_output_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
+    int slot = -1;
+    for (int i = 0; i < VFS_USER_HANDLES; i++)
+        if (!vfs_user_handles[i].used) { slot = i; break; }
+    if (slot < 0) return -1;
     /* Output creation is deliberately limited to one basename in the current
        directory; callers cannot use this syscall to traverse arbitrary paths. */
     uint32_t ino = 0;
     if (e4_create_empty_file(&g_ext4, vfs_cwd_ino, name, &ino) < 0)
         return -1;
-    for (int i = 0; i < VFS_USER_HANDLES; i++) {
-        if (!vfs_user_handles[i].used) {
-            vfs_user_handles[i].ino = ino;
-            vfs_user_handles[i].pos = 0;
-            vfs_user_handles[i].size = 0;
-            vfs_user_handles[i].used = 1;
-            vfs_user_handles[i].writable = 1;
-            (void)vfs_listdir(vfs_cwd_ino);
-            return 0x100 + i;
-        }
-    }
-    /* The empty file is already published if every handle is busy. */
+    vfs_user_handles[slot].ino = ino;
+    vfs_user_handles[slot].pos = 0;
+    vfs_user_handles[slot].size = 0;
+    vfs_user_handles[slot].used = 1;
+    vfs_user_handles[slot].writable = 1;
     (void)vfs_listdir(vfs_cwd_ino);
-    return -1;
+    return 0x100 + slot;
 }
 
 static int vfs_write_user_output_file(uint64_t handle, uint64_t src, uint64_t len) {

@@ -308,14 +308,7 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
     if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
         E16(root, 2) > 4 || E16(root, 4) > 4)
         return -2;
-    uint32_t needed = 0;
-    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
-        uint64_t prev = lb ? e4_map(fs, inode, (uint32_t)(lb - 1)) : 0;
-        uint8_t *last = E16(root, 2) ? root + 12 + (E16(root, 2) - 1) * 12 : 0;
-        if (!last || !prev || prev + 1 != 0) ++needed;
-    }
-    /* Conservative bound: each new block may require a new root extent. */
-    if ((uint32_t)E16(root, 2) + needed > 4) return -2;
+    /* Extent capacity is checked against actual physical adjacency below. */
 
     uint8_t zero[4096];
     for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
@@ -376,7 +369,12 @@ static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
     E32(inode, 4) = 0;
     E16(inode, 26) = 1;
     E32(inode, 28) = 0;
-    E32(inode, 32) = 0;
+    E32(inode, 32) = 0x00080000u; /* EXT4_EXTENTS_FL */
+    E16(inode, 40) = 0xF30A;
+    E16(inode, 42) = 0;
+    E16(inode, 44) = 4;
+    E16(inode, 46) = 0;
+    E32(inode, 48) = 0;
     if (fs->isize >= 130)
         E16(inode, 128) = (uint16_t)(fs->isize - 128 >= 32 ? 32 : fs->isize - 128);
     if (e4_inode_write(fs, ino, inode) < 0) return -1;
@@ -649,7 +647,7 @@ static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
     uint64_t old_size = e4_size(dir);
     if (old_size % fs->blksz) return -1;
     uint64_t lb = old_size / fs->blksz;
-    if (lb > UINT32_MAX || e4_extent_append_root == 0) return -1;
+    if (lb > UINT32_MAX) return -1;
     uint64_t physical = 0;
     if (e4_alloc_block(fs, &physical) < 0) return -1;
     for (uint32_t i = 0; i < fs->blksz; ++i) block[i] = 0;
@@ -724,6 +722,22 @@ static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
     uint32_t ino = 0;
     if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
     int drc = e4_dir_add_file(fs, dir_ino, name, ino);\n    if (drc == -2) drc = e4_dir_grow_add_file(fs, dir_ino, name, ino);\n    if (drc < 0) { e4_free_inode(fs, ino); return -1; }
+    *out_ino = ino;
+    return 0;
+}
+
+
+/*
+ * Create a named file and populate it. Metadata writes are not journaled;
+ * failures may leave an incomplete published entry and require recovery.
+ */
+static int e4_create_file_with_data(Ext4k *fs, uint32_t dir_ino,
+                                    const char *name, const void *data,
+                                    uint64_t len, uint32_t *out_ino) {
+    if (!fs || !name || !data || !len || !out_ino) return -1;
+    uint32_t ino = 0;
+    if (e4_create_empty_file(fs, dir_ino, name, &ino) < 0) return -1;
+    if (e4_write_inode_grow(fs, ino, 0, data, len) < 0) return -1;
     *out_ino = ino;
     return 0;
 }

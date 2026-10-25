@@ -406,8 +406,8 @@ static void vmm_init(const BootInfo *bi) {
     uint64_t fb = bi->fb_base, fbe = fb + (uint64_t)bi->pitch * bi->height;
     map_range(0, fb, fbe, PTE_PWT);
     map_range(HHDM_BASE, fb, fbe, PTE_PWT);
-    map_range(0, 0xFEC00000ULL, 0xFF000000ULL, PTE_PCD | PTE_PWT);
-    map_range(HHDM_BASE, 0xFEC00000ULL, 0xFF000000ULL, PTE_PCD | PTE_PWT);
+    map_range(0, 0xFE000000ULL, 0xFF000000ULL, PTE_PCD | PTE_PWT);
+    map_range(HHDM_BASE, 0xFE000000ULL, 0xFF000000ULL, PTE_PCD | PTE_PWT);
 
     uint64_t old_cr3;
     __asm__ volatile("movq %%cr3, %0" : "=r"(old_cr3));

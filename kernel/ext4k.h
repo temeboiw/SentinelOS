@@ -146,7 +146,7 @@ static int e4_write_supported(Ext4k *fs) {
     if (!fs || !fs->ok || fs->is64 || fs->blksz != 4096 ||
         fs->dsize != 32 || !fs->bpg || !fs->ipg)
         return 0;
-    if (fs->feature_compat & 0x0004u) return 0; /* has_journal */
+    if (fs->feature_compat & (0x0004u | 0x0020u)) return 0; /* journal or dir_index */
     if (fs->feature_ro_compat & (0x0010u | 0x0200u | 0x0400u))
         return 0; /* GDT checksum, bigalloc, metadata checksum */
     if (fs->feature_incompat & ~0x00000242u) return 0;
@@ -240,6 +240,8 @@ static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
         for (uint64_t bit = 0; bit < span; ++bit) {
             uint8_t mask = (uint8_t)(1u << (bit & 7));
             if (bitmap[bit >> 3] & mask) continue;
+            /* Inodes 1-10 are reserved by ext4 even if a damaged bitmap says free. */
+            if (first_ino + bit + 1 < 11) continue;
             if (e4_read(fs, 1024, sb, sizeof(sb)) < 0 || E32(sb, 16) == 0)
                 return -1;
             for (uint32_t i = 0; i < fs->blksz; ++i) old_bitmap[i] = bitmap[i];

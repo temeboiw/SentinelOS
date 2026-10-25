@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52, SYS_QueryFileMetadata=30 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52, SYS_QueryFileMetadata=30, SYS_WmUnregister=17 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -883,8 +883,16 @@ static void show_installer_window(const char *name) {
     (void)msi_invalidate(msi_hwnd,0,1);
     MSI_MSG msg;
     for (;;) {
-        if (!msi_getmsg(&msg,0,0,0)) continue;
+        if (!msi_getmsg(&msg,0,0,0)) {
+            /* Let other runnable processes and input polling progress instead
+             * of spinning at full CPU while the message queue is empty. */
+            (void)sy3(SYS_NtYield,0,0,0);
+            continue;
+        }
         if ((msg.message==0x0100u && msg.wParam==27u) || msg.message==0x0010u) {
+            /* Release the wizard window before terminating the process.
+             * Kernel exit cleanup remains a defensive second line of cleanup. */
+            (void)sy3(SYS_WmUnregister,0,0,0);
             (void)sy3(SYS_Exit,0,0,0);
             for (;;) __asm__ volatile("pause");
         }

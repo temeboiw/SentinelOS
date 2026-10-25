@@ -597,26 +597,27 @@ static int inspect_embedded_pe(const u8 *p, u32 n, u64 total_size) {
     out("\n  PE kind: "); out(magic==0x20b?"PE32+":"PE32");
     out("\n  Sections: "); out_u32(sections);
     out("\n  Stream size: "); out_u32((u32)total_size); out(" bytes\n");
-    if (machine!=0x8664) {
-        out("msiexec: embedded PE machine mismatch; expected AMD64 (34404), got ");
-        out_u32(machine);
-        out("\n");
-        if (machine==0x14c) out("msiexec: this stream contains an x86/I386 PE; this does NOT establish the architecture of any nested Chrome payload\n");
-        else if (machine==0xaa64) out("msiexec: this stream contains an ARM64 PE\n");
-        return 0;
-    }
-    if (magic!=0x20b) {
-        out("msiexec: embedded PE is AMD64 but optional-header magic is ");
-        out_u32(magic);
-        out(magic==0x10b?" (PE32, not PE32+)\n":" (not PE32+)\n");
+    /* The MSI Binary stream need not have the same architecture as a
+       nested payload. Validate this PE's own machine/header pairing, then
+       extract the stream unchanged instead of assuming it must be AMD64. */
+    if ((machine==0x14c && magic!=0x10b) ||
+        ((machine==0x8664 || machine==0xaa64) && magic!=0x20b) ||
+        (machine!=0x14c && machine!=0x8664 && machine!=0xaa64)) {
+        out("msiexec: unsupported or inconsistent PE machine/optional-header pair\\n");
         return 0;
     }
     if (!sections || sections>96) {
-        out("msiexec: AMD64 PE has invalid section count: ");
+        out("msiexec: PE has invalid section count: ");
         out_u32(sections);
-        out("\n");
+        out("\\n");
         return 0;
     }
+    if (machine==0x14c)
+        out("msiexec: valid x86 PE32 bootstrapper; extracting unchanged (nested payload architecture not yet verified)\\n");
+    else if (machine==0x8664)
+        out("msiexec: valid AMD64 PE32+ executable\\n");
+    else
+        out("msiexec: valid ARM64 PE32+ executable\\n");
     return 1;
 }
 static int extract_embedded_installer(void) {
@@ -678,7 +679,7 @@ static int extract_embedded_installer(void) {
         out("msiexec: embedded installer extraction FAILED; do not launch partial file\n");
         return 0;
     }
-    set_extraction_status("Extracted GoogleChromeInstaller.exe (validated PE)");
+    set_extraction_status("Extracted validated PE; nested Chrome payload architecture unverified");
     out("msiexec: extraction complete: "); out(out_name); out(" (");
     out_u32((u32)size); out(" bytes)\n");
     out("msiexec: this is the embedded installer, not yet confirmed to be chrome.exe\n");

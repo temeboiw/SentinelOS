@@ -85,12 +85,14 @@ static int E1000Init(void) {
         DbgPrint("e1000: unsupported BAR0=%08x (MMIO required)\n",bar); return 0;
     }
     uint64_t mmio=(uint64_t)(bar&0xFFFFFFF0u);
-    /* The kernel maps the low 4-GiB PCI/MMIO region uncached in both
-       the identity map and HHDM. QEMU's q35 E1000 commonly sits at
-       0x80880000, which is valid and is below the former 0xFE000000-only
-       aperture check. Reject only addresses outside the mapped low region. */
-    if (mmio >= 0xFE000000ULL) {
-        DbgPrint("e1000: BAR0=%p outside mapped low PCI/MMIO region\n",(void*)mmio); return 0;
+    if (mmio == 0 || mmio >= 0x100000000ULL || mmio + 0x6000ULL > 0x100000000ULL) {
+        DbgPrint("e1000: unsupported BAR0 address %p\n",(void*)mmio); return 0;
+    }
+    /* Firmware may omit this PCI BAR from its memory map. Explicitly map
+       every page containing the registers, with cache-disable flags, before
+       touching the device. */
+    if (!vmm_map_mmio(mmio, 0x6000ULL)) {
+        DbgPrint("e1000: failed to map BAR0=%p into HHDM\n",(void*)mmio); return 0;
     }
     e1000_regs=(volatile uint32_t *)(HHDM_BASE + mmio);
     uint32_t cmd=PciRead32(d.bus,d.device,d.function,4);

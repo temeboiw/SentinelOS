@@ -694,12 +694,13 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
     if ((E16(dir, 0) & 0xF000u) != 0x4000u) return -1;
     uint64_t size = e4_size(dir);
     uint32_t need = (8u + nl + 3u) & ~3u;
-    uint8_t block[4096];
+    uint8_t block[4096], original_block[4096];
 
     for (uint64_t pos = 0; pos < size; pos += fs->blksz) {
         uint64_t pb = e4_map(fs, dir, (uint32_t)(pos / fs->blksz));
         if (!pb || e4_read(fs, pb * fs->blksz, block, fs->blksz) < 0)
             return -1;
+        for (uint32_t bi = 0; bi < fs->blksz; ++bi) original_block[bi] = block[bi];
         for (uint32_t off = 0; off + 8 <= fs->blksz; ) {
             uint32_t ino = E32(block, off);
             uint16_t rec = E16(block, off + 4);
@@ -717,10 +718,18 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                 /* Confirm the directory entry reached stable readable media. */
                 uint8_t check[4096];
                 if (e4_read(fs, pb * fs->blksz, check, fs->blksz) < 0 ||
-                    E32(check, off) != child_ino || check[off + 6] != nl)
+                    E32(check, off) != child_ino || check[off + 6] != nl) {
+                    if (e4_write(fs, pb * fs->blksz, original_block, fs->blksz) < 0) {
+                        fs->write_faulted = 1; fs->ok = 0;
+                    }
                     return -1;
-                for (uint32_t j = 0; j < nl; ++j)
-                    if (check[off + 8 + j] != (uint8_t)name[j]) return -1;
+                }
+                for (uint32_t j = 0; j < nl; ++j) if (check[off + 8 + j] != (uint8_t)name[j]) {
+                    if (e4_write(fs, pb * fs->blksz, original_block, fs->blksz) < 0) {
+                        fs->write_faulted = 1; fs->ok = 0;
+                    }
+                    return -1;
+                }
                 return 0;
             }
             if (ino != 0 && used <= rec && rec - used >= need) {
@@ -734,10 +743,18 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                 if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
                 uint8_t check[4096];
                 if (e4_read(fs, pb * fs->blksz, check, fs->blksz) < 0 ||
-                    E32(check, noff) != child_ino || check[noff + 6] != nl)
+                    E32(check, noff) != child_ino || check[noff + 6] != nl) {
+                    if (e4_write(fs, pb * fs->blksz, original_block, fs->blksz) < 0) {
+                        fs->write_faulted = 1; fs->ok = 0;
+                    }
                     return -1;
-                for (uint32_t j = 0; j < nl; ++j)
-                    if (check[noff + 8 + j] != (uint8_t)name[j]) return -1;
+                }
+                for (uint32_t j = 0; j < nl; ++j) if (check[noff + 8 + j] != (uint8_t)name[j]) {
+                    if (e4_write(fs, pb * fs->blksz, original_block, fs->blksz) < 0) {
+                        fs->write_faulted = 1; fs->ok = 0;
+                    }
+                    return -1;
+                }
                 return 0;
             }
             off += rec;
@@ -788,6 +805,18 @@ static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
     if (e4_inode_write(fs, dir_ino, dir) < 0) {
         (void)e4_inode_write(fs, dir_ino, original);
         (void)e4_free_block(fs, physical);
+        return -1;
+    }
+    uint8_t verify_inode[256];
+    if (e4_inode(fs, dir_ino, verify_inode) < 0 ||
+        e4_size(verify_inode) != old_size + fs->blksz ||
+        e4_map(fs, verify_inode, (uint32_t)lb) != physical) {
+        if (e4_inode_write(fs, dir_ino, original) < 0) {
+            fs->write_faulted = 1; fs->ok = 0;
+        }
+        if (e4_free_block(fs, physical) < 0) {
+            fs->write_faulted = 1; fs->ok = 0;
+        }
         return -1;
     }
     return 0;

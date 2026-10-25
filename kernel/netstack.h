@@ -152,7 +152,7 @@ static int NetInit(void) {
     if(!e1000_ready) return 0;
     NetZero(net_udp_slots,sizeof(net_udp_slots));
     net_gateway_mac_valid=0; net_started=1;
-    NetSendArp(1,(const uint8_t *)"\xff\xff\xff\xff\xff\xff",net_ipv4_gateway);
+    { const uint8_t broadcast[6]={255,255,255,255,255,255}; NetSendArp(1,broadcast,net_ipv4_gateway); }
     DbgPrint("net: IPv4 10.0.2.15/24 gateway 10.0.2.2; ARP/IPv4/UDP polling initialized (DHCP/TCP pending)\n");
     return 1;
 }

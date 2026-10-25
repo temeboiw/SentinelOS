@@ -494,7 +494,7 @@ __attribute__((dllexport)) int wcstombs(char *dst, const unsigned short *src, un
         unsigned int cp=src[i]; unsigned int need=(cp<0x80)?1u:(cp<0x800)?2u:3u;
         if(cp>=0xD800&&cp<=0xDBFF){unsigned int lo=src[i+1];if(lo<0xDC00||lo>0xDFFF)return (int)-1;cp=0x10000+((cp-0xD800)<<10)+(lo-0xDC00);need=4;i++;}
         else if(cp>=0xDC00&&cp<=0xDFFF)return (int)-1;
-        if(o+need>cap)break;
+        if(dst&&o+need>cap)break;
         if(dst){if(need==1)dst[o]=(char)cp;else if(need==2){dst[o]=(char)(0xC0|(cp>>6));dst[o+1]=(char)(0x80|(cp&0x3F));}else if(need==3){dst[o]=(char)(0xE0|(cp>>12));dst[o+1]=(char)(0x80|((cp>>6)&0x3F));dst[o+2]=(char)(0x80|(cp&0x3F));}else{dst[o]=(char)(0xF0|(cp>>18));dst[o+1]=(char)(0x80|((cp>>12)&0x3F));dst[o+2]=(char)(0x80|((cp>>6)&0x3F));dst[o+3]=(char)(0x80|(cp&0x3F));}}
         o+=need;i++;
     }
@@ -504,11 +504,11 @@ __attribute__((dllexport)) int wcstombs(char *dst, const unsigned short *src, un
 __attribute__((dllexport)) unsigned long long mbstowcs(unsigned short *dst, const char *src, unsigned long long cap) {
     if(!src)return (unsigned long long)-1;
     unsigned long long i=0,o=0;
-    while(src[i] && o<cap){unsigned char c=(unsigned char)src[i++];unsigned int cp;unsigned int need;
+    while(src[i] && (!dst || o<cap)){unsigned char c=(unsigned char)src[i++];unsigned int cp;unsigned int need;
       if(c<0x80){cp=c;need=0;}else if((c&0xE0)==0xC0){cp=c&0x1F;need=1;}else if((c&0xF0)==0xE0){cp=c&0x0F;need=2;}else if((c&0xF8)==0xF0){cp=c&7;need=3;}else return (unsigned long long)-1;
       for(unsigned int j=0;j<need;j++){unsigned char q=(unsigned char)src[i++];if(!q||(q&0xC0)!=0x80)return (unsigned long long)-1;cp=(cp<<6)|(q&0x3F);}
       if(cp>0x10FFFF||(cp>=0xD800&&cp<=0xDFFF)||(need==1&&cp<0x80)||(need==2&&cp<0x800)||(need==3&&cp<0x10000))return (unsigned long long)-1;
-      if(cp<=0xFFFF){if(dst)dst[o]=(unsigned short)cp;o++;}else{if(o+2>cap)break;cp-=0x10000;if(dst){dst[o]=(unsigned short)(0xD800+(cp>>10));dst[o+1]=(unsigned short)(0xDC00+(cp&0x3FF));}o+=2;}
+      if(cp<=0xFFFF){if(dst)dst[o]=(unsigned short)cp;o++;}else{if(dst&&o+2>cap)break;cp-=0x10000;if(dst){dst[o]=(unsigned short)(0xD800+(cp>>10));dst[o+1]=(unsigned short)(0xDC00+(cp&0x3FF));}o+=2;}
     }
     if(dst&&o<cap)dst[o]=0;
     return o;

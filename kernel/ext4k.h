@@ -44,20 +44,46 @@ static int e4_raw_write(Ext4k *fs, uint64_t off,
  * successful writes. Filesystem-wide multi-block atomicity still requires a
  * persistent journal and is deliberately not claimed here.
  */
+static int e4_bytes_equal(const uint8_t *a, const uint8_t *b, uint64_t n) {
+    for (uint64_t i = 0; i < n; ++i) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+/*
+ * Failure-contained byte write. Verify successful writes by reading them back.
+ * If the device reports failure or readback differs, restore the saved bytes.
+ * Restoration is retried because ATA/virtio errors may be transient; if the
+ * old bytes cannot be verified, fence the mounted filesystem against writes.
+ * This is operation-level recovery, not power-loss recovery: that needs a
+ * persistent journal and ordered flush/barrier support.
+ */
 static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
     if (!fs || !fs->ok || fs->write_faulted || (!src && len)) return -1;
     if (!len) return 0;
-    /* A write is one bounded transaction: snapshot the entire request before
-       issuing I/O, so a failed request cannot leave successful prefix chunks. */
     if (len > fs->blksz || len > sizeof(fs->blk) || off > UINT64_MAX - len)
         return -1;
-    uint8_t before[4096];
+
+    uint8_t before[4096], verify[4096];
     if (e4_read(fs, off, before, len) < 0) return -1;
-    if (e4_raw_write(fs, off, src, len) == 0) return 0;
-    if (e4_raw_write(fs, off, before, len) < 0) {
-        fs->write_faulted = 1;
-        fs->ok = 0;
+    int write_ok = 0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (e4_raw_write(fs, off, src, len) == 0 &&
+            e4_read(fs, off, verify, len) == 0 &&
+            e4_bytes_equal(verify, (const uint8_t *)src, len)) {
+            write_ok = 1;
+            break;
+        }
     }
+    if (write_ok) return 0;
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (e4_raw_write(fs, off, before, len) == 0 &&
+            e4_read(fs, off, verify, len) == 0 &&
+            e4_bytes_equal(verify, before, len))
+            return -1;
+    }
+    fs->write_faulted = 1;
+    fs->ok = 0;
     return -1;
 }
 
@@ -620,7 +646,7 @@ static int e4_free_inode(Ext4k *fs, uint32_t ino) {
 /* Discard an unpublished regular file and reclaim its inline extent blocks.
    This is best-effort rollback, not crash recovery or a substitute for journaling. */
 static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
-    if (!e4_write_supported(fs) || !ino) return -1;
+    if (!e4_write_supported(fs) || !ino || fs->write_faulted) return -1;
     uint8_t inode[256], zero_inode[256];
     uint64_t starts[4], counts[4], nruns = 0;
     if (e4_inode(fs, ino, inode) < 0) return -1;
@@ -653,7 +679,7 @@ static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
 
 static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                            const char *name, uint32_t child_ino) {
-    if (!e4_write_supported(fs) || !name || !child_ino || !dir_ino)
+    if (!e4_write_supported(fs) || !name || !child_ino || !dir_ino || fs->write_faulted)
         return -1;
     uint32_t nl = 0;
     while (name[nl] && nl < 256) {
@@ -688,6 +714,13 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                 block[off + 7] = 1; /* EXT4_FT_REG_FILE */
                 for (uint32_t j = 0; j < nl; ++j) block[off + 8 + j] = (uint8_t)name[j];
                 if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+                /* Confirm the directory entry reached stable readable media. */
+                uint8_t check[4096];
+                if (e4_read(fs, pb * fs->blksz, check, fs->blksz) < 0 ||
+                    E32(check, off) != child_ino || check[off + 6] != nl)
+                    return -1;
+                for (uint32_t j = 0; j < nl; ++j)
+                    if (check[off + 8 + j] != (uint8_t)name[j]) return -1;
                 return 0;
             }
             if (ino != 0 && used <= rec && rec - used >= need) {
@@ -699,6 +732,12 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                 block[noff + 7] = 1;
                 for (uint32_t j = 0; j < nl; ++j) block[noff + 8 + j] = (uint8_t)name[j];
                 if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+                uint8_t check[4096];
+                if (e4_read(fs, pb * fs->blksz, check, fs->blksz) < 0 ||
+                    E32(check, noff) != child_ino || check[noff + 6] != nl)
+                    return -1;
+                for (uint32_t j = 0; j < nl; ++j)
+                    if (check[noff + 8 + j] != (uint8_t)name[j]) return -1;
                 return 0;
             }
             off += rec;

@@ -603,21 +603,21 @@ static int inspect_embedded_pe(const u8 *p, u32 n, u64 total_size) {
     if ((machine==0x14c && magic!=0x10b) ||
         ((machine==0x8664 || machine==0xaa64) && magic!=0x20b) ||
         (machine!=0x14c && machine!=0x8664 && machine!=0xaa64)) {
-        out("msiexec: unsupported or inconsistent PE machine/optional-header pair\\n");
+        out("msiexec: unsupported or inconsistent PE machine/optional-header pair\n");
         return 0;
     }
     if (!sections || sections>96) {
         out("msiexec: PE has invalid section count: ");
         out_u32(sections);
-        out("\\n");
+        out("\n");
         return 0;
     }
     if (machine==0x14c)
-        out("msiexec: valid x86 PE32 bootstrapper; extracting unchanged (nested payload architecture not yet verified)\\n");
+        out("msiexec: valid x86 PE32 bootstrapper; extracting unchanged (nested payload architecture not yet verified)\n");
     else if (machine==0x8664)
-        out("msiexec: valid AMD64 PE32+ executable\\n");
+        out("msiexec: valid AMD64 PE32+ executable\n");
     else
-        out("msiexec: valid ARM64 PE32+ executable\\n");
+        out("msiexec: valid ARM64 PE32+ executable\n");
     return 1;
 }
 static int extract_embedded_installer(void) {

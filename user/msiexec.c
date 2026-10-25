@@ -982,8 +982,9 @@ void mainCRTStartup(void) {
     }
     out("msiexec: package read complete: "); out_u32(total); out(" bytes\n");
     file_bytes=buf; file_size=total;
-    msi_ui_progress("Validating MSI database",total,total);
+    msi_ui_progress("Validating MSI database",0,1);
     inspect_msi();
+    msi_ui_progress("MSI analysis complete",1,1);
     if (msi_ok) {
         if (msi_db_ok) {
             if (msi_ui_confirm(name)) {

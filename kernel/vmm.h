@@ -425,9 +425,18 @@ static void MmDeleteAddressSpace(KPROCESS *p) {
 
 // map physical [s, e) at virt = voff + phys, rounded out to 2 MiB
 static void map_range(uint64_t voff, uint64_t s, uint64_t e, uint64_t attr) {
+    if (e <= s || e > UINT64_MAX - (LARGE - 1)) return;
     s &= ~(LARGE - 1);
     e = (e + LARGE - 1) & ~(LARGE - 1);
-    for (uint64_t p = s; p < e; p += LARGE) map_2m(voff + p, p, attr);
+    for (uint64_t p = s; p < e; p += LARGE) {
+        uint64_t virt = voff + p;
+        /* Refuse arithmetic wrap or non-canonical mappings instead of corrupting
+           a different page-table slot when firmware supplies a strange range. */
+        if (virt < voff || (virt >> 48) != 0xFFFF && virt >= 0xFFFF800000000000ULL)
+            vmm_panic("map_range: invalid virtual range");
+        map_2m(virt, p, attr);
+        if (p > UINT64_MAX - LARGE) break;
+    }
 }
 
 // software page-table walk; returns physical address or ~0 if unmapped
@@ -466,6 +475,14 @@ static void vmm_init(const BootInfo *bi) {
             attr = PTE_PCD | PTE_PWT; break;
         default:
             continue;                                               // unusable, PAL code
+        }
+        /* This build's PMM supports up to 128 GiB. Cap RAM direct/identity
+           mappings at the same boundary; keep low MMIO mapping policy intact. */
+        if (d->type == 1 || d->type == 2 || d->type == 3 || d->type == 4 ||
+            d->type == 5 || d->type == 6 || d->type == 7 || d->type == 9 ||
+            d->type == 10 || d->type == 14) {
+            if (s >= PMM_MAX_PHYS_BYTES) continue;
+            if (e > PMM_MAX_PHYS_BYTES) e = PMM_MAX_PHYS_BYTES;
         }
         map_range(0, s, e, attr);
         map_range(HHDM_BASE, s, e, attr);

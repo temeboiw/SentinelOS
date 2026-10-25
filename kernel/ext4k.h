@@ -415,6 +415,69 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
     return 0;
 }
 
+
+/*
+ * Insert a regular-file name into slack space in an existing directory block.
+ * Does not grow directories; returns failure if no safe slot exists. Caller
+ * must initialize the child inode first and handle rollback on failure.
+ */
+static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
+                           const char *name, uint32_t child_ino) {
+    if (!fs || !fs->ok || !name || !child_ino || !dir_ino ||
+        fs->blksz < 1024 || fs->blksz > 4096)
+        return -1;
+    uint32_t nl = 0;
+    while (name[nl] && nl < 256) {
+        if (name[nl] == '/' || name[nl] == '\\') return -1;
+        ++nl;
+    }
+    if (!nl || nl > 255 || name[0] == '.' || e4_lookup(fs, dir_ino, name))
+        return -1;
+
+    uint8_t dir[256];
+    if (e4_inode(fs, dir_ino, dir) < 0) return -1;
+    if ((E16(dir, 0) & 0xF000u) != 0x4000u) return -1;
+    uint64_t size = e4_size(dir);
+    uint32_t need = (8u + nl + 3u) & ~3u;
+    uint8_t block[4096];
+
+    for (uint64_t pos = 0; pos < size; pos += fs->blksz) {
+        uint64_t pb = e4_map(fs, dir, (uint32_t)(pos / fs->blksz));
+        if (!pb || e4_read(fs, pb * fs->blksz, block, fs->blksz) < 0)
+            return -1;
+        for (uint32_t off = 0; off + 8 <= fs->blksz; ) {
+            uint32_t ino = E32(block, off);
+            uint16_t rec = E16(block, off + 4);
+            uint8_t old_nl = block[off + 6];
+            if (rec < 8 || (rec & 3u) || rec > fs->blksz - off)
+                return -1;
+            uint32_t used = (8u + old_nl + 3u) & ~3u;
+            if (ino == 0 && rec >= need) {
+                E32(block, off) = child_ino;
+                E16(block, off + 4) = rec;
+                block[off + 6] = (uint8_t)nl;
+                block[off + 7] = 1; /* EXT4_FT_REG_FILE */
+                for (uint32_t j = 0; j < nl; ++j) block[off + 8 + j] = (uint8_t)name[j];
+                if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+                return 0;
+            }
+            if (ino != 0 && used <= rec && rec - used >= need) {
+                E16(block, off + 4) = (uint16_t)used;
+                uint32_t noff = off + used;
+                E32(block, noff) = child_ino;
+                E16(block, noff + 4) = (uint16_t)(rec - used);
+                block[noff + 6] = (uint8_t)nl;
+                block[noff + 7] = 1;
+                for (uint32_t j = 0; j < nl; ++j) block[noff + 8 + j] = (uint8_t)name[j];
+                if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+                return 0;
+            }
+            off += rec;
+        }
+    }
+    return -2; /* directory has no suitable slack; growth is not implemented */
+}
+
 #define VFS_MAX_ENT 256
 typedef struct { char name[256]; uint8_t is_dir; uint32_t ino; } VfsEnt;
 static VfsEnt vfs_ents[VFS_MAX_ENT];

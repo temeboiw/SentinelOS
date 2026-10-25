@@ -7,7 +7,7 @@
 
 typedef struct {
     uint64_t part_off;
-    uint32_t blksz, ipg, isize, dsize, first_data;
+    uint32_t blksz, ipg, isize, dsize, first_data, bpg;
     uint64_t total_blocks,free_blocks,reserved_blocks;
     uint32_t total_inodes,free_inodes,volume_serial;
     char volume_label[17];
@@ -79,6 +79,7 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     if (E16(sb, 56) != 0xEF53) return -1;
     fs->blksz = 1024u << E32(sb, 24);
     fs->first_data = E32(sb, 20);
+    fs->bpg = E32(sb, 32);
     fs->ipg = E32(sb, 40);
     fs->isize = E16(sb, 88);
     if (fs->isize < 128) fs->isize = 128;
@@ -92,6 +93,69 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     if (fs->blksz > 4096 || !fs->ipg) return -1;
     fs->ok = 1;
     return 0;
+}
+
+
+/*
+ * Allocate one data block using ext4's block bitmap.
+ * SentinelOS's formatter disables the journal, metadata_csum, and 64bit
+ * features. Refuse other incompatible layouts instead of writing metadata
+ * with assumptions that do not hold for that filesystem.
+ */
+static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
+    if (!fs || !fs->ok || !block_out || !fs->bpg ||
+        fs->is64 || fs->blksz != 4096 || fs->dsize != 32)
+        return -1;
+
+    uint8_t sb[1024];
+    if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    uint32_t incompat = E32(sb, 96);
+    uint32_t ro_compat = E32(sb, 100);
+    /* Allow filetype, extents and flex_bg, which the formatter may enable. */
+    if ((incompat & ~0x00000242u) != 0 ||
+        (ro_compat & 0x00000400u) != 0)
+        return -1;
+
+    uint64_t groups = (fs->total_blocks + fs->bpg - 1) / fs->bpg;
+    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    for (uint64_t g = 0; g < groups; ++g) {
+        uint8_t gd[64];
+        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            return -1;
+        uint32_t bitmap_block = E32(gd, 0);
+        if (!bitmap_block) continue;
+        uint16_t group_free = E16(gd, 12);
+        if (!group_free) continue;
+
+        uint8_t bitmap[4096];
+        if (e4_read(fs, (uint64_t)bitmap_block * fs->blksz,
+                    bitmap, fs->blksz) < 0) return -1;
+        uint64_t first = g * fs->bpg;
+        uint64_t count = fs->total_blocks - first;
+        if (count > fs->bpg) count = fs->bpg;
+        for (uint64_t bit = 0; bit < count; ++bit) {
+            uint64_t block = first + bit;
+            if (block < fs->first_data) continue;
+            if (bitmap[bit >> 3] & (uint8_t)(1u << (bit & 7))) continue;
+
+            uint32_t sb_free = E32(sb, 12);
+            if (!sb_free) return -1;
+            bitmap[bit >> 3] |= (uint8_t)(1u << (bit & 7));
+            if (e4_write(fs, (uint64_t)bitmap_block * fs->blksz,
+                         bitmap, fs->blksz) < 0) return -1;
+
+            E16(gd, 12) = (uint16_t)(group_free - 1);
+            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+                return -1;
+            E32(sb, 12) = sb_free - 1;
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+
+            fs->free_blocks = sb_free - 1;
+            *block_out = block;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {

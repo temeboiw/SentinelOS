@@ -35,6 +35,14 @@ for file in "$ROOT/winmm.dll" "$ROOT/Windows/System32/winmm.dll" "$ROOT/magic/Sy
   require_export "$file" timeGetTime
 done
 
+# Winsock runtime package and key import names must remain available.
+for file in "$ROOT/ws2_32.dll" "$ROOT/Windows/System32/ws2_32.dll" "$ROOT/magic/System32/ws2_32.dll"; do
+  require_file "$file"
+  for symbol in WSAStartup WSACleanup WSAGetLastError WSASetLastError socket closesocket connect bind listen accept send recv sendto recvfrom shutdown select ioctlsocket setsockopt getsockopt inet_addr inet_ntoa inet_pton inet_ntop htons ntohs htonl ntohl getaddrinfo freeaddrinfo gethostname; do
+    require_export "$file" "$symbol"
+  done
+done
+
 # Ensure the shared CRT implementation and the VCRUNTIME compatibility module
 # remain packaged under both names searched by the current loader.
 for file in \

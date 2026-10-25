@@ -125,13 +125,10 @@ static int NetUdpReceive(uint16_t port,void *out,unsigned cap) {
 static int NetUdpSend(uint32_t dst_ip,uint16_t src_port,uint16_t dst_port,const void *data,unsigned len) {
     if(!e1000_ready||!src_port||!dst_port||(!data&&len)||len>NET_UDP_DATA_MAX) return -1;
     uint8_t dst_mac[6]; const uint8_t *mac=0;
-    if((dst_ip&net_ipv4_mask)==(net_ipv4_addr&net_ipv4_mask)&&dst_ip!=net_ipv4_gateway) {
-        /* Neighbor cache is intentionally limited to the QEMU gateway in this
-           milestone. ARP lookup for arbitrary peers is added with DHCP. */
-        return -2;
-    }
-    if(dst_ip==net_ipv4_gateway&&net_gateway_mac_valid) { NetCopy(dst_mac,net_gateway_mac,6); mac=dst_mac; }
-    if(!mac) { uint8_t broadcast[6]={255,255,255,255,255,255}; NetSendArp(1,broadcast,dst_ip); return -3; }
+    /* This first routing milestone uses the QEMU user-network gateway as
+       the Ethernet next hop for external peers and QEMU's DNS alias too. */
+    if(net_gateway_mac_valid) { NetCopy(dst_mac,net_gateway_mac,6); mac=dst_mac; }
+    if(!mac) { uint8_t broadcast[6]={255,255,255,255,255,255}; NetSendArp(1,broadcast,net_ipv4_gateway); return -3; }
     unsigned iplen=sizeof(NET_IP_HDR)+sizeof(NET_UDP_HDR)+len;
     unsigned framelen=sizeof(NET_ETH_HDR)+iplen;
     if(framelen<60) framelen=60;

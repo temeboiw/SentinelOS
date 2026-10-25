@@ -2041,6 +2041,18 @@ ls -lh \
   "$SYS32/taskmgr.exe" \
   "$SYS32/msiexec.exe"
 
+# Enforce the on-disk layout before making the filesystem image.
+if [[ ! -d "$B/rootfs/magic/System32/drivers" ]]; then
+  echo "FATAL: missing magic/System32/drivers directory"
+  exit 1
+fi
+while IFS= read -r top_entry; do
+  [[ "$(basename "$top_entry")" == "magic" ]] || {
+    echo "FATAL: unexpected rootfs entry: $top_entry (only /magic is allowed)"
+    exit 1
+  }
+done < <(find "$B/rootfs" -mindepth 1 -maxdepth 1 -print)
+
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
 
 # Size the ESP from the EFI files (minimum 64 MiB for a practical FAT32 ESP),

@@ -69,14 +69,6 @@ static int e4_write_inode_at(Ext4k *fs, uint8_t *inode,
     return 0;
 }
 
-/* Raw filesystem-relative byte writes. Callers must update ext4 metadata
- * consistently; this primitive alone does not allocate files or blocks. */
-static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
-    if (!fs || !fs->ok || (!src && len)) return -1;
-    if (vb_ok) return blk_write(fs->part_off + off, src, len);
-    return ata_write(fs->part_off + off, src, len);
-}
-
 static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     uint8_t sb[1024];
     fs->part_off = part_lba * 512;

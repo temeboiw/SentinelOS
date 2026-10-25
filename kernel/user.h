@@ -2244,7 +2244,11 @@ static Frame *syscall_handler(Frame *f) {
             }
             wm_unregister(dead_pid);
             if(dx<0){dw+=dx;dx=0;}if(dy<0){dh+=dy;dy=0;}
-            if(dw>0&&dh>0)wm_shared_compose((uint32_t)dx,(uint32_t)dy,(uint32_t)dw,(uint32_t)dh);
+            /* If the process already unregistered its window, there is no
+             * stale window rectangle to repaint. Avoid a needless full-screen
+             * compose on the exit path; it can stall interactive input/rendering. */
+            if(dead_slot>=0&&dw>0&&dh>0)
+                wm_shared_compose((uint32_t)dx,(uint32_t)dy,(uint32_t)dw,(uint32_t)dh);
 
             for (int i = 0; i < UP_MAX; i++) {
                 if (up_tab[i].proc == dying) {

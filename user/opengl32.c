@@ -136,7 +136,7 @@ static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
     float v=ogl_get_texcoord(a,1)*wa+ogl_get_texcoord(b,1)*wb+ogl_get_texcoord(c,1)*wc;
     unsigned int t=ogl_sample_texture(u,v);
     unsigned int tr=(t>>16)&255,tg=(t>>8)&255,tb=t&255,ta=t>>24;
-    unsigned int cr=(color>>16)&255,cg=(color>>8)&255,cb=color&255,ca=color>>24;
+    unsigned int cr=(out>>16)&255,cg=(out>>8)&255,cb=out&255,ca=out>>24;
     out=((ta*ca/255)<<24)|((tr*cr/255)<<16)|((tg*cg/255)<<8)|(tb*cb/255);
    }
    if(ogl_enabled&GL_BLEND){OGL_FB *fb=ogl_fb();if(fb&&x>=0&&y>=0&&(unsigned int)x<fb->w&&(unsigned int)y<fb->h){unsigned int *dp=(unsigned int*)(unsigned long long)fb->va+(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x;unsigned int dst=*dp,sa=(out>>24)&255,da=(dst>>24)&255;unsigned int sf=ogl_blend_src==GL_ZERO?0:ogl_blend_src==GL_ONE?255:ogl_blend_src==GL_SRC_ALPHA?sa:0,df=ogl_blend_dst==GL_ZERO?0:ogl_blend_dst==GL_ONE?255:ogl_blend_dst==GL_ONE_MINUS_SRC_ALPHA?255-sa:0;unsigned int rr=(((out>>16)&255)*sf+((dst>>16)&255)*df)/255,gg=(((out>>8)&255)*sf+((dst>>8)&255)*df)/255,bb=((out&255)*sf+(dst&255)*df)/255,aa=(sa*sf+da*df)/255;out=(aa<<24)|(rr<<16)|(gg<<8)|bb;}}

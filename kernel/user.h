@@ -1688,9 +1688,76 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
+
+#define SYS_NtSocketCreate 44
+#define SYS_NtSocketClose  45
+#define SYS_NtSocketBind   46
+#define SYS_NtSocketSendTo 47
+#define SYS_NtSocketRecvFrom 48
+#define NT_SOCKET_BASE 0x534F0000ULL
+typedef struct { int used; int owner_pid; int type; uint16_t local_port; uint32_t peer_addr; uint16_t peer_port; } NT_SOCKET_SLOT;
+static NT_SOCKET_SLOT nt_socket_slots[32];
+
+static int NtSocketDecode(uint64_t h) {
+    if(h<=NT_SOCKET_BASE || h>NT_SOCKET_BASE+32) return -1;
+    int i=(int)(h-NT_SOCKET_BASE-1);
+    if(!nt_socket_slots[i].used || !MmCurrentProcess ||
+       nt_socket_slots[i].owner_pid!=(int)MmCurrentProcess->Pid) return -1;
+    return i;
+}
+
 static Frame *syscall_handler(Frame *f) {
     NetPoll(); /* service Ethernet RX while user processes make kernel calls */
     switch (f->rax) {
+    case SYS_NtSocketCreate: {
+        int af=(int)f->rdi, type=(int)f->rsi, proto=(int)f->rdx;
+        if(af!=2 || (type!=1 && type!=2) || (proto && proto!=(type==2?17:6))) { f->rax=(uint64_t)-1LL; return f; }
+        if(type==1) { f->rax=(uint64_t)-1LL; return f; } /* TCP waits for the TCP state machine. */
+        for(int i=0;i<32;i++) if(!nt_socket_slots[i].used) {
+            nt_socket_slots[i]=(NT_SOCKET_SLOT){.used=1,.owner_pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:-1,.type=type};
+            f->rax=NT_SOCKET_BASE+(uint64_t)i+1; return f;
+        }
+        f->rax=(uint64_t)-1LL; return f;
+    }
+    case SYS_NtSocketClose: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0) { f->rax=(uint64_t)-1LL; return f; }
+        nt_socket_slots[i].used=0; f->rax=0; return f;
+    }
+    case SYS_NtSocketBind: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0 || !f->rsi || f->rdx<16 ||
+           !MmValidateUserRange(MmCurrentProcess,f->rsi,16,0)) { f->rax=(uint64_t)-1LL; return f; }
+        const uint8_t *sa=(const uint8_t *)(uint64_t)f->rsi;
+        uint16_t family=*(const uint16_t *)sa;
+        uint16_t port=(uint16_t)(((uint16_t)sa[2]<<8)|sa[3]);
+        if(family!=2 || !port) { f->rax=(uint64_t)-1LL; return f; }
+        int slot=NetUdpBind(port);
+        if(slot<0) { f->rax=(uint64_t)-1LL; return f; }
+        nt_socket_slots[i].local_port=port; f->rax=0; return f;
+    }
+    case SYS_NtSocketSendTo: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0 || nt_socket_slots[i].type!=2 || !f->rsi || f->rdx>1472 ||
+           !MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,0) ||
+           !f->r8 || f->r9<16 || !MmValidateUserRange(MmCurrentProcess,f->r8,16,0)) { f->rax=(uint64_t)-1LL; return f; }
+        const uint8_t *sa=(const uint8_t *)(uint64_t)f->r8;
+        if(*(const uint16_t *)sa!=2) { f->rax=(uint64_t)-1LL; return f; }
+        uint16_t port=(uint16_t)(((uint16_t)sa[2]<<8)|sa[3]);
+        uint32_t ip=*(const uint32_t *)(sa+4);
+        uint16_t local=nt_socket_slots[i].local_port;
+        if(!local) { local=(uint16_t)(49152+(i*37)%16000); if(NetUdpBind(local)<0){f->rax=(uint64_t)-1LL;return f;} nt_socket_slots[i].local_port=local; }
+        int sent=NetUdpSend(ip,local,port,(const void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        f->rax=(uint64_t)(int64_t)sent; return f;
+    }
+    case SYS_NtSocketRecvFrom: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0 || nt_socket_slots[i].type!=2 || !nt_socket_slots[i].local_port ||
+           !f->rsi || f->rdx>1472 || !MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,1)) { f->rax=(uint64_t)-1LL; return f; }
+        NetPoll();
+        int got=NetUdpReceive(nt_socket_slots[i].local_port,(void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        f->rax=(uint64_t)(int64_t)got; return f;
+    }
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
         if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS ||
             f->rsi != NT_PROCESS_BASIC_INFORMATION_CLASS ||

@@ -1689,6 +1689,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
 }
 
 static Frame *syscall_handler(Frame *f) {
+    NetPoll(); /* service Ethernet RX while user processes make kernel calls */
     switch (f->rax) {
     case NT_SYS_QUERY_INFORMATION_PROCESS: {
         if ((NT_HANDLE)f->rdi != NT_CURRENT_PROCESS ||

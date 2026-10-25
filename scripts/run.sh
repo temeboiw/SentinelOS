@@ -136,6 +136,8 @@ exec qemu-system-x86_64 \
     -drive if=pflash,format=raw,file="$VARS" \
     -drive file="$DISKIMG",format=raw,if=none,id=d0 \
     -device virtio-blk-pci,drive=d0 \
+    -netdev user,id=net0 \
+    -device e1000,netdev=net0 \
     "${GPU_ARGS[@]}" \
     -audiodev "wav,id=audio0,path=$B/sentinel-audio.wav" \
     -device ich9-intel-hda,id=hda,debug=0 \

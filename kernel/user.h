@@ -1271,7 +1271,8 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
         found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
     }
     if (!found) { DbgPrint("user: disk image not found: %s\n", name); return 0; }
-    if (raw_size < 0x100) {
+    DbgPrint("user: PE probe path=%s size=%llu ino=%u\n",name,(unsigned long long)raw_size,ino);
+    if (raw_size < 0x100) { DbgPrint("user: PE reject too-small file size=%llu\n",(unsigned long long)raw_size);
         DbgPrint("user: disk image too small: %s size=%llu\n", name,
                  (unsigned long long)raw_size);
         return 0;
@@ -1280,34 +1281,34 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     /* Read only enough to discover and validate the PE header extent. */
     uint8_t dos[64];
     if (vfs_read_inode_at(ino,0,dos,sizeof(dos))!=(int)sizeof(dos) ||
-        dos[0]!='M' || dos[1]!='Z') {
+        dos[0]!='M' || dos[1]!='Z') { DbgPrint("user: PE reject DOS header/read\n");
         DbgPrint("user: disk image is not MZ PE: %s\n",name);
         return 0;
     }
     int32_t lfanew=*(int32_t *)(dos+0x3C);
     if (lfanew<0 || (uint64_t)lfanew>raw_size ||
-        raw_size-(uint64_t)lfanew<24) return 0;
+        raw_size-(uint64_t)lfanew<24) { DbgPrint("user: PE reject e_lfanew=%d size=%llu\n",lfanew,(unsigned long long)raw_size); return 0; }
 
     uint8_t nt_head[24];
     if (vfs_read_inode_at(ino,(uint64_t)lfanew,nt_head,sizeof(nt_head))!=(int)sizeof(nt_head) ||
-        *(uint32_t *)nt_head!=0x00004550) return 0;
+        *(uint32_t *)nt_head!=0x00004550) { DbgPrint("user: PE reject NT signature/read\n"); return 0; }
     uint16_t machine=*(uint16_t *)(nt_head+4);
     uint16_t sections=*(uint16_t *)(nt_head+6);
     uint16_t opt_size=*(uint16_t *)(nt_head+20);
     uint64_t opt_off=(uint64_t)lfanew+24;
     if (machine!=0x8664 || opt_size<160 || !sections || sections>96 ||
-        opt_off>raw_size || opt_size>raw_size-opt_off) return 0;
+        opt_off>raw_size || opt_size>raw_size-opt_off) { DbgPrint("user: PE reject COFF machine=%x sections=%u opt=%u\n",machine,sections,opt_size); return 0; }
 
     uint64_t sect_off=opt_off+opt_size;
     uint64_t header_need=sect_off+(uint64_t)sections*40;
     if (header_need<sect_off || header_need>raw_size ||
-        header_need>1024ull*1024ull) {
+        header_need>1024ull*1024ull) { DbgPrint("user: PE reject header extent=%llu\n",(unsigned long long)header_need);
         DbgPrint("user: invalid or oversized PE headers: %s\n",name);
         return 0;
     }
     uint64_t header_pages=(header_need+0xFFFULL)>>12;
     uint64_t header_pa=pmm_alloc_n(header_pages);
-    if(!header_pa)return 0;
+    if(!header_pa) { DbgPrint("user: PE header allocation failed pages=%llu\n",(unsigned long long)header_pages); return 0; }
     uint8_t *headers=(uint8_t *)(HHDM_BASE+header_pa);
     for(uint64_t i=0;i<header_pages*USER_IMAGE_PAGE;i++)headers[i]=0;
     if(vfs_read_inode_at(ino,0,headers,header_need)!=(int)header_need) {
@@ -1321,12 +1322,12 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     uint32_t headers_size=*(uint32_t *)(opt+60);
     if (*(uint16_t *)opt!=0x20B || image_size<0x1000 ||
         !headers_size || headers_size>raw_size || headers_size>image_size ||
-        entry_rva>=image_size) goto bad_headers;
+        entry_rva>=image_size) { DbgPrint("user: PE reject optional magic=%x image=%u headers=%u entry=%x raw=%llu\n",*(uint16_t *)opt,image_size,headers_size,entry_rva,(unsigned long long)raw_size); goto bad_headers; }
 
     uint64_t image_pages=((uint64_t)image_size+0xFFFULL)>>12;
     if(!image_pages || image_pages>UINT64_MAX/USER_IMAGE_PAGE)goto bad_headers;
     uint64_t image_pa=pmm_alloc_n(image_pages);
-    if(!image_pa)goto bad_headers;
+    if(!image_pa) { DbgPrint("user: PE image allocation failed pages=%llu bytes=%u\n",(unsigned long long)image_pages,image_size); goto bad_headers; }
     uint8_t *image=(uint8_t *)(HHDM_BASE+image_pa);
     for(uint64_t i=0;i<image_pages*USER_IMAGE_PAGE;i++)image[i]=0;
     if(vfs_read_inode_at(ino,0,image,headers_size)!=(int)headers_size) {

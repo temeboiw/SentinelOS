@@ -1584,9 +1584,9 @@ static uint64_t wm_dbg_window_moves, wm_dbg_window_registers, wm_dbg_window_clos
 static int wm_dbg_sample(uint64_t n) { return n <= 2u || (n % 512u) == 0u; }
 static uint64_t wm_dbg_input_events;
 static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
-    uint64_t n=++wm_dbg_input_events;
     /* Pointer motion is extremely frequent; keep keys and click events only. */
     if(type!=1 && type!=3)return;
+    uint64_t n=++wm_dbg_input_events;
     if(!wm_dbg_sample(n))return;
     if(type==1)
         DbgPrint("[input] #%llu pid=%d key='%c' mouse=(%d,%d) buttons=%d\n",
@@ -1703,9 +1703,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         order[count++]=slot;
     }
     uint64_t dbg_n=++wm_dbg_compose_calls;
-    static uint64_t wm_dbg_composed_pixels;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
-    wm_dbg_composed_pixels+=damage_pixels;
     if(x==0&&y==0&&w==width&&h==height && dbg_n==1u) {
         DbgPrint("[gfx] initial full-screen compose pixels=%llu\\n",
                  (unsigned long long)damage_pixels);
@@ -1732,7 +1730,6 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                                        wm_shared_desktop[at]);
         }
     }
-    static uint64_t wm_dbg_window_overlay_pixels;
     uint64_t window_overlay_pixels=0;
     for(int oi=0;oi<count;oi++) {
         int slot=order[oi];
@@ -1766,7 +1763,6 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             }
         }
     }
-    wm_dbg_window_overlay_pixels+=window_overlay_pixels;
     if(wm_dbg_sample(dbg_n) && (window_overlay_pixels || dbg_n<=2u))
         DbgPrint("[gfx] overlay pixels=%llu (compose #%llu)\\n",
                  (unsigned long long)window_overlay_pixels,

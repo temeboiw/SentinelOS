@@ -25,7 +25,7 @@ enum {
  GL_VERTEX_ARRAY=0x8074, GL_COLOR_ARRAY=0x8076, GL_TEXTURE_COORD_ARRAY=0x8078,
  GL_TEXTURE_2D=0x0DE1, GL_BLEND=0x0BE2, GL_DEPTH_TEST=0x0B71,
  GL_SCISSOR_TEST=0x0C11, GL_STENCIL_TEST=0x0B90, GL_DITHER=0x0BD0,
- GL_SRC_ALPHA=0x0302, GL_ONE_MINUS_SRC_ALPHA=0x0303, GL_ONE=1, GL_ZERO=0,
+ GL_SRC_COLOR=0x0300, GL_ONE_MINUS_SRC_COLOR=0x0301, GL_SRC_ALPHA=0x0302, GL_ONE_MINUS_SRC_ALPHA=0x0303, GL_DST_ALPHA=0x0304, GL_ONE_MINUS_DST_ALPHA=0x0305, GL_DST_COLOR=0x0306, GL_ONE_MINUS_DST_COLOR=0x0307, GL_SRC_ALPHA_SATURATE=0x0308, GL_ONE=1, GL_ZERO=0,
  GL_TEXTURE_MIN_FILTER=0x2801, GL_TEXTURE_MAG_FILTER=0x2800,
  GL_TEXTURE_WRAP_S=0x2802, GL_TEXTURE_WRAP_T=0x2803, GL_NEAREST=0x2600,
  GL_LINEAR=0x2601, GL_CLAMP=0x2900, GL_REPEAT=0x2901,
@@ -34,6 +34,7 @@ enum {
  GL_INVALID_VALUE=0x0501, GL_INVALID_OPERATION=0x0502
 };
 static unsigned int ogl_error, ogl_clear_color, ogl_enabled, ogl_next_texture=1;
+static unsigned int ogl_blend_factor(GLenum factor,unsigned int src,unsigned int dst,unsigned int channel){unsigned int sa=src>>24,da=dst>>24,sc=(src>>(channel*8u))&255u,dc=(dst>>(channel*8u))&255u;if(factor==GL_ZERO)return 0;if(factor==GL_ONE)return 255;if(factor==GL_SRC_ALPHA)return sa;if(factor==GL_ONE_MINUS_SRC_ALPHA)return 255u-sa;if(factor==GL_DST_ALPHA)return da;if(factor==GL_ONE_MINUS_DST_ALPHA)return 255u-da;if(factor==GL_SRC_COLOR)return sc;if(factor==GL_ONE_MINUS_SRC_COLOR)return 255u-sc;if(factor==GL_DST_COLOR)return dc;if(factor==GL_ONE_MINUS_DST_COLOR)return 255u-dc;if(factor==GL_SRC_ALPHA_SATURATE)return channel==3?255u:(sa<(255u-da)?sa:(255u-da));return 0;}
 static GLenum ogl_blend_src=GL_SRC_ALPHA,ogl_blend_dst=GL_ONE_MINUS_SRC_ALPHA;
 static unsigned int ogl_pack_alignment=4,ogl_unpack_alignment=4;
 static unsigned int ogl_view_x,ogl_view_y,ogl_view_w,ogl_view_h;
@@ -140,7 +141,7 @@ static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
     unsigned int cr=(out>>16)&255,cg=(out>>8)&255,cb=out&255,ca=out>>24;
     out=((ta*ca/255)<<24)|((tr*cr/255)<<16)|((tg*cg/255)<<8)|(tb*cb/255);
    }
-   if(ogl_enabled&GL_BLEND){OGL_FB *fb=ogl_fb();if(fb&&x>=0&&y>=0&&(unsigned int)x<fb->w&&(unsigned int)y<fb->h){unsigned int *dp=(unsigned int*)(unsigned long long)fb->va+(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x;unsigned int dst=*dp,sa=(out>>24)&255,da=(dst>>24)&255;unsigned int sf=ogl_blend_src==GL_ZERO?0:ogl_blend_src==GL_ONE?255:ogl_blend_src==GL_SRC_ALPHA?sa:0,df=ogl_blend_dst==GL_ZERO?0:ogl_blend_dst==GL_ONE?255:ogl_blend_dst==GL_ONE_MINUS_SRC_ALPHA?255-sa:0;unsigned int rr=(((out>>16)&255)*sf+((dst>>16)&255)*df)/255,gg=(((out>>8)&255)*sf+((dst>>8)&255)*df)/255,bb=((out&255)*sf+(dst&255)*df)/255,aa=(sa*sf+da*df)/255;out=(aa<<24)|(rr<<16)|(gg<<8)|bb;}}
+   if(ogl_enabled&GL_BLEND){OGL_FB *fb=ogl_fb();if(fb&&x>=0&&y>=0&&(unsigned int)x<fb->w&&(unsigned int)y<fb->h){unsigned int *dp=(unsigned int*)(unsigned long long)fb->va+(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x;unsigned int dst=*dp,rr=0,gg=0,bb=0,aa=0;for(unsigned int ch=0;ch<4;ch++){unsigned int sc=(out>>(ch*8u))&255u,dc=(dst>>(ch*8u))&255u,sf=ogl_blend_factor(ogl_blend_src,out,dst,ch),df=ogl_blend_factor(ogl_blend_dst,out,dst,ch),v=(sc*sf+dc*df)/255u;if(ch==0)bb=v;else if(ch==1)gg=v;else if(ch==2)rr=v;else aa=v;}out=(aa<<24)|(rr<<16)|(gg<<8)|bb;}}
    ogl_pixel(x,y,out);
   }
  }
@@ -194,7 +195,8 @@ __attribute__((dllexport)) void glTexCoordPointer(GLint size,GLenum type,GLsizei
 __attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=1;return;}if(a==GL_COLOR_ARRAY){ogl_color_array_enabled=1;return;}if(a==GL_VERTEX_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glDisableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=0;return;}if(a==GL_COLOR_ARRAY){ogl_color_array_enabled=0;return;}if(a!=GL_VERTEX_ARRAY)ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
-__attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if((s!=GL_SRC_ALPHA&&s!=GL_ONE&&s!=GL_ZERO)||(d!=GL_ONE_MINUS_SRC_ALPHA&&d!=GL_ONE&&d!=GL_ZERO)){ogl_error=GL_INVALID_ENUM;return;}ogl_blend_src=s;ogl_blend_dst=d;}
+static int ogl_valid_blend_factor(GLenum f){return f==GL_ZERO||f==GL_ONE||f==GL_SRC_COLOR||f==GL_ONE_MINUS_SRC_COLOR||f==GL_SRC_ALPHA||f==GL_ONE_MINUS_SRC_ALPHA||f==GL_DST_ALPHA||f==GL_ONE_MINUS_DST_ALPHA||f==GL_DST_COLOR||f==GL_ONE_MINUS_DST_COLOR||f==GL_SRC_ALPHA_SATURATE;}
+__attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if(!ogl_valid_blend_factor(s)||!ogl_valid_blend_factor(d)||s==GL_SRC_ALPHA_SATURATE&&d==GL_SRC_ALPHA_SATURATE){ogl_error=GL_INVALID_ENUM;return;}ogl_blend_src=s;ogl_blend_dst=d;}
 __attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v!=1&&v!=2&&v!=4&&v!=8){ogl_error=GL_INVALID_VALUE;return;}if(p==0x0D05)ogl_pack_alignment=(unsigned int)v;else if(p==0x0CF5)ogl_unpack_alignment=(unsigned int)v;else ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glClearStencil(GLint s){(void)s;ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glClearDepth(double d){(void)d;ogl_error=GL_INVALID_OPERATION;}

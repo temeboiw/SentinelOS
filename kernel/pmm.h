@@ -210,7 +210,12 @@ static uint64_t pmm_reclaim_boot_services(const BootInfo *bi) {
     for (uint64_t i = 0; i < n; i++) {
         const EfiMemDesc *d = md_at(bi, i);
         if (d->type != 3 && d->type != 4) continue;
-        for (uint64_t p = 0; p < d->pages; p++) {
+        if (d->phys >= PMM_MAX_PHYS_BYTES ||
+            d->pages > (UINT64_MAX - d->phys) / PAGE_SIZE) continue;
+        uint64_t pages = d->pages;
+        if (pages > (PMM_MAX_PHYS_BYTES - d->phys) / PAGE_SIZE)
+            pages = (PMM_MAX_PHYS_BYTES - d->phys) / PAGE_SIZE;
+        for (uint64_t p = 0; p < pages; p++) {
             uint64_t a = d->phys + p * PAGE_SIZE;
             if (a < 0x100000 || a / PAGE_SIZE >= pm_pages) continue;
             if (bit_get(a / PAGE_SIZE)) { bit_clr(a / PAGE_SIZE); pm_free++; got++; }

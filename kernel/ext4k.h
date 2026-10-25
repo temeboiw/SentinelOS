@@ -174,6 +174,71 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
     return e4_read(fs, itab * fs->blksz + (uint64_t)idx * fs->isize, out, n);
 }
 
+/*
+ * Reserve an inode number using the ext4 inode bitmap. This is only a
+ * reservation primitive: callers must initialize and persist the inode
+ * before publishing a directory entry. Unsupported metadata-checksum and
+ * bigalloc variants are refused rather than silently corrupting metadata.
+ */
+static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
+    if (!fs || !fs->ok || !out_ino || !fs->ipg || !fs->total_inodes ||
+        fs->dsize < 32 || fs->dsize > 64 || fs->isize > 256)
+        return -1;
+    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
+    if (!fs->free_inodes) return -3;
+
+    uint64_t groups = ((uint64_t)fs->total_inodes + fs->ipg - 1) / fs->ipg;
+    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint8_t gd[64], sb[1024];
+    for (uint64_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            return -1;
+        uint32_t free_count = E16(gd, 14);
+        if (fs->is64) free_count |= (uint32_t)E16(gd, 46) << 16;
+        if (!free_count) continue;
+
+        uint64_t bitmap = E32(gd, 4);
+        if (fs->is64) bitmap |= (uint64_t)E32(gd, 36) << 32;
+        if (!bitmap || bitmap >= fs->total_blocks ||
+            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+            return -1;
+
+        uint64_t first_ino = g * fs->ipg;
+        uint64_t span = fs->total_inodes > first_ino
+                      ? fs->total_inodes - first_ino : 0;
+        if (span > fs->ipg) span = fs->ipg;
+        for (uint64_t bit = 0; bit < span; ++bit) {
+            uint8_t mask = (uint8_t)(1u << (bit & 7));
+            if (fs->blk[bit >> 3] & mask) continue;
+            fs->blk[bit >> 3] |= mask;
+            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+                return -1;
+
+            --free_count;
+            E16(gd, 14) = (uint16_t)free_count;
+            if (fs->is64) E16(gd, 46) = (uint16_t)(free_count >> 16);
+            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+                return -1;
+
+            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            uint64_t super_free = E32(sb, 16);
+            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x160) << 32;
+            if (!super_free) return -1;
+            --super_free;
+            E32(sb, 16) = (uint32_t)super_free;
+            if (fs->is64) E32(sb, 0x160) = (uint32_t)(super_free >> 32);
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+
+            fs->free_inodes = (uint32_t)super_free;
+            *out_ino = (uint32_t)(first_ino + bit + 1);
+            return 0;
+        }
+        /* A contradictory group counter/bitmap is not safe to work around. */
+        return -1;
+    }
+    return -3;
+}
+
 /* Persist an inode record without disturbing adjacent inode-table entries. */
 static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
     if (!fs || !fs->ok || !inode || !ino || ino > fs->total_inodes ||

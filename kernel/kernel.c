@@ -12,6 +12,7 @@
 #include "hda.h"
 #include "smp.h"
 #include "pci_network.h"
+#include "e1000.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -56,6 +57,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
+    E1000Init();
     smp_discover();
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);

@@ -1143,6 +1143,12 @@ lld -flavor link \
   /export:strstr \
   /export:strrchr \
   /export:atoi \
+  /export:strtol \
+  /export:strtoul \
+  /export:strtoll \
+  /export:strtoull \
+  /export:wcstombs \
+  /export:mbstowcs \
   /export:isprint \
   /export:strspn \
   /export:strcspn \

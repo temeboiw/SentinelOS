@@ -172,13 +172,20 @@ __attribute__((dllexport)) void glDrawArrays(GLenum mode,GLint first,GLsizei cou
  else if(mode==GL_QUADS){for(int i=0;i+3<count;i+=4){ogl_triangle(first+i,first+i+1,first+i+2);ogl_triangle(first+i,first+i+2,first+i+3);}}
  else ogl_error=GL_INVALID_ENUM;
 }
+static unsigned int ogl_index_at(const unsigned char *p,GLenum type,int i){return type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i]:p[i];}
 __attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum type,const void *indices){
  if(!indices||count<0||count>100000){ogl_error=GL_INVALID_VALUE;return;}
+ if(type!=GL_UNSIGNED_SHORT&&type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}
  const unsigned char *p=(const unsigned char*)indices;
- for(int i=0;i<count;){unsigned int ix;if(type==GL_UNSIGNED_SHORT){ix=((const unsigned short*)p)[i];}else if(type==GL_UNSIGNED_BYTE){ix=p[i];}else{ogl_error=GL_INVALID_ENUM;return;}
-  if(mode==GL_TRIANGLES&&i+2<count){unsigned int ib=type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i+1]:p[i+1],ic=type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i+2]:p[i+2];ogl_triangle((int)ix,(int)ib,(int)ic);i+=3;}
-  else {ogl_pixel(ogl_coord((int)ix,0),ogl_coord((int)ix,1),ogl_vertex_color((int)ix));i++;}
- }
+ if(!ogl_vertices){ogl_error=GL_INVALID_OPERATION;return;}
+ if(mode==GL_TRIANGLES){for(int i=0;i+2<count;i+=3)ogl_triangle((int)ogl_index_at(p,type,i),(int)ogl_index_at(p,type,i+1),(int)ogl_index_at(p,type,i+2));}
+ else if(mode==GL_TRIANGLE_STRIP){for(int i=0;i+2<count;i++){int a=(int)ogl_index_at(p,type,i),b=(int)ogl_index_at(p,type,i+1),d=(int)ogl_index_at(p,type,i+2);if(i&1)ogl_triangle(b,a,d);else ogl_triangle(a,b,d);}}
+ else if(mode==GL_TRIANGLE_FAN){int base=(int)ogl_index_at(p,type,0);for(int i=1;i+1<count;i++)ogl_triangle(base,(int)ogl_index_at(p,type,i),(int)ogl_index_at(p,type,i+1));}
+ else if(mode==GL_QUADS){for(int i=0;i+3<count;i+=4){int a=(int)ogl_index_at(p,type,i),b=(int)ogl_index_at(p,type,i+1),d=(int)ogl_index_at(p,type,i+2),e=(int)ogl_index_at(p,type,i+3);ogl_triangle(a,b,d);ogl_triangle(a,d,e);}}
+ else if(mode==GL_LINES){for(int i=0;i+1<count;i+=2){int a=(int)ogl_index_at(p,type,i),b=(int)ogl_index_at(p,type,i+1);ogl_line(ogl_coord(a,0),ogl_coord(a,1),ogl_coord(b,0),ogl_coord(b,1),ogl_vertex_color(a));}}
+ else if(mode==GL_LINE_STRIP){for(int i=0;i+1<count;i++){int a=(int)ogl_index_at(p,type,i),b=(int)ogl_index_at(p,type,i+1);ogl_line(ogl_coord(a,0),ogl_coord(a,1),ogl_coord(b,0),ogl_coord(b,1),ogl_vertex_color(a));}}
+ else if(mode==GL_POINTS){for(int i=0;i<count;i++){int a=(int)ogl_index_at(p,type,i);ogl_pixel(ogl_coord(a,0),ogl_coord(a,1),ogl_vertex_color(a));}}
+ else ogl_error=GL_INVALID_ENUM;
 }
 __attribute__((dllexport)) void glVertexPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<2||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_vertex_size=size;ogl_vertex_stride=stride;ogl_vertices=(const GLfloat*)p;}
 __attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}

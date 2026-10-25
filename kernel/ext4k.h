@@ -693,33 +693,10 @@ static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
         e4_lookup(fs, dir_ino, name))
         return -1;
 
-    uint8_t dir[256], block[4096];
+    uint8_t dir[256];
     if (e4_inode(fs, dir_ino, dir) < 0 ||
         (E16(dir, 0) & 0xF000u) != 0x4000u)
         return -1;
-    uint64_t size = e4_size(dir);
-    uint32_t need = (8u + nl + 3u) & ~3u;
-    int space = 0;
-    for (uint64_t pos = 0; pos < size && !space; pos += fs->blksz) {
-        uint64_t pb = e4_map(fs, dir, (uint32_t)(pos / fs->blksz));
-        if (!pb || e4_read(fs, pb * fs->blksz, block, fs->blksz) < 0)
-            return -1;
-        for (uint32_t off = 0; off + 8 <= fs->blksz; ) {
-            uint32_t ino = E32(block, off);
-            uint16_t rec = E16(block, off + 4);
-            uint8_t old_nl = block[off + 6];
-            if (rec < 8 || (rec & 3u) || rec > fs->blksz - off)
-                return -1;
-            uint32_t used = (8u + old_nl + 3u) & ~3u;
-            if ((!ino && rec >= need) ||
-                (ino && used <= rec && rec - used >= need)) {
-                space = 1;
-                break;
-            }
-            off += rec;
-        }
-    }
-    if (!space) return -2;
 
     uint32_t ino = 0;
     if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;

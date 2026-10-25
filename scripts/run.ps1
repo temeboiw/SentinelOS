@@ -12,7 +12,21 @@ if (-not (Test-Path $vars)) {
     Copy-Item $tmpl $vars
 }
 
-qemu-system-x86_64 -machine q35 -m 256M `
+# Set SENTINELOS_RAM_MB to test larger guest RAM (maximum managed by this
+# kernel build: 128 GiB). Keep it configurable for smaller development PCs.
+$ramMb = 1024
+if ($env:SENTINELOS_RAM_MB) {
+    if ($env:SENTINELOS_RAM_MB -notmatch '^[1-9][0-9]*$') {
+        throw "SENTINELOS_RAM_MB must be a positive integer (MiB)."
+    }
+    $ramMb = [int64]$env:SENTINELOS_RAM_MB
+}
+if ($ramMb -gt 131072) {
+    throw "This kernel build manages at most 131072 MiB (128 GiB) of RAM."
+}
+Write-Host "SentinelOS: QEMU guest RAM $ramMb MiB"
+
+qemu-system-x86_64 -machine q35 -m "${ramMb}M" `
   -drive "if=pflash,format=raw,readonly=on,file=$code" `
   -drive "if=pflash,format=raw,file=$vars" `
   -drive "format=raw,file=$disk,index=0" `

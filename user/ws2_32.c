@@ -252,16 +252,59 @@ __attribute__((dllexport)) int gethostname(char *name,int len) {
     if(len<9){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
     ws2_copy(name,"sentinel", (unsigned int)len);ws2_last_error=0;return 0;
 }
+typedef struct WS2_ADDRINFO {
+    int ai_flags,ai_family,ai_socktype,ai_protocol;
+    unsigned long ai_addrlen;
+    char *ai_canonname;
+    SOCKADDR *ai_addr;
+    struct WS2_ADDRINFO *ai_next;
+} WS2_ADDRINFO;
+typedef struct { SOCKADDR_IN addr; } WS2_ADDR_NODE;
+static WS2_ADDRINFO ws2_addrinfo_nodes[8];
+static WS2_ADDR_NODE ws2_addr_nodes[8];
+static char ws2_canon_nodes[8][256];
+static unsigned ws2_addrinfo_used;
+static int ws2_parse_service(const char *s,unsigned short *port) {
+    unsigned v=0;if(!s||!*s){*port=0;return 1;}
+    for(;*s;s++){if(*s<'0'||*s>'9')return 0;v=v*10u+(unsigned)(*s-'0');if(v>65535)return 0;}
+    *port=(unsigned short)v;return 1;
+}
 __attribute__((dllexport)) int getaddrinfo(const char *node,const char *service,const void *hints,void **result) {
-    (void)node;(void)service;(void)hints;
     if(result)*result=0;
-    ws2_last_error=WSANOTINITIALISED;
-    return WSANOTINITIALISED;
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return WSANOTINITIALISED;}
+    if(!result||!node){ws2_last_error=WSAEFAULT;return WSAEINVAL;}
+    unsigned short port;if(!ws2_parse_service(service,&port)){ws2_last_error=WSAEINVAL;return WSAEINVAL;}
+    const unsigned char *hint=(const unsigned char *)hints;
+    int family=hint?*(const int *)(hint+4):AF_INET;
+    int stype=hint?*(const int *)(hint+8):0;
+    int proto=hint?*(const int *)(hint+12):0;
+    if(family!=AF_UNSPEC&&family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return WSAEAFNOSUPPORT;}
+    unsigned int ip=inet_addr(node);
+    if(ip==0xFFFFFFFFu && !(node[0]=='2'&&node[1]=='5'&&node[2]=='5'&&node[3]=='.')) {
+        ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;
+    }
+    unsigned slot=ws2_addrinfo_used++%8u;
+    WS2_ADDRINFO *ai=&ws2_addrinfo_nodes[slot];WS2_ADDR_NODE *an=&ws2_addr_nodes[slot];
+    an->addr.sin_family=AF_INET;an->addr.sin_port=htons(port);an->addr.sin_addr=ip;
+    for(unsigned i=0;i<8;i++)an->addr.sin_zero[i]=0;
+    ai->ai_flags=hint?*(const int *)hint:0;ai->ai_family=AF_INET;ai->ai_socktype=stype;ai->ai_protocol=proto;
+    ai->ai_addrlen=sizeof(SOCKADDR_IN);ai->ai_addr=(SOCKADDR *)&an->addr;ai->ai_next=0;
+    ai->ai_canonname=0;
+    if(ai->ai_flags&2){unsigned i=0;for(;node[i]&&i<255;i++)ws2_canon_nodes[slot][i]=node[i];ws2_canon_nodes[slot][i]=0;ai->ai_canonname=ws2_canon_nodes[slot];}
+    *result=ai;ws2_last_error=0;return 0;
 }
 __attribute__((dllexport)) void freeaddrinfo(void *result) { (void)result; }
 __attribute__((dllexport)) int getnameinfo(const SOCKADDR *sa,unsigned int salen,char *host,unsigned int hostlen,char *serv,unsigned int servlen,int flags) {
-    (void)sa;(void)salen;(void)host;(void)hostlen;(void)serv;(void)servlen;(void)flags;
-    ws2_last_error=WSANOTINITIALISED;return WSANOTINITIALISED;
+    (void)flags;
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return WSANOTINITIALISED;}
+    if(!sa||salen<sizeof(SOCKADDR_IN)){ws2_last_error=WSAEFAULT;return WSAEINVAL;}
+    const SOCKADDR_IN *in=(const SOCKADDR_IN *)sa;
+    if(in->sin_family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return WSAEAFNOSUPPORT;}
+    if(host&&hostlen){char tmp[16];if(!inet_ntop(AF_INET,&in->sin_addr,tmp,sizeof(tmp))){ws2_last_error=WSAEFAULT;return WSAEINVAL;}
+        unsigned i=0;while(tmp[i]&&i+1<hostlen){host[i]=tmp[i];i++;}if(tmp[i]){ws2_last_error=WSAEFAULT;return WSAEINVAL;}host[i]=0;}
+    if(serv&&servlen){unsigned p=ntohs(in->sin_port);char tmp[6];unsigned i=0;if(!p)tmp[i++]='0';else{char rev[6];unsigned j=0;while(p){rev[j++]=(char)('0'+p%10);p/=10;}while(j)tmp[i++]=rev[--j];}tmp[i]=0;
+        unsigned j=0;while(tmp[j]&&j+1<servlen){serv[j]=tmp[j];j++;}if(tmp[j]){ws2_last_error=WSAEFAULT;return WSAEINVAL;}serv[j]=0;}
+    ws2_last_error=0;return 0;
 }
 
 /*

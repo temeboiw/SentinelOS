@@ -1023,6 +1023,8 @@ static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }
 
+static int vfs_find_regular_file(const char *name, uint32_t *ino_out, uint64_t *size_out);
+
 static int vfs_open_user_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = 0;

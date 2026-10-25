@@ -597,8 +597,24 @@ static int inspect_embedded_pe(const u8 *p, u32 n, u64 total_size) {
     out("\n  PE kind: "); out(magic==0x20b?"PE32+":"PE32");
     out("\n  Sections: "); out_u32(sections);
     out("\n  Stream size: "); out_u32((u32)total_size); out(" bytes\n");
-    if (machine!=0x8664 || magic!=0x20b || !sections || sections>96) {
-        out("msiexec: payload is not a supported x64 PE32+ executable\n");
+    if (machine!=0x8664) {
+        out("msiexec: embedded PE machine mismatch; expected AMD64 (34404), got ");
+        out_u32(machine);
+        out("\n");
+        if (machine==0x14c) out("msiexec: this stream contains an x86/I386 PE; this does NOT establish the architecture of any nested Chrome payload\n");
+        else if (machine==0xaa64) out("msiexec: this stream contains an ARM64 PE\n");
+        return 0;
+    }
+    if (magic!=0x20b) {
+        out("msiexec: embedded PE is AMD64 but optional-header magic is ");
+        out_u32(magic);
+        out(magic==0x10b?" (PE32, not PE32+)\n":" (not PE32+)\n");
+        return 0;
+    }
+    if (!sections || sections>96) {
+        out("msiexec: AMD64 PE has invalid section count: ");
+        out_u32(sections);
+        out("\n");
         return 0;
     }
     return 1;

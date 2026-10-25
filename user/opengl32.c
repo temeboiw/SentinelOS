@@ -245,7 +245,6 @@ __attribute__((dllexport)) void glColor4ub(unsigned char r,unsigned char g,unsig
 __attribute__((dllexport)) void glClearAccum(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;ogl_error=GL_INVALID_OPERATION;}
 
 /* Resolve only the OpenGL entry points implemented by this runtime. */
-static int ogl_streq(const char *a,const char *b){if(!a||!b)return 0;while(*a&&*a==*b){a++;b++;}return *a==*b;}
 __attribute__((dllexport)) void *wglGetProcAddress(const char *name){
  if(ogl_streq(name,"glClearColor"))return (void*)glClearColor;
  if(ogl_streq(name,"glClear"))return (void*)glClear;

@@ -1323,11 +1323,12 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     }
     if (!found) found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
 
-    const char prefix0[] = "Windows/System32/";
-    const char prefix1[] = "C:/Windows/System32/";
-    const char prefix2[] = "C:\\Windows\\System32\\";
-    const char prefix3[] = "System32/";
-    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3 };
+    const char prefix0[] = "magic/System32/";
+    const char prefix1[] = "C:/magic/System32/";
+    const char prefix2[] = "System32/";
+    const char prefix3[] = "Windows/System32/";
+    const char prefix4[] = "C:/Windows/System32/";
+    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3, prefix4 };
     for (unsigned int p = 0; !found && p < 4; ++p) {
         unsigned int i = 0;
         while (prefixes[p][i] && i + path_len + 1 < sizeof(system_path)) {

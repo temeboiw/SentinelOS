@@ -14,6 +14,7 @@ typedef struct {
     int is64;
     uint8_t blk[4096];
     int ok;
+    int write_faulted; /* Set if a failed write cannot be rolled back safely. */
 } Ext4k;
 
 static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
@@ -26,12 +27,43 @@ static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
  * backends perform sector read/modify/write for unaligned ranges, which is
  * required for ext4 metadata and file tails.
  */
-static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
-    if (!fs || !fs->ok || (!src && len)) return -1;
-    if (!len) return 0;
-    if (off > UINT64_MAX - len) return -1;
+static int e4_raw_write(Ext4k *fs, uint64_t off,
+                          const void *src, uint64_t len) {
     if (vb_ok) return blk_write(fs->part_off + off, src, len);
     return ata_write(fs->part_off + off, src, len);
+}
+
+/*
+ * Failure-contained byte write. Snapshot each bounded chunk before writing;
+ * if the device reports failure, restore that exact range. If restoration
+ * itself fails, permanently fence this mounted instance against further
+ * writes so a later operation cannot compound known metadata damage.
+ *
+ * This handles reported I/O errors, not power loss or a device that lies about
+ * successful writes. Filesystem-wide multi-block atomicity still requires a
+ * persistent journal and is deliberately not claimed here.
+ */
+static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
+    if (!fs || !fs->ok || fs->write_faulted || (!src && len)) return -1;
+    if (!len) return 0;
+    if (off > UINT64_MAX - len) return -1;
+    const uint8_t *input = (const uint8_t *)src;
+    uint8_t before[4096];
+    while (len) {
+        uint64_t n = len > sizeof(before) ? sizeof(before) : len;
+        if (e4_read(fs, off, before, n) < 0) return -1;
+        if (e4_raw_write(fs, off, input, n) < 0) {
+            if (e4_raw_write(fs, off, before, n) < 0) {
+                fs->write_faulted = 1;
+                fs->ok = 0;
+            }
+            return -1;
+        }
+        off += n;
+        input += n;
+        len -= n;
+    }
+    return 0;
 }
 
 static uint64_t e4_size(uint8_t *inode);
@@ -95,7 +127,14 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     for(int i=0;i<16;i++)fs->volume_label[i]=(char)sb[120+i];fs->volume_label[16]=0;
     fs->dsize = fs->is64 ? E16(sb, 254) : 32;
     if (!fs->dsize) fs->dsize = 32;
-    if (fs->blksz > 4096 || !fs->ipg) return -1;
+    if (fs->blksz > 4096 || fs->blksz < 1024 || !fs->ipg ||
+        !fs->bpg || !fs->total_blocks || !fs->total_inodes ||
+        fs->isize < 128 || fs->isize > 256 ||
+        fs->dsize < 32 || fs->dsize > 64 ||
+        fs->total_blocks > (UINT64_MAX / fs->blksz) ||
+        fs->part_off > UINT64_MAX - fs->total_blocks * fs->blksz)
+        return -1;
+    fs->write_faulted = 0;
     fs->ok = 1;
     return 0;
 }
@@ -659,8 +698,7 @@ static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
 
 static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
                            const char *name, uint32_t child_ino) {
-    if (!fs || !fs->ok || !name || !child_ino || !dir_ino ||
-        fs->blksz < 1024 || fs->blksz > 4096)
+    if (!e4_write_supported(fs) || !name || !child_ino || !dir_ino)
         return -1;
     uint32_t nl = 0;
     while (name[nl] && nl < 256) {

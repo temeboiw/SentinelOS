@@ -40,6 +40,7 @@ static unsigned int ogl_pack_alignment=4,ogl_unpack_alignment=4;
 static unsigned int ogl_view_x,ogl_view_y,ogl_view_w,ogl_view_h;
 static unsigned int ogl_sc_x,ogl_sc_y,ogl_sc_w,ogl_sc_h;
 static int ogl_current;
+static void *ogl_current_dc,*ogl_current_rc;
 static const GLfloat *ogl_vertices,*ogl_colors,*ogl_texcoords;
 static GLint ogl_vertex_size=2,ogl_color_size=4,ogl_tex_size=2;
 static GLsizei ogl_vertex_stride,ogl_color_stride,ogl_tex_stride;
@@ -241,9 +242,20 @@ __attribute__((dllexport)) void *wglGetProcAddress(const char *name){
  if(ogl_streq(name,"glFlush"))return (void*)glFlush;
  return 0;
 }
-__attribute__((dllexport)) int wglMakeCurrent(void *dc,void *rc){(void)dc;ogl_current=rc!=0;return ogl_current;}
-__attribute__((dllexport)) int wglDeleteContext(void *rc){(void)rc;ogl_current=0;return 1;}
-__attribute__((dllexport)) void *wglCreateContext(void *dc){(void)dc;if(!ogl_fb())return 0;ogl_current=1;return (void*)1;}
+__attribute__((dllexport)) int wglMakeCurrent(void *dc,void *rc){
+ if(!dc&&!rc){ogl_current=0;ogl_current_dc=0;ogl_current_rc=0;return 1;}
+ if(!dc||!rc||rc!=(void*)1){ogl_error=GL_INVALID_OPERATION;return 0;}
+ if(!ogl_fb()){ogl_error=GL_INVALID_OPERATION;return 0;}
+ ogl_current_dc=dc;ogl_current_rc=rc;ogl_current=1;return 1;
+}
+__attribute__((dllexport)) int wglDeleteContext(void *rc){
+ if(!rc||rc!=(void*)1){ogl_error=GL_INVALID_VALUE;return 0;}
+ if(ogl_current_rc==rc){ogl_current=0;ogl_current_dc=0;ogl_current_rc=0;}
+ return 1;
+}
+__attribute__((dllexport)) void *wglCreateContext(void *dc){if(!dc||!ogl_fb())return 0;return (void*)1;}
+__attribute__((dllexport)) void *wglGetCurrentDC(void){return ogl_current?ogl_current_dc:0;}
+__attribute__((dllexport)) void *wglGetCurrentContext(void){return ogl_current?ogl_current_rc:0;}
 __attribute__((dllexport)) int wglShareLists(void *a,void *b){return a&&b;}
 __attribute__((dllexport)) int SwapBuffers(void *dc){(void)dc;glFinish();return ogl_fb()!=0;}
 __attribute__((dllexport)) void glDrawBuffer(GLenum mode){(void)mode;}

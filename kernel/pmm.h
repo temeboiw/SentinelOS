@@ -41,10 +41,10 @@ static void mmap_dump(const BootInfo *bi) {
         uint64_t s = d->phys, e = s + d->pages * PAGE_SIZE;
         tot[d->type < 15 ? d->type : 15] += d->pages;
         if (open && d->type == rt && s == re) { re = e; continue; }
-        if (open) mmap_emit(rs, re, rt);
+        /* Aggregate adjacent ranges without printing each descriptor. */
         rs = s; re = e; rt = d->type; open = 1;
     }
-    if (open) mmap_emit(rs, re, rt);
+    (void)rs; (void)re; (void)rt; (void)open;
 
     DbgPrint("  totals: conventional=%llu MiB  boot-services=%llu MiB  loader=%llu MiB  runtime=%llu MiB  acpi=%llu MiB\n",
             tot[7] * 4 / 1024, (tot[3] + tot[4]) * 4 / 1024, (tot[1] + tot[2]) * 4 / 1024,

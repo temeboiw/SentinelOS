@@ -393,7 +393,7 @@ __attribute__((dllexport)) int connect(SOCKET s,const SOCKADDR *a,int n) {
 __attribute__((dllexport)) int bind(SOCKET s,const SOCKADDR *a,int n) {
     if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
     if(!a||n<(int)sizeof(SOCKADDR_IN)||a->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
-    int r=(int)ws2_syscall3(SYS_NtSocketBind,s,a,n);
+    int r=(int)ws2_syscall6(SYS_NtSocketBind,s,(unsigned long long)a,(unsigned long long)n,0,0,0);
     if(r<0){ws2_last_error=WSAEADDRINUSE;return SOCKET_ERROR;}ws2_last_error=0;return 0;
 }
 __attribute__((dllexport)) int listen(SOCKET s,int backlog) { (void)s;(void)backlog;return ws2_no_io(); }

@@ -622,6 +622,7 @@ static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
     if (!fs || !fs->ok || !ino || fs->is64 || fs->blksz != 4096 ||
         fs->dsize != 32) return -1;
     uint8_t inode[256], zero_inode[256];
+    uint64_t starts[4], counts[4], nruns = 0;
     if (e4_inode(fs, ino, inode) < 0) return -1;
     if ((E16(inode, 0) & 0xF000u) == 0x8000u &&
         (E32(inode, 32) & 0x80000u)) {
@@ -631,17 +632,22 @@ static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
         uint16_t entries = E16(root, 2);
         for (uint16_t i = 0; i < entries; ++i) {
             uint8_t *ex = root + 12 + i * 12;
-            uint32_t logical = E32(ex, 0);
             uint32_t count = E16(ex, 4) & 0x7FFFu;
             uint64_t physical = ((uint64_t)E16(ex, 6) << 32) | E32(ex, 8);
-            if (!count || !physical || logical > UINT32_MAX - count)
+            if (!count || !physical || nruns >= 4 ||
+                physical >= fs->total_blocks ||
+                count > fs->total_blocks - physical)
                 return -1;
-            for (uint32_t n = 0; n < count; ++n)
-                if (e4_free_block(fs, physical + n) < 0) return -1;
+            starts[nruns] = physical;
+            counts[nruns++] = count;
         }
     }
+    /* Unpublish the inode before returning any of its blocks to the allocator. */
     for (uint32_t i = 0; i < fs->isize; ++i) zero_inode[i] = 0;
     if (e4_inode_write(fs, ino, zero_inode) < 0) return -1;
+    for (uint64_t r = 0; r < nruns; ++r)
+        for (uint64_t n = 0; n < counts[r]; ++n)
+            if (e4_free_block(fs, starts[r] + n) < 0) return -1;
     return e4_free_inode(fs, ino);
 }
 
@@ -774,7 +780,9 @@ static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
 
     uint32_t ino = 0;
     if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
-    int drc = e4_dir_add_file(fs, dir_ino, name, ino);\n    if (drc == -2) drc = e4_dir_grow_add_file(fs, dir_ino, name, ino);\n    if (drc < 0) { (void)e4_discard_file_inode(fs, ino); return -1; }
+    int drc = e4_dir_add_file(fs, dir_ino, name, ino);
+    if (drc == -2) drc = e4_dir_grow_add_file(fs, dir_ino, name, ino);
+    if (drc < 0) { (void)e4_discard_file_inode(fs, ino); return -1; }
     *out_ino = ino;
     return 0;
 }

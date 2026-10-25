@@ -1080,6 +1080,28 @@ lld -flavor link \
 cp "$SYS32/winmm.dll" "$B/rootfs/winmm.dll"
 cp "$SYS32/winmm.dll" "$B/rootfs/Windows/System32/winmm.dll"
 
+echo "  -> ws2_32.dll (Winsock 2 API and address utilities)"
+clang "${USER_CFLAGS[@]}" -fno-builtin \
+  -c "$ROOT/user/ws2_32.c" \
+  -o "$B/obj/ws2_32.o"
+
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /dynamicbase /base:0x43400000 \
+  /export:WSAStartup /export:WSACleanup /export:WSAGetLastError /export:WSASetLastError \
+  /export:WSAIsBlocking /export:htons /export:ntohs /export:htonl /export:ntohl \
+  /export:inet_addr /export:inet_ntoa /export:inet_pton /export:inet_ntop \
+  /export:gethostname /export:getaddrinfo /export:freeaddrinfo /export:getnameinfo \
+  /export:socket /export:closesocket /export:connect /export:bind /export:listen /export:accept \
+  /export:send /export:recv /export:sendto /export:recvfrom /export:shutdown /export:select \
+  /export:ioctlsocket /export:setsockopt /export:getsockopt /export:getsockname /export:getpeername \
+  /export:WSAIoctl /export:WSAEventSelect /export:WSACreateEvent /export:WSACloseEvent \
+  /export:WSAWaitForMultipleEvents /export:WSAEnumNetworkEvents /export:WSAAsyncSelect \
+  "/out:$SYS32/ws2_32.dll" \
+  "$B/obj/ws2_32.o"
+cp "$SYS32/ws2_32.dll" "$B/rootfs/ws2_32.dll"
+cp "$SYS32/ws2_32.dll" "$B/rootfs/Windows/System32/ws2_32.dll"
+
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
 for flag in "${USER_CFLAGS[@]}"; do

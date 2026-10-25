@@ -1706,11 +1706,9 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     static uint64_t wm_dbg_composed_pixels;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
     wm_dbg_composed_pixels+=damage_pixels;
-    if(x==0&&y==0&&w==width&&h==height) {
-        DbgPrint("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
-                 (unsigned long long)dbg_n,
-                 (unsigned long long)damage_pixels,
-                 (unsigned long long)wm_dbg_composed_pixels);
+    if(x==0&&y==0&&w==width&&h==height && dbg_n==1u) {
+        DbgPrint("[gfx] initial full-screen compose pixels=%llu\\n",
+                 (unsigned long long)damage_pixels);
     }
     if(wm_dbg_sample(dbg_n)) {
         DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
@@ -1769,11 +1767,10 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         }
     }
     wm_dbg_window_overlay_pixels+=window_overlay_pixels;
-    if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
-                 (unsigned long long)dbg_n,
+    if(wm_dbg_sample(dbg_n) && (window_overlay_pixels || dbg_n<=2u))
+        DbgPrint("[gfx] overlay pixels=%llu (compose #%llu)\\n",
                  (unsigned long long)window_overlay_pixels,
-                 (unsigned long long)wm_dbg_window_overlay_pixels);
+                 (unsigned long long)dbg_n);
     /* Taskbar remains the top layer and is blended only once per damaged pixel. */
     for(uint32_t yy=y;yy<y+h;yy++) {
         uint32_t row=yy*width;
@@ -1784,8 +1781,8 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         }
     }
     int flush_ok=gfx_flush(x,y,w,h);
-    if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
+    if(!flush_ok || wm_dbg_sample(dbg_n))
+        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -2078,7 +2075,7 @@ static Frame *syscall_handler(Frame *f) {
         }
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\n",
+            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h,a.width,a.height);
         int slot=wm_shared_window_slot(pid);
         KPROCESS *caller=MmCurrentProcess;
@@ -2128,7 +2125,7 @@ static Frame *syscall_handler(Frame *f) {
            (a.layer==WM_LAYER_WINDOW && !desktop_owner))
             wm_shared_compose(a.x,a.y,a.w,a.h);
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",
+            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h);
         f->rax=1;
         return f;

@@ -290,8 +290,10 @@ static int e4_extent_append_root(Ext4k *fs, uint8_t *inode,
 static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
                                uint64_t pos, const void *src, uint64_t len) {
     if (!fs || !fs->ok || !src || !len || !ino ||
-        fs->blksz != 4096 || fs->is64 || pos > UINT32_MAX ||
-        len > UINT32_MAX - pos)
+        fs->blksz != 4096 || fs->is64 || fs->dsize != 32 ||
+        pos > UINT32_MAX || len > UINT32_MAX - pos ||
+        (fs->feature_ro_compat & 0x00000400u) ||
+        (fs->feature_incompat & ~0x00000242u))
         return -1;
     uint8_t inode[256];
     if (e4_inode(fs, ino, inode) < 0 ||
@@ -734,10 +736,32 @@ static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
 static int e4_create_file_with_data(Ext4k *fs, uint32_t dir_ino,
                                     const char *name, const void *data,
                                     uint64_t len, uint32_t *out_ino) {
-    if (!fs || !name || !data || !len || !out_ino) return -1;
+    if (!fs || !fs->ok || !name || !data || !len || !out_ino ||
+        len > UINT32_MAX || !dir_ino)
+        return -1;
+
+    /* Validate the parent and reject duplicates before reserving resources. */
+    uint8_t dir[256];
+    if (e4_inode(fs, dir_ino, dir) < 0 ||
+        (E16(dir, 0) & 0xF000u) != 0x4000u ||
+        e4_lookup(fs, dir_ino, name))
+        return -1;
+
+    /* Keep the inode unreachable until its payload is written successfully. */
     uint32_t ino = 0;
-    if (e4_create_empty_file(fs, dir_ino, name, &ino) < 0) return -1;
-    if (e4_write_inode_grow(fs, ino, 0, data, len) < 0) return -1;
+    if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
+    if (e4_write_inode_grow(fs, ino, 0, data, len) < 0) {
+        /* No directory entry was published; inode/data cleanup is best-effort. */
+        e4_free_inode(fs, ino);
+        return -1;
+    }
+
+    int rc = e4_dir_add_file(fs, dir_ino, name, ino);
+    if (rc == -2) rc = e4_dir_grow_add_file(fs, dir_ino, name, ino);
+    if (rc < 0) {
+        e4_free_inode(fs, ino);
+        return -1;
+    }
     *out_ino = ino;
     return 0;
 }

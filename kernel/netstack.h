@@ -6,7 +6,8 @@
  * No dynamic allocation or interrupt dependency. Current IPv4 config is the
  * QEMU user-network default; DHCP and TCP are intentionally separate work. */
 #define NET_ETH_TYPE_IPV4 0x0800
-#define NET_ETH_TYPE_ARP  0x0806#define NET_IP_PROTO_ICMP 1
+#define NET_ETH_TYPE_ARP  0x0806
+#define NET_IP_PROTO_ICMP 1
 #define NET_IP_PROTO_UDP  17
 #define NET_DHCP_CLIENT_PORT 68
 #define NET_DHCP_SERVER_PORT 67

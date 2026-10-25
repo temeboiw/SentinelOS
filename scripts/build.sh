@@ -1104,6 +1104,7 @@ lld -flavor link \
   /export:glGetIntegerv /export:glGetFloatv /export:glGetBooleanv /export:glReadPixels \
   /export:glGetDoublev /export:glFinish /export:glFlush /export:wglGetProcAddress \
   /export:wglMakeCurrent /export:wglDeleteContext /export:wglCreateContext \
+  /export:wglGetCurrentDC /export:wglGetCurrentContext \\
   /export:wglShareLists /export:SwapBuffers /export:glDrawBuffer /export:glReadBuffer \
   /export:glGetTexParameteriv /export:glGetTexLevelParameteriv /export:glTexSubImage2D \
   /export:glColor4f /export:glColor4ub /export:glClearAccum \

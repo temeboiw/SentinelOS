@@ -21,6 +21,54 @@ static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
     return ata_read(fs->part_off + off, dst, len);
 }
 
+/*
+ * Byte-range disk writes use the same device selection as reads. The block
+ * backends perform sector read/modify/write for unaligned ranges, which is
+ * required for ext4 metadata and file tails.
+ */
+static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
+    if (!fs || !fs->ok || (!src && len)) return -1;
+    if (!len) return 0;
+    if (off > UINT64_MAX - len) return -1;
+    if (vb_ok) return blk_write(fs->part_off + off, src, len);
+    return ata_write(fs->part_off + off, src, len);
+}
+
+/*
+ * Write bytes into already allocated extents of an existing inode.
+ * This deliberately does not allocate blocks, grow files, or create names;
+ * callers must stay within the inode's current size until the allocator and
+ * directory transaction code are in place.
+ */
+static int e4_write_inode_at(Ext4k *fs, uint8_t *inode,
+                             uint64_t pos, const void *src, uint64_t len) {
+    if (!fs || !fs->ok || !inode || (!src && len)) return -1;
+    uint64_t size = e4_size(inode);
+    if (pos > size || len > size - pos) return -1;
+    const uint8_t *in = (const uint8_t *)src;
+    uint8_t block[4096];
+    while (len) {
+        uint32_t in_block = (uint32_t)(pos % fs->blksz);
+        uint32_t n = fs->blksz - in_block;
+        if ((uint64_t)n > len) n = (uint32_t)len;
+        uint64_t physical = e4_map(fs, inode, (uint32_t)(pos / fs->blksz));
+        if (!physical) return -1;
+        if (in_block == 0 && n == fs->blksz) {
+            if (e4_write(fs, physical * fs->blksz, in, n) < 0) return -1;
+        } else {
+            if (e4_read(fs, physical * fs->blksz, block, fs->blksz) < 0)
+                return -1;
+            for (uint32_t i = 0; i < n; ++i) block[in_block + i] = in[i];
+            if (e4_write(fs, physical * fs->blksz, block, fs->blksz) < 0)
+                return -1;
+        }
+        pos += n;
+        in += n;
+        len -= n;
+    }
+    return 0;
+}
+
 /* Raw filesystem-relative byte writes. Callers must update ext4 metadata
  * consistently; this primitive alone does not allocate files or blocks. */
 static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {

@@ -1527,6 +1527,8 @@ typedef struct {
     uint64_t pixels;
     uint32_t x, y, w, h, width, height;
 } WmPresentWindowSurfaceArgs;
+typedef struct { uint32_t x,y,w,h; } WmRepaintRectArgs;
+#define SYS_NtRepaintRect 44
 static uint32_t *wm_shared_background;
 static uint32_t *wm_shared_desktop;
 static uint32_t *wm_shared_taskbar;
@@ -2049,6 +2051,23 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+
+    case SYS_NtRepaintRect: {
+        WmRepaintRectArgs a;
+        if(!f->rdi || !MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(a),0)) {
+            f->rax=0;return f;
+        }
+        a=*(WmRepaintRectArgs *)(uintptr_t)f->rdi;
+        if(!a.w || !a.h || a.x>=gfx_width || a.y>=gfx_height) {
+            f->rax=0;return f;
+        }
+        if(a.w>gfx_width-a.x)a.w=gfx_width-a.x;
+        if(a.h>gfx_height-a.y)a.h=gfx_height-a.y;
+        /* Restore damaged pixels from the kernel-owned persistent Z-order. */
+        wm_shared_compose(a.x,a.y,a.w,a.h);
+        f->rax=1;
+        return f;
+    }
 
     case SYS_NtPresentLayer: {
         WmPresentLayerArgs a;

@@ -1110,14 +1110,23 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
     while (done < len) {
         uint64_t pos = h->pos + done;
         uint32_t block_off = (uint32_t)(pos % g_ext4.blksz);
-        uint64_t chunk = g_ext4.blksz - block_off;
-        if (chunk > len - done) chunk = len - done;
-        uint64_t phys_block = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
-        if (!phys_block) {
-            for (uint64_t j = 0; j < chunk; j++) ((uint8_t *)dst)[done + j] = 0;
-        } else if (e4_read(&g_ext4, phys_block * g_ext4.blksz + block_off,
-                           (void *)(dst + done), chunk) < 0) {
-            return done ? (int)done : -1;
+        uint32_t run_blocks = 0;
+        uint64_t phys_block = e4_map_run(&g_ext4, inode,
+            (uint32_t)(pos / g_ext4.blksz), &run_blocks);
+        uint64_t chunk;
+        if (phys_block && run_blocks) {
+            /* Read the contiguous part of this extent in one I/O operation. */
+            chunk = (uint64_t)run_blocks * g_ext4.blksz - block_off;
+            if (chunk > len - done) chunk = len - done;
+            if (e4_read(&g_ext4, phys_block * g_ext4.blksz + block_off,
+                        (void *)(dst + done), chunk) < 0)
+                return done ? (int)done : -1;
+        } else {
+            /* Sparse/unmapped block: preserve the previous zero-fill behavior. */
+            chunk = g_ext4.blksz - block_off;
+            if (chunk > len - done) chunk = len - done;
+            for (uint64_t j = 0; j < chunk; j++)
+                ((uint8_t *)dst)[done + j] = 0;
         }
         done += chunk;
     }

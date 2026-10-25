@@ -924,8 +924,8 @@ void mainCRTStartup(void) {
     out("msiexec: package opened; reading bytes\n");
     const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=1024u*1024u;
-    /* 0x50000000 is already occupied by user32.dll in this process. Keep the package buffer separate from the DLL and the GPU surface at 0x71000000. */
-    const u64 buffer_base=0x72000000ULL;
+    /* Keep the package buffer outside user32.dll (0x50000000), the default allocation arena, and the framebuffer/GPU mappings (0x70000000+). */
+    const u64 buffer_base=0x60000000ULL;
     u8 *buf=(u8 *)buffer_base;
     u32 capacity=0, total=0;
     /* Console output is expensive in the current UI. Report progress every
@@ -944,7 +944,8 @@ void mainCRTStartup(void) {
             if (grow>MAX_BUFFER-capacity) grow=MAX_BUFFER-capacity;
             u64 p=sy3(SYS_Alloc,buffer_base+capacity,grow,0);
             if (p!=(buffer_base+capacity)) {
-                out("msiexec: cannot grow MSI buffer; package size or memory limit reached\n");
+                out("msiexec: buffer allocation failed at VA "); out_u32((u32)(buffer_base+capacity)); out(" (returned "); out_u32((u32)p); out(")\n");
+                out("msiexec: cannot grow MSI buffer; address conflict or memory limit reached\n");
                 read_error=1;
                 break;
             }

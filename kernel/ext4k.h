@@ -34,6 +34,8 @@ static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
     return ata_write(fs->part_off + off, src, len);
 }
 
+static uint64_t e4_size(uint8_t *inode);
+
 /*
  * Write bytes into already allocated extents of an existing inode.
  * This deliberately does not allocate blocks, grow files, or create names;
@@ -101,6 +103,24 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
     if (fs->is64) itab |= (uint64_t)E32(gd, 0x28) << 32;
     uint32_t n = fs->isize > 256 ? 256 : fs->isize;
     return e4_read(fs, itab * fs->blksz + (uint64_t)idx * fs->isize, out, n);
+}
+
+/* Persist an inode record without disturbing adjacent inode-table entries. */
+static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
+    if (!fs || !fs->ok || !inode || !ino || ino > fs->total_inodes ||
+        fs->isize > 256)
+        return -1;
+    uint32_t group = (ino - 1) / fs->ipg;
+    uint32_t index = (ino - 1) % fs->ipg;
+    uint8_t gd[64];
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (e4_read(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
+        return -1;
+    uint64_t inode_table = E32(gd, 8);
+    if (fs->is64) inode_table |= (uint64_t)E32(gd, 0x28) << 32;
+    return e4_write(fs,
+                    inode_table * fs->blksz + (uint64_t)index * fs->isize,
+                    inode, fs->isize);
 }
 
 static uint64_t e4_size(uint8_t *inode) {

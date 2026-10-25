@@ -21,7 +21,7 @@ enum {
  GL_FALSE=0, GL_TRUE=1, GL_COLOR_BUFFER_BIT=0x4000, GL_DEPTH_BUFFER_BIT=0x0100,
  GL_STENCIL_BUFFER_BIT=0x0400, GL_TRIANGLES=4, GL_TRIANGLE_STRIP=5,
  GL_TRIANGLE_FAN=6, GL_QUADS=7, GL_LINES=1, GL_LINE_STRIP=3, GL_POINTS=0,
- GL_FLOAT=0x1406, GL_UNSIGNED_BYTE=0x1401, GL_UNSIGNED_SHORT=0x1403,
+ GL_FLOAT=0x1406, GL_UNSIGNED_BYTE=0x1401, GL_UNSIGNED_SHORT=0x1403, GL_UNSIGNED_INT=0x1405,
  GL_VERTEX_ARRAY=0x8074, GL_COLOR_ARRAY=0x8076, GL_TEXTURE_COORD_ARRAY=0x8078,
  GL_TEXTURE_2D=0x0DE1, GL_BLEND=0x0BE2, GL_DEPTH_TEST=0x0B71,
  GL_SCISSOR_TEST=0x0C11, GL_STENCIL_TEST=0x0B90, GL_DITHER=0x0BD0,
@@ -174,10 +174,10 @@ __attribute__((dllexport)) void glDrawArrays(GLenum mode,GLint first,GLsizei cou
  else if(mode==GL_QUADS){for(int i=0;i+3<count;i+=4){ogl_triangle(first+i,first+i+1,first+i+2);ogl_triangle(first+i,first+i+2,first+i+3);}}
  else ogl_error=GL_INVALID_ENUM;
 }
-static unsigned int ogl_index_at(const unsigned char *p,GLenum type,int i){return type==GL_UNSIGNED_SHORT?((const unsigned short*)p)[i]:p[i];}
+static unsigned int ogl_index_at(const unsigned char *p,GLenum type,int i){if(type==GL_UNSIGNED_SHORT){const unsigned char *q=p+(unsigned long long)i*2u;return (unsigned int)q[0]|((unsigned int)q[1]<<8);}if(type==GL_UNSIGNED_INT){const unsigned char *q=p+(unsigned long long)i*4u;return (unsigned int)q[0]|((unsigned int)q[1]<<8)|((unsigned int)q[2]<<16)|((unsigned int)q[3]<<24);}return p[i];}
 __attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum type,const void *indices){
  if(!indices||count<0||count>100000){ogl_error=GL_INVALID_VALUE;return;}
- if(type!=GL_UNSIGNED_SHORT&&type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}
+ if(type!=GL_UNSIGNED_SHORT&&type!=GL_UNSIGNED_BYTE&&type!=GL_UNSIGNED_INT){ogl_error=GL_INVALID_ENUM;return;}
  const unsigned char *p=(const unsigned char*)indices;
  if(!ogl_vertices){ogl_error=GL_INVALID_OPERATION;return;}
  if(mode==GL_TRIANGLES){for(int i=0;i+2<count;i+=3)ogl_triangle((int)ogl_index_at(p,type,i),(int)ogl_index_at(p,type,i+1),(int)ogl_index_at(p,type,i+2));}

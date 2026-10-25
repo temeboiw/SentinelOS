@@ -231,6 +231,35 @@ static KPROCESS *MmCreateAddressSpace(const char *name) {
     }
     uint64_t *np = PHYS_TO_VIRT(pml4_pa); /* Shared direct-map access to this address space's root. */
     for (int i = 256; i < 512; i++) np[i] = PspSystemProcess->Pml4[i];
+
+    /*
+     * Preserve the kernel's low physical/identity aliases while a process
+     * CR3 is active. Early kernel/HAL paths still dereference some physical
+     * addresses directly; SMSS startup faults at 0x0011700c without this.
+     *
+     * Do not copy the whole lower half: user images start at 1 GiB and the
+     * user stack is near the top of the lower canonical half. Clone only the
+     * first 1 GiB identity-map branch (PML4[0] -> PDPT[0]). This leaves the
+     * USER_CODE_BASE region beginning at 0x40000000 available for user pages.
+     * The inherited leaf mappings remain supervisor-only (no PTE_U bit).
+     */
+    uint64_t sys_low = PspSystemProcess->Pml4[0];
+    if (sys_low & PTE_P) {
+        uint64_t low_pdpt_pa = pmm_alloc_zeroed();
+        if (!low_pdpt_pa) {
+            pmm_free(pml4_pa);
+            for (int i = 0; i < MM_MAX_PROCESSES; i++)
+                if (p == &MmProcessPool[i]) MmProcessUsed[i] = 0;
+            MmUnlock(mmfl);
+            return NULL;
+        }
+        vmm_table_pages++;
+        uint64_t *low_pdpt = PHYS_TO_VIRT(low_pdpt_pa);
+        uint64_t *sys_pdpt = PHYS_TO_VIRT(sys_low & PTE_ADDR);
+        low_pdpt[0] = sys_pdpt[0];
+        np[0] = low_pdpt_pa | (sys_low & ~PTE_ADDR);
+    }
+
     /* APIC/IOAPIC so HAL works under process CR3 */
     for (uint64_t pa = 0xFEC00000ULL; pa < 0x100000000ULL; pa += 0x200000ULL)
         map_2m_in(np, pa, pa, PTE_PCD | PTE_PWT);

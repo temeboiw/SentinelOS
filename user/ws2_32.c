@@ -140,7 +140,7 @@ __attribute__((dllexport)) int WSAStartup(WORD version, WSADATA *data) {
     data->wVersion=(WORD)requested;
     data->wHighVersion=0x0202;
     ws2_copy(data->szDescription,"SentinelOS Winsock 2.2",sizeof(data->szDescription));
-    ws2_copy(data->szSystemStatus,"Winsock utilities available; kernel network backend unavailable",sizeof(data->szSystemStatus));
+    ws2_copy(data->szSystemStatus,"SentinelOS Winsock: IPv4 UDP available; TCP pending",sizeof(data->szSystemStatus));
     data->iMaxSockets=0;
     data->iMaxUdpDg=0;
     data->lpVendorInfo=0;
@@ -297,6 +297,7 @@ __attribute__((dllexport)) int bind(SOCKET s,const SOCKADDR *a,int n) {
 }
 __attribute__((dllexport)) int listen(SOCKET s,int backlog) { (void)s;(void)backlog;return ws2_no_io(); }
 __attribute__((dllexport)) SOCKET accept(SOCKET s,SOCKADDR *a,int *n) { (void)s;(void)a;(void)n;return ws2_no_socket(); }
+__attribute__((dllexport)) int sendto(SOCKET s,const char *b,int n,int f,const SOCKADDR *a,int al);
 __attribute__((dllexport)) int send(SOCKET s,const char *b,int n,int f) {
     (void)f;int p=ws2_peer_slot(s,0);if(p<0||!ws2_peers[p].connected){ws2_last_error=WSAEDESTADDRREQ;return SOCKET_ERROR;}
     return sendto(s,b,n,0,(const SOCKADDR *)&ws2_peers[p].peer,sizeof(SOCKADDR_IN));

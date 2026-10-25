@@ -382,6 +382,8 @@ static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
  * a name in a directory and must not be mistaken for complete file creation.
  * Bitmap/counter reservation and inode write are not transactional yet.
  */
+static int e4_free_inode(Ext4k *fs, uint32_t ino);
+
 static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
     if (!fs || !fs->ok || !out_ino || fs->isize < 128 || fs->isize > 256)
         return -1;
@@ -403,7 +405,10 @@ static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
     E32(inode, 48) = 0;
     if (fs->isize >= 130)
         E16(inode, 128) = (uint16_t)(fs->isize - 128 >= 32 ? 32 : fs->isize - 128);
-    if (e4_inode_write(fs, ino, inode) < 0) return -1;
+    if (e4_inode_write(fs, ino, inode) < 0) {
+        (void)e4_free_inode(fs, ino);
+        return -1;
+    }
     *out_ino = ino;
     return 0;
 }

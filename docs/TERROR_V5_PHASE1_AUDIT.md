@@ -1,6 +1,6 @@
 # SentinelOS V5: TERROR — Phase 1 Architecture Audit
 
-**Status:** Initial source audit; no build or runtime test has been executed by this audit.
+**Status:** Source trace expanded; user reports that the initial Phase 1 branch build succeeded. Runtime behavior and the new telemetry change still need testing.
 **Branch:** `terror-v5-phase1`
 **Baseline:** `main` at the time this branch was created.
 **Purpose:** Establish the actual implementation boundary before making foundational TERROR changes.
@@ -23,12 +23,14 @@
 - The source defines graphics capability flags and 3D-related system-call interfaces. These declarations alone do not prove complete 3D acceleration, driver coverage, or Vulkan conformance.
 - `user/soft3d.c` contains a CPU-side software 3D rasterizer and can obtain either the VirtIO-GPU surface or the firmware framebuffer. This is a real architectural distinction that must be accounted for before claiming GPU-only rendering.
 - `user/opengl32.c` explicitly describes itself as a bounded software OpenGL 1.1 compatibility implementation over a mapped framebuffer. It is not full hardware OpenGL.
-- The initial audit has not found evidence of a complete Vulkan implementation or an integrated, working DXVK runtime. Those are major implementation projects, not simple API-export additions.
+- End-to-end trace: syscall 32 initializes graphics and returns backend/surface metadata; syscall 33 flushes a rectangle; syscalls 34–36 submit/present VirGL work and upload the shared buffer; window-layer and window-surface presentation go through syscalls 37 and 40. The shared compositor in `kernel/user.h` copies pixels on the CPU into the mapped VirtIO-GPU backing and then calls `gfx_flush`, which issues a VirtIO-GPU transfer and flush. This is GPU-backed scanout, but not GPU-only composition or proof that the GPU rasterized those pixels.
+- `gfx.h` now counts successful 2D flushes and cumulative transferred pixel area, with sparse serial telemetry on the first four flushes and every 4096th flush. This is instrumentation for measuring the real path, not a performance fix. The telemetry change has not yet been built or runtime-tested.
+- The source audit has not found evidence of a complete Vulkan implementation or an integrated, working DXVK runtime. Those are major implementation projects, not simple API-export additions.
 
 ### Build and repository health
 - `scripts/build.sh` is the repository's Linux build entry point and supports `--run`, `--clean`, and other options. It attempts to use all online CPUs by default, with `JOBS` available to limit parallelism.
 - `readme.md` still describes the project as an early kernel that paints the framebuffer and halts. That description is stale compared with the current user-mode and desktop source tree and should be updated in a separate documentation task.
-- This audit used source inspection only. No clean build, QEMU boot, frame-time benchmark, or runtime regression test has been performed.
+- The user reports that `bash scripts/build.sh` succeeded on the Phase 1 branch before the telemetry change. That is a user-reported baseline, not independent verification of the latest commit. No QEMU boot, frame-time benchmark, or runtime regression test has been confirmed.
 
 ## TERROR architecture decisions
 
@@ -48,10 +50,12 @@
 - Preserve serial output and any compile/runtime failures as the baseline.
 
 ### P1.2 — Graphics path inventory
-- Trace initialization and active backend selection in `kernel/gfx.h`.
-- Trace graphics syscall handlers and the user-space calls that submit, flush, and present.
-- Trace window surface composition and damage/redraw behavior without changing the mouse implementation.
-- Document which operations are performed by the CPU, VirtIO-GPU 2D device, and VirGL path.
+- [x] Trace initialization and active backend selection in `kernel/gfx.h`.
+- [x] Trace graphics syscall handlers and the user-space calls that submit, flush, and present.
+- [x] Trace the shared compositor and confirm that its pixel-copy loops run on the CPU before VirtIO-GPU transfer/flush.
+- [x] Add sparse 2D flush/pixel-area telemetry to help quantify damage traffic.
+- [ ] Build and boot the telemetry change; verify the log output and confirm no rendering/input regression.
+- [ ] Document which operations are performed by the CPU, VirtIO-GPU 2D device, and VirGL path using runtime evidence.
 
 ### P1.3 — Release-blocking tests
 - Build from a clean state.

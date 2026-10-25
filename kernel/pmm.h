@@ -29,7 +29,7 @@ static void mmap_dump(const BootInfo *bi) {
         const EfiMemDesc *d = md_at(bi, i);
         tot[d->type < 15 ? d->type : 15] += d->pages;
     }
-    DbgPrint("  totals: conventional=%llu MiB  boot-services=%llu MiB  loader=%llu MiB  runtime=%llu MiB  acpi=%llu MiB\\n",
+    DbgPrint("  totals: conventional=%llu MiB  boot-services=%llu MiB  loader=%llu MiB  runtime=%llu MiB  acpi=%llu MiB\n",
             tot[7] * 4 / 1024, (tot[3] + tot[4]) * 4 / 1024, (tot[1] + tot[2]) * 4 / 1024,
             (tot[5] + tot[6]) * 4 / 1024, (tot[9] + tot[10]) * 4 / 1024);
 }

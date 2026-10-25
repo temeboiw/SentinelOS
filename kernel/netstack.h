@@ -28,7 +28,7 @@ typedef struct __attribute__((packed)) {
     uint16_t src,dst,len,checksum;
 } NET_UDP_HDR;
 typedef struct {
-    uint16_t port; uint16_t length; uint8_t data[NET_UDP_DATA_MAX]; int ready;
+    uint16_t port; uint16_t length; uint32_t source_ip; uint16_t source_port; uint8_t data[NET_UDP_DATA_MAX]; int ready;
 } NET_UDP_SLOT;
 
 static uint8_t net_frame[NET_FRAME_MAX];
@@ -79,8 +79,9 @@ static void NetHandleUdp(const NET_IP_HDR *ip,const uint8_t *payload,unsigned le
     for(unsigned i=0;i<NET_UDP_SLOTS;i++) if(net_udp_slots[i].port==dport) {
         unsigned n=udp_len-sizeof(*u); if(n>NET_UDP_DATA_MAX)n=NET_UDP_DATA_MAX;
         NetCopy(net_udp_slots[i].data,payload+sizeof(*u),n);
-        net_udp_slots[i].length=(uint16_t)n; net_udp_slots[i].ready=1;
-        (void)ip; return;
+        net_udp_slots[i].length=(uint16_t)n; net_udp_slots[i].source_ip=ip->src;
+        net_udp_slots[i].source_port=NetSwap16(u->src); net_udp_slots[i].ready=1;
+        return;
     }
 }
 static void NetHandleIpv4(const uint8_t *frame,unsigned len) {
@@ -114,13 +115,18 @@ static int NetUdpBind(uint16_t port) {
     }
     return -1;
 }
-static int NetUdpReceive(uint16_t port,void *out,unsigned cap) {
+static int NetUdpReceiveFrom(uint16_t port,void *out,unsigned cap,uint32_t *source_ip,uint16_t *source_port) {
     int slot=-1;
     for(unsigned i=0;i<NET_UDP_SLOTS;i++) if(net_udp_slots[i].port==port) {slot=(int)i;break;}
     if(slot<0||!out||!net_udp_slots[slot].ready) return 0;
     unsigned n=net_udp_slots[slot].length; if(n>cap)n=cap;
     NetCopy((uint8_t *)out,net_udp_slots[slot].data,n);
+    if(source_ip)*source_ip=net_udp_slots[slot].source_ip;
+    if(source_port)*source_port=net_udp_slots[slot].source_port;
     net_udp_slots[slot].ready=0; return (int)n;
+}
+static int NetUdpReceive(uint16_t port,void *out,unsigned cap) {
+    return NetUdpReceiveFrom(port,out,cap,0,0);
 }
 static int NetUdpSend(uint32_t dst_ip,uint16_t src_port,uint16_t dst_port,const void *data,unsigned len) {
     if(!e1000_ready||!src_port||!dst_port||(!data&&len)||len>NET_UDP_DATA_MAX) return -1;

@@ -252,6 +252,10 @@ __attribute__((dllexport)) int gethostname(char *name,int len) {
     if(len<9){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
     ws2_copy(name,"sentinel", (unsigned int)len);ws2_last_error=0;return 0;
 }
+__attribute__((dllexport)) SOCKET socket(int af,int type,int protocol);
+__attribute__((dllexport)) int closesocket(SOCKET s);
+__attribute__((dllexport)) int sendto(SOCKET s,const char *b,int n,int f,const SOCKADDR *a,int al);
+__attribute__((dllexport)) int recvfrom(SOCKET s,char *b,int n,int f,SOCKADDR *a,int *al);
 typedef struct WS2_ADDRINFO {
     int ai_flags,ai_family,ai_socktype,ai_protocol;
     unsigned long ai_addrlen;
@@ -280,8 +284,62 @@ __attribute__((dllexport)) int getaddrinfo(const char *node,const char *service,
     int proto=hint?*(const int *)(hint+12):0;
     if(family!=AF_UNSPEC&&family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return WSAEAFNOSUPPORT;}
     unsigned int ip=inet_addr(node);
-    if(ip==0xFFFFFFFFu && !(node[0]=='2'&&node[1]=='5'&&node[2]=='5'&&node[3]=='.')) {
-        ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;
+    if(ip==0xFFFFFFFFu && !ws2_eq(node,"255.255.255.255")) {
+        /* QEMU user networking exposes its DNS proxy at 10.0.2.3:53. */
+        unsigned char query[512];unsigned qn=12;static unsigned short txid=0x4A31;
+        unsigned short id=++txid;
+        query[0]=(unsigned char)(id>>8);query[1]=(unsigned char)id;
+        query[2]=1;query[3]=0;query[4]=0;query[5]=1;
+        query[6]=query[7]=query[8]=query[9]=query[10]=query[11]=0;
+        const char *p=node;
+        while(*p) {
+            const char *dot=p;unsigned lab=0;
+            while(*dot&&*dot!='.') {dot++;lab++;}
+            if(!lab||lab>63||qn+lab+1+5>sizeof(query)){ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;}
+            query[qn++]=(unsigned char)lab;
+            while(p<dot)query[qn++]=(unsigned char)*p++;
+            if(*p=='.')p++;
+            if(!*p&&p[-1]=='.')break;
+        }
+        query[qn++]=0;query[qn++]=0;query[qn++]=1;query[qn++]=0;query[qn++]=1;
+        SOCKET ds=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+        if(ds==INVALID_SOCKET){ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;}
+        SOCKADDR_IN dns;dns.sin_family=AF_INET;dns.sin_port=htons(53);dns.sin_addr=0x0302000Au;
+        for(unsigned z=0;z<8;z++)dns.sin_zero[z]=0;
+        int sent=sendto(ds,(const char *)query,(int)qn,0,(const SOCKADDR *)&dns,sizeof(dns));
+        if(sent<0){closesocket(ds);ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;}
+        unsigned char reply[1024];SOCKADDR_IN from;int fromlen=sizeof(from);int rn=-1;
+        for(unsigned tries=0;tries<250000;tries++) {
+            fromlen=sizeof(from);
+            rn=recvfrom(ds,(char *)reply,sizeof(reply),0,(SOCKADDR *)&from,&fromlen);
+            if(rn>=0)break;
+        }
+        closesocket(ds);
+        if(rn<12||reply[0]!=(unsigned char)(id>>8)||reply[1]!=(unsigned char)id||
+           !(reply[2]&0x80)||(reply[3]&0x0F)||!((reply[6]<<8)|reply[7])) {
+            ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;
+        }
+        unsigned answers=((unsigned)reply[6]<<8)|reply[7];unsigned off=12;
+        /* Skip the encoded question name; compression pointers are accepted. */
+        while(off<(unsigned)rn&&reply[off]) {
+            if((reply[off]&0xC0)==0xC0){off+=2;break;}
+            off+=(unsigned)reply[off]+1;
+        }
+        if(off<(unsigned)rn&&reply[off]==0)off++;
+        if(off+4>(unsigned)rn){ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;}
+        off+=4;ip=0;int found=0;
+        for(unsigned ai=0;ai<answers&&off+12<=(unsigned)rn;ai++) {
+            if((reply[off]&0xC0)==0xC0)off+=2;
+            else {while(off<(unsigned)rn&&reply[off]){unsigned l=reply[off];if((l&0xC0)==0xC0){off+=2;break;}off+=l+1;}if(off<(unsigned)rn&&reply[off]==0)off++;}
+            if(off+10>(unsigned)rn)break;
+            unsigned typ=((unsigned)reply[off]<<8)|reply[off+1];
+            unsigned cls=((unsigned)reply[off+2]<<8)|reply[off+3];
+            unsigned rdlen=((unsigned)reply[off+8]<<8)|reply[off+9];off+=10;
+            if(off+rdlen>(unsigned)rn)break;
+            if(typ==1&&cls==1&&rdlen==4){ip=(unsigned)reply[off]|((unsigned)reply[off+1]<<8)|((unsigned)reply[off+2]<<16)|((unsigned)reply[off+3]<<24);found=1;break;}
+            off+=rdlen;
+        }
+        if(!found){ws2_last_error=WSAHOST_NOT_FOUND;return WSAHOST_NOT_FOUND;}
     }
     unsigned slot=ws2_addrinfo_used++%8u;
     WS2_ADDRINFO *ai=&ws2_addrinfo_nodes[slot];WS2_ADDR_NODE *an=&ws2_addr_nodes[slot];

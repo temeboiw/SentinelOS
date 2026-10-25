@@ -81,6 +81,10 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     fs->blksz = 1024u << E32(sb, 24);
     fs->first_data = E32(sb, 20);
     fs->bpg = E32(sb, 32);
+    fs->feature_compat = E32(sb, 92);
+    fs->feature_incompat = E32(sb, 96);
+    fs->feature_ro_compat = E32(sb, 100);
+    fs->bpg = E32(sb, 32);
     fs->ipg = E32(sb, 40);
     fs->isize = E16(sb, 88);
     if (fs->isize < 128) fs->isize = 128;
@@ -186,6 +190,73 @@ static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
     return e4_write(fs,
                     inode_table * fs->blksz + (uint64_t)index * fs->isize,
                     inode, fs->isize);
+}
+
+/*
+ * Allocate one ext4 data block from an existing block group's bitmap.
+ * Deliberately refuses metadata-checksummed and bigalloc filesystems because
+ * those require checksum/cluster accounting updates that this small VFS does
+ * not yet implement. Callers must subsequently attach the block to an inode.
+ */
+static int e4_alloc_block(Ext4k *fs, uint64_t *out_block) {
+    if (!fs || !fs->ok || !out_block || !fs->bpg ||
+        fs->blksz < 1024 || fs->blksz > sizeof(fs->blk))
+        return -1;
+    /* RO_COMPAT_GDT_CSUM=0x10, RO_COMPAT_BIGALLOC=0x200,
+       RO_COMPAT_METADATA_CSUM=0x400. Never corrupt unsupported metadata. */
+    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
+    if (!fs->free_blocks) return -3;
+
+    uint64_t groups = (fs->total_blocks + fs->bpg - 1) / fs->bpg;
+    uint8_t gd[64];
+    uint8_t sb[1024];
+    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    for (uint64_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            return -1;
+        uint32_t free_lo = E16(gd, 12);
+        uint32_t free_count = free_lo;
+        if (fs->is64) free_count |= (uint32_t)E16(gd, 44) << 16;
+        if (!free_count) continue;
+
+        uint64_t bitmap = E32(gd, 0);
+        if (fs->is64) bitmap |= (uint64_t)E32(gd, 32) << 32;
+        if (!bitmap || bitmap >= fs->total_blocks ||
+            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+            return -1;
+
+        uint64_t first = (uint64_t)fs->first_data + g * fs->bpg;
+        uint64_t span = fs->total_blocks > first ? fs->total_blocks - first : 0;
+        if (span > fs->bpg) span = fs->bpg;
+        for (uint64_t bit = 0; bit < span; ++bit) {
+            uint8_t mask = (uint8_t)(1u << (bit & 7));
+            if (fs->blk[bit >> 3] & mask) continue;
+            fs->blk[bit >> 3] |= mask;
+            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+                return -1;
+
+            free_count--;
+            E16(gd, 12) = (uint16_t)free_count;
+            if (fs->is64) E16(gd, 44) = (uint16_t)(free_count >> 16);
+            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+                return -1;
+            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            uint64_t super_free = E32(sb, 12);
+            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x158) << 32;
+            if (!super_free) return -1;
+            --super_free;
+            E32(sb, 12) = (uint32_t)super_free;
+            if (fs->is64) E32(sb, 0x158) = (uint32_t)(super_free >> 32);
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            fs->free_blocks = super_free;
+            *out_block = first + bit;
+            return 0;
+        }
+        /* A group counter that claims free blocks but has none in its bitmap
+           indicates inconsistent metadata; do not silently keep scanning. */
+        return -1;
+    }
+    return -3;
 }
 
 static uint64_t e4_size(uint8_t *inode) {

@@ -1039,6 +1039,22 @@ static int vfs_open_user_file(const char *name) {
         }
         if (same && !vfs_ents[i].is_dir) { ino = vfs_ents[i].ino; break; }
     }
+    /* Resolve explicit paths and system DLL basenames through the ext4
+       directory tree; the cached list is only for current-directory UI use. */
+    if (!ino) {
+        uint64_t ignored_size=0;
+        if(vfs_find_regular_file(name,&ino,&ignored_size)<0)ino=0;
+        const char *prefixes[]={"magic/System32/","magic/","magic/Program Files/"};
+        char candidate[256];
+        for(unsigned int p=0;p<sizeof(prefixes)/sizeof(prefixes[0])&&!ino;p++) {
+            unsigned int i=0,j=0;
+            while(prefixes[p][i] && i+1<sizeof(candidate)){candidate[i]=prefixes[p][i];i++;}
+            while(name[j] && i+j+1<sizeof(candidate)){candidate[i+j]=name[j];j++;}
+            if(name[j])continue;
+            candidate[i+j]=0;
+            if(vfs_find_regular_file(candidate,&ino,&ignored_size)<0)ino=0;
+        }
+    }
     if (!ino) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, ino, inode) < 0 ||

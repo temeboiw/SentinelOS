@@ -2441,33 +2441,33 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
 
     int done=0;
     int result=1;
+
+    /* A modal dialog is static between input events. Render its scene and
+     * buttons once; composing the whole desktop on every empty input poll
+     * saturates the GPU flush path and makes the pointer stutter/trail. */
+    if(cur_on) cursor_restore_fast();
+    compose();
+    int by=g_wnd.y+g_wnd.h-42;
+    int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
+    round_fill(bx,by,78,28,4,0xFF559EBB);
+    round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
+    draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
+    int nx=g_wnd.x+g_wnd.w-100;
+    if(yesno) {
+        round_fill(nx,by,78,28,4,0xFF559EBB);
+        round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
+        draw_text(nx+24,by+9,"No",0xFF164E68);
+    }
+    u32_flush_raw(g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h);
+
+    /* Keep the cursor topmost, but update only its 16x16 footprint on input.
+     * Do not redraw or flush the modal window for every pointer event. */
+    cur_ox=g_mx; cur_oy=g_my;
+    cursor_save_draw(g_mx,g_my);
+    if(g_scanout && g_scan_pitch && g_fw && g_fh)
+        u32_flush_raw(g_mx,g_my,16,16);
+
     while(!done) {
-        /* Remove the previous cursor before repainting the modal scene.
-         * Keep cur_on/save-under valid until cursor_restore_fast() restores
-         * exactly the pixels beneath that cursor. Clearing cur_on first
-         * leaves the old cursor pixels in scanout, and the next cursor draw
-         * then saves those cursor pixels as its underlay, producing a trail. */
-        if(cur_on) cursor_restore_fast();
-        compose();
-        int by=g_wnd.y+g_wnd.h-42;
-        int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
-        round_fill(bx,by,78,28,4,0xFF559EBB);
-        round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
-        draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
-        int nx=g_wnd.x+g_wnd.w-100;
-        if(yesno) {
-            round_fill(nx,by,78,28,4,0xFF559EBB);
-            round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
-            draw_text(nx+24,by+9,"No",0xFF164E68);
-        }
-
-        /* The modal title is not "Desktop", so compose() does not paint the
-         * pointer. Repaint it as the final overlay after the dialog is ready. */
-        cur_ox=g_mx; cur_oy=g_my;
-        cursor_save_draw(g_mx,g_my);
-        if(g_scanout && g_scan_pitch && g_fw && g_fh)
-            u32_flush_raw(g_mx,g_my,16,16);
-
         InputEvent ev={0};
         if(!sy3(SYS_GetInput,(u64)&ev,0,0))continue;
         if(ev.type==1) {
@@ -2475,7 +2475,18 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
             else if(yesno && (ev.key=='n'||ev.key=='N'||ev.key==27)) { result=7; done=1; }
             else if(ev.key==27||ev.key=='\r'||ev.key=='\n'||ev.key==' ')done=1;
         } else if(ev.type==2||ev.type==3) {
+            int old_x=cur_ox, old_y=cur_oy;
+            if(cur_on) cursor_restore_fast();
             g_mx=ev.x;g_my=ev.y;u32_mouse_record();
+            /* Flush the restored old footprint before drawing at the new
+             * position, so no stale pointer pixels survive on scanout. */
+            if(old_x>=0&&old_y>=0)
+                u32_flush_raw(old_x,old_y,16,16);
+            cur_ox=g_mx;cur_oy=g_my;
+            cursor_save_draw(g_mx,g_my);
+            if(g_scanout && g_scan_pitch && g_fw && g_fh)
+                u32_flush_raw(g_mx,g_my,16,16);
+
             if(ev.type==3 && hit(ev.x,ev.y,bx,by,bx+78,by+28)) {
                 result=yesno?6:1; done=1;
             } else if(ev.type==3 && yesno && hit(ev.x,ev.y,nx,by,nx+78,by+28)) {

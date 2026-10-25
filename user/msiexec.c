@@ -563,7 +563,7 @@ static void set_extraction_status(const char *s) {
     }
     extraction_status[i]=0;
 }
-static int payload_read(const u8 *entry, u64 size, u32 *ids, u32 sectors,
+static int payload_read(u64 size, u32 *ids, u32 sectors,
                         u64 offset, u32 len) {
     return cfb_stream_read_list(ids,sectors,size,offset,extract_buffer,len);
 }
@@ -623,7 +623,7 @@ static int extract_embedded_installer(void) {
         return 0;
     }
     u32 head=(u32)(size<1024u*1024u?size:1024u*1024u);
-    if (!payload_read(entry,size,cab_sector_ids,sectors,0,head) ||
+    if (!payload_read(size,cab_sector_ids,sectors,0,head) ||
         !inspect_embedded_pe(extract_buffer,head,size)) {
         set_extraction_status("Embedded payload failed PE validation");
         return 0;
@@ -641,7 +641,7 @@ static int extract_embedded_installer(void) {
     int ok=1;
     while (offset<size) {
         u32 n=(u32)((size-offset)>1024u*1024u?1024u*1024u:(size-offset));
-        if (!payload_read(entry,size,cab_sector_ids,sectors,offset,n)) {
+        if (!payload_read(size,cab_sector_ids,sectors,offset,n)) {
             out("msiexec: stream read failed at offset "); out_u32((u32)offset); out("\n");
             ok=0; break;
         }

@@ -2328,13 +2328,24 @@ static Frame *syscall_handler(Frame *f) {
 
         uint64_t size = (requested + 0xFFFULL) & ~0xFFFULL;
         if(protect!=0x02ULL&&protect!=0x04ULL&&protect!=0x20ULL&&protect!=0x40ULL){f->rax=0;return f;}
-        if (!size || size > 16ull * 1024 * 1024) {
+        /* Per-request virtual-memory ceiling: 128 GiB. This is not a promise
+           that physical RAM exists; the physical-page check below rejects
+           requests that cannot be backed while preserving the kernel reserve. */
+        const uint64_t max_user_allocation = 128ull * 1024 * 1024 * 1024;
+        if (!size || size > max_user_allocation) {
             f->rax = 0;
             return f;
         }
 
         int automatic_address=(prefer==0);
         if (!prefer) prefer = 0x50000000ULL;
+        /* The current automatic-address arena is 0x50000000..0x60000000.
+           Avoid unsigned underflow for allocations larger than that arena;
+           callers needing larger ranges must provide a suitable base. */
+        if (automatic_address && size > 0x10000000ULL) {
+            f->rax = 0;
+            return f;
+        }
         if ((prefer & 0xFFFULL) || prefer < 0x10000ULL ||
             prefer >= 0x0000800000000000ULL ||
             size > 0x0000800000000000ULL - prefer) {

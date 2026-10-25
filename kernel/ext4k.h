@@ -239,6 +239,105 @@ static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
     return -3;
 }
 
+
+/*
+ * Append one logical block to an inode whose extents are stored in the inode
+ * root. Supports up to four root extents, merges physically adjacent blocks,
+ * and refuses external extent trees rather than rewriting them incorrectly.
+ * The caller owns rollback if a later write fails.
+ */
+static int e4_extent_append_root(Ext4k *fs, uint8_t *inode,
+                                 uint32_t logical, uint64_t physical) {
+    if (!fs || !fs->ok || !inode || !physical ||
+        !(E32(inode, 32) & 0x80000u))
+        return -1;
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0)
+        return -2;
+    uint16_t entries = E16(root, 2), max = E16(root, 4);
+    if (max > 4 || entries > max || entries > 4) return -2;
+    uint8_t *last = entries ? root + 12 + (entries - 1) * 12 : 0;
+    if (last) {
+        uint32_t start = E32(last, 0);
+        uint16_t count = E16(last, 4) & 0x7FFFu;
+        uint64_t pstart = ((uint64_t)E16(last, 6) << 32) | E32(last, 8);
+        if (count && start + count == logical && pstart + count == physical &&
+            count < 0x7FFFu) {
+            E16(last, 4) = (uint16_t)(count + 1);
+            return 0;
+        }
+        if (logical <= start) return -1;
+    }
+    if (entries >= max || entries >= 4) return -2;
+    uint8_t *e = root + 12 + entries * 12;
+    E32(e, 0) = logical;
+    E16(e, 4) = 1;
+    E16(e, 6) = (uint16_t)(physical >> 32);
+    E32(e, 8) = (uint32_t)physical;
+    E16(root, 2) = (uint16_t)(entries + 1);
+    return 0;
+}
+
+/*
+ * Grow a regular file and write bytes using inline extent-root entries.
+ * Limited to files represented by at most four root extents. This intentionally
+ * rejects unsupported extent trees and files larger than that format can map.
+ * Allocation and metadata updates are not yet journaled, so failures may leak
+ * a block; callers must not treat this as crash-atomic installation.
+ */
+static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
+                               uint64_t pos, const void *src, uint64_t len) {
+    if (!fs || !fs->ok || !src || !len || !ino ||
+        fs->blksz != 4096 || fs->is64 || pos > UINT32_MAX ||
+        len > UINT32_MAX - pos)
+        return -1;
+    uint8_t inode[256];
+    if (e4_inode(fs, ino, inode) < 0 ||
+        (E16(inode, 0) & 0xF000u) != 0x8000u ||
+        !(E32(inode, 32) & 0x80000u))
+        return -1;
+    uint64_t old_size = e4_size(inode), end = pos + len;
+    uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
+    uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
+    if (new_blocks > 0xFFFFFFFFu) return -1;
+
+    /* Ensure the root has room before allocating any data blocks. */
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
+        E16(root, 2) > 4 || E16(root, 4) > 4)
+        return -2;
+    uint32_t needed = 0;
+    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
+        uint64_t prev = lb ? e4_map(fs, inode, (uint32_t)(lb - 1)) : 0;
+        uint8_t *last = E16(root, 2) ? root + 12 + (E16(root, 2) - 1) * 12 : 0;
+        if (!last || !prev || prev + 1 != 0) ++needed;
+    }
+    /* Conservative bound: each new block may require a new root extent. */
+    if ((uint32_t)E16(root, 2) + needed > 4) return -2;
+
+    uint8_t zero[4096];
+    for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
+    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
+        uint64_t physical = 0;
+        if (e4_alloc_block(fs, &physical) < 0) return -3;
+        if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
+            return -1;
+        if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
+            return -2;
+        E32(inode, 28) += fs->blksz / 512;
+    }
+
+    if (end > old_size) {
+        E32(inode, 4) = (uint32_t)end;
+        if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
+    }
+    if (e4_inode_write(fs, ino, inode) < 0) return -1;
+    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) return -1;
+    /* Persist size/accounting again after data I/O; errors remain non-atomic. */
+    return e4_inode_write(fs, ino, inode);
+}
+
+
 /* Persist an inode record without disturbing adjacent inode-table entries. */
 static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
     if (!fs || !fs->ok || !inode || !ino || ino > fs->total_inodes ||

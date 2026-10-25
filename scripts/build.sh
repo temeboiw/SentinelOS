@@ -161,6 +161,8 @@ for src in \
   boot/loadufi.c \
   hal/hal.c \
   kernel/kernel.c \
+  kernel/pci_network.h \
+  kernel/e1000.h \
   kernel/smp_trampoline.S \
   kernel/gfx.h \
   user/smss.c \

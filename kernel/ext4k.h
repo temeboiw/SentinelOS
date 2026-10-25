@@ -107,9 +107,21 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
  * features. Refuse other incompatible layouts instead of writing metadata
  * with assumptions that do not hold for that filesystem.
  */
+/* Writable subset only: no journal, metadata checksums, bigalloc, 64-bit
+   descriptors, or unknown incompatible features. Unsupported images stay read-only. */
+static int e4_write_supported(Ext4k *fs) {
+    if (!fs || !fs->ok || fs->is64 || fs->blksz != 4096 ||
+        fs->dsize != 32 || !fs->bpg || !fs->ipg)
+        return 0;
+    if (fs->feature_compat & 0x0004u) return 0; /* has_journal */
+    if (fs->feature_ro_compat & (0x0010u | 0x0200u | 0x0400u))
+        return 0; /* GDT checksum, bigalloc, metadata checksum */
+    if (fs->feature_incompat & ~0x00000242u) return 0;
+    return 1;
+}
+
 static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
-    if (!fs || !fs->ok || !block_out || !fs->bpg ||
-        fs->is64 || fs->blksz != 4096 || fs->dsize != 32)
+    if (!e4_write_supported(fs) || !block_out)
         return -1;
 
     uint8_t sb[1024];
@@ -183,8 +195,7 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
  * bigalloc variants are refused rather than silently corrupting metadata.
  */
 static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
-    if (!fs || !fs->ok || !out_ino || !fs->ipg || !fs->total_inodes ||
-        fs->dsize < 32 || fs->dsize > 64 || fs->isize > 256)
+    if (!e4_write_supported(fs) || !out_ino || !fs->total_inodes || fs->isize > 256)
         return -1;
     if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
     if (!fs->free_inodes) return -3;
@@ -293,11 +304,8 @@ static int e4_free_block(Ext4k *fs, uint64_t block);
 
 static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
                                uint64_t pos, const void *src, uint64_t len) {
-    if (!fs || !fs->ok || !src || !len || !ino ||
-        fs->blksz != 4096 || fs->is64 || fs->dsize != 32 ||
-        pos > UINT32_MAX || len > UINT32_MAX - pos ||
-        (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) ||
-        (fs->feature_incompat & ~0x00000242u))
+    if (!e4_write_supported(fs) || !src || !len || !ino ||
+        pos > UINT32_MAX || len > UINT32_MAX - pos)
         return -1;
 
     uint8_t original[256], inode[256], tail_backup[4096];
@@ -560,7 +568,7 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
 
 /* Best-effort inverse for a block successfully returned by e4_alloc_block. */
 static int e4_free_block(Ext4k *fs, uint64_t block) {
-    if (!fs || !fs->ok || fs->is64 || fs->blksz != 4096 ||
+    if (!e4_write_supported(fs) ||
         block < fs->first_data || block >= fs->total_blocks)
         return -1;
     uint64_t rel = block - fs->first_data;
@@ -586,8 +594,7 @@ static int e4_free_block(Ext4k *fs, uint64_t block) {
 
 /* Best-effort inverse for an inode successfully returned by e4_alloc_inode. */
 static int e4_free_inode(Ext4k *fs, uint32_t ino) {
-    if (!fs || !fs->ok || !ino || ino > fs->total_inodes ||
-        fs->is64 || fs->dsize != 32)
+    if (!e4_write_supported(fs) || !ino || ino > fs->total_inodes)
         return -1;
     uint32_t group = (ino - 1) / fs->ipg, bit = (ino - 1) % fs->ipg;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
@@ -619,8 +626,7 @@ static int e4_free_inode(Ext4k *fs, uint32_t ino) {
 /* Discard an unpublished regular file and reclaim its inline extent blocks.
    This is best-effort rollback, not crash recovery or a substitute for journaling. */
 static int e4_discard_file_inode(Ext4k *fs, uint32_t ino) {
-    if (!fs || !fs->ok || !ino || fs->is64 || fs->blksz != 4096 ||
-        fs->dsize != 32) return -1;
+    if (!e4_write_supported(fs) || !ino) return -1;
     uint8_t inode[256], zero_inode[256];
     uint64_t starts[4], counts[4], nruns = 0;
     if (e4_inode(fs, ino, inode) < 0) return -1;

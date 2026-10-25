@@ -103,3 +103,15 @@ This milestone deliberately keeps the current compositor, Explorer folder implem
 - Clean build and boot checks are recorded separately from user-supplied runtime observations.
 
 **Current state:** the user has reported that the existing telemetry build passed their desktop checks. The tests above remain the next reproducible qualification step; frame-time instrumentation and benchmark results are not yet implemented or verified.
+
+
+### P1.4 implementation update — synchronous flush latency telemetry
+
+- [x] Add TSC-based elapsed-tick measurement around the VirtIO-GPU 2D transfer-plus-flush command path.
+- [x] Track cumulative and maximum observed latency ticks, total flushed pixels, and logarithmic latency buckets in memory.
+- [x] Emit sparse logs for the first four successful flushes and then every 256th successful flush.
+- [ ] Build the branch and confirm the compiler accepts the new inline RDTSC code.
+- [ ] Boot and compare latency logs during idle, pointer movement, window dragging, and Explorer scrolling.
+- [ ] Use measured TSC frequency or a calibrated clock before converting ticks to time units. The current output deliberately does not claim milliseconds, frame intervals, or FPS.
+
+**Measurement boundary:** this timing wraps the synchronous VirtIO-GPU transfer and flush commands. It does not include CPU-side composition before the flush call, and flush count is not frame count. The histogram is currently collected in memory but not printed; it can support percentile reporting after a bounded sampling/reporting interface is added. These changes are committed source, not yet build- or runtime-verified.

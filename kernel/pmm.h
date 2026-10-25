@@ -7,6 +7,7 @@
 #include "serial.h"
 
 #define PAGE_SIZE 4096ULL
+#define PMM_MAX_PHYS_BYTES (128ULL * 1024 * 1024 * 1024)
 
 // EFI_MEMORY_DESCRIPTOR (stride is bi->desc_size, not sizeof)
 typedef struct {
@@ -78,10 +79,16 @@ static void pmm_panic(const char *why) {
 static void pmm_init(const BootInfo *bi) {
     uint64_t n = bi->mmap_size / bi->desc_size, top = 0;
 
-    for (uint64_t i = 0; i < n; i++) {               // highest usable-or-reclaimable address = size of the bitmap's world
+    /* The PMM deliberately supports physical addresses through 128 GiB.
+       Keep the bitmap bounded even if firmware reports RAM above that ceiling. */
+    for (uint64_t i = 0; i < n; i++) {
         const EfiMemDesc *d = md_at(bi, i);
+        if (d->type != EFI_CONVENTIONAL && d->type != 3 && d->type != 4) continue;
+        if (d->phys >= PMM_MAX_PHYS_BYTES ||
+            d->pages > (UINT64_MAX - d->phys) / PAGE_SIZE) continue;
         uint64_t e = d->phys + d->pages * PAGE_SIZE;
-        if ((d->type == EFI_CONVENTIONAL || d->type == 3 || d->type == 4) && e > top) top = e;   // + boot services: reclaimed later
+        if (e > PMM_MAX_PHYS_BYTES) e = PMM_MAX_PHYS_BYTES;
+        if (e > top) top = e;
     }
     if (!top) pmm_panic("no conventional memory");
 
@@ -105,9 +112,14 @@ static void pmm_init(const BootInfo *bi) {
     for (uint64_t i = 0; i < n; i++) {                            // ... then free the conventional pages above 1 MiB
         const EfiMemDesc *d = md_at(bi, i);
         if (d->type != EFI_CONVENTIONAL) continue;
-        for (uint64_t p = 0; p < d->pages; p++) {
+        if (d->phys >= PMM_MAX_PHYS_BYTES ||
+            d->pages > (UINT64_MAX - d->phys) / PAGE_SIZE) continue;
+        uint64_t pages = d->pages;
+        if (pages > (PMM_MAX_PHYS_BYTES - d->phys) / PAGE_SIZE)
+            pages = (PMM_MAX_PHYS_BYTES - d->phys) / PAGE_SIZE;
+        for (uint64_t p = 0; p < pages; p++) {
             uint64_t a = d->phys + p * PAGE_SIZE;
-            if (a < 0x100000) continue;
+            if (a < 0x100000 || a / PAGE_SIZE >= pm_pages) continue;
             bit_clr(a / PAGE_SIZE); pm_free++;
         }
     }
@@ -205,20 +217,26 @@ static uint64_t pmm_reclaim_boot_services(const BootInfo *bi) {
     return got;
 }
 
-// write an address-derived pattern to every cache line of every free page (via the direct map), then verify
+/* Sample free pages across the whole managed range instead of touching every page.
+   Exhaustively scanning 128 GiB on every boot would add an unreasonable startup delay. */
 static void pmm_touch_test(uint64_t hhdm) {
-    uint64_t bad = 0, touched = 0;
+    uint64_t bad = 0, touched = 0, sampled_pages = 0;
+    uint64_t samples = pm_pages < 8192 ? pm_pages : 8192;
     for (int pass = 0; pass < 2; pass++) {
-        for (uint64_t pg = 0; pg < pm_pages; pg++) {
+        for (uint64_t sample = 0; sample < samples; sample++) {
+            uint64_t pg = samples <= 1 ? 0 :
+                (sample * (pm_pages - 1)) / (samples - 1);
             if (bit_get(pg)) continue;
             volatile uint64_t *q = (volatile uint64_t *)(hhdm + pg * PAGE_SIZE);
             for (int k = 0; k < 512; k += 8) {
                 uint64_t want = 0xA5A5000000000000ULL ^ (pg * PAGE_SIZE + k * 8);
                 if (pass == 0) { q[k] = want; touched++; }
-                else if (q[k] != want && bad++ < 3) DbgPrint("  mismatch at page %p\n", (void *)(pg * PAGE_SIZE));
+                else if (q[k] != want && bad++ < 3) DbgPrint("  mismatch at page %p\\n", (void *)(pg * PAGE_SIZE));
             }
+            if (pass == 0) sampled_pages++;
         }
     }
-    DbgPrint("pmm touch test: %llu cache lines written and verified, %llu errors: %s\n",
-            touched, bad, bad ? "FAIL" : "ok");
+    DbgPrint("pmm touch test: %llu sampled free pages, %llu cache lines verified across %llu MiB, %llu errors: %s\\n",
+            sampled_pages, touched, pm_pages * PAGE_SIZE / (1024 * 1024),
+            bad, bad ? "FAIL" : "ok");
 }

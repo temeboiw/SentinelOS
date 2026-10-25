@@ -300,7 +300,7 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
         (fs->feature_incompat & ~0x00000242u))
         return -1;
 
-    uint8_t original[256], inode[256];
+    uint8_t original[256], inode[256], tail_backup[4096];
     if (e4_inode(fs, ino, original) < 0 ||
         (E16(original, 0) & 0xF000u) != 0x8000u ||
         !(E32(original, 32) & 0x80000u))
@@ -308,9 +308,9 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
     for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = original[i];
 
     uint64_t old_size = e4_size(original), end = pos + len;
-    /* Appending/overwriting within the existing size only. No sparse holes:
-       they require allocating and zeroing every intervening logical block. */
-    if (pos > old_size) return -1;
+    /* Only append is supported. This keeps rollback from needing to restore
+       arbitrary existing file contents. */
+    if (pos != old_size) return -1;
     uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
     uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
     if (new_blocks > UINT32_MAX) return -1;
@@ -320,17 +320,35 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
         E16(root, 2) > 4 || E16(root, 4) != 4)
         return -1;
 
-    /* Track every newly allocated block so ordinary I/O errors can unwind. */
-    uint64_t allocated[131068];
-    uint64_t allocated_n = 0;
+    /* Track up to four allocated physical runs; root extents have this same
+       hard limit. This avoids a large kernel-stack allocation. */
+    uint64_t run_start[4], run_count[4], runs = 0;
+    uint64_t tail_physical = 0;
+    int tail_saved = 0;
+    if (old_size && (old_size % fs->blksz)) {
+        tail_physical = e4_map(fs, original, (uint32_t)(old_size / fs->blksz));
+        if (!tail_physical ||
+            e4_read(fs, tail_physical * fs->blksz, tail_backup, fs->blksz) < 0)
+            return -1;
+        tail_saved = 1;
+    }
+
     uint8_t zero[4096];
     for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
-
     for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
-        if (allocated_n >= sizeof(allocated) / sizeof(allocated[0])) goto rollback;
         uint64_t physical = 0;
         if (e4_alloc_block(fs, &physical) < 0) goto rollback;
-        allocated[allocated_n++] = physical;
+        if (runs && run_start[runs - 1] + run_count[runs - 1] == physical) {
+            ++run_count[runs - 1];
+        } else {
+            if (runs >= 4) {
+                (void)e4_free_block(fs, physical);
+                goto rollback;
+            }
+            run_start[runs] = physical;
+            run_count[runs] = 1;
+            ++runs;
+        }
         if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
             goto rollback;
         if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
@@ -338,19 +356,22 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
         E32(inode, 28) += fs->blksz / 512;
     }
 
-    if (end > old_size) {
-        E32(inode, 4) = (uint32_t)end;
-        if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
-    }
+    E32(inode, 4) = (uint32_t)end;
+    if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
     if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
     if (e4_write_inode_at(fs, inode, pos, src, len) < 0) goto rollback;
     if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
     return 0;
 
 rollback:
-    /* Restore the old inode mapping before releasing newly allocated blocks. */
     (void)e4_inode_write(fs, ino, original);
-    while (allocated_n) (void)e4_free_block(fs, allocated[--allocated_n]);
+    if (tail_saved)
+        (void)e4_write(fs, tail_physical * fs->blksz, tail_backup, fs->blksz);
+    while (runs) {
+        --runs;
+        for (uint64_t n = 0; n < run_count[runs]; ++n)
+            (void)e4_free_block(fs, run_start[runs] + n);
+    }
     return -1;
 }
 

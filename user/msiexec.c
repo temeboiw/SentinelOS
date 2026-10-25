@@ -68,6 +68,8 @@ static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
 
 /* NtAllocateVirtualMemory currently caps each request at 16 MiB. Keep every
  * request below that limit and outside the fixed DLL/image range. */
+static void out(const char *s);
+
 static int init_msi_workspace(void) {
     u64 va=0x43000000ULL, p, n;
 #define MSI_WS(ptr, type, bytes) do { \

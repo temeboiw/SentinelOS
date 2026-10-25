@@ -1581,10 +1581,12 @@ static int wm_shared_window_slot(int pid) {
 /* Bounded serial diagnostics: detailed startup events plus periodic samples. */
 static uint64_t wm_dbg_compose_calls, wm_dbg_present_calls;
 static uint64_t wm_dbg_window_moves, wm_dbg_window_registers, wm_dbg_window_closes;
-static int wm_dbg_sample(uint64_t n) { return n <= 48u || (n % 128u) == 0u; }
+static int wm_dbg_sample(uint64_t n) { return n <= 2u || (n % 512u) == 0u; }
 static uint64_t wm_dbg_input_events;
 static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
     uint64_t n=++wm_dbg_input_events;
+    /* Pointer motion is extremely frequent; keep keys and click events only. */
+    if(type!=1 && type!=3)return;
     if(!wm_dbg_sample(n))return;
     if(type==1)
         DbgPrint("[input] #%llu pid=%d key='%c' mouse=(%d,%d) buttons=%d\n",

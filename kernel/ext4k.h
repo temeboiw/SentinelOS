@@ -478,6 +478,60 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
     return -2; /* directory has no suitable slack; growth is not implemented */
 }
 
+
+/*
+ * Compose the existing inode and directory primitives into a named empty
+ * regular file. Directory space is checked before reserving the inode, but
+ * disk I/O failures can still leave an allocated, unreachable inode; full
+ * journaling/rollback and directory growth remain future work.
+ */
+static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
+                                const char *name, uint32_t *out_ino) {
+    if (!fs || !fs->ok || !name || !out_ino || !dir_ino) return -1;
+    uint32_t nl = 0;
+    while (name[nl] && nl < 256) {
+        if (name[nl] == '/' || name[nl] == '\\') return -1;
+        ++nl;
+    }
+    if (!nl || nl > 255 || name[0] == '.' ||
+        e4_lookup(fs, dir_ino, name))
+        return -1;
+
+    uint8_t dir[256], block[4096];
+    if (e4_inode(fs, dir_ino, dir) < 0 ||
+        (E16(dir, 0) & 0xF000u) != 0x4000u)
+        return -1;
+    uint64_t size = e4_size(dir);
+    uint32_t need = (8u + nl + 3u) & ~3u;
+    int space = 0;
+    for (uint64_t pos = 0; pos < size && !space; pos += fs->blksz) {
+        uint64_t pb = e4_map(fs, dir, (uint32_t)(pos / fs->blksz));
+        if (!pb || e4_read(fs, pb * fs->blksz, block, fs->blksz) < 0)
+            return -1;
+        for (uint32_t off = 0; off + 8 <= fs->blksz; ) {
+            uint32_t ino = E32(block, off);
+            uint16_t rec = E16(block, off + 4);
+            uint8_t old_nl = block[off + 6];
+            if (rec < 8 || (rec & 3u) || rec > fs->blksz - off)
+                return -1;
+            uint32_t used = (8u + old_nl + 3u) & ~3u;
+            if ((!ino && rec >= need) ||
+                (ino && used <= rec && rec - used >= need)) {
+                space = 1;
+                break;
+            }
+            off += rec;
+        }
+    }
+    if (!space) return -2;
+
+    uint32_t ino = 0;
+    if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
+    if (e4_dir_add_file(fs, dir_ino, name, ino) < 0) return -1;
+    *out_ino = ino;
+    return 0;
+}
+
 #define VFS_MAX_ENT 256
 typedef struct { char name[256]; uint8_t is_dir; uint32_t ino; } VfsEnt;
 static VfsEnt vfs_ents[VFS_MAX_ENT];

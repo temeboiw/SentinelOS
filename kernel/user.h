@@ -1705,7 +1705,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint64_t dbg_n=++wm_dbg_compose_calls;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
     if(x==0&&y==0&&w==width&&h==height && dbg_n==1u) {
-        DbgPrint("[gfx] initial full-screen compose pixels=%llu\\n",
+        DbgPrint("[gfx] initial full-screen compose pixels=%llu\n",
                  (unsigned long long)damage_pixels);
     }
     if(wm_dbg_sample(dbg_n)) {
@@ -1764,7 +1764,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         }
     }
     if(wm_dbg_sample(dbg_n) && (window_overlay_pixels || dbg_n<=2u))
-        DbgPrint("[gfx] overlay pixels=%llu (compose #%llu)\\n",
+        DbgPrint("[gfx] overlay pixels=%llu (compose #%llu)\n",
                  (unsigned long long)window_overlay_pixels,
                  (unsigned long long)dbg_n);
     /* Taskbar remains the top layer and is blended only once per damaged pixel. */
@@ -1778,7 +1778,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     int flush_ok=gfx_flush(x,y,w,h);
     if(!flush_ok || wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\\n",x,y,w,h,flush_ok);
+        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -2071,7 +2071,7 @@ static Frame *syscall_handler(Frame *f) {
         }
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\\n",
+            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h,a.width,a.height);
         int slot=wm_shared_window_slot(pid);
         KPROCESS *caller=MmCurrentProcess;
@@ -2121,7 +2121,7 @@ static Frame *syscall_handler(Frame *f) {
            (a.layer==WM_LAYER_WINDOW && !desktop_owner))
             wm_shared_compose(a.x,a.y,a.w,a.h);
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\\n",
+            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h);
         f->rax=1;
         return f;

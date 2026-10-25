@@ -839,13 +839,20 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     }
     cur_ox=x; cur_oy=y;
     cursor_save_draw(x,y);
-    /* Present old and new cursor footprints together. Two separate flushes
-       expose a one-frame gap and make the pointer flicker under rapid motion. */
-    int x0=rendered_x<x?rendered_x:x, y0=rendered_y<y?rendered_y:y;
-    int x1=(rendered_x>x?rendered_x:x)+16, y1=(rendered_y>y?rendered_y:y)+16;
-    if(x0<0)x0=0;if(y0<0)y0=0;
-    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
-    if(x1>x0&&y1>y0)u32_flush_graphics(x0,y0,x1-x0,y1-y0);
+    /* Flush only the old and new 16x16 footprints. A bounding rectangle
+     * spanning a fast pointer jump can cover most of the screen and cause
+     * visible stutter. The old footprint was reconstructed from the kernel
+     * compositor above, so it is safe to flush independently. */
+    int ox0=rendered_x, oy0=rendered_y, ox1=rendered_x+16, oy1=rendered_y+16;
+    int nx0=x, ny0=y, nx1=x+16, ny1=y+16;
+    if(ox0<0)ox0=0;if(oy0<0)oy0=0;
+    if(ox1>(int)g_fw)ox1=(int)g_fw;if(oy1>(int)g_fh)oy1=(int)g_fh;
+    if(nx0<0)nx0=0;if(ny0<0)ny0=0;
+    if(nx1>(int)g_fw)nx1=(int)g_fw;if(ny1>(int)g_fh)ny1=(int)g_fh;
+    if(ox1>ox0&&oy1>oy0)u32_flush_graphics(ox0,oy0,ox1-ox0,oy1-oy0);
+    if(nx1>nx0&&ny1>ny0 &&
+       (nx0!=ox0||ny0!=oy0||nx1!=ox1||ny1!=oy1))
+        u32_flush_graphics(nx0,ny0,nx1-nx0,ny1-ny0);
     (void)old_x; (void)old_y;
 }
 

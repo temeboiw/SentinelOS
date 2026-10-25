@@ -565,6 +565,44 @@ static uint64_t e4_map(Ext4k *fs, uint8_t *inode, uint32_t lb) {
     return 0;
 }
 
+
+/* Resolve one logical block and the remaining contiguous blocks in its
+ * extent. Bulk file reads use this to avoid re-reading an extent-tree node
+ * for every 4 KiB block of large files. */
+static uint64_t e4_map_run(Ext4k *fs, uint8_t *inode, uint32_t lb,
+                           uint32_t *run_out) {
+    if (run_out) *run_out = 0;
+    if (!fs || !inode || !run_out || !(E32(inode, 32) & 0x80000)) return 0;
+    uint8_t *node = inode + 40;
+    for (int depth = 0; depth < 5; depth++) {
+        if (E16(node, 0) != 0xF30A) return 0;
+        uint16_t n = E16(node, 2);
+        uint16_t depth_v = E16(node, 6);
+        uint8_t *e = node + 12;
+        if (depth_v == 0) {
+            for (uint16_t i = 0; i < n; i++, e += 12) {
+                uint32_t first = E32(e, 0);
+                uint32_t len = E16(e, 4) & 0x7FFF;
+                if (len && lb >= first && lb - first < len) {
+                    uint64_t start = ((uint64_t)E16(e, 6) << 32) | E32(e, 8);
+                    *run_out = len - (lb - first);
+                    return start + (lb - first);
+                }
+            }
+            return 0;
+        }
+        uint64_t leaf = 0;
+        for (uint16_t i = 0; i < n; i++, e += 12) {
+            if (E32(e, 0) <= lb)
+                leaf = ((uint64_t)E16(e, 8) << 32) | E32(e, 4);
+        }
+        if (!leaf || e4_read(fs, leaf * fs->blksz, fs->blk, fs->blksz) < 0)
+            return 0;
+        node = fs->blk;
+    }
+    return 0;
+}
+
 static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
     uint8_t inode[256];
     if (e4_inode(fs, dir, inode) < 0) return 0;

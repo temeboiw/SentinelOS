@@ -517,6 +517,59 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
 }
 
 
+
+/* Best-effort inverse for a block successfully returned by e4_alloc_block. */
+static int e4_free_block(Ext4k *fs, uint64_t block) {
+    if (!fs || !fs->ok || fs->is64 || fs->blksz != 4096 ||
+        block < fs->first_data || block >= fs->total_blocks)
+        return -1;
+    uint64_t group = block / fs->bpg, bit = block % fs->bpg;
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint8_t gd[64], sb[1024], bitmap[4096];
+    if (e4_read(fs, gdt + group * fs->dsize, gd, fs->dsize) < 0) return -1;
+    uint32_t bb = E32(gd, 0);
+    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0)
+        return -1;
+    uint8_t mask = (uint8_t)(1u << (bit & 7));
+    if (!(bitmap[bit >> 3] & mask)) return 0;
+    bitmap[bit >> 3] &= (uint8_t)~mask;
+    if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    E16(gd, 12) = (uint16_t)(E16(gd, 12) + 1);
+    if (e4_write(fs, gdt + group * fs->dsize, gd, fs->dsize) < 0) return -1;
+    if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    E32(sb, 12) = E32(sb, 12) + 1;
+    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    fs->free_blocks = E32(sb, 12);
+    return 0;
+}
+
+/* Best-effort inverse for an inode successfully returned by e4_alloc_inode. */
+static int e4_free_inode(Ext4k *fs, uint32_t ino) {
+    if (!fs || !fs->ok || !ino || ino > fs->total_inodes ||
+        fs->is64 || fs->dsize != 32)
+        return -1;
+    uint32_t group = (ino - 1) / fs->ipg, bit = (ino - 1) % fs->ipg;
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint8_t gd[64], sb[1024], bitmap[4096];
+    if (e4_read(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
+        return -1;
+    uint32_t ib = E32(gd, 4);
+    if (!ib || e4_read(fs, (uint64_t)ib * fs->blksz, bitmap, fs->blksz) < 0)
+        return -1;
+    uint8_t mask = (uint8_t)(1u << (bit & 7));
+    if (!(bitmap[bit >> 3] & mask)) return 0;
+    bitmap[bit >> 3] &= (uint8_t)~mask;
+    if (e4_write(fs, (uint64_t)ib * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);
+    if (e4_write(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
+        return -1;
+    if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    E32(sb, 16) = E32(sb, 16) + 1;
+    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    fs->free_inodes = E32(sb, 16);
+    return 0;
+}
+
 /*
  * Insert a regular-file name into slack space in an existing directory block.
  * Does not grow directories; returns failure if no safe slot exists. Caller
@@ -580,6 +633,48 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
 }
 
 
+
+/*
+ * Extend a directory by one block and put a single file entry in that block.
+ * Inline extent-root only; metadata rollback is best-effort and cannot recover
+ * from power loss or a failed rollback write.
+ */
+static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
+                                const char *name, uint32_t child_ino) {
+    if (!fs || !fs->ok || !name || !child_ino || fs->is64 ||
+        fs->blksz != 4096) return -1;
+    uint8_t dir[256], block[4096];
+    if (e4_inode(fs, dir_ino, dir) < 0 ||
+        (E16(dir, 0) & 0xF000u) != 0x4000u) return -1;
+    uint64_t old_size = e4_size(dir);
+    if (old_size % fs->blksz) return -1;
+    uint64_t lb = old_size / fs->blksz;
+    if (lb > UINT32_MAX || e4_extent_append_root == 0) return -1;
+    uint64_t physical = 0;
+    if (e4_alloc_block(fs, &physical) < 0) return -1;
+    for (uint32_t i = 0; i < fs->blksz; ++i) block[i] = 0;
+    E32(block, 0) = child_ino;
+    E16(block, 4) = (uint16_t)fs->blksz;
+    uint32_t nl = 0;
+    while (name[nl] && nl < 255) ++nl;
+    if (!nl || name[nl]) { e4_free_block(fs, physical); return -1; }
+    block[6] = (uint8_t)nl;
+    block[7] = 1;
+    for (uint32_t i = 0; i < nl; ++i) block[8 + i] = (uint8_t)name[i];
+    if (e4_write(fs, physical * fs->blksz, block, fs->blksz) < 0) {
+        e4_free_block(fs, physical); return -1;
+    }
+    if (e4_extent_append_root(fs, dir, (uint32_t)lb, physical) < 0) {
+        e4_free_block(fs, physical); return -1;
+    }
+    E32(dir, 4) = (uint32_t)(old_size + fs->blksz);
+    E32(dir, 28) += fs->blksz / 512;
+    if (e4_inode_write(fs, dir_ino, dir) < 0) {
+        e4_free_block(fs, physical); return -1;
+    }
+    return 0;
+}
+
 /*
  * Compose the existing inode and directory primitives into a named empty
  * regular file. Directory space is checked before reserving the inode, but
@@ -628,7 +723,7 @@ static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
 
     uint32_t ino = 0;
     if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
-    if (e4_dir_add_file(fs, dir_ino, name, ino) < 0) return -1;
+    int drc = e4_dir_add_file(fs, dir_ino, name, ino);\n    if (drc == -2) drc = e4_dir_grow_add_file(fs, dir_ino, name, ino);\n    if (drc < 0) { e4_free_inode(fs, ino); return -1; }
     *out_ino = ino;
     return 0;
 }

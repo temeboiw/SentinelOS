@@ -240,6 +240,8 @@ static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
 }
 
 
+static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode);
+
 /*
  * Append one logical block to an inode whose extents are stored in the inode
  * root. Supports up to four root extents, merges physically adjacent blocks,

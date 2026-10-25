@@ -205,17 +205,16 @@ else
   EDK_INC=()
 fi
 
+# Keep the disk root clean: every installed OS file lives beneath /magic.
+# Recreate the staging tree so stale root-level files cannot leak into images.
+rm -rf "$B/rootfs"
 mkdir -p \
   "$B/obj" \
   "$B/esp/EFI/BOOT" \
   "$B/esp/EFI/magic" \
-  "$SYS32" \
-  "$B/rootfs/Program Files" \
-  "$B/rootfs/Program Files (x86)" \
-  "$B/rootfs/Program Files/Common Files" \
-  "$B/rootfs/Program Files (x86)/Common Files" \
-  "$B/rootfs/Users/Public" \
-  "$B/rootfs/Windows/System32"
+  "$SYS32/drivers" \
+  "$B/rootfs/magic/Program Files" \
+  "$B/rootfs/magic/Users/Public"
 
 # Lato is the preferred humanist sans for the Vista/Frutiger Aero era.
 # If it is not installed, use a neutral sans-serif TrueType substitute.
@@ -233,7 +232,7 @@ if [[ ! -s "$FONT_SRC" ]]; then
   done
 fi
 if [[ -s "$FONT_SRC" ]]; then
-  cp "$FONT_SRC" "$B/rootfs/Lato-Regular.ttf"
+  cp "$FONT_SRC" "$SYS32/Lato-Regular.ttf"
   echo "  -> Lato TrueType font ($(wc -c < "$FONT_SRC") bytes)"
 else
   echo "warning: Lato-Regular.ttf not found; USER32 will use its fallback glyphs"
@@ -1081,8 +1080,6 @@ lld -flavor link \
   /export:timeGetTime \
   "/out:$SYS32/winmm.dll" \
   "$B/obj/winmm.o"
-cp "$SYS32/winmm.dll" "$B/rootfs/winmm.dll"
-cp "$SYS32/winmm.dll" "$B/rootfs/Windows/System32/winmm.dll"
 
 echo "  -> ws2_32.dll (Winsock 2 API and address utilities)"
 clang "${USER_CFLAGS[@]}" -fno-builtin \
@@ -1103,8 +1100,6 @@ lld -flavor link \
   /export:WSAWaitForMultipleEvents /export:WSAEnumNetworkEvents /export:WSAAsyncSelect \
   "/out:$SYS32/ws2_32.dll" \
   "$B/obj/ws2_32.o"
-cp "$SYS32/ws2_32.dll" "$B/rootfs/ws2_32.dll"
-cp "$SYS32/ws2_32.dll" "$B/rootfs/Windows/System32/ws2_32.dll"
 
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
@@ -1136,8 +1131,6 @@ lld -flavor link \
   /export:glColor4f /export:glColor4ub /export:glClearAccum \
   "/out:$SYS32/opengl32.dll" \
   "$B/obj/opengl32.o"
-cp "$SYS32/opengl32.dll" "$B/rootfs/opengl32.dll"
-cp "$SYS32/opengl32.dll" "$B/rootfs/Windows/System32/opengl32.dll"
 
 
 echo "  -> Universal CRT runtime (real initializer-table execution)"
@@ -1208,15 +1201,8 @@ lld -flavor link \
 # The API-set contract name is the import name used by Geometry Dash.
 # Keep the conventional UCRT name pointing at the same implementation too.
 cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/ucrtbase.dll"
-cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/api-ms-win-crt-runtime-l1-1-0.dll"
-cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/ucrtbase.dll"
+cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/ucrtbase.dll"
 
-# The current kernel VFS dependency lookup enumerates the mounted root
-# directory only; it does not yet walk Windows/System32 subdirectories.
-# Publish these runtime DLL names at the root as well so PE imports can find
-# them by their normal basename while recursive directory lookup is unfinished.
-cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/api-ms-win-crt-runtime-l1-1-0.dll"
-cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/ucrtbase.dll"
 
 # These API-set names are separate import contracts on Windows. SentinelOS
 # currently provides one shared implementation for the overlapping CRT
@@ -1230,8 +1216,6 @@ for contract in \
   api-ms-win-crt-environment-l1-1-0.dll
 do
   cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$SYS32/$contract"
-  cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/$contract"
-  cp "$SYS32/api-ms-win-crt-runtime-l1-1-0.dll" "$B/rootfs/Windows/System32/$contract"
 done
 
 # VCRUNTIME140 imports these standard memory/string primitives. Publish a
@@ -1261,8 +1245,6 @@ lld -flavor link \
   /export:_invoke_watson \
   "/out:$SYS32/vcruntime140.dll" \
   "$B/obj/ucrt_runtime.o"
-cp "$SYS32/vcruntime140.dll" "$B/rootfs/Windows/System32/vcruntime140.dll"
-cp "$SYS32/vcruntime140.dll" "$B/rootfs/vcruntime140.dll"
 
 echo "  -> user32.dll"
 
@@ -1935,7 +1917,7 @@ lld -flavor link \
   "/out:$SYS32/msiexec.exe" \
   "$B/obj/msiexec.o"
 
-echo "  -> game.exe (UserTestApps C++ game, installed at disk root)"
+echo "  -> game.exe (UserTestApps C++ game, installed under magic/Program Files)"
 
 USER_CXXFLAGS=(
   -target x86_64-windows-gnu
@@ -1963,15 +1945,15 @@ clang++ "${USER_CXXFLAGS[@]}" \
 lld -flavor link \
   /subsystem:windows /entry:game_mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x42000000 \
-  "/out:$B/rootfs/game.exe" \
+  "/out:$B/rootfs/magic/Program Files/game.exe" \
   "$B/obj/game.o"
 
-if [[ ! -s "$B/rootfs/game.exe" ]]; then
+if [[ ! -s "$B/rootfs/magic/Program Files/game.exe" ]]; then
   echo "FATAL: game.exe was not produced"
   exit 1
 fi
 
-ls -lh "$B/rootfs/game.exe"
+ls -lh "$B/rootfs/magic/Program Files/game.exe"
 
 echo "  -> maze.exe (VirGL shader-driven spinning 3D triangle; GPU-only)"
 
@@ -1992,24 +1974,24 @@ clang++ "${MAZE_CXXFLAGS[@]}" \
 lld -flavor link \
   /machine:x64 /subsystem:windows /entry:maze_mainCRTStartup /nodefaultlib \
   /fixed:no /base:0x42100000 \
-  "/out:$B/rootfs/maze.exe" \
+  "/out:$B/rootfs/magic/Program Files/maze.exe" \
   "$B/obj/maze.o" \
   "$B/obj/soft3d.o"
 
-if [[ ! -s "$B/rootfs/maze.exe" ]]; then
+if [[ ! -s "$B/rootfs/magic/Program Files/maze.exe" ]]; then
   echo "FATAL: maze.exe was not produced"
   exit 1
 fi
 
 # Fail the build if the game is not an x86-64 PE32+ image. The .exe suffix
 # alone is not a format check; SentinelOS user executables must be PE32+.
-MAZE_FORMAT="$(file -b "$B/rootfs/maze.exe")"
+MAZE_FORMAT="$(file -b "$B/rootfs/magic/Program Files/maze.exe")"
 echo "  -> maze.exe format: $MAZE_FORMAT"
 if [[ "$MAZE_FORMAT" != *"PE32+"* || "$MAZE_FORMAT" != *"x86-64"* ]]; then
   echo "FATAL: maze.exe is not a PE32+ x86-64 executable"
   exit 1
 fi
-ls -lh "$B/rootfs/maze.exe"
+ls -lh "$B/rootfs/magic/Program Files/maze.exe"
 
 echo "==> Checking required images"
 
@@ -2058,6 +2040,18 @@ ls -lh \
   "$SYS32/cmd.exe" \
   "$SYS32/taskmgr.exe" \
   "$SYS32/msiexec.exe"
+
+# Enforce the on-disk layout before making the filesystem image.
+if [[ ! -d "$B/rootfs/magic/System32/drivers" ]]; then
+  echo "FATAL: missing magic/System32/drivers directory"
+  exit 1
+fi
+while IFS= read -r top_entry; do
+  [[ "$(basename "$top_entry")" == "magic" ]] || {
+    echo "FATAL: unexpected rootfs entry: $top_entry (only /magic is allowed)"
+    exit 1
+  }
+done < <(find "$B/rootfs" -mindepth 1 -maxdepth 1 -print)
 
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
 

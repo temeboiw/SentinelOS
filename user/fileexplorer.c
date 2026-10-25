@@ -169,8 +169,7 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
 
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     if (!pText) { print("fileexplorer: draw_rows missing TextOutA\n"); return; }
-    print("fileexplorer: draw_rows stage=title-before\n");
-    pText(g_window, 0, 0, g_home ? "File Explorer  >  Home" : "File Explorer", -1);
+pText(g_window, 0, 0, g_home ? "File Explorer  >  Home" : "File Explorer", -1);
     {
         char toolbar[80]; int q=0;
         const char *prefix="Back  Forward  Up  Refresh  |  Address: ";
@@ -186,10 +185,8 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         pText(g_window,0,1,toolbar,-1);
     }
     for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
-        if (visible == 0) print("fileexplorer: draw_rows stage=first-row-before\n");
-        draw_visible_row(pText, 0, visible);
-        if (visible == 0) print("fileexplorer: draw_rows stage=first-row-after\n");
-    }
+draw_visible_row(pText, 0, visible);
+}
     if (g_context_menu) {
         /* Overlay a compact in-window context menu; the backing rows are
            redrawn when it closes, so no pixels are left behind. */
@@ -420,23 +417,16 @@ void mainCRTStartup(void) {
     print("fileexplorer: create window\n");
     g_win_y = 40;
     if (pBeginBatch) pBeginBatch();
-    print("fileexplorer: startup stage=before-create\n");
     g_window = pCreate(0, "Explorer", "File Explorer", 0, 40, g_win_y, 760, 520, 0, 0, 0, 0);
-    print(g_window ? "fileexplorer: startup stage=after-create hwnd-valid\n"
-                   : "fileexplorer: startup stage=create-failed\n");
+    if (!g_window) print("fileexplorer: CreateWindowExA failed\n");
     if (!g_window) {
         if (pEndBatch) pEndBatch();
         print("fileexplorer: aborting startup after CreateWindowExA failure\n");
         for (;;) __asm__ volatile("pause");
     }
-    print("fileexplorer: startup stage=before-show\n");
     if (pShow) pShow(g_window, 1);
-    print("fileexplorer: startup stage=after-show\n");
-    print("fileexplorer: startup stage=before-reload\n");
     reload(pQuery, pText, pInv);
-    print("fileexplorer: startup stage=after-reload\n");
     if (pUpdate) pUpdate(g_window);
-    print("fileexplorer: startup stage=after-update\n");
     if (pEndBatch) pEndBatch();
     print("fileexplorer: ready\n");
 

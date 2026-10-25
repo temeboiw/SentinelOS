@@ -39,7 +39,7 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42, SYS_RepaintRect=44
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -829,7 +829,9 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
      * new position and flush that footprint. */
     int rendered_x=cur_ox, rendered_y=cur_oy;
     if (cur_on) {
-        if (g_gpu_surface && u32_is_desktop_window()) {
+        if (g_gpu_surface) {
+            /* The compositor must rebuild the old pointer footprint even
+             * when an application-owned modal window has focus. */
             u32_repaint_scene_rect(rendered_x,rendered_y,rendered_x+16,rendered_y+16);
             cur_on=0;
             for(int i=0;i<16*16;i++)cur_paint[i]=0;
@@ -837,13 +839,20 @@ static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     }
     cur_ox=x; cur_oy=y;
     cursor_save_draw(x,y);
-    /* Present old and new cursor footprints together. Two separate flushes
-       expose a one-frame gap and make the pointer flicker under rapid motion. */
-    int x0=rendered_x<x?rendered_x:x, y0=rendered_y<y?rendered_y:y;
-    int x1=(rendered_x>x?rendered_x:x)+16, y1=(rendered_y>y?rendered_y:y)+16;
-    if(x0<0)x0=0;if(y0<0)y0=0;
-    if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
-    if(x1>x0&&y1>y0)u32_flush_graphics(x0,y0,x1-x0,y1-y0);
+    /* Flush only the old and new 16x16 footprints. A bounding rectangle
+     * spanning a fast pointer jump can cover most of the screen and cause
+     * visible stutter. The old footprint was reconstructed from the kernel
+     * compositor above, so it is safe to flush independently. */
+    int ox0=rendered_x, oy0=rendered_y, ox1=rendered_x+16, oy1=rendered_y+16;
+    int nx0=x, ny0=y, nx1=x+16, ny1=y+16;
+    if(ox0<0)ox0=0;if(oy0<0)oy0=0;
+    if(ox1>(int)g_fw)ox1=(int)g_fw;if(oy1>(int)g_fh)oy1=(int)g_fh;
+    if(nx0<0)nx0=0;if(ny0<0)ny0=0;
+    if(nx1>(int)g_fw)nx1=(int)g_fw;if(ny1>(int)g_fh)ny1=(int)g_fh;
+    if(ox1>ox0&&oy1>oy0)u32_flush_graphics(ox0,oy0,ox1-ox0,oy1-oy0);
+    if(nx1>nx0&&ny1>ny0 &&
+       (nx0!=ox0||ny0!=oy0||nx1!=ox1||ny1!=oy1))
+        u32_flush_graphics(nx0,ny0,nx1-nx0,ny1-ny0);
     (void)old_x; (void)old_y;
 }
 
@@ -981,32 +990,11 @@ static void u32_repaint_scene_rect(int x0,int y0,int x1,int y1) {
     if(x1>(int)g_fw)x1=(int)g_fw;if(y1>(int)g_fh)y1=(int)g_fh;
     if(x0>=x1||y0>=y1)return;
     if(g_gpu_surface) {
-        /* The kernel owns the shared GPU scanout. Re-submit only the already
-         * rendered layer covering the cursor's old footprint; the kernel then
-         * reconstructs the underlay from its persistent Z-ordered buffers.
-         * Never restore wallpaper directly over a window or taskbar. */
-        typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
-        int desktop_owner=u32_is_desktop_window();
-        U32_PRESENT_LAYER a;
-        a.x=(u32)x0;a.y=(u32)y0;a.w=(u32)(x1-x0);a.h=(u32)(y1-y0);
-        a.width=g_fw;a.height=g_fh;
-        if (desktop_owner) {
-            /*
-             * Rebuild the old cursor rectangle in the same Z order as the
-             * real scene. Presenting only the taskbar layer here painted
-             * taskbar pixels over windows and left stale cursor/save-under
-             * pixels behind when the pointer crossed layer boundaries.
-             */
-            a.layer=1;a.pixels=(u64)u32_desktop_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-            a.layer=2;a.pixels=(u64)u32_window_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-            a.layer=3;a.pixels=(u64)u32_taskbar_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-        } else {
-            a.layer=2;a.pixels=(u64)u32_window_layer;
-            (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-        }
+        /* Restore damage from the kernel's persistent Z-order, not this
+         * process's private window layer; the latter creates pointer trails. */
+        typedef struct { u32 x,y,w,h; } U32_REPAINT_RECT;
+        U32_REPAINT_RECT a={(u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0)};
+        (void)sy3(SYS_RepaintRect,(u64)&a,0,0);
         return;
     }
     if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
@@ -2441,33 +2429,33 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
 
     int done=0;
     int result=1;
+
+    /* A modal dialog is static between input events. Render its scene and
+     * buttons once; composing the whole desktop on every empty input poll
+     * saturates the GPU flush path and makes the pointer stutter/trail. */
+    if(cur_on) cursor_restore_fast();
+    compose();
+    int by=g_wnd.y+g_wnd.h-42;
+    int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
+    round_fill(bx,by,78,28,4,0xFF559EBB);
+    round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
+    draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
+    int nx=g_wnd.x+g_wnd.w-100;
+    if(yesno) {
+        round_fill(nx,by,78,28,4,0xFF559EBB);
+        round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
+        draw_text(nx+24,by+9,"No",0xFF164E68);
+    }
+    u32_flush_raw(g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h);
+
+    /* Keep the cursor topmost, but update only its 16x16 footprint on input.
+     * Do not redraw or flush the modal window for every pointer event. */
+    cur_ox=g_mx; cur_oy=g_my;
+    cursor_save_draw(g_mx,g_my);
+    if(g_scanout && g_scan_pitch && g_fw && g_fh)
+        u32_flush_raw(g_mx,g_my,16,16);
+
     while(!done) {
-        /* Remove the previous cursor before repainting the modal scene.
-         * Keep cur_on/save-under valid until cursor_restore_fast() restores
-         * exactly the pixels beneath that cursor. Clearing cur_on first
-         * leaves the old cursor pixels in scanout, and the next cursor draw
-         * then saves those cursor pixels as its underlay, producing a trail. */
-        if(cur_on) cursor_restore_fast();
-        compose();
-        int by=g_wnd.y+g_wnd.h-42;
-        int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
-        round_fill(bx,by,78,28,4,0xFF559EBB);
-        round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
-        draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
-        int nx=g_wnd.x+g_wnd.w-100;
-        if(yesno) {
-            round_fill(nx,by,78,28,4,0xFF559EBB);
-            round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
-            draw_text(nx+24,by+9,"No",0xFF164E68);
-        }
-
-        /* The modal title is not "Desktop", so compose() does not paint the
-         * pointer. Repaint it as the final overlay after the dialog is ready. */
-        cur_ox=g_mx; cur_oy=g_my;
-        cursor_save_draw(g_mx,g_my);
-        if(g_scanout && g_scan_pitch && g_fw && g_fh)
-            u32_flush_raw(g_mx,g_my,16,16);
-
         InputEvent ev={0};
         if(!sy3(SYS_GetInput,(u64)&ev,0,0))continue;
         if(ev.type==1) {
@@ -2475,7 +2463,18 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
             else if(yesno && (ev.key=='n'||ev.key=='N'||ev.key==27)) { result=7; done=1; }
             else if(ev.key==27||ev.key=='\r'||ev.key=='\n'||ev.key==' ')done=1;
         } else if(ev.type==2||ev.type==3) {
+            int old_x=cur_ox, old_y=cur_oy;
+            if(cur_on) cursor_restore_fast();
             g_mx=ev.x;g_my=ev.y;u32_mouse_record();
+            /* Flush the restored old footprint before drawing at the new
+             * position, so no stale pointer pixels survive on scanout. */
+            if(old_x>=0&&old_y>=0)
+                u32_flush_raw(old_x,old_y,16,16);
+            cur_ox=g_mx;cur_oy=g_my;
+            cursor_save_draw(g_mx,g_my);
+            if(g_scanout && g_scan_pitch && g_fw && g_fh)
+                u32_flush_raw(g_mx,g_my,16,16);
+
             if(ev.type==3 && hit(ev.x,ev.y,bx,by,bx+78,by+28)) {
                 result=yesno?6:1; done=1;
             } else if(ev.type==3 && yesno && hit(ev.x,ev.y,nx,by,nx+78,by+28)) {

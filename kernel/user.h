@@ -1023,6 +1023,8 @@ static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }
 
+static int vfs_find_regular_file(const char *name, uint32_t *ino_out, uint64_t *size_out);
+
 static int vfs_open_user_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = 0;
@@ -1036,6 +1038,22 @@ static int vfs_open_user_file(const char *name) {
             if (ca != cb) { same = 0; break; }
         }
         if (same && !vfs_ents[i].is_dir) { ino = vfs_ents[i].ino; break; }
+    }
+    /* Resolve explicit paths and system DLL basenames through the ext4
+       directory tree; the cached list is only for current-directory UI use. */
+    if (!ino) {
+        uint64_t ignored_size=0;
+        if(vfs_find_regular_file(name,&ino,&ignored_size)<0)ino=0;
+        const char *prefixes[]={"magic/System32/","magic/","magic/Program Files/"};
+        char candidate[256];
+        for(unsigned int p=0;p<sizeof(prefixes)/sizeof(prefixes[0])&&!ino;p++) {
+            unsigned int i=0,j=0;
+            while(prefixes[p][i] && i+1<sizeof(candidate)){candidate[i]=prefixes[p][i];i++;}
+            while(name[j] && i+j+1<sizeof(candidate)){candidate[i+j]=name[j];j++;}
+            if(name[j])continue;
+            candidate[i+j]=0;
+            if(vfs_find_regular_file(candidate,&ino,&ignored_size)<0)ino=0;
+        }
     }
     if (!ino) return -1;
     uint8_t inode[256];
@@ -1305,12 +1323,15 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     }
     if (!found) found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
 
-    const char prefix0[] = "Windows/System32/";
-    const char prefix1[] = "C:/Windows/System32/";
-    const char prefix2[] = "C:\\Windows\\System32\\";
-    const char prefix3[] = "System32/";
-    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3 };
-    for (unsigned int p = 0; !found && p < 4; ++p) {
+    const char prefix0[] = "magic/System32/";
+    const char prefix1[] = "C:/magic/System32/";
+    const char prefix2[] = "magic/Program Files/";
+    const char prefix3[] = "C:/magic/Program Files/";
+    const char prefix4[] = "System32/";
+    const char prefix5[] = "Windows/System32/";
+    const char prefix6[] = "C:/Windows/System32/";
+    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3, prefix4, prefix5, prefix6 };
+    for (unsigned int p = 0; !found && p < sizeof(prefixes)/sizeof(prefixes[0]); ++p) {
         unsigned int i = 0;
         while (prefixes[p][i] && i + path_len + 1 < sizeof(system_path)) {
             system_path[i] = prefixes[p][i];
@@ -1527,6 +1548,8 @@ typedef struct {
     uint64_t pixels;
     uint32_t x, y, w, h, width, height;
 } WmPresentWindowSurfaceArgs;
+typedef struct { uint32_t x,y,w,h; } WmRepaintRectArgs;
+#define SYS_NtRepaintRect 44
 static uint32_t *wm_shared_background;
 static uint32_t *wm_shared_desktop;
 static uint32_t *wm_shared_taskbar;
@@ -1581,9 +1604,11 @@ static int wm_shared_window_slot(int pid) {
 /* Bounded serial diagnostics: detailed startup events plus periodic samples. */
 static uint64_t wm_dbg_compose_calls, wm_dbg_present_calls;
 static uint64_t wm_dbg_window_moves, wm_dbg_window_registers, wm_dbg_window_closes;
-static int wm_dbg_sample(uint64_t n) { return n <= 48u || (n % 128u) == 0u; }
+static int wm_dbg_sample(uint64_t n) { return n <= 2u || (n % 512u) == 0u; }
 static uint64_t wm_dbg_input_events;
 static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
+    /* Pointer motion is extremely frequent; keep keys and click events only. */
+    if(type!=1 && type!=3)return;
     uint64_t n=++wm_dbg_input_events;
     if(!wm_dbg_sample(n))return;
     if(type==1)
@@ -1701,14 +1726,10 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         order[count++]=slot;
     }
     uint64_t dbg_n=++wm_dbg_compose_calls;
-    static uint64_t wm_dbg_composed_pixels;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
-    wm_dbg_composed_pixels+=damage_pixels;
-    if(x==0&&y==0&&w==width&&h==height) {
-        DbgPrint("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
-                 (unsigned long long)dbg_n,
-                 (unsigned long long)damage_pixels,
-                 (unsigned long long)wm_dbg_composed_pixels);
+    if(x==0&&y==0&&w==width&&h==height && dbg_n==1u) {
+        DbgPrint("[gfx] initial full-screen compose pixels=%llu\n",
+                 (unsigned long long)damage_pixels);
     }
     if(wm_dbg_sample(dbg_n)) {
         DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
@@ -1732,7 +1753,6 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                                        wm_shared_desktop[at]);
         }
     }
-    static uint64_t wm_dbg_window_overlay_pixels;
     uint64_t window_overlay_pixels=0;
     for(int oi=0;oi<count;oi++) {
         int slot=order[oi];
@@ -1766,12 +1786,10 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             }
         }
     }
-    wm_dbg_window_overlay_pixels+=window_overlay_pixels;
-    if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
-                 (unsigned long long)dbg_n,
+    if(wm_dbg_sample(dbg_n) && (window_overlay_pixels || dbg_n<=2u))
+        DbgPrint("[gfx] overlay pixels=%llu (compose #%llu)\n",
                  (unsigned long long)window_overlay_pixels,
-                 (unsigned long long)wm_dbg_window_overlay_pixels);
+                 (unsigned long long)dbg_n);
     /* Taskbar remains the top layer and is blended only once per damaged pixel. */
     for(uint32_t yy=y;yy<y+h;yy++) {
         uint32_t row=yy*width;
@@ -1782,7 +1800,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         }
     }
     int flush_ok=gfx_flush(x,y,w,h);
-    if(wm_dbg_sample(dbg_n))
+    if(!flush_ok || wm_dbg_sample(dbg_n))
         DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
@@ -2054,6 +2072,23 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+
+    case SYS_NtRepaintRect: {
+        WmRepaintRectArgs a;
+        if(!f->rdi || !MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(a),0)) {
+            f->rax=0;return f;
+        }
+        a=*(WmRepaintRectArgs *)(uintptr_t)f->rdi;
+        if(!a.w || !a.h || a.x>=gfx_width || a.y>=gfx_height) {
+            f->rax=0;return f;
+        }
+        if(a.w>gfx_width-a.x)a.w=gfx_width-a.x;
+        if(a.h>gfx_height-a.y)a.h=gfx_height-a.y;
+        /* Restore damaged pixels from the kernel-owned persistent Z-order. */
+        wm_shared_compose(a.x,a.y,a.w,a.h);
+        f->rax=1;
+        return f;
+    }
 
     case SYS_NtPresentLayer: {
         WmPresentLayerArgs a;

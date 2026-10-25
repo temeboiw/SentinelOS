@@ -46,8 +46,12 @@ function Invoke-Tool {
 }
 function Fwd($p) { $p -replace '\\', '/' }
 
-$sys32 = "$b\rootfs\magic\System32"
-New-Item -ItemType Directory -Force "$b\obj", "$b\esp\EFI\BOOT", "$b\esp\EFI\magic", $sys32 | Out-Null
+# Recreate a clean staged filesystem. The ext4 volume root contains only /magic.
+$rootfs = "$b\rootfs"
+if (Test-Path $rootfs) { Remove-Item $rootfs -Recurse -Force }
+$sys32 = "$rootfs\magic\System32"
+$drivers = "$sys32\drivers"
+New-Item -ItemType Directory -Force "$b\obj", "$b\esp\EFI\BOOT", "$b\esp\EFI\magic", $drivers, "$rootfs\magic\Program Files", "$rootfs\magic\Users\Public" | Out-Null
 
 $common = "--target=x86_64-unknown-windows", "-ffreestanding", "-mno-red-zone",
           "-fno-stack-protector", "-mgeneral-regs-only", "-O2", "-Wall", "-Wno-unused-function",

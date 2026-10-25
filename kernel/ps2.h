@@ -79,9 +79,6 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
         mouse_btn = mouse_pkt[0] & 0x07;
 
         mouse_pkt_count++;
-        if (mouse_pkt_count == 1 || (mouse_pkt_count % 50) == 0)
-            DbgPrint("ps2: mouse pkt#%d dx=%d dy=%d -> (%d,%d)\n",
-                     mouse_pkt_count, dx, dy, mouse_x, mouse_y);
     } else {
         /* Record both make and break codes while retaining text-input bytes. */
         if (b < 0x80) kbd_down[b] = 1;

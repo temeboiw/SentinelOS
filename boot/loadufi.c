@@ -464,9 +464,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             VOID *file; UINTN fsize;
             EFI_STATUS st2 = os_load_file(path, 3, &file, &fsize);
             if (EFI_ERROR(st2)) {
-                say(L"loadufi: missing user image ");
-                say_a(users[u]);
-                say(L"\r\n");
+                /* instlr.exe and screen.exe are optional in this build. */
+                int optional = (users[u][0] == 'i' && users[u][1] == 'n' &&
+                                users[u][2] == 's' && users[u][3] == 't') ||
+                               (users[u][0] == 's' && users[u][1] == 'c' &&
+                                users[u][2] == 'r' && users[u][3] == 'e');
+                if (!optional) {
+                    say(L"loadufi: missing user image ");
+                    say_a(users[u]);
+                    say(L"\r\n");
+                }
                 continue;
             }
             if (nmods >= BOOT_MAX_MODULES) break;
@@ -482,20 +489,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
                 continue;
             }
             nmods++;
-            say(L"loadufi: loaded user image ");
-            say_a(users[u]);
-            say(L"\r\n");
-        }
+}
     }
 
     for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) &&
             !streq(mods[i].name, "krnl.exe", 1)) continue;
 
-        say(L"loadufi: resolving ");
-        say_a(mods[i].name);
-        say(L"\r\n");
-        resolve_imports_hh(i);
+resolve_imports_hh(i);
     }
 
     say(L"loadufi: imports resolved\r\n");
@@ -539,10 +540,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
         if (is_user) {
             if (!prefer) prefer = 0x40000000ULL;
-            say(L"loadufi: user image ");
-            say_a(mods[i].name);
-            say(L"\r\n");
-            UINT64 rva = mods[i].entry - phys;
+UINT64 rva = mods[i].entry - phys;
             bi->modules[i].base = prefer;
             bi->modules[i].phys = phys;
             bi->modules[i].entry = prefer + rva;
@@ -550,10 +548,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         } else {
             if (prefer < 0xFFFF800000000000ULL)
                 prefer = HH_HHDM + phys;
-            say(L"loadufi: higher-half ");
-            say_a(mods[i].name);
-            say(L"\r\n");
-            for (UINT64 off = 0; off < size; off += 4096)
+for (UINT64 off = 0; off < size; off += 4096)
                 hh_map_4k(hh_pml4, prefer + off, phys + off, 0);
             hh_apply_relocs((UINT8 *)(UINTN)phys, (INT64)(prefer - phys));
             mods[i].entry = prefer + (mods[i].entry - phys);

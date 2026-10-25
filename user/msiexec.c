@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52, SYS_QueryFileMetadata=30 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -44,6 +44,7 @@ static u8 *table_buffer;
 static u8 *string_data;
 static u8 *extract_buffer;
 static char extraction_status[96]="Embedded payload: not extracted";
+static void msi_ui_progress(const char *phase, u32 done, u32 total);
 static u32 string_offset[MSI_MAX_STRINGS], string_length[MSI_MAX_STRINGS];
 static u32 string_count, string_data_size;
 static u32 mini_fat_count, mini_stream_size, mini_sector_count;
@@ -676,6 +677,11 @@ static int extract_embedded_installer(void) {
             out("msiexec: extracted "); out_u32((u32)offset); out(" bytes\n");
             next_report+=16u*1024u*1024u;
         }
+        static u32 last_ui_progress;
+        if (offset-last_ui_progress>=4u*1024u*1024u || offset==size) {
+            msi_ui_progress("Extracting embedded payload", (u32)offset, (u32)size);
+            last_ui_progress=(u32)offset;
+        }
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     if (!ok || offset!=size) {
@@ -777,62 +783,108 @@ static u32 msi_strlen(const char *s) {
 static void msi_ui_line(MSI_TextOutA text, void *hwnd, int row, const char *s) {
     if (text && s) (void)text(hwnd, 0, row, s, (int)msi_strlen(s));
 }
-static void show_installer_window(const char *name) {
+static void *msi_hwnd;
+static MSI_TextOutA msi_text;
+static MSI_InvalidateRect msi_invalidate;
+static MSI_GetMessageA msi_getmsg;
+
+typedef struct {
+    u64 creation_time, access_time, write_time, change_time, size;
+    u32 inode, mode, volume_serial;
+    u16 links, reserved;
+} MSI_FILE_METADATA;
+
+static void msi_ui_open(const char *name) {
     MSI_CreateWindowExA create=(MSI_CreateWindowExA)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"CreateWindowExA",0);
     MSI_ShowWindow show=(MSI_ShowWindow)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"ShowWindow",0);
-    MSI_TextOutA text=(MSI_TextOutA)sy3(SYS_GetProcAddress,
+    msi_text=(MSI_TextOutA)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"TextOutA",0);
-    MSI_InvalidateRect invalidate=(MSI_InvalidateRect)sy3(SYS_GetProcAddress,
+    msi_invalidate=(MSI_InvalidateRect)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"InvalidateRect",0);
-    MSI_GetMessageA getmsg=(MSI_GetMessageA)sy3(SYS_GetProcAddress,
+    msi_getmsg=(MSI_GetMessageA)sy3(SYS_GetProcAddress,
         (u64)"user32.dll",(u64)"GetMessageA",0);
-    if (!create || !show || !text || !invalidate || !getmsg) {
-        show_and_exit("MSI Reader",
-            "The installer window APIs are unavailable. No files were changed.",1);
+    if (!create || !show || !msi_text || !msi_invalidate || !msi_getmsg) {
+        show_and_exit("MSI Reader","The MSI wizard window APIs are unavailable.",1);
         return;
     }
-    void *hwnd=create(0,"STATIC","SentinelOS MSI Installer",0x10CF0000u,
+    msi_hwnd=create(0,"STATIC","SentinelOS MSI Wizard",0x10CF0000u,
         120,70,720,440,0,0,0,0);
-    if (!hwnd) {
-        show_and_exit("MSI Reader","Could not create installer window.",1);
-        return;
+    if (!msi_hwnd) show_and_exit("MSI Reader","Could not create MSI wizard window.",1);
+    (void)show(msi_hwnd,5);
+    msi_ui_line(msi_text,msi_hwnd,0,"SentinelOS MSI Extraction Wizard");
+    msi_ui_line(msi_text,msi_hwnd,1,"Reading and validating Windows Installer package");
+    msi_ui_line(msi_text,msi_hwnd,2,"Package:");
+    msi_ui_line(msi_text,msi_hwnd,3,name);
+    msi_ui_line(msi_text,msi_hwnd,4,"");
+    msi_ui_line(msi_text,msi_hwnd,5,"Please wait while the MSI is read.");
+    msi_ui_progress("Reading MSI package",0,0);
+    (void)msi_invalidate(msi_hwnd,0,1);
+}
+
+static void msi_ui_progress(const char *phase, u32 done, u32 total) {
+    if (!msi_hwnd || !msi_text) return;
+    char bar[32];
+    u32 percent=0;
+    if (total) {
+        percent=(u32)(((u64)done*100u)/total);
+        if (percent>100) percent=100;
     }
-    (void)show(hwnd,5);
-    msi_ui_line(text,hwnd,0,"SentinelOS Installer");
-    msi_ui_line(text,hwnd,1,"Windows Installer package recognized");
-    msi_ui_line(text,hwnd,2,"");
-    msi_ui_line(text,hwnd,3,"Package:");
-    msi_ui_line(text,hwnd,4,name);
-    msi_ui_line(text,hwnd,5,"");
-    msi_ui_line(text,hwnd,6,"Container validation: PASSED");
-    msi_ui_line(text,hwnd,7,"Compound-file version:");
-    msi_ui_line(text,hwnd,8,msi_major==4?"4":"3");
-    msi_ui_line(text,hwnd,9,"Directory entries:");
-    char entries[16];
-    u32 ev=msi_entry_count, en=0;
-    if (!ev) entries[en++]=48;
-    else {
-        char rev[16]; u32 rn=0;
-        while (ev && rn<15) { rev[rn++]=(char)(48+ev%10); ev/=10; }
-        while (rn) entries[en++]=rev[--rn];
-    }
-    entries[en]=0;
-    msi_ui_line(text,hwnd,10,entries);
-    msi_ui_line(text,hwnd,11,msi_db_ok?"MSI database catalog: DECODED":"MSI database catalog: UNSUPPORTED");
-    msi_ui_line(text,hwnd,12,extraction_status);
-    msi_ui_line(text,hwnd,13,"Embedded installer payload extraction only.");
-    msi_ui_line(text,hwnd,14,"MSI install sequencing is not implemented.");
-    msi_ui_line(text,hwnd,15,"Custom actions are never executed by this reader.");
-    msi_ui_line(text,hwnd,16,"The extracted payload is not yet Chrome itself.");
-    msi_ui_line(text,hwnd,17,"");
-    msi_ui_line(text,hwnd,18,"Press Esc or click X to close.");
-    (void)invalidate(hwnd,0,1);
+    u32 filled=(percent*20u)/100u;
+    bar[0]='[';
+    for (u32 i=0;i<20;i++) bar[i+1]=(i<filled)?'#':'-';
+    bar[21]=']'; bar[22]=' '; bar[23]=0;
+    char digits[4]; u32 n=0, v=percent;
+    do { digits[n++]=(char)('0'+v%10u); v/=10u; } while(v&&n<3);
+    u32 pos=23;
+    while(n) bar[pos++]=digits[--n];
+    bar[pos++]='%'; bar[pos]=0;
+    msi_ui_line(msi_text,msi_hwnd,6,phase?phase:"Working...");
+    msi_ui_line(msi_text,msi_hwnd,7,bar);
+    if (total && done>=total) msi_ui_line(msi_text,msi_hwnd,8,"100% complete");
+    else if (!total) msi_ui_line(msi_text,msi_hwnd,8,"Progress is being measured...");
+    (void)msi_invalidate(msi_hwnd,0,1);
+}
+
+static int msi_ui_confirm(const char *name) {
+    typedef int (*MSI_MessageBoxA)(void *, const char *, const char *, u32);
+    MSI_MessageBoxA box=(MSI_MessageBoxA)sy3(SYS_GetProcAddress,
+        (u64)"user32.dll",(u64)"MessageBoxA",0);
+    if (!box) return 0;
+    char prompt[192];
+    const char *prefix="MSI read successfully. Extract its embedded installer now?\n\nPackage: ";
+    u32 n=0;
+    while(prefix[n] && n<sizeof(prompt)-1) { prompt[n]=prefix[n]; n++; }
+    for(u32 i=0;name && name[i] && n<sizeof(prompt)-1;i++) prompt[n++]=name[i];
+    const char *suffix="\n\nThis extracts the embedded payload; it does not run MSI install actions.";
+    for(u32 i=0;suffix[i] && n<sizeof(prompt)-1;i++) prompt[n++]=suffix[i];
+    prompt[n]=0;
+    return box(msi_hwnd,prompt,"SentinelOS MSI Wizard",0x24u)==6;
+}
+
+static void show_installer_window(const char *name) {
+    if (!msi_hwnd) return;
+    msi_ui_line(msi_text,msi_hwnd,0,"SentinelOS MSI Extraction Wizard");
+    msi_ui_line(msi_text,msi_hwnd,1,"MSI reading and validation finished");
+    msi_ui_line(msi_text,msi_hwnd,2,"Package:");
+    msi_ui_line(msi_text,msi_hwnd,3,name);
+    msi_ui_line(msi_text,msi_hwnd,4,"");
+    msi_ui_line(msi_text,msi_hwnd,5,"Container validation: PASSED");
+    msi_ui_line(msi_text,msi_hwnd,9,"Compound-file version:");
+    msi_ui_line(msi_text,msi_hwnd,10,msi_major==4?"4":"3");
+    msi_ui_line(msi_text,msi_hwnd,11,msi_db_ok?"MSI database catalog: DECODED":"MSI database catalog: UNSUPPORTED");
+    msi_ui_line(msi_text,msi_hwnd,12,extraction_status);
+    msi_ui_line(msi_text,msi_hwnd,13,"Embedded installer payload extraction only.");
+    msi_ui_line(msi_text,msi_hwnd,14,"MSI install sequencing is not implemented.");
+    msi_ui_line(msi_text,msi_hwnd,15,"Custom actions are never executed.");
+    msi_ui_line(msi_text,msi_hwnd,16,"The extracted payload is not yet confirmed to be Chrome itself.");
+    msi_ui_line(msi_text,msi_hwnd,18,"Press Esc or click X to close.");
+    (void)msi_invalidate(msi_hwnd,0,1);
     MSI_MSG msg;
     for (;;) {
-        if (!getmsg(&msg,0,0,0)) continue;
-        if (msg.message==0x0100u && msg.wParam==27u) {
+        if (!msi_getmsg(&msg,0,0,0)) continue;
+        if ((msg.message==0x0100u && msg.wParam==27u) || msg.message==0x0010u) {
             (void)sy3(SYS_Exit,0,0,0);
             for (;;) __asm__ volatile("pause");
         }
@@ -863,6 +915,12 @@ void mainCRTStartup(void) {
      * virtual/physical memory. File-read syscalls are capped at 1 MiB each.
      * The parser currently uses 32-bit file offsets.
      */
+    MSI_FILE_METADATA meta={0};
+    u32 expected_size=0;
+    if (sy3(SYS_QueryFileMetadata,h,(u64)&meta,sizeof(meta)) && meta.size<=MAX_BUFFER)
+        expected_size=(u32)meta.size;
+    msi_ui_open(name);
+    msi_ui_progress("Reading MSI package",0,expected_size);
     out("msiexec: package opened; reading bytes\n");
     const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=1024u*1024u;
@@ -872,6 +930,7 @@ void mainCRTStartup(void) {
     /* Console output is expensive in the current UI. Report progress every
      * 16 MiB rather than issuing a write for every 1 MiB read syscall. */
     u32 next_report=16u*1024u*1024u;
+    u32 last_ui_progress=0;
     int read_error=0;
     for (;;) {
         if (total==capacity) {
@@ -899,6 +958,11 @@ void mainCRTStartup(void) {
         total+=(u32)n;
         /* Package reads must not monopolize the cooperative user scheduler. */
         (void)sy3(SYS_NtYield,0,0,0);
+        if (total-last_ui_progress>=4u*1024u*1024u ||
+            (expected_size && total>=expected_size)) {
+            msi_ui_progress("Reading MSI package",total,expected_size);
+            last_ui_progress=total;
+        }
         if (total>=next_report) {
             out("msiexec: read "); out_u32(total); out(" bytes\n");
             /* Advance past every crossed threshold without repeated prints. */
@@ -918,9 +982,20 @@ void mainCRTStartup(void) {
     }
     out("msiexec: package read complete: "); out_u32(total); out(" bytes\n");
     file_bytes=buf; file_size=total;
+    msi_ui_progress("Validating MSI database",total,total);
     inspect_msi();
     if (msi_ok) {
-        if (msi_db_ok) (void)extract_embedded_installer();
+        if (msi_db_ok) {
+            if (msi_ui_confirm(name)) {
+                msi_ui_progress("Preparing embedded payload",0,1);
+                (void)extract_embedded_installer();
+            } else {
+                set_extraction_status("Extraction cancelled by user");
+                out("msiexec: extraction cancelled by user\n");
+            }
+        } else {
+            set_extraction_status("MSI database decoded, but no supported embedded payload was found");
+        }
         show_installer_window(name);
         (void)sy3(SYS_Exit,0,0,0);
         for (;;) __asm__ volatile("pause");

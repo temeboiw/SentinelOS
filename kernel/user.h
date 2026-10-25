@@ -1192,6 +1192,15 @@ static void PspForgetDiskModule(KPROCESS *owner) {
  * Load an on-disk x64 PE32+ file into image layout. This handles PE headers
  * and section copies; imports still resolve only against boot-loaded DLLs.
  */
+/*
+ * Load an on-disk x64 PE32+ file into image layout without reading the entire
+ * file into RAM. Large installers commonly carry a huge overlay after their
+ * PE sections; that overlay is data, not part of the mapped executable image.
+ *
+ * The file itself has no arbitrary 64 MiB cap. Only PE headers are buffered;
+ * section data is streamed directly from the filesystem into the allocated
+ * image. Actual limits are the PE format, address space, filesystem and RAM.
+ */
 static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     uint32_t ino=0;
     uint64_t raw_size=0;
@@ -1200,11 +1209,6 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     while (name[path_len] && path_len < 159) path_len++;
     if (name[path_len] != 0) { DbgPrint("user: disk image path too long\n"); return 0; }
 
-    /*
-     * Windows searches the executable's directory before System32. Keep the
-     * full launch path with the process-owned disk image so private DLLs can
-     * be found beside GeometryDash.exe even when imports contain bare names.
-     */
     int found = 0;
     if (owner) {
         const char *app_dir = 0;
@@ -1228,7 +1232,6 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
                 system_path[dir_len+path_len]=0;
                 found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
                 if (!found) {
-                    /* Some VFS paths are rooted relative to the current volume. */
                     unsigned int start=0;
                     if (dir_len>=2 && system_path[1]==':') start=2;
                     while (system_path[start]=='/') start++;
@@ -1268,46 +1271,72 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
         found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
     }
     if (!found) { DbgPrint("user: disk image not found: %s\n", name); return 0; }
-    if (raw_size < 0x100 || raw_size > 64ull*1024*1024) { DbgPrint("user: disk image size rejected: %s size=%llu\n", name, (unsigned long long)raw_size); return 0; }
-    uint64_t raw_pages=(raw_size+0xFFFULL)>>12;
-    uint64_t raw_pa=pmm_alloc_n(raw_pages);
-    if(!raw_pa)return 0;
-    uint8_t *raw=(uint8_t *)(HHDM_BASE+raw_pa);
-    for(uint64_t i=0;i<raw_pages*USER_IMAGE_PAGE;i++)raw[i]=0;
-    if(vfs_read_inode_at(ino,0,raw,raw_size)!=(int)raw_size) {
-        DbgPrint("user: disk image read failed: %s size=%llu\n", name, (unsigned long long)raw_size);
-        for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+    if (raw_size < 0x100) {
+        DbgPrint("user: disk image too small: %s size=%llu\n", name,
+                 (unsigned long long)raw_size);
         return 0;
     }
-    if(raw[0]!='M'||raw[1]!='Z') { DbgPrint("user: disk image is not MZ PE: %s\n", name); goto bad_raw; }
-    int32_t lfanew=*(int32_t *)(raw+0x3C);
-    if(lfanew<0 || (uint64_t)lfanew+24>raw_size ||
-       *(uint32_t *)(raw+lfanew)!=0x00004550)goto bad_raw;
-    uint8_t *fh=raw+lfanew+4;
-    uint16_t machine=*(uint16_t *)fh;
-    uint16_t sections=*(uint16_t *)(fh+2);
-    uint16_t opt_size=*(uint16_t *)(fh+16);
+
+    /* Read only enough to discover and validate the PE header extent. */
+    uint8_t dos[64];
+    if (vfs_read_inode_at(ino,0,dos,sizeof(dos))!=(int)sizeof(dos) ||
+        dos[0]!='M' || dos[1]!='Z') {
+        DbgPrint("user: disk image is not MZ PE: %s\n",name);
+        return 0;
+    }
+    int32_t lfanew=*(int32_t *)(dos+0x3C);
+    if (lfanew<0 || (uint64_t)lfanew>raw_size ||
+        raw_size-(uint64_t)lfanew<24) return 0;
+
+    uint8_t nt_head[24];
+    if (vfs_read_inode_at(ino,(uint64_t)lfanew,nt_head,sizeof(nt_head))!=(int)sizeof(nt_head) ||
+        *(uint32_t *)nt_head!=0x00004550) return 0;
+    uint16_t machine=*(uint16_t *)(nt_head+4);
+    uint16_t sections=*(uint16_t *)(nt_head+6);
+    uint16_t opt_size=*(uint16_t *)(nt_head+20);
     uint64_t opt_off=(uint64_t)lfanew+24;
-    if(machine!=0x8664 || opt_size<160 || opt_off+opt_size>raw_size ||
-       *(uint16_t *)(raw+opt_off)!=0x20B || !sections || sections>96)goto bad_raw;
-    uint8_t *opt=raw+opt_off;
+    if (machine!=0x8664 || opt_size<160 || !sections || sections>96 ||
+        opt_off>raw_size || opt_size>raw_size-opt_off) return 0;
+
+    uint64_t sect_off=opt_off+opt_size;
+    uint64_t header_need=sect_off+(uint64_t)sections*40;
+    if (header_need<sect_off || header_need>raw_size ||
+        header_need>1024ull*1024ull) {
+        DbgPrint("user: invalid or oversized PE headers: %s\n",name);
+        return 0;
+    }
+    uint64_t header_pages=(header_need+0xFFFULL)>>12;
+    uint64_t header_pa=pmm_alloc_n(header_pages);
+    if(!header_pa)return 0;
+    uint8_t *headers=(uint8_t *)(HHDM_BASE+header_pa);
+    for(uint64_t i=0;i<header_pages*USER_IMAGE_PAGE;i++)headers[i]=0;
+    if(vfs_read_inode_at(ino,0,headers,header_need)!=(int)header_need) {
+        for(uint64_t i=0;i<header_pages;i++)pmm_free(header_pa+i*USER_IMAGE_PAGE);
+        return 0;
+    }
+    uint8_t *opt=headers+opt_off;
     uint32_t entry_rva=*(uint32_t *)(opt+16);
     uint64_t preferred=*(uint64_t *)(opt+24);
     uint32_t image_size=*(uint32_t *)(opt+56);
     uint32_t headers_size=*(uint32_t *)(opt+60);
-    uint64_t sect_off=opt_off+opt_size;
-    if(image_size<0x1000 || image_size>64u*1024*1024 ||
-       !headers_size || headers_size>raw_size || headers_size>image_size ||
-       entry_rva>=image_size ||
-       sect_off+(uint64_t)sections*40>raw_size)goto bad_raw;
+    if (*(uint16_t *)opt!=0x20B || image_size<0x1000 ||
+        !headers_size || headers_size>raw_size || headers_size>image_size ||
+        entry_rva>=image_size) goto bad_headers;
+
     uint64_t image_pages=((uint64_t)image_size+0xFFFULL)>>12;
+    if(!image_pages || image_pages>UINT64_MAX/USER_IMAGE_PAGE)goto bad_headers;
     uint64_t image_pa=pmm_alloc_n(image_pages);
-    if(!image_pa)goto bad_raw;
+    if(!image_pa)goto bad_headers;
     uint8_t *image=(uint8_t *)(HHDM_BASE+image_pa);
     for(uint64_t i=0;i<image_pages*USER_IMAGE_PAGE;i++)image[i]=0;
-    for(uint32_t i=0;i<headers_size;i++)image[i]=raw[i];
+    if(vfs_read_inode_at(ino,0,image,headers_size)!=(int)headers_size) {
+        for(uint64_t j=0;j<image_pages;j++)pmm_free(image_pa+j*USER_IMAGE_PAGE);
+        goto bad_headers;
+    }
+
+    /* Stream each raw section in bounded chunks; ignore installer overlays. */
     for(uint16_t i=0;i<sections;i++) {
-        uint8_t *sh=raw+sect_off+(uint64_t)i*40;
+        uint8_t *sh=headers+sect_off+(uint64_t)i*40;
         uint32_t vsize=*(uint32_t *)(sh+8);
         uint32_t va=*(uint32_t *)(sh+12);
         uint32_t rawsz=*(uint32_t *)(sh+16);
@@ -1317,11 +1346,21 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
         if(va>image_size || copy>image_size-va ||
            rawoff>raw_size || copy>raw_size-rawoff) {
             for(uint64_t j=0;j<image_pages;j++)pmm_free(image_pa+j*USER_IMAGE_PAGE);
-            goto bad_raw;
+            goto bad_headers;
         }
-        for(uint32_t j=0;j<copy;j++)image[va+j]=raw[rawoff+j];
+        uint32_t done=0;
+        while(done<copy) {
+            uint32_t chunk=copy-done;
+            if(chunk>65536u)chunk=65536u;
+            if(vfs_read_inode_at(ino,(uint64_t)rawoff+done,image+va+done,chunk)!=(int)chunk) {
+                for(uint64_t j=0;j<image_pages;j++)pmm_free(image_pa+j*USER_IMAGE_PAGE);
+                goto bad_headers;
+            }
+            done+=chunk;
+        }
     }
-    for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+
+    for(uint64_t i=0;i<header_pages;i++)pmm_free(header_pa+i*USER_IMAGE_PAGE);
     for(int i=0;i<USER_DISK_MODULE_MAX;i++)if(!user_disk_modules[i].used) {
         UserDiskModule *d=&user_disk_modules[i];
         d->used=1; d->owner=0; d->source_phys=image_pa;
@@ -1342,8 +1381,9 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     }
     for(uint64_t i=0;i<image_pages;i++)pmm_free(image_pa+i*USER_IMAGE_PAGE);
     return 0;
-bad_raw:
-    for(uint64_t i=0;i<raw_pages;i++)pmm_free(raw_pa+i*USER_IMAGE_PAGE);
+
+bad_headers:
+    for(uint64_t i=0;i<header_pages;i++)pmm_free(header_pa+i*USER_IMAGE_PAGE);
     return 0;
 }
 

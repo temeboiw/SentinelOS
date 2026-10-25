@@ -682,7 +682,7 @@ static int extract_embedded_installer(void) {
     set_extraction_status("Extracted validated PE; nested Chrome payload architecture unverified");
     out("msiexec: extraction complete: "); out(out_name); out(" (");
     out_u32((u32)size); out(" bytes)\n");
-    out("msiexec: this is the embedded installer, not yet confirmed to be chrome.exe\n");
+    out("msiexec: extracted stream is not yet confirmed to be chrome.exe; nested payload was not inspected\n");
     return 1;
 }
 static void inspect_msi(void) {

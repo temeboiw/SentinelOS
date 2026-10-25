@@ -53,6 +53,8 @@
 #define SYS_NtLoadLibrary                    43
 #define SYS_NtNetworkInfo 49
 #define SYS_NtPing 50
+#define SYS_NtCreateOutputFile 51
+#define SYS_NtWriteOutputFile 52
 typedef struct { uint32_t ip,mask,gateway,dns; uint32_t dhcp_state,link_up; uint8_t mac[6]; uint16_t reserved; } NT_NETWORK_INFO;
 
 #define UP_MAX 8
@@ -1004,7 +1006,7 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 typedef struct {
     uint32_t ino;
     uint64_t pos, size;
-    int used;
+    int used, writable;
 } VfsUserHandle;
 typedef struct {
     uint64_t creation_time,access_time,write_time,change_time,size;
@@ -1045,10 +1047,53 @@ static int vfs_open_user_file(const char *name) {
             vfs_user_handles[i].pos = 0;
             vfs_user_handles[i].size = e4_size(inode);
             vfs_user_handles[i].used = 1;
+            vfs_user_handles[i].writable = 0;
             return 0x100 + i;
         }
     }
     return -1;
+}
+
+static int vfs_create_user_output_file(const char *name) {
+    if (!g_ext4_ok || !name || !name[0]) return -1;
+    /* Output creation is deliberately limited to one basename in the current
+       directory; callers cannot use this syscall to traverse arbitrary paths. */
+    uint32_t ino = 0;
+    if (e4_create_empty_file(&g_ext4, vfs_cwd_ino, name, &ino) < 0)
+        return -1;
+    for (int i = 0; i < VFS_USER_HANDLES; i++) {
+        if (!vfs_user_handles[i].used) {
+            vfs_user_handles[i].ino = ino;
+            vfs_user_handles[i].pos = 0;
+            vfs_user_handles[i].size = 0;
+            vfs_user_handles[i].used = 1;
+            vfs_user_handles[i].writable = 1;
+            (void)vfs_listdir(vfs_cwd_ino);
+            return 0x100 + i;
+        }
+    }
+    /* The empty file is already published if every handle is busy. */
+    (void)vfs_listdir(vfs_cwd_ino);
+    return -1;
+}
+
+static int vfs_write_user_output_file(uint64_t handle, uint64_t src, uint64_t len) {
+    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
+        !len || len > 1024 * 1024) return -1;
+    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+    KPROCESS *proc = MmCurrentProcess;
+    if (!h->used || !h->writable || !proc ||
+        h->pos != h->size || len > UINT32_MAX - h->size ||
+        !MmValidateUserRange(proc, src, len, 0)) return -1;
+    uint8_t inode[256];
+    if (e4_inode(&g_ext4, h->ino, inode) < 0 ||
+        e4_size(inode) != h->size ||
+        e4_write_inode_grow(&g_ext4, h->ino, h->pos,
+                            (const void *)(uintptr_t)src, len) < 0)
+        return -1;
+    h->pos += len;
+    h->size += len;
+    return (int)len;
 }
 
 static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
@@ -1084,8 +1129,12 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
 }
 
 static void vfs_close_user_file(uint64_t handle) {
-    if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES)
-        vfs_user_handles[handle - 0x100].used = 0;
+    if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES) {
+        VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+        if (h->used && h->writable) (void)vfs_listdir(vfs_cwd_ino);
+        h->used = 0;
+        h->writable = 0;
+    }
 }
 
 
@@ -2610,6 +2659,20 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = total;
         return f;
     }
+
+    case SYS_NtCreateOutputFile: {
+        char name[64];
+        if (copy_user_str(f->rdi, name, sizeof name) != 0) {
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        f->rax = (uint64_t)(int64_t)vfs_create_user_output_file(name);
+        return f;
+    }
+
+    case SYS_NtWriteOutputFile:
+        f->rax = (uint64_t)(int64_t)vfs_write_user_output_file(f->rdi, f->rsi, f->rdx);
+        return f;
 
     case SYS_NtOpenFile: {
         char name[64];

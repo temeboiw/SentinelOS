@@ -581,14 +581,29 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
         gfx_width,gfx_height,(unsigned long long)gfx_surface_pages);
     return 1;
 }
-/* Low-rate telemetry for Phase 1: distinguish the number and area of GPU
- * 2D transfers from frame-rate claims. Serial output is deliberately sparse. */
+/* Sparse timing telemetry: RDTSC ticks measure the synchronous command /
+ * transfer / flush path. Ticks are intentionally not mislabeled as nanoseconds:
+ * without calibrated TSC frequency this is latency instrumentation, not FPS. */
 static uint64_t gfx_dbg_flush_count;
 static uint64_t gfx_dbg_flush_pixels;
+static uint64_t gfx_dbg_flush_tsc_total;
+static uint64_t gfx_dbg_flush_tsc_max;
+static uint64_t gfx_dbg_flush_tsc_hist[16];
+static inline uint64_t gfx_read_tsc(void) {
+    uint32_t lo,hi;
+    __asm__ volatile("lfence; rdtsc" : "=a"(lo),"=d"(hi) :: "memory");
+    return ((uint64_t)hi<<32)|lo;
+}
+static unsigned int gfx_tsc_bucket(uint64_t ticks) {
+    unsigned int b=0;
+    while(ticks>1u && b<15u) { ticks>>=1; b++; }
+    return b;
+}
 static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(!gfx_gpu_ready)return 0;
     if(x>=gfx_width||y>=gfx_height||!w||!h)return 0;
     if(w>gfx_width-x)w=gfx_width-x;if(h>gfx_height-y)h=gfx_height-y;
+    uint64_t start_tsc=gfx_read_tsc();
     GfxTransfer tr={0};tr.hdr.type=GFX_GPU_CMD_TRANSFER;
     tr.x=x;tr.y=y;tr.width=w;tr.height=h;
     /* TRANSFER_TO_HOST_2D reads the rectangle from the guest backing starting
@@ -600,14 +615,22 @@ static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     GfxFlush fl={0};fl.hdr.type=GFX_GPU_CMD_FLUSH;
     fl.x=x;fl.y=y;fl.width=w;fl.height=h;fl.resource_id=GFX_RESOURCE_ID;
     if(!gfx_command(&fl,sizeof fl))return 0;
+    uint64_t elapsed=gfx_read_tsc()-start_tsc;
     uint64_t count=++gfx_dbg_flush_count;
     uint64_t pixels=(uint64_t)w*(uint64_t)h;
     gfx_dbg_flush_pixels+=pixels;
-    if(count<=4u||(count%4096u)==0u)
-        DbgPrint("[gfx] virtio-2d flush #%llu rect=%u,%u %ux%u pixels=%llu cumulative=%llu (host transfer/flush; not proof of GPU rasterization)\n",
+    gfx_dbg_flush_tsc_total+=elapsed;
+    if(elapsed>gfx_dbg_flush_tsc_max)gfx_dbg_flush_tsc_max=elapsed;
+    unsigned int bucket=gfx_tsc_bucket(elapsed);
+    gfx_dbg_flush_tsc_hist[bucket]++;
+    if(count<=4u||(count%256u)==0u)
+        DbgPrint("[gfx] virtio-2d flush #%llu rect=%u,%u %ux%u pixels=%llu cumulative=%llu latency_tsc=%llu avg_tsc=%llu max_tsc=%llu bucket=%u (command+transfer+flush; TSC ticks are not milliseconds or FPS)\\n",
             (unsigned long long)count,x,y,w,h,
             (unsigned long long)pixels,
-            (unsigned long long)gfx_dbg_flush_pixels);
+            (unsigned long long)gfx_dbg_flush_pixels,
+            (unsigned long long)elapsed,
+            (unsigned long long)(gfx_dbg_flush_tsc_total/count),
+            (unsigned long long)gfx_dbg_flush_tsc_max,bucket);
     return 1;
 }
 static int gfx_map_surface_for_process(KPROCESS *proc,uint64_t *uva_out) {

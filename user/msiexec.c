@@ -78,19 +78,19 @@ static int init_msi_workspace(void) {
         if (p!=va) return 0; \
         (ptr)=(type *)p; va+=n; \
     } while (0)
-    out("msiexec: allocating FAT workspace\\n");
+    out("msiexec: allocating FAT workspace\n");
     MSI_WS(fat,u32,MAX_FAT*sizeof(u32));
     MSI_WS(fat_sids,u32,(MAX_FAT/128)*sizeof(u32));
     MSI_WS(cab_sector_ids,u32,MAX_FAT*sizeof(u32));
-    out("msiexec: allocating directory workspace\\n");
+    out("msiexec: allocating directory workspace\n");
     MSI_WS(dir_buffer,u8,MAX_DIR);
     MSI_WS(mini_fat,u32,MAX_MINIFAT*sizeof(u32));
-    out("msiexec: allocating mini-stream workspace\\n");
+    out("msiexec: allocating mini-stream workspace\n");
     MSI_WS(mini_stream,u8,MAX_MINI_STREAM);
-    out("msiexec: allocating table workspace\\n");
+    out("msiexec: allocating table workspace\n");
     MSI_WS(table_buffer,u8,MAX_TABLE_STREAM);
     MSI_WS(string_data,u8,MAX_TABLE_STREAM);
-    out("msiexec: parser workspace ready\\n");
+    out("msiexec: parser workspace ready\n");
 #undef MSI_WS
     return 1;
 }
@@ -713,7 +713,7 @@ void mainCRTStartup(void) {
         show_and_exit("MSI Reader",
             "Not enough memory for MSI parser workspaces. No files were changed.",1);
     }
-    out("msiexec: parser workspace initialized\\n");
+    out("msiexec: parser workspace initialized\n");
     u64 h=sy3(SYS_OpenFile,(u64)name,0,0);
     if ((long long)h<0) {
         out("msiexec: cannot open package in the current directory\n");
@@ -726,7 +726,7 @@ void mainCRTStartup(void) {
      * virtual/physical memory. File-read syscalls are capped at 1 MiB each.
      * The parser currently uses 32-bit file offsets.
      */
-    out("msiexec: package opened; reading bytes\\n");
+    out("msiexec: package opened; reading bytes\n");
     const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=1024u*1024u;
     const u64 buffer_base=0x50000000ULL;
@@ -749,7 +749,7 @@ void mainCRTStartup(void) {
                 break;
             }
             capacity+=grow;
-            out("msiexec: expanded package buffer to "); out_u32(capacity); out(" bytes\\n");
+            out("msiexec: expanded package buffer to "); out_u32(capacity); out(" bytes\n");
         }
         u64 want=capacity-total;
         if (want>read_size) want=read_size;
@@ -757,14 +757,14 @@ void mainCRTStartup(void) {
         if ((long long)n<0) { read_error=1; break; }
         if (!n) break;
         total+=(u32)n;
-        if ((total & 0xFFFFFu) < (u32)n) { out("msiexec: read "); out_u32(total); out(" bytes\\n"); }
+        if ((total & 0xFFFFFu) < (u32)n) { out("msiexec: read "); out_u32(total); out(" bytes\n"); }
     }
     (void)sy3(SYS_CloseFile,h,0,0);
     if (read_error) {
         show_and_exit("MSI Reader",
             "Could not read the complete MSI within available memory. No files were changed.",1);
     }
-    out("msiexec: package read complete: "); out_u32(total); out(" bytes\\n");
+    out("msiexec: package read complete: "); out_u32(total); out(" bytes\n");
     file_bytes=buf; file_size=total;
     inspect_msi();
     if (msi_ok) {

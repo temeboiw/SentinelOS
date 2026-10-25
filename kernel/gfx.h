@@ -604,7 +604,7 @@ static int gfx_flush(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint64_t pixels=(uint64_t)w*(uint64_t)h;
     gfx_dbg_flush_pixels+=pixels;
     if(count<=4u||(count%4096u)==0u)
-        DbgPrint("[gfx] virtio-2d flush #%llu rect=%u,%u %ux%u pixels=%llu cumulative=%llu (host transfer/flush; not proof of GPU rasterization)\\n",
+        DbgPrint("[gfx] virtio-2d flush #%llu rect=%u,%u %ux%u pixels=%llu cumulative=%llu (host transfer/flush; not proof of GPU rasterization)\n",
             (unsigned long long)count,x,y,w,h,
             (unsigned long long)pixels,
             (unsigned long long)gfx_dbg_flush_pixels);

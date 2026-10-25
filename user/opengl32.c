@@ -196,7 +196,7 @@ __attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_TEXTURE_C
 __attribute__((dllexport)) void glDisableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=0;return;}if(a==GL_COLOR_ARRAY){ogl_color_array_enabled=0;return;}if(a!=GL_VERTEX_ARRAY)ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
 static int ogl_valid_blend_factor(GLenum f){return f==GL_ZERO||f==GL_ONE||f==GL_SRC_COLOR||f==GL_ONE_MINUS_SRC_COLOR||f==GL_SRC_ALPHA||f==GL_ONE_MINUS_SRC_ALPHA||f==GL_DST_ALPHA||f==GL_ONE_MINUS_DST_ALPHA||f==GL_DST_COLOR||f==GL_ONE_MINUS_DST_COLOR||f==GL_SRC_ALPHA_SATURATE;}
-__attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if(!ogl_valid_blend_factor(s)||!ogl_valid_blend_factor(d)||s==GL_SRC_ALPHA_SATURATE&&d==GL_SRC_ALPHA_SATURATE){ogl_error=GL_INVALID_ENUM;return;}ogl_blend_src=s;ogl_blend_dst=d;}
+__attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if(!ogl_valid_blend_factor(s)||!ogl_valid_blend_factor(d)||d==GL_SRC_ALPHA_SATURATE){ogl_error=GL_INVALID_ENUM;return;}ogl_blend_src=s;ogl_blend_dst=d;}
 __attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v!=1&&v!=2&&v!=4&&v!=8){ogl_error=GL_INVALID_VALUE;return;}if(p==0x0D05)ogl_pack_alignment=(unsigned int)v;else if(p==0x0CF5)ogl_unpack_alignment=(unsigned int)v;else ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glClearStencil(GLint s){(void)s;ogl_error=GL_INVALID_OPERATION;}
 __attribute__((dllexport)) void glClearDepth(double d){(void)d;ogl_error=GL_INVALID_OPERATION;}

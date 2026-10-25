@@ -82,3 +82,24 @@ The user reports that desktop checks passed and supplied serial output showing:
 ## Phase 1 exit criteria
 
 Phase 1 is complete only when the baseline build result is recorded, the active graphics path is traced end-to-end, and the existing desktop regression tests have reproducible steps and outcomes. Vulkan and DXVK work should not be presented as complete until their own feature and workload tests pass.
+
+
+## Next milestone — P1.4: Damage correctness and frame pacing
+
+This milestone deliberately keeps the current compositor, Explorer folder implementation, and mouse cursor implementation intact. It adds measurable acceptance criteria before any renderer rewrite.
+
+### Work sequence
+1. **Damage correctness:** exercise window movement at all four screen edges and all four corners. After each drag, release the pointer and move it away. Check both the old rectangle and newly exposed desktop for stale pixels, including areas clipped by the screen boundary.
+2. **Lifecycle restoration:** close a window while it overlaps another window; verify the lower window and desktop are restored. Repeat minimize/restore and close/reopen, then verify input still reaches the correct visible window.
+3. **Frame pacing baseline:** capture a timed sample during idle desktop, pointer movement, window dragging, and Explorer scrolling. Report elapsed time, frame/present count, and p50/p95/max frame interval. Do not infer FPS from flush count alone because one visible frame may trigger multiple flushes.
+4. **Composition cost:** pair frame intervals with the existing composed-pixel and flush-pixel counters. Distinguish CPU composition work from the pixels transferred to the VirtIO-GPU backend.
+5. **Optimization gate:** only optimize after the baseline identifies the dominant cost. Preserve the current telemetry and rerun the same scenarios after each change.
+
+### Acceptance criteria
+- No stale pixels in the exposed region after movement, clipping, minimize, restore, or process exit.
+- No lost or misrouted input after a window lifecycle operation.
+- Timed output states the measurement source and sampling duration, and does not label flushes as frames unless they are explicitly synchronized one-to-one.
+- Report measured results, including regressions; do not claim a 60 Hz / 60 FPS target without timing evidence.
+- Clean build and boot checks are recorded separately from user-supplied runtime observations.
+
+**Current state:** the user has reported that the existing telemetry build passed their desktop checks. The tests above remain the next reproducible qualification step; frame-time instrumentation and benchmark results are not yet implemented or verified.

@@ -418,7 +418,7 @@ __attribute__((dllexport)) void srand(unsigned int seed) {
 
 /* Locale-independent numeric conversion used by common C/C++ libraries. */
 static int ucrt_space(unsigned char c) {
-    return c==' ' || c=='\\t' || c=='\\r' || c=='\\n' || c=='\\f' || c=='\\v';
+    return c==' ' || c=='\t' || c=='\r' || c=='\n' || c=='\f' || c=='\v';
 }
 static int ucrt_digit_value(unsigned char c) {
     if(c>='0'&&c<='9') return (int)(c-'0');

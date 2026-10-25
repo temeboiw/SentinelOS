@@ -51,6 +51,9 @@
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
 #define SYS_NtLoadLibrary                    43
+#define SYS_NtNetworkInfo 49
+#define SYS_NtPing 50
+typedef struct { uint32_t ip,mask,gateway,dns; uint32_t dhcp_state,link_up; uint8_t mac[6]; uint16_t reserved; } NT_NETWORK_INFO;
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -1709,6 +1712,20 @@ static int NtSocketDecode(uint64_t h) {
 static Frame *syscall_handler(Frame *f) {
     NetPoll(); /* service Ethernet RX while user processes make kernel calls */
     switch (f->rax) {
+    case SYS_NtNetworkInfo: {
+        if(!f->rdi||!MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(NT_NETWORK_INFO),1)) { f->rax=0; return f; }
+        NT_NETWORK_INFO *out=(NT_NETWORK_INFO *)(uint64_t)f->rdi;
+        out->ip=net_ipv4_addr; out->mask=net_ipv4_mask; out->gateway=net_ipv4_gateway; out->dns=net_dns_server;
+        out->dhcp_state=(uint32_t)net_dhcp_state; out->link_up=(uint32_t)e1000_ready;
+        for(unsigned i=0;i<6;i++)out->mac[i]=e1000_mac[i]; out->reserved=0; f->rax=1; return f;
+    }
+    case SYS_NtPing: {
+        uint32_t ip=(uint32_t)f->rdi, reply=0, polls=0;
+        int result=NetPing(ip,&reply,&polls);
+        if(f->rsi && MmValidateUserRange(MmCurrentProcess,f->rsi,sizeof(uint32_t),1)) *(uint32_t *)(uint64_t)f->rsi=reply;
+        if(f->rdx && MmValidateUserRange(MmCurrentProcess,f->rdx,sizeof(uint32_t),1)) *(uint32_t *)(uint64_t)f->rdx=polls;
+        f->rax=(uint64_t)(int64_t)result; return f;
+    }
     case SYS_NtSocketCreate: {
         int af=(int)f->rdi, type=(int)f->rsi, proto=(int)f->rdx;
         if(af!=2 || (type!=1 && type!=2) || (proto && proto!=(type==2?17:6))) { f->rax=(uint64_t)-1LL; return f; }

@@ -30,6 +30,68 @@ typedef void (*RedrawBatch_t)(void);
 #define PATH_SIZE  64
 #define DATA_SIZE  256
 
+typedef unsigned long long cmd_u64;
+static cmd_u64 cmd_netcall(cmd_u64 n,cmd_u64 a,cmd_u64 b,cmd_u64 c) {
+    cmd_u64 r;
+    __asm__ volatile("mov %1,%%rax; mov %2,%%rdi; mov %3,%%rsi; mov %4,%%rdx; int $0x80; mov %%rax,%0"
+        :"=r"(r):"r"(n),"r"(a),"r"(b),"r"(c):"rax","rdi","rsi","rdx","memory","cc");
+    return r;
+}
+typedef struct { u32 ip,mask,gateway,dns,dhcp_state,link_up; unsigned char mac[6]; unsigned short reserved; } CMD_NETINFO;
+static void print_ipv4(const char *label,u32 ip) {
+    char line[LINE_SIZE]; int n=0;
+    while(label[n]&&n<32){line[n]=label[n];n++;}
+    line[n++]=':';
+    line[n++]=' ';
+    for(int k=0;k<4;k++) {
+        u32 v=(ip>>(k*8))&255; char digits[4]; int d=0;
+        if(v>=100)digits[d++]=(char)('0'+v/100);
+        if(v>=10)digits[d++]=(char)('0'+(v/10)%10);
+        digits[d++]=(char)('0'+v%10);
+        for(int j=0;j<d;j++)line[n++]=digits[j];
+        if(k<3)line[n++]='.';
+    }
+    line[n]=0; print_line(line);
+}
+static int parse_ipv4(const char *s,u32 *out) {
+    u32 value=0; int parts=0;
+    while(*s&&parts<4) {
+        unsigned v=0,d=0;
+        while(*s>='0'&&*s<='9'){v=v*10+(unsigned)(*s-'0');if(v>255)return 0;s++;d++;}
+        if(!d)return 0; value|=v<<(parts*8);parts++;
+        if(parts<4){if(*s!='.')return 0;s++;}
+    }
+    if(*s||parts!=4)return 0;*out=value;return 1;
+}
+static void command_ipconfig(void) {
+    CMD_NETINFO ni;
+    if(!cmd_netcall(49,(cmd_u64)&ni,0,0)){print_line("Network information unavailable.");return;}
+    print_line("Windows IP Configuration");
+    print_line("Ethernet adapter E1000:");
+    print_ipv4("   IPv4 Address",ni.ip);
+    print_ipv4("   Subnet Mask",ni.mask);
+    print_ipv4("   Default Gateway",ni.gateway);
+    print_ipv4("   DNS Server",ni.dns);
+    char line[LINE_SIZE];
+    str_copy(line,"   Physical Address: ",sizeof line); int n=str_len(line);
+    for(int i=0;i<6;i++){const char h[]="0123456789ABCDEF";line[n++]=h[ni.mac[i]>>4];line[n++]=h[ni.mac[i]&15];if(i<5)line[n++]='-';}
+    line[n]=0;print_line(line);
+    print_line(ni.dhcp_state==2?"   DHCP Enabled: Yes (lease acquired)":"   DHCP Enabled: Yes (discovering; fallback config active)");
+}
+static void command_ping(const char *arg) {
+    u32 ip=0,reply=0,polls=0;
+    if(!parse_ipv4(arg,&ip)){print_line("Usage: ping <IPv4-address> (DNS names coming next)");return;}
+    print_line("Pinging target with 0 bytes of data:");
+    for(int i=0;i<4;i++) {
+        int r=(int)(long long)cmd_netcall(50,ip,(cmd_u64)&reply,(cmd_u64)&polls);
+        if(r==1)print_ipv4("Reply from",reply);
+        else if(r==0)print_line("Request timed out.");
+        else print_line("Transmit failed. Check link/gateway and try again.");
+    }
+    print_line("Ping complete.");
+}
+
+
 typedef struct { int left, top, right, bottom; } CMD_RECT;
 
 typedef struct {
@@ -329,20 +391,35 @@ static void run_command(const char *raw) {
     while (*arg == ' ') arg++;
 
     if (equals(cmd, "help")) {
-        print_line("Commands: help, ver, ipconfig, cls, dir, mkdir, echo, cat, exit");
+        print_line("Commands: help, ver, ipconfig, ping, route, arp, hostname, netstat, cls, dir, mkdir, echo, cat, exit");
         print_line("Example: mkdir test");
         print_line("echo Hello from SentinelOS > test\\hello.txt");
         print_line("cat test\\hello.txt");
+        print_line("ping 10.0.2.2");
+        print_line("route print | arp -a | hostname | netstat");
     } else if (equals(cmd, "ver")) {
         print_line("SentinelOS [experimental x86-64]");
     } else if (equals(cmd, "ipconfig")) {
-        print_line("SentinelOS IP Configuration");
-        print_line("Ethernet adapter: no network interface registered");
-        print_line("IPv4 address . . . : not configured");
-        print_line("Subnet mask . . .  : none");
-        print_line("Default gateway .  : none");
-        print_line("DNS servers . . .  : none");
-        print_line("DHCP . . . . . .  : unavailable (network driver/IP stack missing)");
+        command_ipconfig();
+    } else if (equals(cmd, "ping")) {
+        command_ping(arg);
+    } else if (equals(cmd, "hostname")) {
+        print_line("SENTINELOS");
+    } else if (equals(cmd, "route")) {
+        CMD_NETINFO ni;
+        if(cmd_netcall(49,(cmd_u64)&ni,0,0)) {
+            print_line("IPv4 Route Table");
+            print_ipv4("Network destination",0);
+            print_ipv4("Default gateway",ni.gateway);
+            print_ipv4("Interface address",ni.ip);
+            print_line("Metric: 1 (default route via configured gateway)");
+        } else print_line("Route table unavailable.");
+    } else if (equals(cmd, "arp")) {
+        print_line("ARP cache: gateway neighbor resolution is maintained by the kernel.");
+        print_line("Dynamic entries are learned from ARP replies.");
+    } else if (equals(cmd, "netstat")) {
+        print_line("Active TCP connections: none (TCP state machine not yet enabled)");
+        print_line("UDP sockets are available to Winsock applications.");
     } else if (equals(cmd, "cls") || equals(cmd, "clear")) {
         g_line_count = 0;
         for (int i = 0; i < LINE_COUNT; i++) g_lines[i][0] = 0;

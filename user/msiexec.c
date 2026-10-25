@@ -924,7 +924,8 @@ void mainCRTStartup(void) {
     out("msiexec: package opened; reading bytes\n");
     const u32 chunk_size=16u*1024u*1024u;
     const u32 read_size=1024u*1024u;
-    const u64 buffer_base=0x50000000ULL;
+    /* 0x50000000 is already occupied by user32.dll in this process. Keep the package buffer separate from the DLL and the GPU surface at 0x71000000. */
+    const u64 buffer_base=0x72000000ULL;
     u8 *buf=(u8 *)buffer_base;
     u32 capacity=0, total=0;
     /* Console output is expensive in the current UI. Report progress every

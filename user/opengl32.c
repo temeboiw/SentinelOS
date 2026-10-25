@@ -38,7 +38,7 @@ static GLenum ogl_blend_src=GL_SRC_ALPHA,ogl_blend_dst=GL_ONE_MINUS_SRC_ALPHA;
 static unsigned int ogl_pack_alignment=4,ogl_unpack_alignment=4;
 static unsigned int ogl_view_x,ogl_view_y,ogl_view_w,ogl_view_h;
 static unsigned int ogl_sc_x,ogl_sc_y,ogl_sc_w,ogl_sc_h;
-static int ogl_sc_set, ogl_current;
+static int ogl_current;
 static const GLfloat *ogl_vertices,*ogl_colors,*ogl_texcoords;
 static GLint ogl_vertex_size=2,ogl_color_size=4,ogl_tex_size=2;
 static GLsizei ogl_vertex_stride,ogl_color_stride,ogl_tex_stride;
@@ -64,7 +64,7 @@ static OGL_FB *ogl_fb(void) {
 static unsigned int ogl_stride(GLsizei stride,unsigned int size) { return stride?(unsigned int)stride:size*4u; }
 static void ogl_pixel(int x,int y,unsigned int color) {
  OGL_FB *fb=ogl_fb(); if(!fb||x<0||y<0||(unsigned int)x>=fb->w||(unsigned int)y>=fb->h)return;
- if(ogl_sc_set&&(x<(int)ogl_sc_x||y<(int)ogl_sc_y||x>=(int)(ogl_sc_x+ogl_sc_w)||y>=(int)(ogl_sc_y+ogl_sc_h)))return;
+ if((ogl_enabled&GL_SCISSOR_TEST)&&(x<(int)ogl_sc_x||y<(int)ogl_sc_y||x>=(int)(ogl_sc_x+ogl_sc_w)||y>=(int)(ogl_sc_y+ogl_sc_h)))return;
  ((unsigned int*)(unsigned long long)fb->va)[(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x]=color;
 }
 static unsigned int ogl_vertex_color(GLsizei i) {
@@ -152,13 +152,13 @@ __attribute__((dllexport)) void glClear(GLbitfield mask) {
  if(!(mask&GL_COLOR_BUFFER_BIT))return;OGL_FB *fb=ogl_fb();if(!fb)return;
  unsigned int *p=(unsigned int*)(unsigned long long)fb->va;
  for(unsigned int y=0;y<fb->h;y++)for(unsigned int x=0;x<fb->w;x++)
-  if(!ogl_sc_set||(x>=ogl_sc_x&&y>=ogl_sc_y&&x<ogl_sc_x+ogl_sc_w&&y<ogl_sc_y+ogl_sc_h))p[(unsigned long long)y*(fb->pitch/4u)+x]=ogl_clear_color;
+  if(!(ogl_enabled&GL_SCISSOR_TEST)||(x>=ogl_sc_x&&y>=ogl_sc_y&&x<ogl_sc_x+ogl_sc_w&&y<ogl_sc_y+ogl_sc_h))p[(unsigned long long)y*(fb->pitch/4u)+x]=ogl_clear_color;
 }
 __attribute__((dllexport)) void glViewport(GLint x,GLint y,GLsizei w,GLsizei h){if(w<0||h<0){ogl_error=GL_INVALID_VALUE;return;}ogl_view_x=x<0?0:(unsigned int)x;ogl_view_y=y<0?0:(unsigned int)y;ogl_view_w=(unsigned int)w;ogl_view_h=(unsigned int)h;}
-__attribute__((dllexport)) void glScissor(GLint x,GLint y,GLsizei w,GLsizei h){if(w<0||h<0){ogl_error=GL_INVALID_VALUE;return;}ogl_sc_x=x<0?0:(unsigned int)x;ogl_sc_y=y<0?0:(unsigned int)y;ogl_sc_w=(unsigned int)w;ogl_sc_h=(unsigned int)h;ogl_sc_set=1;}
-__attribute__((dllexport)) void glEnable(GLenum c){if(c==GL_SCISSOR_TEST)ogl_sc_set=1;else if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D)ogl_enabled|=c;else ogl_error=GL_INVALID_ENUM;}
-__attribute__((dllexport)) void glDisable(GLenum c){if(c==GL_SCISSOR_TEST)ogl_sc_set=0;else if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D)ogl_enabled&=~c;else ogl_error=GL_INVALID_ENUM;}
-__attribute__((dllexport)) GLboolean glIsEnabled(GLenum c){if(c==GL_SCISSOR_TEST)return (GLboolean)ogl_sc_set;return (GLboolean)((ogl_enabled&c)!=0);}
+__attribute__((dllexport)) void glScissor(GLint x,GLint y,GLsizei w,GLsizei h){if(w<0||h<0){ogl_error=GL_INVALID_VALUE;return;}if(x<0){w+=x;x=0;if(w<0)w=0;}if(y<0){h+=y;y=0;if(h<0)h=0;}ogl_sc_x=(unsigned int)x;ogl_sc_y=(unsigned int)y;ogl_sc_w=(unsigned int)w;ogl_sc_h=(unsigned int)h;}
+__attribute__((dllexport)) void glEnable(GLenum c){if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D||c==GL_SCISSOR_TEST)ogl_enabled|=c;else ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glDisable(GLenum c){if(c==GL_BLEND||c==GL_DEPTH_TEST||c==GL_STENCIL_TEST||c==GL_DITHER||c==GL_TEXTURE_2D||c==GL_SCISSOR_TEST)ogl_enabled&=~c;else ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) GLboolean glIsEnabled(GLenum c){if(c!=GL_BLEND&&c!=GL_DEPTH_TEST&&c!=GL_STENCIL_TEST&&c!=GL_DITHER&&c!=GL_TEXTURE_2D&&c!=GL_SCISSOR_TEST){ogl_error=GL_INVALID_ENUM;return GL_FALSE;}return (GLboolean)((ogl_enabled&c)!=0);}
 __attribute__((dllexport)) GLenum glGetError(void){unsigned int e=ogl_error;ogl_error=0;return e;}
 __attribute__((dllexport)) const GLubyte *glGetString(GLenum n){static const GLubyte vendor[]="SentinelOS";static const GLubyte renderer[]="SentinelOS framebuffer software rasterizer";static const GLubyte version[]="1.1 SentinelOS subset";static const GLubyte ext[]="";if(n==GL_VENDOR)return vendor;if(n==GL_RENDERER)return renderer;if(n==GL_VERSION)return version;if(n==GL_EXTENSIONS)return ext;ogl_error=GL_INVALID_ENUM;return 0;}
 __attribute__((dllexport)) void glDrawArrays(GLenum mode,GLint first,GLsizei count){

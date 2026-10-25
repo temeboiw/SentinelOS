@@ -464,9 +464,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
             VOID *file; UINTN fsize;
             EFI_STATUS st2 = os_load_file(path, 3, &file, &fsize);
             if (EFI_ERROR(st2)) {
-                say(L"loadufi: missing user image ");
-                say_a(users[u]);
-                say(L"\r\n");
+                /* instlr.exe and screen.exe are optional in this build. */
+                int optional = (users[u][0] == 'i' && users[u][1] == 'n' &&
+                                users[u][2] == 's' && users[u][3] == 't') ||
+                               (users[u][0] == 's' && users[u][1] == 'c' &&
+                                users[u][2] == 'r' && users[u][3] == 'e');
+                if (!optional) {
+                    say(L"loadufi: missing user image ");
+                    say_a(users[u]);
+                    say(L"\r\n");
+                }
                 continue;
             }
             if (nmods >= BOOT_MAX_MODULES) break;

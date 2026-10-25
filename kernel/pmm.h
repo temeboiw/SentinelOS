@@ -99,8 +99,11 @@ static void pmm_init(const BootInfo *bi) {
     uint64_t at = 0;                                 // first conventional region (>= 1 MiB) big enough for the bitmap
     for (uint64_t i = 0; i < n && !at; i++) {
         const EfiMemDesc *d = md_at(bi, i);
-        if (d->type != EFI_CONVENTIONAL) continue;
-        uint64_t s = d->phys < 0x100000 ? 0x100000 : d->phys, e = d->phys + d->pages * PAGE_SIZE;
+        if (d->type != EFI_CONVENTIONAL || d->phys >= PMM_MAX_PHYS_BYTES ||
+            d->pages > (UINT64_MAX - d->phys) / PAGE_SIZE) continue;
+        uint64_t s = d->phys < 0x100000 ? 0x100000 : d->phys;
+        uint64_t e = d->phys + d->pages * PAGE_SIZE;
+        if (e > PMM_MAX_PHYS_BYTES) e = PMM_MAX_PHYS_BYTES;
         if (e > s && (e - s) / PAGE_SIZE >= bm_pages) at = s;
     }
     if (!at) pmm_panic("no room for bitmap");
@@ -231,12 +234,12 @@ static void pmm_touch_test(uint64_t hhdm) {
             for (int k = 0; k < 512; k += 8) {
                 uint64_t want = 0xA5A5000000000000ULL ^ (pg * PAGE_SIZE + k * 8);
                 if (pass == 0) { q[k] = want; touched++; }
-                else if (q[k] != want && bad++ < 3) DbgPrint("  mismatch at page %p\\n", (void *)(pg * PAGE_SIZE));
+                else if (q[k] != want && bad++ < 3) DbgPrint("  mismatch at page %p\n", (void *)(pg * PAGE_SIZE));
             }
             if (pass == 0) sampled_pages++;
         }
     }
-    DbgPrint("pmm touch test: %llu sampled free pages, %llu cache lines verified across %llu MiB, %llu errors: %s\\n",
+    DbgPrint("pmm touch test: %llu sampled free pages, %llu cache lines verified across %llu MiB, %llu errors: %s\n",
             sampled_pages, touched, pm_pages * PAGE_SIZE / (1024 * 1024),
             bad, bad ? "FAIL" : "ok");
 }

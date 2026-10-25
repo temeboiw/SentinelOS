@@ -15,38 +15,21 @@ typedef struct {
     uint64_t phys, virt, pages, attr;
 } EfiMemDesc;
 
-static const char *const efi_type[15] = {
-    "Reserved", "LoaderCode", "LoaderData", "BootServicesCode", "BootServicesData",
-    "RuntimeCode", "RuntimeData", "Conventional", "Unusable", "ACPIReclaim",
-    "ACPINVS", "MMIO", "MMIOPortSpace", "PalCode", "Persistent",
-};
 #define EFI_CONVENTIONAL 7
 
 static const EfiMemDesc *md_at(const BootInfo *bi, uint64_t i) {
     return (const EfiMemDesc *)(bi->mmap + i * bi->desc_size);
 }
 
-static void mmap_emit(uint64_t s, uint64_t e, uint32_t t) {
-    DbgPrint("  %016llx - %016llx  %s (%llu KiB)\n", s, e, t < 15 ? efi_type[t] : "?", (e - s) / 1024);
-}
-
-// print the map with adjacent same-type regions merged, then totals
+// Print aggregate totals by default; full EFI maps drown out useful boot diagnostics.
 static void mmap_dump(const BootInfo *bi) {
     uint64_t n = bi->mmap_size / bi->desc_size;
     uint64_t tot[16] = {0};
-    uint64_t rs = 0, re = 0; uint32_t rt = 0; int open = 0;
-
     for (uint64_t i = 0; i < n; i++) {
         const EfiMemDesc *d = md_at(bi, i);
-        uint64_t s = d->phys, e = s + d->pages * PAGE_SIZE;
         tot[d->type < 15 ? d->type : 15] += d->pages;
-        if (open && d->type == rt && s == re) { re = e; continue; }
-        /* Aggregate adjacent ranges without printing each descriptor. */
-        rs = s; re = e; rt = d->type; open = 1;
     }
-    (void)rs; (void)re; (void)rt; (void)open;
-
-    DbgPrint("  totals: conventional=%llu MiB  boot-services=%llu MiB  loader=%llu MiB  runtime=%llu MiB  acpi=%llu MiB\n",
+    DbgPrint("  totals: conventional=%llu MiB  boot-services=%llu MiB  loader=%llu MiB  runtime=%llu MiB  acpi=%llu MiB\\n",
             tot[7] * 4 / 1024, (tot[3] + tot[4]) * 4 / 1024, (tot[1] + tot[2]) * 4 / 1024,
             (tot[5] + tot[6]) * 4 / 1024, (tot[9] + tot[10]) * 4 / 1024);
 }

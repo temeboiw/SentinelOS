@@ -1,6 +1,6 @@
 # SentinelOS V5: TERROR — Phase 1 Architecture Audit
 
-**Status:** Source trace expanded; user reports that the initial Phase 1 branch build succeeded. Runtime behavior and the new telemetry change still need testing.
+**Status:** User reports the telemetry build booted through logon and passed desktop checks, including File Explorer launch and window dragging. Full release qualification and independent build verification remain pending.
 **Branch:** `terror-v5-phase1`
 **Baseline:** `main` at the time this branch was created.
 **Purpose:** Establish the actual implementation boundary before making foundational TERROR changes.

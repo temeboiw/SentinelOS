@@ -70,4 +70,15 @@ for file in "$ROOT/opengl32.dll" "$ROOT/Windows/System32/opengl32.dll" "$ROOT/ma
   done
 done
 
+# The WGL proc-address resolver must return the real implementations for
+# supported names and leave unknown extension names unavailable.
+OGL_SOURCE="$(dirname "$0")/../user/opengl32.c"
+require_file "$OGL_SOURCE"
+for symbol in glClearColor glClear glViewport glScissor glEnable glDisable glIsEnabled glGetError glGetString glDrawArrays glDrawElements glVertexPointer glColorPointer glTexCoordPointer glEnableClientState glDisableClientState glLineWidth glBlendFunc glPixelStorei glTexParameteri glTexImage2D glBindTexture glGenTextures glDeleteTextures glGetIntegerv glGetFloatv glGetBooleanv glReadPixels glFinish glFlush glTexSubImage2D glColor4f glColor4ub; do
+  grep -Fq "ogl_streq(name,\"$symbol\")" "$OGL_SOURCE" || fail "wglGetProcAddress does not resolve implemented symbol $symbol"
+done
+grep -Fq 'return 0;' "$OGL_SOURCE" || fail "wglGetProcAddress must return NULL for unsupported symbols"
+[[ "$(grep -Fc 'static int ogl_streq(' "$OGL_SOURCE")" -eq 1 ]] || fail "duplicate or missing ogl_streq helper in OpenGL runtime"
+pass "WGL proc-address source coverage and helper uniqueness"
+
 echo "Compatibility DLL export/package regression checks passed."

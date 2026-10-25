@@ -359,6 +359,90 @@ static int e4_free_block(Ext4k *fs, uint64_t block) {
     return 0;
 }
 
+static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
+                               uint64_t pos, const void *src, uint64_t len) {
+    if (!fs || !fs->ok || !src || !len || !ino ||
+        fs->blksz != 4096 || fs->is64 || fs->dsize != 32 ||
+        pos > UINT32_MAX || len > UINT32_MAX - pos ||
+        (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) ||
+        (fs->feature_incompat & ~0x00000242u))
+        return -1;
+
+    uint8_t original[256], inode[256], tail_backup[4096];
+    if (e4_inode(fs, ino, original) < 0 ||
+        (E16(original, 0) & 0xF000u) != 0x8000u ||
+        !(E32(original, 32) & 0x80000u))
+        return -1;
+    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = original[i];
+
+    uint64_t old_size = e4_size(original), end = pos + len;
+    /* Only append is supported. This keeps rollback from needing to restore
+       arbitrary existing file contents. */
+    if (pos != old_size) return -1;
+    uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
+    uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
+    if (new_blocks > UINT32_MAX) return -1;
+
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
+        E16(root, 2) > 4 || E16(root, 4) != 4)
+        return -1;
+
+    /* Track up to four allocated physical runs; root extents have this same
+       hard limit. This avoids a large kernel-stack allocation. */
+    uint64_t run_start[4], run_count[4], runs = 0;
+    uint64_t tail_physical = 0;
+    int tail_saved = 0;
+    if (old_size && (old_size % fs->blksz)) {
+        tail_physical = e4_map(fs, original, (uint32_t)(old_size / fs->blksz));
+        if (!tail_physical ||
+            e4_read(fs, tail_physical * fs->blksz, tail_backup, fs->blksz) < 0)
+            return -1;
+        tail_saved = 1;
+    }
+
+    uint8_t zero[4096];
+    for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
+    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
+        uint64_t physical = 0;
+        if (e4_alloc_block(fs, &physical) < 0) goto rollback;
+        if (runs && run_start[runs - 1] + run_count[runs - 1] == physical) {
+            ++run_count[runs - 1];
+        } else {
+            if (runs >= 4) {
+                (void)e4_free_block(fs, physical);
+                goto rollback;
+            }
+            run_start[runs] = physical;
+            run_count[runs] = 1;
+            ++runs;
+        }
+        if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
+            goto rollback;
+        if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
+            goto rollback;
+        E32(inode, 28) += fs->blksz / 512;
+    }
+
+    E32(inode, 4) = (uint32_t)end;
+    if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) goto rollback;
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    return 0;
+
+rollback:
+    (void)e4_inode_write(fs, ino, original);
+    if (tail_saved)
+        (void)e4_write(fs, tail_physical * fs->blksz, tail_backup, fs->blksz);
+    while (runs) {
+        --runs;
+        for (uint64_t n = 0; n < run_count[runs]; ++n)
+            (void)e4_free_block(fs, run_start[runs] + n);
+    }
+    return -1;
+}
+
 /* Persist an inode record without disturbing adjacent inode-table entries. */
 static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
     if (!fs || !fs->ok || !inode || !ino || ino > fs->total_inodes ||
@@ -489,30 +573,7 @@ static uint32_t e4_lookup(Ext4k *fs, uint32_t dir, const char *name) {
 
 
 /* Best-effort inverse for a block successfully returned by e4_alloc_block. */
-static int e4_free_block(Ext4k *fs, uint64_t block) {
-    if (!e4_write_supported(fs) ||
-        block < fs->first_data || block >= fs->total_blocks)
-        return -1;
-    uint64_t rel = block - fs->first_data;
-    uint64_t group = rel / fs->bpg, bit = rel % fs->bpg;
-    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
-    uint8_t gd[64], sb[1024], bitmap[4096];
-    if (e4_read(fs, gdt + group * fs->dsize, gd, fs->dsize) < 0) return -1;
-    uint32_t bb = E32(gd, 0);
-    if (!bb || e4_read(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0)
-        return -1;
-    uint8_t mask = (uint8_t)(1u << (bit & 7));
-    if (!(bitmap[bit >> 3] & mask)) return 0;
-    bitmap[bit >> 3] &= (uint8_t)~mask;
-    if (e4_write(fs, (uint64_t)bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
-    E16(gd, 12) = (uint16_t)(E16(gd, 12) + 1);
-    if (e4_write(fs, gdt + group * fs->dsize, gd, fs->dsize) < 0) return -1;
-    if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-    E32(sb, 12) = E32(sb, 12) + 1;
-    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-    fs->free_blocks = E32(sb, 12);
-    return 0;
-}
+
 
 /* Best-effort inverse for an inode successfully returned by e4_alloc_inode. */
 static int e4_free_inode(Ext4k *fs, uint32_t ino) {

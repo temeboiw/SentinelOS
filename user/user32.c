@@ -2395,7 +2395,9 @@ i64 DispatchMessageA(const MSG *m) {
 /* Modal message box: a real captioned window with an OK button. */
 __attribute__((dllexport))
 int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
-    (void)hwnd; (void)type;
+    (void)hwnd;
+    /* MB_YESNO is used by the MSI reader before writing extracted output. */
+    int yesno = ((type & 0x0Fu) == 0x04u);
     WINDOW old_wnd = g_wnd;
     char old_lines[40][80];
     int old_nlines = g_nlines, old_menu = g_menu, old_search = g_search_focus;
@@ -2438,6 +2440,7 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
     (void)sy3(SYS_WmRect,(u64)rect,0,0);
 
     int done=0;
+    int result=1;
     while(!done) {
         /* Remove the previous cursor before repainting the modal scene.
          * Keep cur_on/save-under valid until cursor_restore_fast() restores
@@ -2446,10 +2449,17 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
          * then saves those cursor pixels as its underlay, producing a trail. */
         if(cur_on) cursor_restore_fast();
         compose();
-        int bx=g_wnd.x+g_wnd.w-100, by=g_wnd.y+g_wnd.h-42;
+        int by=g_wnd.y+g_wnd.h-42;
+        int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
         round_fill(bx,by,78,28,4,0xFF559EBB);
         round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
-        draw_text(bx+26,by+9,"OK",0xFF164E68);
+        draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
+        int nx=g_wnd.x+g_wnd.w-100;
+        if(yesno) {
+            round_fill(nx,by,78,28,4,0xFF559EBB);
+            round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
+            draw_text(nx+24,by+9,"No",0xFF164E68);
+        }
 
         /* The modal title is not "Desktop", so compose() does not paint the
          * pointer. Repaint it as the final overlay after the dialog is ready. */
@@ -2461,13 +2471,20 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
         InputEvent ev={0};
         if(!sy3(SYS_GetInput,(u64)&ev,0,0))continue;
         if(ev.type==1) {
-            if(ev.key==27||ev.key=='\r'||ev.key=='\n'||ev.key==' ')done=1;
+            if(yesno && (ev.key=='y'||ev.key=='Y')) { result=6; done=1; }
+            else if(yesno && (ev.key=='n'||ev.key=='N'||ev.key==27)) { result=7; done=1; }
+            else if(ev.key==27||ev.key=='\r'||ev.key=='\n'||ev.key==' ')done=1;
         } else if(ev.type==2||ev.type==3) {
             g_mx=ev.x;g_my=ev.y;u32_mouse_record();
-            if(ev.type==3 &&
-              (hit(ev.x,ev.y,bx,by,bx+78,by+28) ||
-               hit(ev.x,ev.y,g_wnd.x+g_wnd.w-30,g_wnd.y+2,
-                            g_wnd.x+g_wnd.w-2,g_wnd.y+30))) done=1;
+            if(ev.type==3 && hit(ev.x,ev.y,bx,by,bx+78,by+28)) {
+                result=yesno?6:1; done=1;
+            } else if(ev.type==3 && yesno && hit(ev.x,ev.y,nx,by,nx+78,by+28)) {
+                result=7; done=1;
+            } else if(ev.type==3 &&
+              hit(ev.x,ev.y,g_wnd.x+g_wnd.w-30,g_wnd.y+2,
+                           g_wnd.x+g_wnd.w-2,g_wnd.y+30)) {
+                result=yesno?7:1; done=1;
+            }
         }
     }
 
@@ -2481,7 +2498,7 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
         (void)sy3(SYS_WmRect,(u64)rect,0,0);
     }
     compose();
-    return 1;
+    return result;
 }
 
 __attribute__((dllexport))

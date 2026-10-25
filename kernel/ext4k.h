@@ -221,61 +221,53 @@ static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
  * bigalloc variants are refused rather than silently corrupting metadata.
  */
 static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
-    if (!e4_write_supported(fs) || !out_ino || !fs->total_inodes || fs->isize > 256)
-        return -1;
-    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
-    if (!fs->free_inodes) return -3;
-
+    if (!e4_write_supported(fs) || !out_ino || !fs->total_inodes ||
+        fs->isize > 256 || !fs->ipg || !fs->free_inodes) return -1;
     uint64_t groups = ((uint64_t)fs->total_inodes + fs->ipg - 1) / fs->ipg;
     uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
-    uint8_t gd[64], sb[1024];
+    uint8_t gd[64], old_gd[64], sb[1024], bitmap[4096], old_bitmap[4096];
     for (uint64_t g = 0; g < groups; ++g) {
-        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
-            return -1;
-        uint32_t free_count = E16(gd, 14);
-        if (fs->is64) free_count |= (uint32_t)E16(gd, 46) << 16;
+        uint64_t gd_off = gdt_off + g * fs->dsize;
+        if (e4_read(fs, gd_off, gd, fs->dsize) < 0) return -1;
+        uint16_t free_count = E16(gd, 14);
         if (!free_count) continue;
-
-        uint64_t bitmap = E32(gd, 4);
-        if (fs->is64) bitmap |= (uint64_t)E32(gd, 36) << 32;
-        if (!bitmap || bitmap >= fs->total_blocks ||
-            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
-            return -1;
-
+        uint64_t ib = E32(gd, 4);
+        if (!ib || ib >= fs->total_blocks ||
+            e4_read(fs, ib * fs->blksz, bitmap, fs->blksz) < 0) return -1;
         uint64_t first_ino = g * fs->ipg;
-        uint64_t span = fs->total_inodes > first_ino
-                      ? fs->total_inodes - first_ino : 0;
+        uint64_t span = fs->total_inodes > first_ino ? fs->total_inodes - first_ino : 0;
         if (span > fs->ipg) span = fs->ipg;
         for (uint64_t bit = 0; bit < span; ++bit) {
             uint8_t mask = (uint8_t)(1u << (bit & 7));
-            if (fs->blk[bit >> 3] & mask) continue;
-            fs->blk[bit >> 3] |= mask;
-            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+            if (bitmap[bit >> 3] & mask) continue;
+            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0 || E32(sb, 16) == 0)
                 return -1;
-
-            --free_count;
-            E16(gd, 14) = (uint16_t)free_count;
-            if (fs->is64) E16(gd, 46) = (uint16_t)(free_count >> 16);
-            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            for (uint32_t i = 0; i < fs->blksz; ++i) old_bitmap[i] = bitmap[i];
+            for (uint32_t i = 0; i < fs->dsize; ++i) old_gd[i] = gd[i];
+            bitmap[bit >> 3] |= mask;
+            E16(gd, 14) = (uint16_t)(free_count - 1);
+            E32(sb, 16) = E32(sb, 16) - 1;
+            if (e4_write(fs, ib * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+            if (e4_write(fs, gd_off, gd, fs->dsize) < 0) {
+                if (e4_write(fs, ib * fs->blksz, old_bitmap, fs->blksz) < 0) {
+                    fs->write_faulted = 1; fs->ok = 0;
+                }
                 return -1;
-
-            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-            uint64_t super_free = E32(sb, 16);
-            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x160) << 32;
-            if (!super_free) return -1;
-            --super_free;
-            E32(sb, 16) = (uint32_t)super_free;
-            if (fs->is64) E32(sb, 0x160) = (uint32_t)(super_free >> 32);
-            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-
-            fs->free_inodes = (uint32_t)super_free;
+            }
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) {
+                int bad = 0;
+                if (e4_write(fs, gd_off, old_gd, fs->dsize) < 0) bad = 1;
+                if (e4_write(fs, ib * fs->blksz, old_bitmap, fs->blksz) < 0) bad = 1;
+                if (bad) { fs->write_faulted = 1; fs->ok = 0; }
+                return -1;
+            }
+            fs->free_inodes = E32(sb, 16);
             *out_ino = (uint32_t)(first_ino + bit + 1);
             return 0;
         }
-        /* A contradictory group counter/bitmap is not safe to work around. */
         return -1;
     }
-    return -3;
+    return -1;
 }
 
 
@@ -326,87 +318,42 @@ static int e4_extent_append_root(Ext4k *fs, uint8_t *inode,
  * Allocation and metadata updates are not yet journaled, so failures may leak
  * a block; callers must not treat this as crash-atomic installation.
  */
-static int e4_free_block(Ext4k *fs, uint64_t block);
-
-static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
-                               uint64_t pos, const void *src, uint64_t len) {
-    if (!e4_write_supported(fs) || !src || !len || !ino ||
-        pos > UINT32_MAX || len > UINT32_MAX - pos)
+static int e4_free_block(Ext4k *fs, uint64_t block) {
+    if (!e4_write_supported(fs) || block < fs->first_data || block >= fs->total_blocks)
         return -1;
-
-    uint8_t original[256], inode[256], tail_backup[4096];
-    if (e4_inode(fs, ino, original) < 0 ||
-        (E16(original, 0) & 0xF000u) != 0x8000u ||
-        !(E32(original, 32) & 0x80000u))
-        return -1;
-    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = original[i];
-
-    uint64_t old_size = e4_size(original), end = pos + len;
-    /* Only append is supported. This keeps rollback from needing to restore
-       arbitrary existing file contents. */
-    if (pos != old_size) return -1;
-    uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
-    uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
-    if (new_blocks > UINT32_MAX) return -1;
-
-    uint8_t *root = inode + 40;
-    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
-        E16(root, 2) > 4 || E16(root, 4) != 4)
-        return -1;
-
-    /* Track up to four allocated physical runs; root extents have this same
-       hard limit. This avoids a large kernel-stack allocation. */
-    uint64_t run_start[4], run_count[4], runs = 0;
-    uint64_t tail_physical = 0;
-    int tail_saved = 0;
-    if (old_size && (old_size % fs->blksz)) {
-        tail_physical = e4_map(fs, original, (uint32_t)(old_size / fs->blksz));
-        if (!tail_physical ||
-            e4_read(fs, tail_physical * fs->blksz, tail_backup, fs->blksz) < 0)
-            return -1;
-        tail_saved = 1;
-    }
-
-    uint8_t zero[4096];
-    for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
-    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
-        uint64_t physical = 0;
-        if (e4_alloc_block(fs, &physical) < 0) goto rollback;
-        if (runs && run_start[runs - 1] + run_count[runs - 1] == physical) {
-            ++run_count[runs - 1];
-        } else {
-            if (runs >= 4) {
-                (void)e4_free_block(fs, physical);
-                goto rollback;
-            }
-            run_start[runs] = physical;
-            run_count[runs] = 1;
-            ++runs;
+    uint64_t rel = block - fs->first_data;
+    uint64_t group = rel / fs->bpg, bit = rel % fs->bpg;
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint64_t gd_off = gdt + group * fs->dsize;
+    uint8_t gd[64], old_gd[64], sb[1024], bitmap[4096], old_bitmap[4096];
+    if (e4_read(fs, gd_off, gd, fs->dsize) < 0) return -1;
+    uint64_t bb = E32(gd, 0);
+    if (!bb || bb >= fs->total_blocks ||
+        e4_read(fs, bb * fs->blksz, bitmap, fs->blksz) < 0 ||
+        e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    uint8_t mask = (uint8_t)(1u << (bit & 7));
+    if (!(bitmap[bit >> 3] & mask)) return 0;
+    for (uint32_t i = 0; i < fs->blksz; ++i) old_bitmap[i] = bitmap[i];
+    for (uint32_t i = 0; i < fs->dsize; ++i) old_gd[i] = gd[i];
+    bitmap[bit >> 3] &= (uint8_t)~mask;
+    E16(gd, 12) = (uint16_t)(E16(gd, 12) + 1);
+    E32(sb, 12) = E32(sb, 12) + 1;
+    if (e4_write(fs, bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    if (e4_write(fs, gd_off, gd, fs->dsize) < 0) {
+        if (e4_write(fs, bb * fs->blksz, old_bitmap, fs->blksz) < 0) {
+            fs->write_faulted = 1; fs->ok = 0;
         }
-        if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
-            goto rollback;
-        if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
-            goto rollback;
-        E32(inode, 28) += fs->blksz / 512;
+        return -1;
     }
-
-    E32(inode, 4) = (uint32_t)end;
-    if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
-    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
-    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) goto rollback;
-    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) {
+        int bad = 0;
+        if (e4_write(fs, gd_off, old_gd, fs->dsize) < 0) bad = 1;
+        if (e4_write(fs, bb * fs->blksz, old_bitmap, fs->blksz) < 0) bad = 1;
+        if (bad) { fs->write_faulted = 1; fs->ok = 0; }
+        return -1;
+    }
+    fs->free_blocks = E32(sb, 12);
     return 0;
-
-rollback:
-    (void)e4_inode_write(fs, ino, original);
-    if (tail_saved)
-        (void)e4_write(fs, tail_physical * fs->blksz, tail_backup, fs->blksz);
-    while (runs) {
-        --runs;
-        for (uint64_t n = 0; n < run_count[runs]; ++n)
-            (void)e4_free_block(fs, run_start[runs] + n);
-    }
-    return -1;
 }
 
 /* Persist an inode record without disturbing adjacent inode-table entries. */
@@ -464,66 +411,7 @@ static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
  * those require checksum/cluster accounting updates that this small VFS does
  * not yet implement. Callers must subsequently attach the block to an inode.
  */
-static int e4_alloc_block(Ext4k *fs, uint64_t *out_block) {
-    if (!fs || !fs->ok || !out_block || !fs->bpg ||
-        fs->blksz < 1024 || fs->blksz > sizeof(fs->blk))
-        return -1;
-    /* RO_COMPAT_GDT_CSUM=0x10, RO_COMPAT_BIGALLOC=0x200,
-       RO_COMPAT_METADATA_CSUM=0x400. Never corrupt unsupported metadata. */
-    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
-    if (!fs->free_blocks) return -3;
 
-    uint64_t groups = (fs->total_blocks + fs->bpg - 1) / fs->bpg;
-    uint8_t gd[64];
-    uint8_t sb[1024];
-    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
-    for (uint64_t g = 0; g < groups; ++g) {
-        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
-            return -1;
-        uint32_t free_lo = E16(gd, 12);
-        uint32_t free_count = free_lo;
-        if (fs->is64) free_count |= (uint32_t)E16(gd, 44) << 16;
-        if (!free_count) continue;
-
-        uint64_t bitmap = E32(gd, 0);
-        if (fs->is64) bitmap |= (uint64_t)E32(gd, 32) << 32;
-        if (!bitmap || bitmap >= fs->total_blocks ||
-            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
-            return -1;
-
-        uint64_t first = (uint64_t)fs->first_data + g * fs->bpg;
-        uint64_t span = fs->total_blocks > first ? fs->total_blocks - first : 0;
-        if (span > fs->bpg) span = fs->bpg;
-        for (uint64_t bit = 0; bit < span; ++bit) {
-            uint8_t mask = (uint8_t)(1u << (bit & 7));
-            if (fs->blk[bit >> 3] & mask) continue;
-            fs->blk[bit >> 3] |= mask;
-            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
-                return -1;
-
-            free_count--;
-            E16(gd, 12) = (uint16_t)free_count;
-            if (fs->is64) E16(gd, 44) = (uint16_t)(free_count >> 16);
-            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
-                return -1;
-            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-            uint64_t super_free = E32(sb, 12);
-            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x158) << 32;
-            if (!super_free) return -1;
-            --super_free;
-            E32(sb, 12) = (uint32_t)super_free;
-            if (fs->is64) E32(sb, 0x158) = (uint32_t)(super_free >> 32);
-            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-            fs->free_blocks = super_free;
-            *out_block = first + bit;
-            return 0;
-        }
-        /* A group counter that claims free blocks but has none in its bitmap
-           indicates inconsistent metadata; do not silently keep scanning. */
-        return -1;
-    }
-    return -3;
-}
 
 static uint64_t e4_size(uint8_t *inode) {
     return E32(inode, 4) | ((uint64_t)E32(inode, 108) << 32);
@@ -620,26 +508,37 @@ static int e4_free_block(Ext4k *fs, uint64_t block) {
 
 /* Best-effort inverse for an inode successfully returned by e4_alloc_inode. */
 static int e4_free_inode(Ext4k *fs, uint32_t ino) {
-    if (!e4_write_supported(fs) || !ino || ino > fs->total_inodes)
-        return -1;
+    if (!e4_write_supported(fs) || !ino || ino > fs->total_inodes) return -1;
     uint32_t group = (ino - 1) / fs->ipg, bit = (ino - 1) % fs->ipg;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
-    uint8_t gd[64], sb[1024], bitmap[4096];
-    if (e4_read(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
-        return -1;
-    uint32_t ib = E32(gd, 4);
-    if (!ib || e4_read(fs, (uint64_t)ib * fs->blksz, bitmap, fs->blksz) < 0)
-        return -1;
+    uint64_t gd_off = gdt + (uint64_t)group * fs->dsize;
+    uint8_t gd[64], old_gd[64], sb[1024], bitmap[4096], old_bitmap[4096];
+    if (e4_read(fs, gd_off, gd, fs->dsize) < 0) return -1;
+    uint64_t ib = E32(gd, 4);
+    if (!ib || ib >= fs->total_blocks ||
+        e4_read(fs, ib * fs->blksz, bitmap, fs->blksz) < 0 ||
+        e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
     uint8_t mask = (uint8_t)(1u << (bit & 7));
     if (!(bitmap[bit >> 3] & mask)) return 0;
+    for (uint32_t i = 0; i < fs->blksz; ++i) old_bitmap[i] = bitmap[i];
+    for (uint32_t i = 0; i < fs->dsize; ++i) old_gd[i] = gd[i];
     bitmap[bit >> 3] &= (uint8_t)~mask;
-    if (e4_write(fs, (uint64_t)ib * fs->blksz, bitmap, fs->blksz) < 0) return -1;
     E16(gd, 14) = (uint16_t)(E16(gd, 14) + 1);
-    if (e4_write(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
-        return -1;
-    if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
     E32(sb, 16) = E32(sb, 16) + 1;
-    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+    if (e4_write(fs, ib * fs->blksz, bitmap, fs->blksz) < 0) return -1;
+    if (e4_write(fs, gd_off, gd, fs->dsize) < 0) {
+        if (e4_write(fs, ib * fs->blksz, old_bitmap, fs->blksz) < 0) {
+            fs->write_faulted = 1; fs->ok = 0;
+        }
+        return -1;
+    }
+    if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) {
+        int bad = 0;
+        if (e4_write(fs, gd_off, old_gd, fs->dsize) < 0) bad = 1;
+        if (e4_write(fs, ib * fs->blksz, old_bitmap, fs->blksz) < 0) bad = 1;
+        if (bad) { fs->write_faulted = 1; fs->ok = 0; }
+        return -1;
+    }
     fs->free_inodes = E32(sb, 16);
     return 0;
 }

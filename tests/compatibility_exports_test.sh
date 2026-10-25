@@ -65,7 +65,7 @@ done
 # OpenGL is a real bounded framebuffer renderer, not a full OpenGL driver.
 for file in "$ROOT/opengl32.dll" "$ROOT/Windows/System32/opengl32.dll" "$ROOT/magic/System32/opengl32.dll"; do
   require_file "$file"
-  for symbol in glClearColor glClear glViewport glDrawArrays glDrawElements glGetString glGetError glGenTextures glBindTexture glDeleteTextures glTexImage2D glTexParameteri glTexCoordPointer glEnableClientState glBlendFunc wglCreateContext wglMakeCurrent wglGetProcAddress SwapBuffers; do
+  for symbol in glClearColor glClear glViewport glDrawArrays glDrawElements glGetString glGetError glGenTextures glBindTexture glDeleteTextures glTexImage2D glTexParameteri glTexCoordPointer glEnableClientState glBlendFunc glPixelStorei wglCreateContext wglMakeCurrent wglGetProcAddress SwapBuffers; do
     require_export "$file" "$symbol"
   done
 done

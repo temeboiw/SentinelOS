@@ -761,7 +761,7 @@ void mainCRTStartup(void) {
         if (!n) break;
         total+=(u32)n;
         if (total>=next_report) {
-            out("msiexec: read "); out_u32(total); out(" bytes\\n");
+            out("msiexec: read "); out_u32(total); out(" bytes\n");
             /* Advance past every crossed threshold without repeated prints. */
             do {
                 if (next_report>0xFFFFFFFFu-(16u*1024u*1024u)) {

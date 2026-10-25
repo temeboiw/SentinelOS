@@ -258,6 +258,32 @@ static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
 }
 
 /*
+ * Allocate and initialize an empty regular-file inode. This does not publish
+ * a name in a directory and must not be mistaken for complete file creation.
+ * Bitmap/counter reservation and inode write are not transactional yet.
+ */
+static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
+    if (!fs || !fs->ok || !out_ino || fs->isize < 128 || fs->isize > 256)
+        return -1;
+    uint32_t ino = 0;
+    int rc = e4_alloc_inode(fs, &ino);
+    if (rc < 0) return rc;
+
+    uint8_t inode[256];
+    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = 0;
+    E16(inode, 0) = 0100644; /* regular file, rw-r--r-- */
+    E32(inode, 4) = 0;
+    E16(inode, 26) = 1;
+    E32(inode, 28) = 0;
+    E32(inode, 32) = 0;
+    if (fs->isize >= 130)
+        E16(inode, 128) = (uint16_t)(fs->isize - 128 >= 32 ? 32 : fs->isize - 128);
+    if (e4_inode_write(fs, ino, inode) < 0) return -1;
+    *out_ino = ino;
+    return 0;
+}
+
+/*
  * Allocate one ext4 data block from an existing block group's bitmap.
  * Deliberately refuses metadata-checksummed and bigalloc filesystems because
  * those require checksum/cluster accounting updates that this small VFS does

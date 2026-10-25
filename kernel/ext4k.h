@@ -8,6 +8,7 @@
 typedef struct {
     uint64_t part_off;
     uint32_t blksz, ipg, isize, dsize, first_data, bpg;
+    uint32_t feature_compat, feature_incompat, feature_ro_compat;
     uint64_t total_blocks,free_blocks,reserved_blocks;
     uint32_t total_inodes,free_inodes,volume_serial;
     char volume_label[17];

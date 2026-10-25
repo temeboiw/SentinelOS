@@ -219,29 +219,6 @@ __attribute__((dllexport)) void glGetDoublev(GLenum p,double *v){(void)p;if(v)*v
 __attribute__((dllexport)) void glFinish(void){OGL_FB *fb=ogl_fb();if(fb){OGL_RECT r={0,0,fb->w,fb->h};ogl_sys(33,(unsigned long long)&r,0,0);}}
 __attribute__((dllexport)) void glFlush(void){glFinish();}
 static int ogl_streq(const char *a,const char *b){if(!a||!b)return 0;while(*a&&*a==*b){a++;b++;}return *a==*b;}
-__attribute__((dllexport)) void *wglGetProcAddress(const char *name){
- if(ogl_streq(name,"glClear"))return (void*)glClear;
- if(ogl_streq(name,"glClearColor"))return (void*)glClearColor;
- if(ogl_streq(name,"glViewport"))return (void*)glViewport;
- if(ogl_streq(name,"glScissor"))return (void*)glScissor;
- if(ogl_streq(name,"glEnable"))return (void*)glEnable;
- if(ogl_streq(name,"glDisable"))return (void*)glDisable;
- if(ogl_streq(name,"glIsEnabled"))return (void*)glIsEnabled;
- if(ogl_streq(name,"glGetError"))return (void*)glGetError;
- if(ogl_streq(name,"glGetString"))return (void*)glGetString;
- if(ogl_streq(name,"glDrawArrays"))return (void*)glDrawArrays;
- if(ogl_streq(name,"glDrawElements"))return (void*)glDrawElements;
- if(ogl_streq(name,"glBindTexture"))return (void*)glBindTexture;
- if(ogl_streq(name,"glGenTextures"))return (void*)glGenTextures;
- if(ogl_streq(name,"glDeleteTextures"))return (void*)glDeleteTextures;
- if(ogl_streq(name,"glTexImage2D"))return (void*)glTexImage2D;
- if(ogl_streq(name,"glTexParameteri"))return (void*)glTexParameteri;
- if(ogl_streq(name,"glReadPixels"))return (void*)glReadPixels;
- if(ogl_streq(name,"glBlendFunc"))return (void*)glBlendFunc;
- if(ogl_streq(name,"glFinish"))return (void*)glFinish;
- if(ogl_streq(name,"glFlush"))return (void*)glFlush;
- return 0;
-}
 __attribute__((dllexport)) int wglMakeCurrent(void *dc,void *rc){
  if(!dc&&!rc){ogl_current=0;ogl_current_dc=0;ogl_current_rc=0;return 1;}
  if(!dc||!rc||rc!=(void*)1){ogl_error=GL_INVALID_OPERATION;return 0;}
@@ -266,3 +243,42 @@ __attribute__((dllexport)) void glTexSubImage2D(GLenum t,GLint l,GLint x,GLint y
 __attribute__((dllexport)) void glColor4f(GLfloat r,GLfloat g,GLfloat b,GLfloat a){unsigned int R=(unsigned int)(r<0?0:r>1?255:r*255),G=(unsigned int)(g<0?0:g>1?255:g*255),B=(unsigned int)(b<0?0:b>1?255:b*255),A=(unsigned int)(a<0?0:a>1?255:a*255);ogl_current_color=(A<<24)|(R<<16)|(G<<8)|B;}
 __attribute__((dllexport)) void glColor4ub(unsigned char r,unsigned char g,unsigned char b,unsigned char a){ogl_current_color=((unsigned int)a<<24)|((unsigned int)r<<16)|((unsigned int)g<<8)|b;}
 __attribute__((dllexport)) void glClearAccum(GLfloat r,GLfloat g,GLfloat b,GLfloat a){(void)r;(void)g;(void)b;(void)a;ogl_error=GL_INVALID_OPERATION;}
+
+/* Resolve only the OpenGL entry points implemented by this runtime. */
+static int ogl_streq(const char *a,const char *b){if(!a||!b)return 0;while(*a&&*a==*b){a++;b++;}return *a==*b;}
+__attribute__((dllexport)) void *wglGetProcAddress(const char *name){
+ if(ogl_streq(name,"glClearColor"))return (void*)glClearColor;
+ if(ogl_streq(name,"glClear"))return (void*)glClear;
+ if(ogl_streq(name,"glViewport"))return (void*)glViewport;
+ if(ogl_streq(name,"glScissor"))return (void*)glScissor;
+ if(ogl_streq(name,"glEnable"))return (void*)glEnable;
+ if(ogl_streq(name,"glDisable"))return (void*)glDisable;
+ if(ogl_streq(name,"glIsEnabled"))return (void*)glIsEnabled;
+ if(ogl_streq(name,"glGetError"))return (void*)glGetError;
+ if(ogl_streq(name,"glGetString"))return (void*)glGetString;
+ if(ogl_streq(name,"glDrawArrays"))return (void*)glDrawArrays;
+ if(ogl_streq(name,"glDrawElements"))return (void*)glDrawElements;
+ if(ogl_streq(name,"glVertexPointer"))return (void*)glVertexPointer;
+ if(ogl_streq(name,"glColorPointer"))return (void*)glColorPointer;
+ if(ogl_streq(name,"glTexCoordPointer"))return (void*)glTexCoordPointer;
+ if(ogl_streq(name,"glEnableClientState"))return (void*)glEnableClientState;
+ if(ogl_streq(name,"glDisableClientState"))return (void*)glDisableClientState;
+ if(ogl_streq(name,"glLineWidth"))return (void*)glLineWidth;
+ if(ogl_streq(name,"glBlendFunc"))return (void*)glBlendFunc;
+ if(ogl_streq(name,"glPixelStorei"))return (void*)glPixelStorei;
+ if(ogl_streq(name,"glTexParameteri"))return (void*)glTexParameteri;
+ if(ogl_streq(name,"glTexImage2D"))return (void*)glTexImage2D;
+ if(ogl_streq(name,"glBindTexture"))return (void*)glBindTexture;
+ if(ogl_streq(name,"glGenTextures"))return (void*)glGenTextures;
+ if(ogl_streq(name,"glDeleteTextures"))return (void*)glDeleteTextures;
+ if(ogl_streq(name,"glGetIntegerv"))return (void*)glGetIntegerv;
+ if(ogl_streq(name,"glGetFloatv"))return (void*)glGetFloatv;
+ if(ogl_streq(name,"glGetBooleanv"))return (void*)glGetBooleanv;
+ if(ogl_streq(name,"glReadPixels"))return (void*)glReadPixels;
+ if(ogl_streq(name,"glFinish"))return (void*)glFinish;
+ if(ogl_streq(name,"glFlush"))return (void*)glFlush;
+ if(ogl_streq(name,"glTexSubImage2D"))return (void*)glTexSubImage2D;
+ if(ogl_streq(name,"glColor4f"))return (void*)glColor4f;
+ if(ogl_streq(name,"glColor4ub"))return (void*)glColor4ub;
+ return 0;
+}

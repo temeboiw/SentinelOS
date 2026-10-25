@@ -46,11 +46,9 @@ static int e4_raw_write(Ext4k *fs, uint64_t off,
 static int e4_write(Ext4k *fs, uint64_t off, const void *src, uint64_t len) {
     if (!fs || !fs->ok || fs->write_faulted || (!src && len)) return -1;
     if (!len) return 0;
-    /* Every caller must split writes into one filesystem-block-sized unit.
-       Snapshotting the complete request makes a reported write failure atomic
-       for that unit instead of leaving earlier chunks changed. */
-    if (len > fs->blksz || len > sizeof(fs->blk) ||
-        off > UINT64_MAX - len)
+    /* A write is one bounded transaction: snapshot the entire request before
+       issuing I/O, so a failed request cannot leave successful prefix chunks. */
+    if (len > fs->blksz || len > sizeof(fs->blk) || off > UINT64_MAX - len)
         return -1;
     uint8_t before[4096];
     if (e4_read(fs, off, before, len) < 0) return -1;
@@ -156,12 +154,10 @@ static int e4_write_supported(Ext4k *fs) {
 }
 
 static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
-    if (!e4_write_supported(fs) || !block_out || !fs->free_blocks)
-        return -1;
-    uint8_t sb[1024], old_sb[1024], gd[64], old_gd[64], bitmap[4096], old_bitmap[4096];
+    if (!e4_write_supported(fs) || !block_out || !fs->free_blocks) return -1;
+    uint8_t sb[1024], gd[64], old_gd[64], bitmap[4096], old_bitmap[4096];
     if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
-    uint64_t usable = fs->total_blocks > fs->first_data
-                    ? fs->total_blocks - fs->first_data : 0;
+    uint64_t usable = fs->total_blocks > fs->first_data ? fs->total_blocks - fs->first_data : 0;
     uint64_t groups = (usable + fs->bpg - 1) / fs->bpg;
     uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
     for (uint64_t g = 0; g < groups; ++g) {
@@ -179,25 +175,17 @@ static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
         for (uint64_t bit = 0; bit < span; ++bit) {
             if (bitmap[bit >> 3] & (uint8_t)(1u << (bit & 7))) continue;
             uint64_t block = first + bit;
-            if (block < fs->first_data || block >= fs->total_blocks) continue;
-            if (E32(sb, 12) == 0) return -1;
-
+            if (block < fs->first_data || block >= fs->total_blocks || !E32(sb, 12)) continue;
             for (uint32_t i = 0; i < fs->blksz; ++i) old_bitmap[i] = bitmap[i];
             for (uint32_t i = 0; i < fs->dsize; ++i) old_gd[i] = gd[i];
-            for (uint32_t i = 0; i < sizeof(sb); ++i) old_sb[i] = sb[i];
-
             bitmap[bit >> 3] |= (uint8_t)(1u << (bit & 7));
             E16(gd, 12) = (uint16_t)(free_count - 1);
             E32(sb, 12) = E32(sb, 12) - 1;
-
-            /* Publish bitmap, group count, and superblock count as one
-               recoverable in-process transaction. On failure restore every
-               earlier write; a failed restore fences this mount read-only. */
-            if (e4_write(fs, bb * fs->blksz, bitmap, fs->blksz) < 0)
-                return -1;
+            if (e4_write(fs, bb * fs->blksz, bitmap, fs->blksz) < 0) return -1;
             if (e4_write(fs, gd_off, gd, fs->dsize) < 0) {
-                if (e4_write(fs, bb * fs->blksz, old_bitmap, fs->blksz) < 0)
-                    return -1;
+                if (e4_write(fs, bb * fs->blksz, old_bitmap, fs->blksz) < 0) {
+                    fs->write_faulted = 1; fs->ok = 0;
+                }
                 return -1;
             }
             if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) {
@@ -211,10 +199,330 @@ static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
             *block_out = block;
             return 0;
         }
-        /* A positive free counter with no clear bits means inconsistent disk. */
         return -1;
     }
     return -1;
+}
+static int e4_inode(Ext4k *fs, uint32_t ino, uint8_t *out) {
+    uint32_t g = (ino - 1) / fs->ipg, idx = (ino - 1) % fs->ipg;
+    uint8_t gd[64];
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (e4_read(fs, gdt + (uint64_t)g * fs->dsize, gd, fs->dsize) < 0) return -1;
+    uint64_t itab = E32(gd, 8);
+    if (fs->is64) itab |= (uint64_t)E32(gd, 0x28) << 32;
+    uint32_t n = fs->isize > 256 ? 256 : fs->isize;
+    return e4_read(fs, itab * fs->blksz + (uint64_t)idx * fs->isize, out, n);
+}
+
+/*
+ * Reserve an inode number using the ext4 inode bitmap. This is only a
+ * reservation primitive: callers must initialize and persist the inode
+ * before publishing a directory entry. Unsupported metadata-checksum and
+ * bigalloc variants are refused rather than silently corrupting metadata.
+ */
+static int e4_alloc_inode(Ext4k *fs, uint32_t *out_ino) {
+    if (!e4_write_supported(fs) || !out_ino || !fs->total_inodes || fs->isize > 256)
+        return -1;
+    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
+    if (!fs->free_inodes) return -3;
+
+    uint64_t groups = ((uint64_t)fs->total_inodes + fs->ipg - 1) / fs->ipg;
+    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    uint8_t gd[64], sb[1024];
+    for (uint64_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            return -1;
+        uint32_t free_count = E16(gd, 14);
+        if (fs->is64) free_count |= (uint32_t)E16(gd, 46) << 16;
+        if (!free_count) continue;
+
+        uint64_t bitmap = E32(gd, 4);
+        if (fs->is64) bitmap |= (uint64_t)E32(gd, 36) << 32;
+        if (!bitmap || bitmap >= fs->total_blocks ||
+            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+            return -1;
+
+        uint64_t first_ino = g * fs->ipg;
+        uint64_t span = fs->total_inodes > first_ino
+                      ? fs->total_inodes - first_ino : 0;
+        if (span > fs->ipg) span = fs->ipg;
+        for (uint64_t bit = 0; bit < span; ++bit) {
+            uint8_t mask = (uint8_t)(1u << (bit & 7));
+            if (fs->blk[bit >> 3] & mask) continue;
+            fs->blk[bit >> 3] |= mask;
+            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+                return -1;
+
+            --free_count;
+            E16(gd, 14) = (uint16_t)free_count;
+            if (fs->is64) E16(gd, 46) = (uint16_t)(free_count >> 16);
+            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+                return -1;
+
+            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            uint64_t super_free = E32(sb, 16);
+            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x160) << 32;
+            if (!super_free) return -1;
+            --super_free;
+            E32(sb, 16) = (uint32_t)super_free;
+            if (fs->is64) E32(sb, 0x160) = (uint32_t)(super_free >> 32);
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+
+            fs->free_inodes = (uint32_t)super_free;
+            *out_ino = (uint32_t)(first_ino + bit + 1);
+            return 0;
+        }
+        /* A contradictory group counter/bitmap is not safe to work around. */
+        return -1;
+    }
+    return -3;
+}
+
+
+static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode);
+
+/*
+ * Append one logical block to an inode whose extents are stored in the inode
+ * root. Supports up to four root extents, merges physically adjacent blocks,
+ * and refuses external extent trees rather than rewriting them incorrectly.
+ * The caller owns rollback if a later write fails.
+ */
+static int e4_extent_append_root(Ext4k *fs, uint8_t *inode,
+                                 uint32_t logical, uint64_t physical) {
+    if (!fs || !fs->ok || !inode || !physical ||
+        !(E32(inode, 32) & 0x80000u))
+        return -1;
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0)
+        return -2;
+    uint16_t entries = E16(root, 2), max = E16(root, 4);
+    if (max > 4 || entries > max || entries > 4) return -2;
+    uint8_t *last = entries ? root + 12 + (entries - 1) * 12 : 0;
+    if (last) {
+        uint32_t start = E32(last, 0);
+        uint16_t count = E16(last, 4) & 0x7FFFu;
+        uint64_t pstart = ((uint64_t)E16(last, 6) << 32) | E32(last, 8);
+        if (count && start + count == logical && pstart + count == physical &&
+            count < 0x7FFFu) {
+            E16(last, 4) = (uint16_t)(count + 1);
+            return 0;
+        }
+        if (logical <= start) return -1;
+    }
+    if (entries >= max || entries >= 4) return -2;
+    uint8_t *e = root + 12 + entries * 12;
+    E32(e, 0) = logical;
+    E16(e, 4) = 1;
+    E16(e, 6) = (uint16_t)(physical >> 32);
+    E32(e, 8) = (uint32_t)physical;
+    E16(root, 2) = (uint16_t)(entries + 1);
+    return 0;
+}
+
+/*
+ * Grow a regular file and write bytes using inline extent-root entries.
+ * Limited to files represented by at most four root extents. This intentionally
+ * rejects unsupported extent trees and files larger than that format can map.
+ * Allocation and metadata updates are not yet journaled, so failures may leak
+ * a block; callers must not treat this as crash-atomic installation.
+ */
+static int e4_free_block(Ext4k *fs, uint64_t block);
+
+static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
+                               uint64_t pos, const void *src, uint64_t len) {
+    if (!e4_write_supported(fs) || !src || !len || !ino ||
+        pos > UINT32_MAX || len > UINT32_MAX - pos)
+        return -1;
+
+    uint8_t original[256], inode[256], tail_backup[4096];
+    if (e4_inode(fs, ino, original) < 0 ||
+        (E16(original, 0) & 0xF000u) != 0x8000u ||
+        !(E32(original, 32) & 0x80000u))
+        return -1;
+    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = original[i];
+
+    uint64_t old_size = e4_size(original), end = pos + len;
+    /* Only append is supported. This keeps rollback from needing to restore
+       arbitrary existing file contents. */
+    if (pos != old_size) return -1;
+    uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
+    uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
+    if (new_blocks > UINT32_MAX) return -1;
+
+    uint8_t *root = inode + 40;
+    if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
+        E16(root, 2) > 4 || E16(root, 4) != 4)
+        return -1;
+
+    /* Track up to four allocated physical runs; root extents have this same
+       hard limit. This avoids a large kernel-stack allocation. */
+    uint64_t run_start[4], run_count[4], runs = 0;
+    uint64_t tail_physical = 0;
+    int tail_saved = 0;
+    if (old_size && (old_size % fs->blksz)) {
+        tail_physical = e4_map(fs, original, (uint32_t)(old_size / fs->blksz));
+        if (!tail_physical ||
+            e4_read(fs, tail_physical * fs->blksz, tail_backup, fs->blksz) < 0)
+            return -1;
+        tail_saved = 1;
+    }
+
+    uint8_t zero[4096];
+    for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
+    for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
+        uint64_t physical = 0;
+        if (e4_alloc_block(fs, &physical) < 0) goto rollback;
+        if (runs && run_start[runs - 1] + run_count[runs - 1] == physical) {
+            ++run_count[runs - 1];
+        } else {
+            if (runs >= 4) {
+                (void)e4_free_block(fs, physical);
+                goto rollback;
+            }
+            run_start[runs] = physical;
+            run_count[runs] = 1;
+            ++runs;
+        }
+        if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
+            goto rollback;
+        if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
+            goto rollback;
+        E32(inode, 28) += fs->blksz / 512;
+    }
+
+    E32(inode, 4) = (uint32_t)end;
+    if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) goto rollback;
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    return 0;
+
+rollback:
+    (void)e4_inode_write(fs, ino, original);
+    if (tail_saved)
+        (void)e4_write(fs, tail_physical * fs->blksz, tail_backup, fs->blksz);
+    while (runs) {
+        --runs;
+        for (uint64_t n = 0; n < run_count[runs]; ++n)
+            (void)e4_free_block(fs, run_start[runs] + n);
+    }
+    return -1;
+}
+
+/* Persist an inode record without disturbing adjacent inode-table entries. */
+static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
+    if (!fs || !fs->ok || !inode || !ino || ino > fs->total_inodes ||
+        fs->isize > 256)
+        return -1;
+    uint32_t group = (ino - 1) / fs->ipg;
+    uint32_t index = (ino - 1) % fs->ipg;
+    uint8_t gd[64];
+    uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    if (e4_read(fs, gdt + (uint64_t)group * fs->dsize, gd, fs->dsize) < 0)
+        return -1;
+    uint64_t inode_table = E32(gd, 8);
+    if (fs->is64) inode_table |= (uint64_t)E32(gd, 0x28) << 32;
+    return e4_write(fs,
+                    inode_table * fs->blksz + (uint64_t)index * fs->isize,
+                    inode, fs->isize);
+}
+
+/*
+ * Allocate and initialize an empty regular-file inode. This does not publish
+ * a name in a directory and must not be mistaken for complete file creation.
+ * Bitmap/counter reservation and inode write are not transactional yet.
+ */
+static int e4_create_empty_file_inode(Ext4k *fs, uint32_t *out_ino) {
+    if (!fs || !fs->ok || !out_ino || fs->isize < 128 || fs->isize > 256)
+        return -1;
+    uint32_t ino = 0;
+    int rc = e4_alloc_inode(fs, &ino);
+    if (rc < 0) return rc;
+
+    uint8_t inode[256];
+    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = 0;
+    E16(inode, 0) = 0100644; /* regular file, rw-r--r-- */
+    E32(inode, 4) = 0;
+    E16(inode, 26) = 1;
+    E32(inode, 28) = 0;
+    E32(inode, 32) = 0x00080000u; /* EXT4_EXTENTS_FL */
+    E16(inode, 40) = 0xF30A;
+    E16(inode, 42) = 0;
+    E16(inode, 44) = 4;
+    E16(inode, 46) = 0;
+    E32(inode, 48) = 0;
+    if (fs->isize >= 130)
+        E16(inode, 128) = (uint16_t)(fs->isize - 128 >= 32 ? 32 : fs->isize - 128);
+    if (e4_inode_write(fs, ino, inode) < 0) return -1;
+    *out_ino = ino;
+    return 0;
+}
+
+/*
+ * Allocate one ext4 data block from an existing block group's bitmap.
+ * Deliberately refuses metadata-checksummed and bigalloc filesystems because
+ * those require checksum/cluster accounting updates that this small VFS does
+ * not yet implement. Callers must subsequently attach the block to an inode.
+ */
+static int e4_alloc_block(Ext4k *fs, uint64_t *out_block) {
+    if (!fs || !fs->ok || !out_block || !fs->bpg ||
+        fs->blksz < 1024 || fs->blksz > sizeof(fs->blk))
+        return -1;
+    /* RO_COMPAT_GDT_CSUM=0x10, RO_COMPAT_BIGALLOC=0x200,
+       RO_COMPAT_METADATA_CSUM=0x400. Never corrupt unsupported metadata. */
+    if (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) return -2;
+    if (!fs->free_blocks) return -3;
+
+    uint64_t groups = (fs->total_blocks + fs->bpg - 1) / fs->bpg;
+    uint8_t gd[64];
+    uint8_t sb[1024];
+    uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
+    for (uint64_t g = 0; g < groups; ++g) {
+        if (e4_read(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+            return -1;
+        uint32_t free_lo = E16(gd, 12);
+        uint32_t free_count = free_lo;
+        if (fs->is64) free_count |= (uint32_t)E16(gd, 44) << 16;
+        if (!free_count) continue;
+
+        uint64_t bitmap = E32(gd, 0);
+        if (fs->is64) bitmap |= (uint64_t)E32(gd, 32) << 32;
+        if (!bitmap || bitmap >= fs->total_blocks ||
+            e4_read(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+            return -1;
+
+        uint64_t first = (uint64_t)fs->first_data + g * fs->bpg;
+        uint64_t span = fs->total_blocks > first ? fs->total_blocks - first : 0;
+        if (span > fs->bpg) span = fs->bpg;
+        for (uint64_t bit = 0; bit < span; ++bit) {
+            uint8_t mask = (uint8_t)(1u << (bit & 7));
+            if (fs->blk[bit >> 3] & mask) continue;
+            fs->blk[bit >> 3] |= mask;
+            if (e4_write(fs, bitmap * fs->blksz, fs->blk, fs->blksz) < 0)
+                return -1;
+
+            free_count--;
+            E16(gd, 12) = (uint16_t)free_count;
+            if (fs->is64) E16(gd, 44) = (uint16_t)(free_count >> 16);
+            if (e4_write(fs, gdt_off + g * fs->dsize, gd, fs->dsize) < 0)
+                return -1;
+            if (e4_read(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            uint64_t super_free = E32(sb, 12);
+            if (fs->is64) super_free |= (uint64_t)E32(sb, 0x158) << 32;
+            if (!super_free) return -1;
+            --super_free;
+            E32(sb, 12) = (uint32_t)super_free;
+            if (fs->is64) E32(sb, 0x158) = (uint32_t)(super_free >> 32);
+            if (e4_write(fs, 1024, sb, sizeof(sb)) < 0) return -1;
+            fs->free_blocks = super_free;
+            *out_block = first + bit;
+            return 0;
+        }
+        /* A group counter that claims free blocks but has none in its bitmap
+           indicates inconsistent metadata; do not silently keep scanning. */
+        return -1;
+    }
+    return -3;
 }
 
 static uint64_t e4_size(uint8_t *inode) {

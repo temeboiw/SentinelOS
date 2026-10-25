@@ -2343,8 +2343,22 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         /* Validate and allocate while the system CR3 provides the physical
-           identity map used by the PMM. Never replace an existing mapping. */
+           identity map used by the PMM. Never replace an existing mapping.
+           Large user allocations must not consume the kernel's last physical
+           pages: an allocation that fails only after mapping thousands of
+           pages can leave the machine under severe memory pressure during
+           rollback and process teardown. Keep a 64 MiB reserve for the kernel,
+           graphics compositor, input, and scheduler when requests are >=4 MiB. */
         MmSwitchToProcess(PspSystemProcess);
+        if (size >= 4ull * 1024 * 1024) {
+            uint64_t need_pages = size / USER_IMAGE_PAGE;
+            uint64_t reserve_pages = 64ull * 1024 * 1024 / USER_IMAGE_PAGE;
+            if (pmm_free_pages() <= need_pages + reserve_pages) {
+                MmSwitchToProcess(caller);
+                f->rax = 0;
+                return f;
+            }
+        }
         if(automatic_address) {
             uint64_t candidate=0x50000000ULL;
             uint64_t limit=0x60000000ULL-size;

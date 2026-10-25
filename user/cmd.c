@@ -31,11 +31,18 @@ typedef void (*RedrawBatch_t)(void);
 #define DATA_SIZE  256
 
 typedef unsigned long long cmd_u64;
+static void print_line(const char *s);
+static void str_copy(char *dst,const char *src,int cap);
+static int str_len(const char *s);
 static cmd_u64 cmd_netcall(cmd_u64 n,cmd_u64 a,cmd_u64 b,cmd_u64 c) {
-    cmd_u64 r;
-    __asm__ volatile("mov %1,%%rax; mov %2,%%rdi; mov %3,%%rsi; mov %4,%%rdx; int $0x80; mov %%rax,%0"
-        :"=r"(r):"r"(n),"r"(a),"r"(b),"r"(c):"rax","rdi","rsi","rdx","memory","cc");
-    return r;
+    register cmd_u64 raxv __asm__("rax")=n;
+    register cmd_u64 rdiv __asm__("rdi")=a;
+    register cmd_u64 rsiv __asm__("rsi")=b;
+    register cmd_u64 rdxv __asm__("rdx")=c;
+    __asm__ volatile("int $0x80"
+        : "+a"(raxv), "+D"(rdiv), "+S"(rsiv), "+d"(rdxv)
+        : : "r10","r11","memory","cc");
+    return raxv;
 }
 typedef struct { u32 ip,mask,gateway,dns,dhcp_state,link_up; unsigned char mac[6]; unsigned short reserved; } CMD_NETINFO;
 static void print_ipv4(const char *label,u32 ip) {

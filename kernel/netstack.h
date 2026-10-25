@@ -193,13 +193,15 @@ static void NetHandleIpv4(const uint8_t *frame,unsigned len) {
     if(ihl<sizeof(NET_IP_HDR)||len<sizeof(NET_ETH_HDR)+ihl) return;
     unsigned total=NetSwap16(ip->total);
     if(total<ihl||total>len-sizeof(NET_ETH_HDR)) return;
-    if(ip->dst!=net_ipv4_addr && ip->dst!=0xFFFFFFFFu) return;
     if(NetChecksum(ip,ihl)!=0) return;
     if(ip->proto==NET_IP_PROTO_UDP) {
         const uint8_t *payload=(const uint8_t *)ip+ihl;
-        if(total-ihl>=sizeof(NET_UDP_HDR) && NetSwap16(((const NET_UDP_HDR *)payload)->dst)==NET_DHCP_CLIENT_PORT)
+        if(total-ihl>=sizeof(NET_UDP_HDR) && NetSwap16(((const NET_UDP_HDR *)payload)->dst)==NET_DHCP_CLIENT_PORT) {
             NetHandleDhcp(ip,payload,total-ihl);
-        else if(ip->dst==net_ipv4_addr) NetHandleUdp(ip,payload,total-ihl);
+            return;
+        }
+        if(ip->dst!=net_ipv4_addr && ip->dst!=0xFFFFFFFFu) return;
+        if(ip->dst==net_ipv4_addr) NetHandleUdp(ip,payload,total-ihl);
     } else if(ip->proto==NET_IP_PROTO_ICMP && ip->dst==net_ipv4_addr && total-ihl>=sizeof(NET_ICMP_HDR)) {
         const NET_ICMP_HDR *ic=(const NET_ICMP_HDR *)((const uint8_t *)ip+ihl);
         if(ic->type==0 && ic->code==0 && NetSwap16(ic->id)==net_icmp_id) {
@@ -277,9 +279,17 @@ static int NetInit(void) {
 static int NetPing(uint32_t dst_ip, uint32_t *reply_ip, uint32_t *polls) {
     if(!e1000_ready||!dst_ip)return -1;
     uint8_t dst_mac[6];
-    if(dst_ip==net_ipv4_gateway && net_gateway_mac_valid) NetCopy(dst_mac,net_gateway_mac,6);
-    else if(net_gateway_mac_valid) NetCopy(dst_mac,net_gateway_mac,6);
-    else { const uint8_t b[6]={255,255,255,255,255,255}; NetSendArp(1,b,net_ipv4_gateway); return -1; }
+    if(!net_gateway_mac_valid) {
+        const uint8_t b[6]={255,255,255,255,255,255};
+        NetSendArp(1,b,net_ipv4_gateway);
+        for(unsigned wait=0;wait<100000;wait++) {
+            NetPoll();
+            if(net_gateway_mac_valid)break;
+            __asm__ volatile("pause");
+        }
+    }
+    if(!net_gateway_mac_valid)return -1;
+    NetCopy(dst_mac,net_gateway_mac,6);
     uint8_t frame[60]; NetZero(frame,sizeof(frame));
     NET_ETH_HDR *e=(NET_ETH_HDR *)frame; NetCopy(e->dst,dst_mac,6); NetCopy(e->src,e1000_mac,6); e->type=NetSwap16(NET_ETH_TYPE_IPV4);
     NET_IP_HDR *ip=(NET_IP_HDR *)(frame+sizeof(*e)); NET_ICMP_HDR *ic=(NET_ICMP_HDR *)((uint8_t *)ip+sizeof(*ip));

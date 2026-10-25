@@ -168,6 +168,7 @@ for src in \
   user/sentlogon.c \
   user/taskbar.c \
   user/kernel32.c \
+  user/ws2_32.c \
   user/ucrt_runtime.c \
   user/user32.c \
   user/soft3d.c \

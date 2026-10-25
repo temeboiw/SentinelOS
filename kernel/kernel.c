@@ -7,12 +7,13 @@
 #include "heap.h"
 #include "ke.h"
 #include "bootcheck.h"
-#include "user.h"
 #include "virtio_blk.h"
 #include "hda.h"
 #include "smp.h"
 #include "pci_network.h"
 #include "e1000.h"
+#include "netstack.h"
+#include "user.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -57,7 +58,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 
     DbgPrint("\n-- virtual memory --\n");
     vmm_init(bi);
-    E1000Init();
+    if (E1000Init()) NetInit();
     smp_discover();
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);

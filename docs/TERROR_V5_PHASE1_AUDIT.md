@@ -32,6 +32,19 @@
 - `readme.md` still describes the project as an early kernel that paints the framebuffer and halts. That description is stale compared with the current user-mode and desktop source tree and should be updated in a separate documentation task.
 - The user reports that `bash scripts/build.sh` succeeded on the Phase 1 branch before the telemetry change. That is a user-reported baseline, not independent verification of the latest commit. No QEMU boot, frame-time benchmark, or runtime regression test has been confirmed.
 
+## Runtime evidence supplied by the user
+
+The user reports that desktop checks passed and supplied serial output showing:
+
+- File Explorer starts as PID 5, creates and shows its window, reloads rows, and reaches `fileexplorer: ready`.
+- The compositor presents bounded damage rectangles, including `760×16`, `760×32`, and `760×48`, and reports successful VirtIO-GPU flushes.
+- A window drag produces successive old/new rectangle records, including movement partly beyond the screen edge.
+- Mouse input and presentation events continue after launch and during the drag sequence.
+
+**Interpretation:** this is positive runtime evidence for boot-to-app operation, partial-region composition, successful flush calls, and window-position updates. The serial excerpt does not by itself prove visual correctness at screen edges, complete old-region restoration, stable frame pacing, or GPU-side rasterization. User-reported checks are recorded as such; they are not independent test execution by the maintainer.
+
+**Next focused regression:** drag a window partly beyond each screen edge, release it, move the pointer away, and verify that the exposed background is restored and no stale pixels remain. Keep this test separate from Explorer folder behavior and cursor implementation.
+
 ## TERROR architecture decisions
 
 1. **Keep one graphics ownership path.** Applications request surfaces, drawing, and presentation through defined OS APIs. The OS graphics subsystem owns device selection, resource lifetime, synchronization, composition, and presentation.

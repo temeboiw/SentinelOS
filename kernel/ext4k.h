@@ -121,7 +121,8 @@ static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
         (ro_compat & 0x00000400u) != 0)
         return -1;
 
-    uint64_t groups = (fs->total_blocks + fs->bpg - 1) / fs->bpg;
+    uint64_t usable_blocks = fs->total_blocks > fs->first_data ? fs->total_blocks - fs->first_data : 0;
+    uint64_t groups = (usable_blocks + fs->bpg - 1) / fs->bpg;
     uint64_t gdt_off = (uint64_t)(fs->first_data + 1) * fs->blksz;
     for (uint64_t g = 0; g < groups; ++g) {
         uint8_t gd[64];
@@ -135,7 +136,8 @@ static int e4_alloc_block(Ext4k *fs, uint64_t *block_out) {
         uint8_t bitmap[4096];
         if (e4_read(fs, (uint64_t)bitmap_block * fs->blksz,
                     bitmap, fs->blksz) < 0) return -1;
-        uint64_t first = g * fs->bpg;
+        uint64_t first = (uint64_t)fs->first_data + g * fs->bpg;
+        if (first >= fs->total_blocks) break;
         uint64_t count = fs->total_blocks - first;
         if (count > fs->bpg) count = fs->bpg;
         for (uint64_t bit = 0; bit < count; ++bit) {
@@ -287,40 +289,52 @@ static int e4_extent_append_root(Ext4k *fs, uint8_t *inode,
  * Allocation and metadata updates are not yet journaled, so failures may leak
  * a block; callers must not treat this as crash-atomic installation.
  */
+static int e4_free_block(Ext4k *fs, uint64_t block);
+
 static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
                                uint64_t pos, const void *src, uint64_t len) {
     if (!fs || !fs->ok || !src || !len || !ino ||
         fs->blksz != 4096 || fs->is64 || fs->dsize != 32 ||
         pos > UINT32_MAX || len > UINT32_MAX - pos ||
-        (fs->feature_ro_compat & 0x00000400u) ||
+        (fs->feature_ro_compat & (0x10u | 0x200u | 0x400u)) ||
         (fs->feature_incompat & ~0x00000242u))
         return -1;
-    uint8_t inode[256];
-    if (e4_inode(fs, ino, inode) < 0 ||
-        (E16(inode, 0) & 0xF000u) != 0x8000u ||
-        !(E32(inode, 32) & 0x80000u))
+
+    uint8_t original[256], inode[256];
+    if (e4_inode(fs, ino, original) < 0 ||
+        (E16(original, 0) & 0xF000u) != 0x8000u ||
+        !(E32(original, 32) & 0x80000u))
         return -1;
-    uint64_t old_size = e4_size(inode), end = pos + len;
+    for (uint32_t i = 0; i < fs->isize; ++i) inode[i] = original[i];
+
+    uint64_t old_size = e4_size(original), end = pos + len;
+    /* Appending/overwriting within the existing size only. No sparse holes:
+       they require allocating and zeroing every intervening logical block. */
+    if (pos > old_size) return -1;
     uint64_t old_blocks = (old_size + fs->blksz - 1) / fs->blksz;
     uint64_t new_blocks = (end + fs->blksz - 1) / fs->blksz;
-    if (new_blocks > 0xFFFFFFFFu) return -1;
+    if (new_blocks > UINT32_MAX) return -1;
 
-    /* Ensure the root has room before allocating any data blocks. */
     uint8_t *root = inode + 40;
     if (E16(root, 0) != 0xF30A || E16(root, 6) != 0 ||
-        E16(root, 2) > 4 || E16(root, 4) > 4)
-        return -2;
-    /* Extent capacity is checked against actual physical adjacency below. */
+        E16(root, 2) > 4 || E16(root, 4) != 4)
+        return -1;
 
+    /* Track every newly allocated block so ordinary I/O errors can unwind. */
+    uint64_t allocated[131068];
+    uint64_t allocated_n = 0;
     uint8_t zero[4096];
     for (uint32_t i = 0; i < fs->blksz; ++i) zero[i] = 0;
+
     for (uint64_t lb = old_blocks; lb < new_blocks; ++lb) {
+        if (allocated_n >= sizeof(allocated) / sizeof(allocated[0])) goto rollback;
         uint64_t physical = 0;
-        if (e4_alloc_block(fs, &physical) < 0) return -3;
+        if (e4_alloc_block(fs, &physical) < 0) goto rollback;
+        allocated[allocated_n++] = physical;
         if (e4_write(fs, physical * fs->blksz, zero, fs->blksz) < 0)
-            return -1;
+            goto rollback;
         if (e4_extent_append_root(fs, inode, (uint32_t)lb, physical) < 0)
-            return -2;
+            goto rollback;
         E32(inode, 28) += fs->blksz / 512;
     }
 
@@ -328,12 +342,17 @@ static int e4_write_inode_grow(Ext4k *fs, uint32_t ino,
         E32(inode, 4) = (uint32_t)end;
         if (fs->isize >= 112) E32(inode, 108) = (uint32_t)(end >> 32);
     }
-    if (e4_inode_write(fs, ino, inode) < 0) return -1;
-    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) return -1;
-    /* Persist size/accounting again after data I/O; errors remain non-atomic. */
-    return e4_inode_write(fs, ino, inode);
-}
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    if (e4_write_inode_at(fs, inode, pos, src, len) < 0) goto rollback;
+    if (e4_inode_write(fs, ino, inode) < 0) goto rollback;
+    return 0;
 
+rollback:
+    /* Restore the old inode mapping before releasing newly allocated blocks. */
+    (void)e4_inode_write(fs, ino, original);
+    while (allocated_n) (void)e4_free_block(fs, allocated[--allocated_n]);
+    return -1;
+}
 
 /* Persist an inode record without disturbing adjacent inode-table entries. */
 static int e4_inode_write(Ext4k *fs, uint32_t ino, const uint8_t *inode) {
@@ -523,7 +542,8 @@ static int e4_free_block(Ext4k *fs, uint64_t block) {
     if (!fs || !fs->ok || fs->is64 || fs->blksz != 4096 ||
         block < fs->first_data || block >= fs->total_blocks)
         return -1;
-    uint64_t group = block / fs->bpg, bit = block % fs->bpg;
+    uint64_t rel = block - fs->first_data;
+    uint64_t group = rel / fs->bpg, bit = rel % fs->bpg;
     uint64_t gdt = (uint64_t)(fs->first_data + 1) * fs->blksz;
     uint8_t gd[64], sb[1024], bitmap[4096];
     if (e4_read(fs, gdt + group * fs->dsize, gd, fs->dsize) < 0) return -1;
@@ -646,6 +666,8 @@ static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
     uint8_t dir[256], block[4096];
     if (e4_inode(fs, dir_ino, dir) < 0 ||
         (E16(dir, 0) & 0xF000u) != 0x4000u) return -1;
+    uint8_t original[256];
+    for (uint32_t i = 0; i < fs->isize; ++i) original[i] = dir[i];
     uint64_t old_size = e4_size(dir);
     if (old_size % fs->blksz) return -1;
     uint64_t lb = old_size / fs->blksz;
@@ -670,7 +692,9 @@ static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
     E32(dir, 4) = (uint32_t)(old_size + fs->blksz);
     E32(dir, 28) += fs->blksz / 512;
     if (e4_inode_write(fs, dir_ino, dir) < 0) {
-        e4_free_block(fs, physical); return -1;
+        (void)e4_inode_write(fs, dir_ino, original);
+        (void)e4_free_block(fs, physical);
+        return -1;
     }
     return 0;
 }

@@ -432,7 +432,9 @@ static void map_range(uint64_t voff, uint64_t s, uint64_t e, uint64_t attr) {
         uint64_t virt = voff + p;
         /* Refuse arithmetic wrap or non-canonical mappings instead of corrupting
            a different page-table slot when firmware supplies a strange range. */
-        if (virt < voff || (virt >> 48) != 0xFFFF && virt >= 0xFFFF800000000000ULL)
+        uint64_t upper = virt >> 48;
+        uint64_t sign = (virt >> 47) & 1;
+        if (virt < voff || (sign ? upper != 0xFFFF : upper != 0))
             vmm_panic("map_range: invalid virtual range");
         map_2m(virt, p, attr);
         if (p > UINT64_MAX - LARGE) break;

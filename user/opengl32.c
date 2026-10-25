@@ -62,6 +62,7 @@ static OGL_FB *ogl_fb(void) {
  return &fb;
 }
 static unsigned int ogl_stride(GLsizei stride,unsigned int size) { return stride?(unsigned int)stride:size*4u; }
+static unsigned int ogl_color_array_stride(void) { return ogl_color_stride?(unsigned int)ogl_color_stride:(unsigned int)ogl_color_size; }
 static void ogl_pixel(int x,int y,unsigned int color) {
  OGL_FB *fb=ogl_fb(); if(!fb||x<0||y<0||(unsigned int)x>=fb->w||(unsigned int)y>=fb->h)return;
  if((ogl_enabled&GL_SCISSOR_TEST)&&(x<(int)ogl_sc_x||y<(int)ogl_sc_y||x>=(int)(ogl_sc_x+ogl_sc_w)||y>=(int)(ogl_sc_y+ogl_sc_h)))return;
@@ -69,7 +70,7 @@ static void ogl_pixel(int x,int y,unsigned int color) {
 }
 static unsigned int ogl_vertex_color(GLsizei i) {
  if(!ogl_color_array_enabled||!ogl_colors)return ogl_current_color;
- const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_stride(ogl_color_stride,(unsigned int)ogl_color_size);
+ const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_color_array_stride();
  unsigned int r=(unsigned int)p[0],g=(unsigned int)p[1],b=(unsigned int)p[2],a=ogl_color_size>3?p[3]:255u;
  return (a<<24)|(r<<16)|(g<<8)|b;
 }

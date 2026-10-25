@@ -46,7 +46,7 @@ static GLuint ogl_bound_texture;
 static unsigned int ogl_current_color=0xffffffffu;
 static struct { GLuint id; unsigned int used, width, height, min_filter, mag_filter, wrap_s, wrap_t; } ogl_textures[8];
 static unsigned int ogl_texture_pixels[8][512u*512u];
-static int ogl_tex_array_enabled;
+static int ogl_tex_array_enabled,ogl_color_array_enabled;
 static unsigned long long ogl_sys(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
  unsigned long long r;
  __asm__ volatile("mov %[n], %%rax\nmov %[a], %%rdi\nmov %[b], %%rsi\nmov %[c], %%rdx\nint $0x80\nmov %%rax, %[r]"
@@ -68,10 +68,15 @@ static void ogl_pixel(int x,int y,unsigned int color) {
  ((unsigned int*)(unsigned long long)fb->va)[(unsigned long long)y*(fb->pitch/4u)+(unsigned int)x]=color;
 }
 static unsigned int ogl_vertex_color(GLsizei i) {
- if(!ogl_colors)return ogl_current_color;
- const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*(ogl_color_stride?(unsigned int)ogl_color_stride:(unsigned int)ogl_color_size);
- unsigned int r=(unsigned int)(p[0]),g=(unsigned int)(p[1]),b=(unsigned int)(p[2]),a=ogl_color_size>3?p[3]:255u;
+ if(!ogl_color_array_enabled||!ogl_colors)return ogl_current_color;
+ const unsigned char *p=(const unsigned char*)ogl_colors+(unsigned long long)i*ogl_stride(ogl_color_stride,(unsigned int)ogl_color_size);
+ unsigned int r=(unsigned int)p[0],g=(unsigned int)p[1],b=(unsigned int)p[2],a=ogl_color_size>3?p[3]:255u;
  return (a<<24)|(r<<16)|(g<<8)|b;
+}
+static unsigned int ogl_lerp_color(unsigned int a,unsigned int b,unsigned int c,float wa,float wb,float wc) {
+ unsigned int out=0;
+ for(unsigned int sh=0;sh<32;sh+=8){float q=(float)((a>>sh)&255)*wa+(float)((b>>sh)&255)*wb+(float)((c>>sh)&255)*wc;unsigned int v=(unsigned int)(q+0.5f);if(v>255)v=255;out|=v<<sh;}
+ return out;
 }
 static int ogl_coord(GLsizei i,int axis) {
  if(!ogl_vertices)return 0;
@@ -124,9 +129,9 @@ static void ogl_triangle(GLsizei a,GLsizei b,GLsizei c) {
   long long w1=(long long)(x2-x)*(y0-y)-(long long)(y2-y)*(x0-x);
   long long w2=(long long)(x0-x)*(y1-y)-(long long)(y0-y)*(x1-x);
   if((area>0&&w0>=0&&w1>=0&&w2>=0)||(area<0&&w0<=0&&w1<=0&&w2<=0)){
-   unsigned int out=color;
+   float wa=(float)w0/(float)area,wb=(float)w1/(float)area,wc=(float)w2/(float)area;
+   unsigned int out=ogl_color_array_enabled?ogl_lerp_color(ogl_vertex_color(a),ogl_vertex_color(b),ogl_vertex_color(c),wa,wb,wc):color;
    if((ogl_enabled&GL_TEXTURE_2D)&&ogl_tex_array_enabled&&ogl_texcoords&&ogl_find_texture(ogl_bound_texture)>=0){
-    float wa=(float)w0/(float)area,wb=(float)w1/(float)area,wc=(float)w2/(float)area;
     float u=ogl_get_texcoord(a,0)*wa+ogl_get_texcoord(b,0)*wb+ogl_get_texcoord(c,0)*wc;
     float v=ogl_get_texcoord(a,1)*wa+ogl_get_texcoord(b,1)*wb+ogl_get_texcoord(c,1)*wc;
     unsigned int t=ogl_sample_texture(u,v);
@@ -178,8 +183,8 @@ __attribute__((dllexport)) void glDrawElements(GLenum mode,GLsizei count,GLenum 
 __attribute__((dllexport)) void glVertexPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<2||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_vertex_size=size;ogl_vertex_stride=stride;ogl_vertices=(const GLfloat*)p;}
 __attribute__((dllexport)) void glColorPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<3||size>4||stride<0||type!=GL_UNSIGNED_BYTE){ogl_error=GL_INVALID_ENUM;return;}ogl_color_size=size;ogl_color_stride=stride;ogl_colors=(const GLfloat*)p;}
 __attribute__((dllexport)) void glTexCoordPointer(GLint size,GLenum type,GLsizei stride,const void *p){if(size<1||size>4||type!=GL_FLOAT||stride<0){ogl_error=GL_INVALID_VALUE;return;}ogl_tex_size=size;ogl_tex_stride=stride;ogl_texcoords=(const GLfloat*)p;}
-__attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=1;return;}if(a==GL_VERTEX_ARRAY||a==GL_COLOR_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
-__attribute__((dllexport)) void glDisableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=0;return;}if(a!=GL_VERTEX_ARRAY&&a!=GL_COLOR_ARRAY)ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glEnableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=1;return;}if(a==GL_COLOR_ARRAY){ogl_color_array_enabled=1;return;}if(a==GL_VERTEX_ARRAY)return;ogl_error=GL_INVALID_ENUM;}
+__attribute__((dllexport)) void glDisableClientState(GLenum a){if(a==GL_TEXTURE_COORD_ARRAY){ogl_tex_array_enabled=0;return;}if(a==GL_COLOR_ARRAY){ogl_color_array_enabled=0;return;}if(a!=GL_VERTEX_ARRAY)ogl_error=GL_INVALID_ENUM;}
 __attribute__((dllexport)) void glLineWidth(GLfloat w){if(w<=0)ogl_error=GL_INVALID_VALUE;}
 __attribute__((dllexport)) void glBlendFunc(GLenum s,GLenum d){if((s!=GL_SRC_ALPHA&&s!=GL_ONE&&s!=GL_ZERO)||(d!=GL_ONE_MINUS_SRC_ALPHA&&d!=GL_ONE&&d!=GL_ZERO)){ogl_error=GL_INVALID_ENUM;return;}ogl_blend_src=s;ogl_blend_dst=d;}
 __attribute__((dllexport)) void glPixelStorei(GLenum p,GLint v){if(v!=1&&v!=2&&v!=4&&v!=8){ogl_error=GL_INVALID_VALUE;return;}if(p==0x0D05)ogl_pack_alignment=(unsigned int)v;else if(p==0x0CF5)ogl_unpack_alignment=(unsigned int)v;else ogl_error=GL_INVALID_ENUM;}

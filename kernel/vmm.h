@@ -116,6 +116,46 @@ static void map_4k(uint64_t virt, uint64_t phys, uint64_t attr) {
     map_4k_in(pml4, virt, phys, attr);
 }
 
+/* Ensure a physical device BAR is reachable through the HHDM as uncached
+ * memory. Split an existing 2 MiB leaf when the BAR occupies only part of it. */
+static int vmm_map_mmio(uint64_t phys, uint64_t length) {
+    if (!length || phys > UINT64_MAX - length) return 0;
+    uint64_t first = phys & ~0xFFFULL;
+    uint64_t end = (phys + length + 0xFFFULL) & ~0xFFFULL;
+    for (uint64_t page = first; page < end; page += 0x1000ULL) {
+        uint64_t virt = HHDM_BASE + page;
+        uint64_t *pdpt = table_next(pml4, (virt >> 39) & 511);
+        uint64_t *pd = table_next(pdpt, (virt >> 30) & 511);
+        unsigned pdi = (virt >> 21) & 511;
+        uint64_t *pt;
+        if (pd[pdi] & PTE_P) {
+            if (pd[pdi] & PTE_PS) {
+                uint64_t old = pd[pdi];
+                uint64_t ptpa = pmm_alloc_zeroed();
+                if (!ptpa) return 0;
+                vmm_table_pages++;
+                pt = (uint64_t *)ptpa;
+                uint64_t base = old & 0x000FFFFFFFE00000ULL;
+                uint64_t flags = (old & 0xFFFULL) & ~PTE_PS;
+                for (unsigned i = 0; i < 512; ++i)
+                    pt[i] = (base + (uint64_t)i * 0x1000ULL) | flags | PTE_P;
+                pd[pdi] = ptpa | PTE_P | PTE_RW;
+            } else {
+                pt = pte_page_va(pd[pdi] & PTE_ADDR);
+            }
+        } else {
+            uint64_t ptpa = pmm_alloc_zeroed();
+            if (!ptpa) return 0;
+            vmm_table_pages++;
+            pd[pdi] = ptpa | PTE_P | PTE_RW;
+            pt = (uint64_t *)ptpa;
+        }
+        pt[(virt >> 12) & 511] = page | PTE_P | PTE_RW | PTE_PCD | PTE_PWT;
+        __asm__ volatile("invlpg (%0)" :: "r"(virt) : "memory");
+    }
+    return 1;
+}
+
 static uint64_t MmMapUserPage(KPROCESS *proc, uint64_t virt, int writable) {
     uint64_t pa = pmm_alloc_zeroed();
     if (!pa) vmm_panic("MmMapUserPage: OOM");

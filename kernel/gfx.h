@@ -413,11 +413,10 @@ static int gfx_create_virgl_buffer(void) {
         uint32_t array_size,last_level,nr_samples,flags,padding;
     } cr={0};
     cr.hdr.type=GFX_GPU_CMD_CREATE_3D;cr.hdr.ctx_id=1;cr.resource_id=GFX_VIRGL_BUFFER_ID;
-    /* Gallium pipe_texture_target values are 0=1D, 1=2D, 2=3D,
-       3=CUBE, 4=RECT, 5=1D_ARRAY, 6=2D_ARRAY, 7=CUBE_ARRAY,
-       8=BUFFER. Using 0 creates a 1D texture, so the 0x70 buffer-bind
-       mask is rejected by virglrenderer as invalid texture bind flags. */
-    cr.target=8; /* PIPE_TEXTURE_BUFFER */
+    /* Gallium's enum pipe_texture_target starts with PIPE_BUFFER=0,
+       followed by PIPE_TEXTURE_1D=1, 2D=2, etc. Buffer bind flags
+       (0x70) therefore require target 0, not a texture target. */
+    cr.target=0; /* PIPE_BUFFER */
     cr.format=0; /* PIPE_BUFFER resources use format 0 */
     cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
     cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;

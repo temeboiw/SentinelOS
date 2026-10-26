@@ -1140,8 +1140,7 @@ static void draw_taskbar(void) {
     int ty = h - 48;
     if (ty < 0) ty = 0;
 
-    /* Explorer-matched Aero glass taskbar: pale cyan edge, bright highlight,
-       translucent blue glass, and the same cool palette as window chrome. */
+    /* Rounded smoked-glass taskbar with restrained Sentinel red signal accents. */
     fill(0, ty-3, w, 3, 0x553B9CC6);
     round_fill(0, ty, w, h-ty, 10, 0xD91A1E25);
     fill(0, ty+14, w, h-ty-14, 0xD91A1E25);
@@ -1149,7 +1148,7 @@ static void draw_taskbar(void) {
     fill(10, ty+1, w-20, 1, 0xFFE9ECF2);
     fill(0, ty+2, w, 1, 0xAAFF3B30);
 
-    /* Glossy blue Start tile uses the same gradients as Explorer artwork. */
+    /* Rounded Sentinel red Start tile. */
     round_fill(5,ty+5,68,38,9,0x66314F62);
     round_fill(5,ty+4,68,37,9,0xFFFF3B30);
     gradient_v(7,ty+6,64,17,0xFFFF766E,0xFFDB3028);
@@ -1157,7 +1156,7 @@ static void draw_taskbar(void) {
     fill(14,ty+14,8,7,0xFFE9ECF2); fill(24,ty+13,8,8,0xFFE9ECF2);
     fill(14,ty+23,8,7,0xFFE9ECF2); fill(24,ty+23,8,8,0xFFE9ECF2);
 
-    /* Cool glass separator, consistent with Explorer's cyan chrome. */
+    /* Subtle red glass separator, consistent with Sentinel chrome. */
     fill(78,ty+9,1,h-ty-18,0x66FF3B30);
 
     g_tb_n = 0;
@@ -1219,11 +1218,10 @@ static void draw_taskbar(void) {
         int my=ty-(mh*g_start_scale_percent+50)/100-4;if(my<4)my=4;
         g_start_scale_x=mx;g_start_scale_y=my;g_start_scale_active=1;
         /* Keep all menu geometry proportional to the available screen. */
-        /* Start surface follows the desktop's bright cyan Aero glass,
-           white highlights, and soft blue shadow instead of the old dark theme. */
+        /* Start surface uses the same rounded charcoal panels and signal-red accents as the website. */
         round_fill(mx+4,my+5,mw,mh,12,0xB8080A0D);
         round_fill(mx,my,mw,mh,11,0xFF454B56);
-        round_fill(mx+1,my+1,mw-2,mh-2,10,0xEAF9FDFF);
+        round_fill(mx+1,my+1,mw-2,mh-2,16,0xFF1B2028);
         fill(mx+2,my+2,mw-4,1,0xFFE9ECF2);
         fill(mx,my,4,mh,0xFFFF3B30);
         gradient_v(mx+5,my+1,mw-6,54,0xFFE9ECF2,0xFF242A33);
@@ -1528,7 +1526,7 @@ static void compose(void) {
          * windows and must not remove their Aero frame. */
         int u32_borderless = (u32_wnd_style & 0x80000000u) != 0;
         if (!u32_borderless) {
-            /* Soft shadow, rounded glass frame, blue Aero caption. */
+            /* Soft shadow, rounded charcoal frame, Sentinel red caption accents. */
             round_fill(x+5,y+8,w,h,18,0xB8080A0D);
             round_fill(x,y,w,h,16,0xFF454B56);
             round_fill(x+1,y+1,w-2,h-2,15,0xFF1B2028);
@@ -1546,7 +1544,7 @@ static void compose(void) {
                 gradient_v(bx+1,by+1,21,10,0xFF515966,0xFF303641);
                 fill(bx+6,by+15,11,2,0xFFE9ECF2);
                 bx=x+w-29;
-                round_fill(bx,by,23,23,5,0xFFFF3B30);
+                round_fill(bx,by,23,23,8,0xFFFF3B30);
                 gradient_v(bx+1,by+1,21,10,0xFFFF766E,0xFFDB3028);
                 fill(bx+6,by+6,2,11,0xFFE9ECF2);
                 fill(bx+15,by+6,2,11,0xFFE9ECF2);
@@ -1554,7 +1552,7 @@ static void compose(void) {
                 fill(bx+6,by+15,11,2,0xFFE9ECF2);
             }
             round_fill(x+5,y+47,w-10,h-53,12,0xFF242A33);
-            fill(x+9,y+51,w-18,h-57,0xFF1B2028);
+            round_fill(x+9,y+51,w-18,h-57,10,0xFF1B2028);
         } else {
             /* No title bar, border, or rounded inset in popup/borderless mode. */
             fill(x,y,w,h,0xFF000000);

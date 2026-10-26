@@ -221,6 +221,15 @@ mkdir -p \
   "$B/rootfs/magic/Program Files" \
   "$B/rootfs/magic/Users/Public"
 
+# Stage the SentinelOS logo in the OS filesystem image.
+LOGO_SRC="$ROOT/resources/logo.bmp"
+if [[ ! -s "$LOGO_SRC" ]]; then
+  echo "error: missing SentinelOS logo: $LOGO_SRC" >&2
+  exit 1
+fi
+cp "$LOGO_SRC" "$B/rootfs/magic/logo.bmp"
+echo "  -> SentinelOS logo staged at /magic/logo.bmp"
+
 # Lato is the preferred humanist sans for the Vista/Frutiger Aero era.
 # If it is not installed, use a neutral sans-serif TrueType substitute.
 # A vendored assets/fonts/Lato-Regular.ttf always takes priority.

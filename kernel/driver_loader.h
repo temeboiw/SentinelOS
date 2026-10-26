@@ -86,6 +86,11 @@ static int32_t SentinelDriverServiceRegisterBlockDevice(
     return SentinelBlockRegister(device);
 }
 
+static int32_t SentinelDriverServiceUnregisterBlockDevice(
+    const char *name, void *context) {
+    return SentinelBlockUnregister(name, context);
+}
+
 static const SENTINEL_DRIVER_SERVICES SentinelDriverServices = {
     sizeof(SENTINEL_DRIVER_SERVICES),
     SENTINEL_DRIVER_ABI_VERSION,
@@ -97,7 +102,8 @@ static const SENTINEL_DRIVER_SERVICES SentinelDriverServices = {
     SentinelDriverServiceAllocateDma,
     SentinelDriverServiceReleaseDma,
     SentinelDriverServiceRegisterBlockDevice,
-    {0}
+    {0},
+    SentinelDriverServiceUnregisterBlockDevice
 };
 
 static int SentinelDriverHasSysSuffix(const char *name) {

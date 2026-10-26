@@ -425,25 +425,44 @@ static void gradient_v(int x,int y,int w,int h,u32 top,u32 bottom) {
         fill(x,y+yy,w,1,c);
     }
 }
+static void round_blend_pixel(int x,int y,u32 c,unsigned int a) {
+    if(!a||!g_front||x<0||y<0||(u32)x>=g_fw||(u32)y>=g_fh)return;
+    if(u32_render_clip&&(x<u32_clip_x0||x>=u32_clip_x1||y<u32_clip_y0||y>=u32_clip_y1))return;
+    u32 *p=&g_front[y*g_pitch+x],old=*p;
+    if(a>=255u){*p=c;return;}
+    unsigned int r=(((c>>16)&255u)*a+((old>>16)&255u)*(255u-a))/255u;
+    unsigned int g=(((c>>8)&255u)*a+((old>>8)&255u)*(255u-a))/255u;
+    unsigned int b=((c&255u)*a+(old&255u)*(255u-a))/255u;
+    *p=0xFF000000u|(r<<16)|(g<<8)|b;
+}
+/* Antialiased circular corners: 4x4 coverage is evaluated only in the corner
+ * quadrants; the centre stays a fast horizontal fill. No beveled/diagonal cuts. */
 static void round_fill(int x,int y,int w,int h,int r,u32 c) {
     if(w<=0||h<=0)return;
     if(r>w/2)r=w/2;if(r>h/2)r=h/2;if(r<0)r=0;
-    /* Rounded corners depend on the original shape's row, so iterate only
-     * visible rows without rebasing yy (which would change corner geometry). */
     int first=0,last=h;
     if(u32_render_clip) {
         if(y<u32_clip_y0)first=u32_clip_y0-y;
         if(y+h>u32_clip_y1)last=u32_clip_y1-y;
         if(first<0)first=0;if(last>h)last=h;
     }
+    if(r==0){fill(x,y+first,w,last-first,c);return;}
     for(int yy=first;yy<last;yy++) {
-        int dy=yy<r?r-yy-1:(yy>=h-r?yy-(h-r):0);
-        int inset=0;
-        if(dy>0) {
-            int rr=r*r-dy*dy;
-            while(inset<r && inset*inset<r*r-rr) inset++;
+        int corner=(yy<r||yy>=h-r);
+        if(!corner){fill(x,y+yy,w,1,c);continue;}
+        int cy=yy<r?r:h-r;
+        fill(x+r,y+yy,w-2*r,1,c);
+        for(int side=0;side<2;side++)for(int xx=0;xx<r;xx++) {
+            int px=side?x+w-r+xx:x+xx;
+            int cx=side?w-r:r;
+            unsigned int hits=0;
+            for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++) {
+                int dx4=(px-x)*4+sx+1-cx*4-2;
+                int dy4=yy*4+sy+1-cy*4-2;
+                if((long long)dx4*dx4+(long long)dy4*dy4<=(long long)r*r*16)hits++;
+            }
+            if(hits)round_blend_pixel(px,y+yy,c,hits*255u/16u);
         }
-        fill(x+inset,y+yy,w-2*inset,1,c);
     }
 }
 static int u32_isqrt(u64 n) {

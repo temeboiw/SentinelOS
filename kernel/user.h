@@ -1023,6 +1023,8 @@ static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }
 
+static int vfs_find_regular_file(const char *name, uint32_t *ino_out, uint64_t *size_out);
+
 static int vfs_open_user_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = 0;
@@ -1036,6 +1038,26 @@ static int vfs_open_user_file(const char *name) {
             if (ca != cb) { same = 0; break; }
         }
         if (same && !vfs_ents[i].is_dir) { ino = vfs_ents[i].ino; break; }
+    }
+    /* The UI cache only lists the mounted root. Resolve real paths and
+       common Windows DLL basenames through the ext4 directory hierarchy. */
+    if (!ino) {
+        uint64_t ignored_size=0;
+        if (vfs_find_regular_file(name,&ino,&ignored_size)<0) ino=0;
+        const char *prefixes[]={"magic/System32/","magic/","magic/Program Files/"};
+        char candidate[256];
+        for (unsigned int p=0; !ino && p<sizeof(prefixes)/sizeof(prefixes[0]); ++p) {
+            unsigned int i=0,j=0;
+            while(prefixes[p][i] && i+1<sizeof(candidate)) {
+                candidate[i]=prefixes[p][i]; i++;
+            }
+            while(name[j] && i+j+1<sizeof(candidate)) {
+                candidate[i+j]=name[j]=='\\' ? '/' : name[j]; j++;
+            }
+            if(name[j]) continue;
+            candidate[i+j]=0;
+            if(vfs_find_regular_file(candidate,&ino,&ignored_size)<0) ino=0;
+        }
     }
     if (!ino) return -1;
     uint8_t inode[256];
@@ -1305,12 +1327,15 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
     }
     if (!found) found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
 
-    const char prefix0[] = "Windows/System32/";
-    const char prefix1[] = "C:/Windows/System32/";
-    const char prefix2[] = "C:\\Windows\\System32\\";
-    const char prefix3[] = "System32/";
-    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3 };
-    for (unsigned int p = 0; !found && p < 4; ++p) {
+    const char prefix0[] = "magic/System32/";
+    const char prefix1[] = "C:/magic/System32/";
+    const char prefix2[] = "C:\\magic\\System32\\";
+    const char prefix3[] = "magic/Program Files/";
+    const char prefix4[] = "System32/";
+    const char prefix5[] = "Windows/System32/";
+    const char prefix6[] = "C:/Windows/System32/";
+    const char *prefixes[] = { prefix0, prefix1, prefix2, prefix3, prefix4, prefix5, prefix6 };
+    for (unsigned int p = 0; !found && p < sizeof(prefixes)/sizeof(prefixes[0]); ++p) {
         unsigned int i = 0;
         while (prefixes[p][i] && i + path_len + 1 < sizeof(system_path)) {
             system_path[i] = prefixes[p][i];

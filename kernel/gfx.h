@@ -495,14 +495,12 @@ static int gfx_present_virgl(void) {
  * This validates clear/presentation only; it is not the Maze scene renderer. */
 static int gfx_virgl_clear_present_test(void) {
     if(!gfx_3d_ready || !gfx_width || !gfx_height)return 0;
-    /* VirGL command headers encode length, object type, and command in
-       the header itself: (length << 16) | (object << 8) | command.
-       CREATE_OBJECT therefore has six payload dwords and no extra object
-       header. CLEAR has seven payload dwords: mask, RGBA, float depth,
-       and stencil. */
-    uint32_t stream[19]={
-        0x00060801u, /* CREATE_OBJECT: SURFACE object (8), command 1, len 6 */
-        1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u, 0u,
+    /* VIRGL_OBJ_SURFACE_SIZE is five dwords: handle, resource handle,
+       format, mip level, and packed first/last array layer. The command
+       header stores (length << 16) | (object << 8) | command. */
+    uint32_t stream[18]={
+        0x00050801u, /* CREATE_OBJECT: SURFACE (8), command 1, len 5 */
+        1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u,
         0x00030005u, /* SET_FRAMEBUFFER_STATE: command 5, three payload dwords */
         1u, 0u, 1u, /* one color buffer, no depth surface, surface handle 1 */
         0x00070007u, /* CLEAR: command 7, seven payload dwords */

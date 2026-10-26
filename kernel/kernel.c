@@ -15,8 +15,9 @@
 #include "netstack.h"
 #include "user.h"
 #include "driver.h"
+#include "driver_loader.h"
 
-/* MSVC/clang stack probe â€“ we are freestanding */
+/* MSVC/clang stack probe ºw^~)Þw we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
     __asm__ volatile("ret");
 }
@@ -72,7 +73,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     heap_selftest();
     heap_stats();
     SentinelDriverManagerInitialize();
-    DbgPrint("driver manager: ABI v%u registry ready (%u slots); module loading not enabled yet\n",
+    DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and ext4 loader ready\n",
              SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);
     modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
     smp_start_aps(bi);
@@ -94,9 +95,9 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 #endif
 
     // ---- usermode demo ----
-    user_enter(bi);   // does not return on success (exit syscall â†’ halt)
+    user_enter(bi);   // does not return on success (exit syscall ºw^~)Þv halt)
 
-    /* Usermode returned â€“ leave the framebuffer alone (taskbar stays). */
+    /* Usermode returned"éÝyø§yÓ leave the framebuffer alone (taskbar stays). */
     DbgPrint("kernel: idle\n");
     for (;;) __asm__ volatile("sti; hlt");
 }

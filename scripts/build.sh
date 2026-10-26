@@ -163,6 +163,7 @@ for src in \
   kernel/kernel.c \
   kernel/driver.h \
   kernel/driver_pe.h \
+  kernel/driver_loader.h \
   kernel/block.h \
   kernel/pci_network.h \
   kernel/e1000.h \

@@ -294,3 +294,84 @@ static int SentinelDriverLoadFromDisk(const char *name) {
     kfree(file);
     return result;
 }
+
+
+/*
+ * Enumerate /magic/System32/drivers and attempt every regular .sys module.
+ * Directory records are validated before their names are copied; the scan is
+ * bounded so a corrupt filesystem cannot make boot spend unbounded time here.
+ * Drivers requiring unresolved PE imports are intentionally rejected by the
+ * single-image loader rather than being called with an incomplete IAT.
+ */
+static int SentinelDriverLoadAllFromDisk(void) {
+    if (!g_ext4_ok || !g_ext4.blksz || g_ext4.blksz > 4096) return -1;
+
+    uint32_t magic = e4_lookup(&g_ext4, 2, "magic");
+    uint32_t system32 = magic ? e4_lookup(&g_ext4, magic, "System32") : 0;
+    uint32_t drivers = system32 ? e4_lookup(&g_ext4, system32, "drivers") : 0;
+    if (!drivers) return -2;
+
+    uint8_t dir_inode[256];
+    if (e4_inode(&g_ext4, drivers, dir_inode) < 0 ||
+        (E16(dir_inode, 0) & 0xF000u) != 0x4000u)
+        return -3;
+
+    uint64_t dir_size = e4_size(dir_inode);
+    if (!dir_size || dir_size > 1024u * 1024u) return -4;
+
+    uint8_t block[4096];
+    char name[SENTINEL_DRIVER_NAME_MAX];
+    int attempted = 0, loaded = 0;
+    uint32_t block_size = g_ext4.blksz;
+
+    for (uint64_t pos = 0; pos < dir_size; ) {
+        uint64_t logical = pos / block_size;
+        if (logical > UINT32_MAX) return loaded ? loaded : -5;
+        uint64_t physical = e4_map(&g_ext4, dir_inode, (uint32_t)logical);
+        if (!physical || physical > UINT64_MAX / block_size ||
+            e4_read(&g_ext4, physical * block_size, block, block_size) < 0)
+            return loaded ? loaded : -6;
+
+        uint32_t valid = (uint32_t)(dir_size - pos);
+        if (valid > block_size) valid = block_size;
+        for (uint32_t off = 0; off + 8u <= valid; ) {
+            uint16_t rec_len = E16(block, off + 4);
+            uint8_t name_len = block[off + 6];
+            if (rec_len < 8u || (rec_len & 3u) || rec_len > valid - off ||
+                name_len > rec_len - 8u)
+                break;
+
+            uint32_t ino = E32(block, off);
+            if (ino && name_len > 0 && name_len < SENTINEL_DRIVER_NAME_MAX) {
+                uint32_t k = 0;
+                while (k < name_len) {
+                    name[k] = (char)block[off + 8u + k];
+                    ++k;
+                }
+                name[k] = 0;
+
+                if (SentinelDriverHasSysSuffix(name)) {
+                    int is_ata = SentinelDriverNameEqual(name, "ata.sys");
+                    if (is_ata && SentinelBlockFind("ata0")) {
+                        DbgPrint("driver: %s skipped; ata0 is already registered\n", name);
+                    } else {
+                        ++attempted;
+                        int status = SentinelDriverLoadFromDisk(name);
+                        if (status == 0) {
+                            ++loaded;
+                            DbgPrint("driver: %s loaded from /magic/System32/drivers\n", name);
+                        } else {
+                            DbgPrint("driver: %s load failed status=%d\n", name, status);
+                        }
+                    }
+                }
+            }
+            off += rec_len;
+        }
+        pos += valid;
+    }
+
+    DbgPrint("driver: .sys scan complete attempted=%d loaded=%d\n",
+             attempted, loaded);
+    return loaded;
+}

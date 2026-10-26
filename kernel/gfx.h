@@ -495,22 +495,24 @@ static int gfx_present_virgl(void) {
  * This validates clear/presentation only; it is not the Maze scene renderer. */
 static int gfx_virgl_clear_present_test(void) {
     if(!gfx_3d_ready || !gfx_width || !gfx_height)return 0;
-    /* CREATE_OBJECT(SURFACE): 6 payload dwords; SET_FRAMEBUFFER_STATE
-       carries nr_cbufs, zsurf_handle, and all PIPE_MAX_COLOR_BUFS handles
-       (8 entries), not just the active color-buffer handle. CLEAR: 7 dwords. */
-    uint32_t stream[26]={
-        0x00060801u, /* CREATE_OBJECT (cmd=1, object=SURFACE=8, len=6) */
-        1u, GFX_VIRGL_TARGET_ID, 2u, 0u, 0u, 0u, /* handle,res,format,level,layers */
-        0x000A0005u, /* SET_FRAMEBUFFER_STATE (cmd=5, len=10) */
-        1u, 0u,       /* one color buffer, no depth surface */
-        1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, /* cbuf handles[PIPE_MAX_COLOR_BUFS] */
-        0x00070007u, /* CLEAR, 7 dwords */
-        0x00000004u, /* PIPE_CLEAR_COLOR0 */
+    /* VirGL packets use [length:16 | command:8] headers. CREATE_OBJECT
+       then has an object-type header (SURFACE=8), object handle, resource,
+       format, level, and layer range. SET_FRAMEBUFFER_STATE carries exactly
+       nr_cbufs handles (not an eight-entry fixed array). CLEAR carries eight
+       payload dwords: mask, RGBA, double-precision depth, and stencil. */
+    uint32_t stream[20]={
+        0x00060801u, /* CREATE_OBJECT: command 1, six payload dwords */
+        0x00000800u, /* VIRGL_OBJECT_SURFACE (8) */
+        1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u,
+        0x00030005u, /* SET_FRAMEBUFFER_STATE: command 5, three payload dwords */
+        1u, 0u, 1u, /* one color buffer, no depth surface, surface handle 1 */
+        0x00080007u, /* CLEAR: command 7, eight payload dwords */
+        0x00000001u, /* PIPE_CLEAR_COLOR0 */
         0x3D23D70Au, /* R = 0.04 */
         0x3DCCCCCDu, /* G = 0.10 */
         0x3F19999Au, /* B = 0.60 */
         0x3F800000u, /* A = 1.00 */
-        0x3F800000u, /* depth = 1.0f */
+        0u, 0u,      /* depth = 0.0 as a 64-bit double */
         0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {

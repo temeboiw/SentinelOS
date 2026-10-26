@@ -495,24 +495,23 @@ static int gfx_present_virgl(void) {
  * This validates clear/presentation only; it is not the Maze scene renderer. */
 static int gfx_virgl_clear_present_test(void) {
     if(!gfx_3d_ready || !gfx_width || !gfx_height)return 0;
-    /* VirGL packets use [length:16 | command:8] headers. CREATE_OBJECT
-       then has an object-type header (SURFACE=8), object handle, resource,
-       format, level, and layer range. SET_FRAMEBUFFER_STATE carries exactly
-       nr_cbufs handles (not an eight-entry fixed array). CLEAR carries eight
-       payload dwords: mask, RGBA, double-precision depth, and stencil. */
-    uint32_t stream[20]={
-        0x00060801u, /* CREATE_OBJECT: command 1, six payload dwords */
-        0x00000800u, /* VIRGL_OBJECT_SURFACE (8) */
-        1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u,
+    /* VirGL command headers encode length, object type, and command in
+       the header itself: (length << 16) | (object << 8) | command.
+       CREATE_OBJECT therefore has six payload dwords and no extra object
+       header. CLEAR has seven payload dwords: mask, RGBA, float depth,
+       and stencil. */
+    uint32_t stream[19]={
+        0x00060801u, /* CREATE_OBJECT: SURFACE object (8), command 1, len 6 */
+        1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u, 0u,
         0x00030005u, /* SET_FRAMEBUFFER_STATE: command 5, three payload dwords */
         1u, 0u, 1u, /* one color buffer, no depth surface, surface handle 1 */
-        0x00080007u, /* CLEAR: command 7, eight payload dwords */
+        0x00070007u, /* CLEAR: command 7, seven payload dwords */
         0x00000001u, /* PIPE_CLEAR_COLOR0 */
         0x3D23D70Au, /* R = 0.04 */
         0x3DCCCCCDu, /* G = 0.10 */
         0x3F19999Au, /* B = 0.60 */
         0x3F800000u, /* A = 1.00 */
-        0u, 0u,      /* depth = 0.0 as a 64-bit double */
+        0x3F800000u, /* depth = 1.0f */
         0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {

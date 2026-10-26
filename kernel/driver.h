@@ -38,6 +38,8 @@ struct SENTINEL_DRIVER_SERVICES {
     void (*release_dma)(uint64_t physical_address, uint64_t bytes);
     int32_t (*register_block_device)(const struct SENTINEL_BLOCK_DEVICE *device);
     uint64_t reserved_v2[8];
+    /* Appended ABI extension: remove only a matching name/context pair. */
+    int32_t (*unregister_block_device)(const char *name, void *context);
 };
 
 struct SENTINEL_DRIVER_OBJECT {

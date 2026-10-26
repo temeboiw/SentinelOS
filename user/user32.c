@@ -457,9 +457,9 @@ static void round_fill(int x,int y,int w,int h,int r,u32 c) {
             int cx=side?w-r:r;
             unsigned int hits=0;
             for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++) {
-                int dx4=(px-x)*4+sx+1-cx*4-2;
-                int dy4=yy*4+sy+1-cy*4-2;
-                if((long long)dx4*dx4+(long long)dy4*dy4<=(long long)r*r*16)hits++;
+                int dx8=(px-x)*8+sx*2+1-cx*8;
+                int dy8=yy*8+sy*2+1-cy*8;
+                if((long long)dx8*dx8+(long long)dy8*dy8<=(long long)r*r*64)hits++;
             }
             if(hits)round_blend_pixel(px,y+yy,c,hits*255u/16u);
         }

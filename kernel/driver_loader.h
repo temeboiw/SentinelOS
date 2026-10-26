@@ -307,13 +307,13 @@ static int SentinelDriverUnloadByName(const char *name) {
         return -6;
     }
 
+    DbgPrint("driver: %s unloaded\n", object->name);
     kfree(image);
     for (uint32_t i = 0; i < sizeof(*object); ++i)
         ((uint8_t *)object)[i] = 0;
     object->state = SENTINEL_DRIVER_UNLOADED;
     SentinelDriverRegistry[index].used = 0;
     if (SentinelDriverRegistryCount) --SentinelDriverRegistryCount;
-    DbgPrint("driver: %s unloaded\n", name);
     return 0;
 }
 

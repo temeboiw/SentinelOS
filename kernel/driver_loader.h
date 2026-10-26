@@ -248,19 +248,72 @@ static int SentinelDriverLoadImage(const char *name,
                                              candidate.unload, 0);
     if (registered) {
         if (candidate.unload) candidate.unload(&candidate);
-        kfree(image);
+        if (!SentinelBlockReferencesRange((uintptr_t)image, info.image_size))
+            kfree(image);
         return -16;
     }
 
     SENTINEL_DRIVER_OBJECT *object = SentinelDriverFind(name);
     if (!object) {
         if (candidate.unload) candidate.unload(&candidate);
-        kfree(image);
+        if (!SentinelBlockReferencesRange((uintptr_t)image, info.image_size))
+            kfree(image);
         return -15;
     }
     object->flags = candidate.flags;
     object->device_context = candidate.device_context;
     object->unload = candidate.unload;
+    return 0;
+}
+
+/*
+ * Unload a registered driver by name. This is a serialized lifecycle operation:
+ * callers must prevent concurrent dispatch into the module while it is unloading.
+ * The image is retained if teardown leaves any registered block callback/context
+ * pointing into it, avoiding a dangling function pointer at the cost of a leak.
+ */
+static int SentinelDriverUnloadByName(const char *name) {
+    if (!SentinelDriverRegistryReady || !name || !name[0]) return -1;
+
+    SENTINEL_DRIVER_OBJECT *object = SentinelDriverFind(name);
+    if (!object) return -2;
+    if (object->state != SENTINEL_DRIVER_RUNNING) return -3;
+    if (!object->module_base || !object->module_size ||
+        object->module_size > SENTINEL_DRIVER_IMAGE_MAX)
+        return -4;
+
+    uint32_t index = SENTINEL_DRIVER_REGISTRY_MAX;
+    for (uint32_t i = 0; i < SENTINEL_DRIVER_REGISTRY_MAX; ++i) {
+        if (SentinelDriverRegistry[i].used &&
+            &SentinelDriverRegistry[i].object == object) {
+            index = i;
+            break;
+        }
+    }
+    if (index == SENTINEL_DRIVER_REGISTRY_MAX) return -5;
+
+    void *image = object->module_base;
+    uint64_t image_size = object->module_size;
+    SENTINEL_DRIVER_UNLOAD unload = object->unload;
+    object->state = SENTINEL_DRIVER_UNLOADING;
+
+    if (unload) unload(object);
+
+    if (SentinelBlockReferencesRange((uintptr_t)image, image_size)) {
+        object->state = SENTINEL_DRIVER_FAILED;
+        object->last_status = -6;
+        DbgPrint("driver: %s teardown left registered callbacks; image retained\n",
+                 object->name);
+        return -6;
+    }
+
+    kfree(image);
+    for (uint32_t i = 0; i < sizeof(*object); ++i)
+        ((uint8_t *)object)[i] = 0;
+    object->state = SENTINEL_DRIVER_UNLOADED;
+    SentinelDriverRegistry[index].used = 0;
+    if (SentinelDriverRegistryCount) --SentinelDriverRegistryCount;
+    DbgPrint("driver: %s unloaded\n", name);
     return 0;
 }
 

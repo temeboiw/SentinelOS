@@ -149,13 +149,22 @@ if (( RAM_MB > 131072 )); then
     exit 1
 fi
 
-# Host CPU mode uses KVM; generic mode remains available for systems without KVM.
-CPU_MODE="${SENTINELOS_CPU:-host}"
+# Prefer the host CPU with KVM, but keep the launcher usable in
+# containers/proot and other environments where /dev/kvm is unavailable.
+CPU_MODE="${SENTINELOS_CPU:-auto}"
+if [[ "$CPU_MODE" == "auto" ]]; then
+    if [[ -e /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
+        CPU_MODE="host"
+    else
+        CPU_MODE="generic"
+        echo "SentinelOS: /dev/kvm unavailable; using generic QEMU CPU (TCG)"
+    fi
+fi
 case "$CPU_MODE" in
     host)
         if [[ ! -e /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-            echo "Error: host CPU mode requires accessible /dev/kvm." >&2
-            echo "Use SENTINELOS_CPU=generic to run without KVM." >&2
+            echo "Error: SENTINELOS_CPU=host requires accessible /dev/kvm." >&2
+            echo "Use SENTINELOS_CPU=auto or generic to run without KVM." >&2
             exit 1
         fi
         CPU_ARGS=(-enable-kvm -cpu host)
@@ -165,7 +174,7 @@ case "$CPU_MODE" in
         ;;
     *)
         echo "Error: invalid SENTINELOS_CPU mode: $CPU_MODE" >&2
-        echo "Use host or generic." >&2
+        echo "Use auto, host, or generic." >&2
         exit 1
         ;;
 esac

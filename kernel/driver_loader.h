@@ -191,25 +191,39 @@ static int SentinelDriverLoadImage(const char *name,
     }
 
     int32_t status = initialize(&candidate, &SentinelDriverServices);
+
+    /* Validate a module-provided unload pointer before ever calling it. */
+    int unload_valid = 0;
+    if (candidate.unload) {
+        uintptr_t unload_address = (uintptr_t)candidate.unload;
+        uintptr_t base = (uintptr_t)image;
+        unload_valid = unload_address >= base &&
+            unload_address - base < info.image_size &&
+            SentinelDriverPeRvaExecutable((const uint8_t *)file, &info,
+                (uint32_t)(unload_address - base));
+    }
+
     if (status != 0 ||
         candidate.size != sizeof(candidate) ||
         candidate.abi_version != SENTINEL_DRIVER_ABI_VERSION ||
         candidate.signature != SENTINEL_DRIVER_SIGNATURE ||
         candidate.module_base != image ||
         candidate.module_size != info.image_size) {
-        kfree(image);
+        /*
+         * DriverEntry may have published device callbacks before failing.
+         * The current block registry has no unregister operation, so freeing
+         * this image could leave registry entries pointing into freed memory.
+         * Keep the failed image resident and offline it through a validated
+         * unload callback when available. This bounded leak is safer than a
+         * kernel use-after-free until transactional device registration exists.
+         */
+        if (unload_valid) candidate.unload(&candidate);
         return status ? -13 : -14;
     }
 
-    if (candidate.unload) {
-        uintptr_t unload_address = (uintptr_t)candidate.unload;
-        uintptr_t base = (uintptr_t)image;
-        if (unload_address < base || unload_address - base >= info.image_size ||
-            !SentinelDriverPeRvaExecutable((const uint8_t *)file, &info,
-                                           (uint32_t)(unload_address - base))) {
-            kfree(image);
-            return -17;
-        }
+    if (candidate.unload && !unload_valid) {
+        kfree(image);
+        return -17;
     }
 
     SENTINEL_DRIVER_MODULE_DESCRIPTOR module = {0};

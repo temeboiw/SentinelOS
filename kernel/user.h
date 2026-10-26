@@ -3369,7 +3369,11 @@ static Frame *syscall_handler(Frame *f) {
         }
         wm_unregister(pid);
         if(x<0){w+=x;x=0;}if(y<0){h+=y;y=0;}
-        if(w>0&&h>0)wm_shared_compose((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h);
+        /* Duplicate unregisters are expected during process teardown.
+         * If the window slot is already gone, do not turn the default full
+         * screen rectangle into an expensive repaint of the entire desktop. */
+        if(slot>=0&&w>0&&h>0)
+            wm_shared_compose((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h);
         if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
         f->rax = 0;
         return f;
@@ -3623,7 +3627,10 @@ static Frame *user_exception_handler(Frame *f) {
     wm_unregister(dead_pid);
     if (dx < 0) { dw += dx; dx = 0; }
     if (dy < 0) { dh += dy; dy = 0; }
-    if (dw > 0 && dh > 0)
+    /* An application may already have unregistered its window before
+     * process-exit cleanup runs. Only repaint when that cleanup owned a live
+     * slot; otherwise the default rectangle would trigger a full-screen redraw. */
+    if (dead_slot >= 0 && dw > 0 && dh > 0)
         wm_shared_compose((uint32_t)dx, (uint32_t)dy, (uint32_t)dw, (uint32_t)dh);
 
     for (int i = 0; i < UP_MAX; i++) {

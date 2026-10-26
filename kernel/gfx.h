@@ -496,9 +496,9 @@ static int gfx_virgl_clear_present_test(void) {
        carries nr_cbufs, zsurf_handle, and all PIPE_MAX_COLOR_BUFS handles
        (8 entries), not just the active color-buffer handle. CLEAR: 7 dwords. */
     uint32_t stream[26]={
-        0x00060801u, /* CREATE_OBJECT, SURFACE, 6 dwords */
+        0x00010806u, /* CREATE_OBJECT (cmd=1, object=SURFACE=8, len=6) */
         1u, GFX_VIRGL_TARGET_ID, 2u, 0u, 0u, 0u, /* handle,res,format,level,layers */
-        0x000A0005u, /* SET_FRAMEBUFFER_STATE, 10 dwords */
+        0x0005000Au, /* SET_FRAMEBUFFER_STATE (cmd=5, len=10) */
         1u, 0u,       /* one color buffer, no depth surface */
         1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, /* cbuf handles[PIPE_MAX_COLOR_BUFS] */
         0x00070007u, /* CLEAR, 7 dwords */

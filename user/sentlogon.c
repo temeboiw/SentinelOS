@@ -190,7 +190,7 @@ void sentlogon_main(void) {
                     (void)NtFlushGraphics(0,0,fbinfo.w,fbinfo.h);
                     if(ev.type==3) {
                         int pw=(int)fbinfo.w-80;if(pw>720)pw=720;if(pw<300)pw=(int)fbinfo.w-16;
-                        int ph=340;if(ph>(int)fbinfo.h-24)ph=(int)fbinfo.h/2;
+                        int ph=340;if(ph>(int)fbinfo.h-24)ph=(int)fbinfo.h-24;
                         int x=((int)fbinfo.w-pw)/2,y=((int)fbinfo.h-ph)/2;
                         int bx=x+pw-218,by=y+232;
                         if(mx>=bx&&mx<bx+190&&my>=by&&my<by+38)break;

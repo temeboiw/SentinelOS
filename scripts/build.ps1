@@ -46,8 +46,12 @@ function Invoke-Tool {
 }
 function Fwd($p) { $p -replace '\\', '/' }
 
-$sys32 = "$b\rootfs\magic\System32"
-New-Item -ItemType Directory -Force "$b\obj", "$b\esp\EFI\BOOT", "$b\esp\EFI\magic", $sys32 | Out-Null
+# Recreate a clean staged rootfs: /magic is the only volume-root entry.
+$rootfs = "$b\rootfs"
+if (Test-Path $rootfs) { Remove-Item $rootfs -Recurse -Force }
+$sys32 = "$rootfs\magic\System32"
+$drivers = "$sys32\drivers"
+New-Item -ItemType Directory -Force "$b\obj", "$b\esp\EFI\BOOT", "$b\esp\EFI\magic", $drivers, "$rootfs\magic\Program Files", "$rootfs\magic\Users\Public" | Out-Null
 
 $common = "--target=x86_64-unknown-windows", "-ffreestanding", "-mno-red-zone",
           "-fno-stack-protector", "-mgeneral-regs-only", "-O2", "-Wall", "-Wno-unused-function",
@@ -75,6 +79,15 @@ Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\o
 Invoke-Tool clang @common -c "$root\kernel\kernel.c" -o "$b\obj\kernel.o"
 Invoke-Tool lld-link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase `
     /base:0xFFFFFFFF80200000 /fixed:no "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\hal.lib"
+
+# Guard the filesystem layout before formatting the ext4 partition.
+$topLevel = @(Get-ChildItem -Force $rootfs)
+if ($topLevel.Count -ne 1 -or $topLevel[0].Name -ne "magic" -or -not $topLevel[0].PSIsContainer) {
+    throw "rootfs must contain exactly one top-level directory: magic"
+}
+if (-not (Test-Path "$drivers" -PathType Container)) {
+    throw "missing magic\System32\drivers directory"
+}
 
 # ---- build one GPT disk: FAT32 ESP + ext4 system partition ----
 $feats = "^has_journal,^metadata_csum,^64bit,^resize_inode"   # keep it simple for the loader

@@ -1,5 +1,7 @@
 #include "ntdll_user.h"
 
+typedef unsigned short u16;
+
 #define LOGO_BMP_CAP 786486u
 #define LOGO_DRAW_SIZE 320
 static unsigned char logo_bmp[LOGO_BMP_CAP];

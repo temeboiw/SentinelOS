@@ -55,20 +55,33 @@ case "$MODE" in
         ;;
 esac
 
-# The default is the broadly compatible 2D VirtIO-VGA device. Set
-# SENTINELOS_GPU=none to exercise the firmware-framebuffer fallback.
-# Opt in to VirGL only when QEMU and the host graphics stack support OpenGL.
+# "host" uses VirGL: QEMU renders through the host OpenGL stack while the
+# guest sees a VirtIO GPU. This is host GPU acceleration, not PCI passthrough.
+# Use "virtio" for the compatible 2D device or "none" for the VGA fallback.
+GPU_MODE="${SENTINELOS_GPU:-host}"
+VIRGL="${SENTINELOS_VIRGL:-0}"
 GPU_ARGS=(-vga none -device virtio-vga)
-if [[ "${SENTINELOS_GPU:-virtio}" == "none" ]]; then
-    if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
-        echo "Error: SENTINELOS_GPU=none conflicts with SENTINELOS_VIRGL=1." >&2
-        exit 1
-    fi
-    GPU_ARGS=()
-    echo "SentinelOS: using QEMU's default VGA device (GPU fallback test)"
-fi
 
-if [[ "${SENTINELOS_VIRGL:-0}" == "1" ]]; then
+case "$GPU_MODE" in
+    host) VIRGL=1 ;;
+    virtio) ;;
+    none)
+        if [[ "$VIRGL" == "1" ]]; then
+            echo "Error: SENTINELOS_GPU=none conflicts with SENTINELOS_VIRGL=1." >&2
+            exit 1
+        fi
+        GPU_ARGS=()
+        echo "SentinelOS: using QEMU's default VGA device (GPU fallback test)"
+        ;;
+    *)
+        echo "Error: invalid SENTINELOS_GPU mode: $GPU_MODE" >&2
+        echo "Use host, virtio, or none." >&2
+        exit 1
+        ;;
+esac
+
+# SENTINELOS_VIRGL=1 remains supported as an alias for host-rendered VirGL.
+if [[ "$VIRGL" == "1" ]]; then
     GPU_ARGS=(-vga none -device virtio-vga-gl)
 
     if [[ "$MODE" == "vnc" ]]; then
@@ -125,9 +138,8 @@ if [[ ! -f "$VARS" ]]; then
     dd if=/dev/zero of="$VARS" bs=1M count=2 status=none
 fi
 
-# Allow explicit RAM sizing for physical-memory testing. Keep the existing
-# 1 GiB default so the normal phone/PRoot workflow remains lightweight.
-RAM_MB="${SENTINELOS_RAM_MB:-1024}"
+# Default to 4 GiB; SENTINELOS_RAM_MB can override it for memory testing.
+RAM_MB="${SENTINELOS_RAM_MB:-4096}"
 if [[ ! "$RAM_MB" =~ ^[1-9][0-9]*$ ]]; then
     echo "Error: SENTINELOS_RAM_MB must be a positive integer (MiB)." >&2
     exit 1
@@ -137,11 +149,33 @@ if (( RAM_MB > 131072 )); then
     exit 1
 fi
 
+# Host CPU mode uses KVM; generic mode remains available for systems without KVM.
+CPU_MODE="${SENTINELOS_CPU:-host}"
+case "$CPU_MODE" in
+    host)
+        if [[ ! -e /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            echo "Error: host CPU mode requires accessible /dev/kvm." >&2
+            echo "Use SENTINELOS_CPU=generic to run without KVM." >&2
+            exit 1
+        fi
+        CPU_ARGS=(-enable-kvm -cpu host)
+        ;;
+    generic)
+        CPU_ARGS=(-cpu qemu64)
+        ;;
+    *)
+        echo "Error: invalid SENTINELOS_CPU mode: $CPU_MODE" >&2
+        echo "Use host or generic." >&2
+        exit 1
+        ;;
+esac
+
 echo "SentinelOS: starting QEMU"
-echo "Machine: Q35 | RAM: $RAM_MB MiB"
+echo "Machine: Q35 | CPU: $CPU_MODE | RAM: $RAM_MB MiB"
 
 exec qemu-system-x86_64 \
     -machine q35 \
+    "${CPU_ARGS[@]}" \
     -smp 4 \
     -m "$RAM_MB" \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \

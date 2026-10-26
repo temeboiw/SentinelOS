@@ -78,6 +78,23 @@ static int SentinelBlockUnregister(const char *name, void *context) {
     return -2;
 }
 
+/* True while any published device still contains a pointer into an
+ * image. The loader uses this after a driver's rollback callback. */
+static int SentinelBlockReferencesRange(uintptr_t base, uint64_t bytes) {
+    if (!base || !bytes || base > UINTPTR_MAX - bytes) return 1;
+    uintptr_t end = base + (uintptr_t)bytes;
+    for (uint32_t i = 0; i < SentinelBlockDeviceCount; ++i) {
+        const SENTINEL_BLOCK_DEVICE *device = &SentinelBlockDevices[i];
+        uintptr_t context = (uintptr_t)device->context;
+        uintptr_t read_fn = (uintptr_t)device->read;
+        uintptr_t write_fn = (uintptr_t)device->write;
+        if ((context >= base && context < end) ||
+            (read_fn >= base && read_fn < end) ||
+            (write_fn >= base && write_fn < end)) return 1;
+    }
+    return 0;
+}
+
 static SENTINEL_BLOCK_DEVICE *SentinelBlockGet(uint32_t index) {
     return index < SentinelBlockDeviceCount ? &SentinelBlockDevices[index] : 0;
 }

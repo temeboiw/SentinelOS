@@ -357,6 +357,72 @@ static void u32_pump_timers(void) {
 #define COL_WHITE    0xFFF1F3F6
 #define COL_ICON     0xFFFF3B30
 
+/* Shared SentinelOS brand mark. The same staged BMP is used by bootvid,
+ * the taskbar Start button, and the Start-menu header. */
+#define U32_LOGO_BMP_CAP 786486u
+static unsigned char u32_logo_bmp[U32_LOGO_BMP_CAP];
+static int u32_logo_state;
+static const char u32_logo_path[]="/magic/logo.bmp";
+enum { U32_SYS_OPEN_FILE=5, U32_SYS_READ_FILE=6 };
+static unsigned int u32_logo_le16(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1]<<8);
+}
+static unsigned int u32_logo_le32(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1]<<8) |
+           ((unsigned int)p[2]<<16) | ((unsigned int)p[3]<<24);
+}
+static int u32_logo_load(void) {
+    if(u32_logo_state) return u32_logo_state>0;
+    u32_logo_state=-1;
+    u64 handle=sy3(U32_SYS_OPEN_FILE,(u64)u32_logo_path,0,0);
+    if(!handle || handle==(u64)-1) return 0;
+    u64 got=sy3(U32_SYS_READ_FILE,handle,(u64)u32_logo_bmp,sizeof(u32_logo_bmp));
+    if(got<54 || u32_logo_bmp[0]!='B' || u32_logo_bmp[1]!='M') return 0;
+    unsigned int offset=u32_logo_le32(&u32_logo_bmp[10]);
+    unsigned int dib=u32_logo_le32(&u32_logo_bmp[14]);
+    int sw=(int)u32_logo_le32(&u32_logo_bmp[18]);
+    int sh=(int)u32_logo_le32(&u32_logo_bmp[22]);
+    if(dib<40 || offset>=got || sw<=0 || sh<=0 || sw>4096 || sh>4096 ||
+       u32_logo_le16(&u32_logo_bmp[26])!=1 ||
+       u32_logo_le16(&u32_logo_bmp[28])!=24 ||
+       u32_logo_le32(&u32_logo_bmp[30])!=0) return 0;
+    u64 row=((u64)(unsigned int)sw*3u+3u)&~3ull;
+    if((u64)offset+row*(unsigned int)sh>got) return 0;
+    u32_logo_state=1;
+    return 1;
+}
+static void u32_draw_logo(int x,int y,int size) {
+    if(size<1) return;
+    if(!u32_logo_load()) {
+        /* Graceful fallback: rounded Sentinel signal mark, never the Windows logo. */
+        round_fill(x,y,size,size,size/5,0xFFFF3B30);
+        int q=size/5;if(q<1)q=1;
+        round_fill(x+size/4,y+size/4,q,q,q/2,0xFFFFFFFF);
+        round_fill(x+size*3/5,y+size/4,q,q,q/2,0xFFFFFFFF);
+        round_fill(x+size/4,y+size*3/5,q,q,q/2,0xFFFFFFFF);
+        round_fill(x+size*3/5,y+size*3/5,q,q,q/2,0xFFFFFFFF);
+        return;
+    }
+    unsigned int offset=u32_logo_le32(&u32_logo_bmp[10]);
+    int sw=(int)u32_logo_le32(&u32_logo_bmp[18]);
+    int sh=(int)u32_logo_le32(&u32_logo_bmp[22]);
+    u64 row=((u64)(unsigned int)sw*3u+3u)&~3ull;
+    int draw_size=size;
+    int scale=g_start_scale_active?g_start_scale_percent:100;
+    int out_size=(draw_size*scale+50)/100;
+    int ox=(x*scale+50)/100,oy=(y*scale+50)/100;
+    if(out_size<1)return;
+    for(int dy=0;dy<out_size;dy++) {
+        int sy=(int)((u64)dy*(unsigned int)sh/(unsigned int)out_size);
+        const unsigned char *src=u32_logo_bmp+offset+(u64)(sh-1-sy)*row;
+        for(int dx=0;dx<out_size;dx++) {
+            int sx=(int)((u64)dx*(unsigned int)sw/(unsigned int)out_size);
+            const unsigned char *p=src+(u64)sx*3u;
+            putpx(ox+dx,oy+dy,0xFF000000u|((u32)p[2]<<16)|((u32)p[1]<<8)|p[0]);
+        }
+    }
+}
+
 #include "font8x8.h"
 
 static void putpx(int x, int y, u32 col) {
@@ -1167,13 +1233,14 @@ static void draw_taskbar(void) {
     fill(10, ty+1, w-20, 1, 0xFFE9ECF2);
     fill(0, ty+2, w, 1, 0xAAFF3B30);
 
-    /* Rounded Sentinel red Start tile. */
-    round_fill(5,ty+5,68,38,12,0xB8080A0D);
-    round_fill(5,ty+4,68,37,12,0xFFFF3B30);
-    gradient_v(7,ty+6,64,17,0xFFFF766E,0xFFDB3028);
-    fill(7,ty+22,64,17,0xFFFF3B30);
-    fill(14,ty+14,8,7,0xFFE9ECF2); fill(24,ty+13,8,8,0xFFE9ECF2);
-    fill(14,ty+23,8,7,0xFFE9ECF2); fill(24,ty+23,8,8,0xFFE9ECF2);
+    /* Polished rounded Start tile: smoked glass, soft outline and real OS logo. */
+    round_fill(5,ty+4,68,39,13,0xB8080A0D);
+    round_fill(5,ty+3,68,38,13,0xFF454B56);
+    round_fill(6,ty+4,66,36,12,0xFF20252D);
+    gradient_v(8,ty+5,62,13,0x663D4654,0x0020252D);
+    fill(17,ty+4,44,1,0x66FFFFFF);
+    round_fill(7,ty+6,3,32,2,0xFFFF3B30);
+    u32_draw_logo(24,ty+8,28);
 
     /* Subtle red glass separator, consistent with Sentinel chrome. */
     fill(78,ty+9,1,h-ty-18,0x66FF3B30);
@@ -1244,9 +1311,8 @@ static void draw_taskbar(void) {
         fill(mx+2,my+2,mw-4,1,0xFFE9ECF2);
         fill(mx,my,4,mh,0xFFFF3B30);
         gradient_v(mx+5,my+1,mw-6,54,0xFFE9ECF2,0xFF242A33);
-        fill(mx+12,my+12,30,30,0xFFFF3B30);
-        fill(mx+18,my+18,7,7,0xFFE9ECF2);fill(mx+27,my+18,7,7,0xFFE9ECF2);
-        fill(mx+18,my+27,7,7,0xFFE9ECF2);fill(mx+27,my+27,7,7,0xFFE9ECF2);
+        round_fill(mx+11,my+11,32,32,9,0xFF303640);
+        u32_draw_logo(mx+12,my+12,30);
         draw_text(mx+52,my+16,"SENTINELOS",0xFFF1F3F6);
         draw_text(mx+52,my+32,"YOUR WORKSPACE",0xFF9AA3B1);
         panel(mx+12,my+60,mw-24,32,0xFF252A33,g_search_focus?0xFFFF3B30:0xFF414854);

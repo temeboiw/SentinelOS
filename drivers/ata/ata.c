@@ -25,6 +25,7 @@
 typedef struct {
     const SENTINEL_DRIVER_SERVICES *services;
     uint64_t sector_count;
+    uint8_t drive_select;
     int online;
 } ATA_CONTEXT;
 
@@ -69,13 +70,13 @@ static int ata_wait_data(void) {
     return -1;
 }
 
-static int ata_identify(uint64_t *sectors) {
+static int ata_identify(uint8_t drive_select, uint64_t *sectors) {
     uint8_t status;
     if (ata_wait_not_busy(&status) != 0) return -1;
     if (status == 0) return -1;
 
     ata_outb(ATA_CONTROL, 0);
-    ata_outb(ATA_DEVICE, 0xA0);
+    ata_outb(ATA_DEVICE, drive_select);
     for (volatile uint32_t i = 0; i < 1000; ++i) { }
     ata_outb(ATA_COUNT, 0);
     ata_outb(ATA_LBA0, 0);
@@ -109,7 +110,7 @@ static int ata_identify(uint64_t *sectors) {
 static int ata_read_sector(uint32_t lba, uint8_t *buffer) {
     if (!g_ata.online || lba >= ATA_MAX_LBA28) return -1;
     if (ata_wait_not_busy(0) != 0) return -1;
-    ata_outb(ATA_DEVICE, (uint8_t)(0xE0 | ((lba >> 24) & 0x0F)));
+    ata_outb(ATA_DEVICE, (uint8_t)(g_ata.drive_select | ((lba >> 24) & 0x0F)));
     ata_outb(ATA_COUNT, 1);
     ata_outb(ATA_LBA0, (uint8_t)lba);
     ata_outb(ATA_LBA1, (uint8_t)(lba >> 8));
@@ -217,12 +218,17 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
     driver->unload = ata_unload;
 
     uint64_t sectors = 0;
-    if (ata_identify(&sectors) != 0) {
-        if (services->debug_print)
-            services->debug_print("ata.sys: loaded; no compatible primary-master ATA LBA28 device\n");
-        return 0;
+    uint8_t selected_drive = 0xA0;
+    if (ata_identify(selected_drive, &sectors) != 0) {
+        selected_drive = 0xB0;
+        if (ata_identify(selected_drive, &sectors) != 0) {
+            if (services->debug_print)
+                services->debug_print("ata.sys: loaded; no primary-channel ATA LBA28 device\n");
+            return 0;
+        }
     }
 
+    g_ata.drive_select = selected_drive;
     g_ata.sector_count = sectors;
     g_ata.online = 1;
 
@@ -230,7 +236,8 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
     block.size = sizeof(block);
     block.abi_version = SENTINEL_BLOCK_ABI_VERSION;
     block.name[0] = 'a'; block.name[1] = 't'; block.name[2] = 'a';
-    block.name[3] = '0'; block.name[4] = 0;
+    block.name[3] = selected_drive == 0xA0 ? '0' : '1';
+    block.name[4] = 0;
     block.sector_size = ATA_SECTOR_BYTES;
     block.sector_count = sectors;
     block.context = &g_ata;
@@ -242,6 +249,10 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
         return -3;
     }
 
-    if (services->debug_print) services->debug_print("ata.sys: LBA28 PIO disk registered as ata0\n");
+    if (services->debug_print) {
+        services->debug_print(selected_drive == 0xA0
+            ? "ata.sys: primary-master LBA28 PIO disk registered as ata0\n"
+            : "ata.sys: primary-slave LBA28 PIO disk registered as ata1\n");
+    }
     return 0;
 }

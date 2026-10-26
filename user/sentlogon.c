@@ -29,57 +29,80 @@ static void text(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,const char *s,u32 col
 /* Fast row-major wallpaper. Curved shoreline thresholds are computed once per column,
  * avoiding integer division and quadratic math in the per-pixel hot loop. */
 static void wallpaper(u32 *fb,u32 pitch,u32 w,u32 h) {
-    enum { MAX_WALLPAPER_WIDTH = 4096 };
-    static u32 wave1[MAX_WALLPAPER_WIDTH];
-    static u32 wave2[MAX_WALLPAPER_WIDTH];
-    int base=(int)(h*2/3);
-    if(w>MAX_WALLPAPER_WIDTH) {
-        for(u32 y=0;y<h;y++) {
-            u32 c=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
-            u32 *row=fb+(u64)y*pitch;
-            for(u32 x=0;x<w;x++)row[x]=c;
-        }
-        return;
-    }
-    for(u32 x=0;x<w;x++) {
-        int dx=(int)x-(int)w/2;
-        wave1[x]=(u32)(base+(int)((long long)dx*dx/(w>0?w*14:1)));
-        wave2[x]=(u32)(base+28+(int)((long long)dx*dx/(w>0?w*19:1)));
-    }
     for(u32 y=0;y<h;y++) {
-        u32 sky=mix(0xFFDDF7FC,0xFF3C9DC5,(u32)((u64)y*255/(h>1?h-1:1)));
-        u32 land=mix(0xFF80D5E9,0xFF2B8CB9,(u32)((u64)y*100/(h?h:1)));
+        u32 t=(u32)((u64)y*95/(h>1?h-1:1));
+        u32 c=mix(0xFF202630,0xFF0B0D11,t);
         u32 *row=fb+(u64)y*pitch;
         for(u32 x=0;x<w;x++) {
-            u32 c=(y>=wave1[x])?land:sky;
-            if(y>=wave2[x])c=mix(c,0xFF2E9DC2,48);
-            row[x]=c;
+            int dx=(int)x-(int)w/2, dy=(int)y-(int)h/3;
+            u32 px=c;
+            int glow=dx<0?-dx:dx;
+            if(glow<(int)w/3 && dy>-((int)h/3) && dy<(int)h/2) {
+                u32 strength=(u32)(72-(glow*72/((int)w/3+1)));
+                if(strength>0) px=mix(c,0xFF35191D,strength);
+            }
+            if((x%48u)==0 || (y%48u)==0) px=mix(px,0xFF343B46,44);
+            if((y%4u)==0) px=mix(px,0xFF050609,36);
+            row[x]=px;
         }
     }
-    rect(fb,pitch,w,h,0,0,(int)w,2,0xFFFFFFFF);
+    rect(fb,pitch,w,h,28,28,42,3,0xFFFF3B30);
+    rect(fb,pitch,w,h,28,31,3,26,0xFFFF3B30);
+    if(w>80) {
+        rect(fb,pitch,w,h,(int)w-70,28,42,3,0xFFFF3B30);
+        rect(fb,pitch,w,h,(int)w-31,28,3,26,0xFFFF3B30);
+    }
 }
 static void paint(u32 *fb,LogonFB *f) {
     wallpaper(fb,f->pitch,f->w,f->h);
-    int pw=(int)f->w-80;if(pw>620)pw=620;if(pw<300)pw=(int)f->w-16;
-    int ph=278;if(ph>(int)f->h-24)ph=(int)f->h-24;
+    int pw=(int)f->w-80;if(pw>720)pw=720;if(pw<300)pw=(int)f->w-16;
+    int ph=340;if(ph>(int)f->h-24)ph=(int)f->h-24;
     int x=((int)f->w-pw)/2,y=((int)f->h-ph)/2;
-    rect(fb,f->pitch,f->w,f->h,x+9,y+11,pw,ph,0x50304455);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,ph,0xFFEAF8FC);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,42,0xFF246F91);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,2,0xFFB8F4FC);
-    text(fb,f->pitch,f->w,f->h,x+18,y+14,"SENTINELOS",0xFFFFFFFF,2);
-    text(fb,f->pitch,f->w,f->h,x+26,y+63,"WELCOME BACK",0xFF246F91,2);
-    /* Glossy user tile, styled to match the Aero desktop. */
-    rect(fb,f->pitch,f->w,f->h,x+28,y+106,72,72,0xFF246F91);
-    rect(fb,f->pitch,f->w,f->h,x+32,y+110,64,64,0xFF8BD5E9);
-    rect(fb,f->pitch,f->w,f->h,x+42,y+120,44,44,0xFF246F91);
-    text(fb,f->pitch,f->w,f->h,x+51,y+138,"A",0xFFFFFFFF,2);
-    text(fb,f->pitch,f->w,f->h,x+120,y+112,"ADMINISTRATOR",0xFF173B52,2);
-    text(fb,f->pitch,f->w,f->h,x+120,y+148,"PRESS ENTER TO SIGN IN",0xFF246F91,1);
-    rect(fb,f->pitch,f->w,f->h,x+120,y+176,176,25,0xFF246F91);
-    rect(fb,f->pitch,f->w,f->h,x+121,y+177,174,23,0xFF3C9DC5);
-    text(fb,f->pitch,f->w,f->h,x+158,y+185,"SIGN IN",0xFFFFFFFF,1);
-    text(fb,f->pitch,f->w,f->h,x+20,y+ph-22,"SENTLOGON SESSION MANAGER",0xFF5D8295,1);
+    rect(fb,f->pitch,f->w,f->h,x+10,y+12,pw,ph,0xFF050609);
+    rect(fb,f->pitch,f->w,f->h,x-2,y-2,pw+4,ph+4,0xFFFF3B30);
+    rect(fb,f->pitch,f->w,f->h,x,y,pw,ph,0xFF171B22);
+    rect(fb,f->pitch,f->w,f->h,x+2,y+2,pw-4,ph-4,0xFF1D222A);
+    rect(fb,f->pitch,f->w,f->h,x,y,pw,48,0xFF101318);
+    rect(fb,f->pitch,f->w,f->h,x,y,pw,3,0xFFFF3B30);
+    rect(fb,f->pitch,f->w,f->h,x+18,y+15,18,18,0xFFFF3B30);
+    rect(fb,f->pitch,f->w,f->h,x+22,y+19,10,10,0xFF171B22);
+    text(fb,f->pitch,f->w,f->h,x+46,y+15,"SENTINEL",0xFFF1F3F6,2);
+    text(fb,f->pitch,f->w,f->h,x+pw-160,y+19,"SECURE SESSION",0xFF9AA3B1,1);
+    rect(fb,f->pitch,f->w,f->h,x,y+48,pw,1,0xFF3A414C);
+    int rail=pw/3;
+    rect(fb,f->pitch,f->w,f->h,x+1,y+49,rail,ph-50,0xFF12151A);
+    rect(fb,f->pitch,f->w,f->h,x+rail,y+49,1,ph-50,0xFF3A414C);
+    text(fb,f->pitch,f->w,f->h,x+22,y+76,"SYSTEM ACCESS",0xFFFF3B30,1);
+    text(fb,f->pitch,f->w,f->h,x+22,y+111,"S",0xFFF1F3F6,5);
+    rect(fb,f->pitch,f->w,f->h,x+22,y+169,104,4,0xFFFF3B30);
+    text(fb,f->pitch,f->w,f->h,x+22,y+190,"BUILT FROM ZERO",0xFFD9DEE6,1);
+    text(fb,f->pitch,f->w,f->h,x+22,y+210,"SENTINELOS",0xFF8B94A3,1);
+    for(int i=0;i<rail-30;i+=18) {
+        rect(fb,f->pitch,f->w,f->h,x+18+i,y+ph-45,9,8,0xFFFF3B30);
+        rect(fb,f->pitch,f->w,f->h,x+27+i,y+ph-45,9,8,0xFF2B323D);
+    }
+    int rx=x+rail+24;
+    text(fb,f->pitch,f->w,f->h,rx,y+77,"WELCOME BACK",0xFFF1F3F6,2);
+    rect(fb,f->pitch,f->w,f->h,rx,y+102,140,2,0xFFFF3B30);
+    text(fb,f->pitch,f->w,f->h,rx,y+124,"SELECT ACCOUNT",0xFF8B94A3,1);
+    rect(fb,f->pitch,f->w,f->h,rx,y+148,54,54,0xFFFF3B30);
+    rect(fb,f->pitch,f->w,f->h,rx+3,y+151,48,48,0xFF2B323D);
+    text(fb,f->pitch,f->w,f->h,rx+17,y+168,"A",0xFFF1F3F6,2);
+    text(fb,f->pitch,f->w,f->h,rx+70,y+153,"ADMINISTRATOR",0xFFF1F3F6,1);
+    text(fb,f->pitch,f->w,f->h,rx+70,y+174,"LOCAL PROFILE",0xFF8B94A3,1);
+    int bx=x+pw-218,by=y+232,bw=190,bh=38;
+    rect(fb,f->pitch,f->w,f->h,bx+5,by+5,bw,bh,0xFF080A0D);
+    rect(fb,f->pitch,f->w,f->h,bx,by,bw,bh,0xFFFF3B30);
+    rect(fb,f->pitch,f->w,f->h,bx+3,by+3,bw-6,bh-6,0xFFDB3028);
+    text(fb,f->pitch,f->w,f->h,bx+26,by+14,"SIGN IN",0xFFFFFFFF,1);
+    rect(fb,f->pitch,f->w,f->h,bx+bw-28,by+12,12,12,0xFFFFFFFF);
+    rect(fb,f->pitch,f->w,f->h,bx+bw-24,by+16,8,4,0xFFDB3028);
+    text(fb,f->pitch,f->w,f->h,rx,y+292,"ENTER / CLICK TO CONTINUE",0xFF8B94A3,1);
+    rect(fb,f->pitch,f->w,f->h,x,y+ph-18,pw,18,0xFF101318);
+    rect(fb,f->pitch,f->w,f->h,x,y+ph-18,pw,1,0xFF3A414C);
+    rect(fb,f->pitch,f->w,f->h,x+12,y+ph-11,5,5,0xFF3DDC84);
+    text(fb,f->pitch,f->w,f->h,x+24,y+ph-13,"SESSION READY",0xFF9AA3B1,1);
+    text(fb,f->pitch,f->w,f->h,x+pw-112,y+ph-13,"BETA / V5",0xFF8B94A3,1);
 }
 static const char cursor_shape[16][17] = {
  "#...............",
@@ -166,10 +189,11 @@ void sentlogon_main(void) {
                     cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);
                     (void)NtFlushGraphics(0,0,fbinfo.w,fbinfo.h);
                     if(ev.type==3) {
-                        int pw=(int)fbinfo.w-80;if(pw>620)pw=620;if(pw<300)pw=(int)fbinfo.w-16;
-                        int ph=278;if(ph>(int)fbinfo.h-24)ph=(int)fbinfo.h-24;
+                        int pw=(int)fbinfo.w-80;if(pw>720)pw=720;if(pw<300)pw=(int)fbinfo.w-16;
+                        int ph=340;if(ph>(int)fbinfo.h-24)ph=(int)fbinfo.h/2;
                         int x=((int)fbinfo.w-pw)/2,y=((int)fbinfo.h-ph)/2;
-                        if(mx>=x+120&&mx<x+300&&my>=y+176&&my<y+204)break;
+                        int bx=x+pw-218,by=y+232;
+                        if(mx>=bx&&mx<bx+190&&my>=by&&my<by+38)break;
                     }
                 }
             }

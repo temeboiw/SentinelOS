@@ -2068,12 +2068,24 @@ if [[ ! -d "$B/rootfs/magic/System32/drivers" ]]; then
   echo "FATAL: missing magic/System32/drivers"
   exit 1
 fi
+# Avoid process substitution here: some Termux/proot shells cannot keep
+# /dev/fd process-substitution descriptors available to the redirected loop.
+# Also avoid piping find into while, which can produce a noisy SIGPIPE when
+# the validation exits early on an unexpected entry.
+ROOTFS_TOP_ENTRIES="$B/rootfs-top-level.list"
+if ! find "$B/rootfs" -mindepth 1 -maxdepth 1 -print > "$ROOTFS_TOP_ENTRIES"; then
+  echo "FATAL: unable to enumerate rootfs top-level entries"
+  rm -f "$ROOTFS_TOP_ENTRIES"
+  exit 1
+fi
 while IFS= read -r top_entry; do
   if [[ "$(basename "$top_entry")" != "magic" ]]; then
     echo "FATAL: unexpected rootfs entry: $top_entry (only /magic is allowed)"
+    rm -f "$ROOTFS_TOP_ENTRIES"
     exit 1
   fi
-done < <(find "$B/rootfs" -mindepth 1 -maxdepth 1 -print)
+done < "$ROOTFS_TOP_ENTRIES"
+rm -f "$ROOTFS_TOP_ENTRIES"
 
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
 

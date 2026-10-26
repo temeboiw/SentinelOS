@@ -1730,17 +1730,17 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
     wm_dbg_composed_pixels+=damage_pixels;
     if(x==0&&y==0&&w==width&&h==height) {
-        DbgPrint("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
+        SENTINEL_GFX_LOG("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
                  (unsigned long long)dbg_n,
                  (unsigned long long)damage_pixels,
                  (unsigned long long)wm_dbg_composed_pixels);
     }
     if(wm_dbg_sample(dbg_n)) {
-        DbgPrint("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
+        SENTINEL_GFX_LOG("[gfx] compose #%llu damage=(%u,%u %ux%u) windows=%d pitch=%u\n",
                  (unsigned long long)dbg_n,x,y,w,h,count,pitch);
         for(int oi=0;oi<count;oi++) {
             WmEntry *e=&wm_tab[order[oi]];
-            DbgPrint("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\n",
+            SENTINEL_GFX_LOG("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\n",
                      oi,e->pid,e->x,e->y,e->w,e->h,e->minimized);
         }
     }
@@ -1793,7 +1793,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     wm_dbg_window_overlay_pixels+=window_overlay_pixels;
     if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
+        SENTINEL_GFX_LOG("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
                  (unsigned long long)dbg_n,
                  (unsigned long long)window_overlay_pixels,
                  (unsigned long long)wm_dbg_window_overlay_pixels);
@@ -1808,7 +1808,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     }
     int flush_ok=gfx_flush(x,y,w,h);
     if(wm_dbg_sample(dbg_n))
-        DbgPrint("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
+        SENTINEL_GFX_LOG("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -2094,14 +2094,14 @@ static Frame *syscall_handler(Frame *f) {
            !MmValidateUserRange(MmCurrentProcess,a.pixels,bytes,0)||
            a.width!=gfx_width||a.height!=gfx_height) {
             if(wm_dbg_sample(dbg_n))
-                DbgPrint("[gfx] present #%llu REJECT layer=%u rect=(%u,%u %ux%u) surface=%ux%u gfx=%ux%u pixels=%p\n",
+                SENTINEL_GFX_LOG("[gfx] present #%llu REJECT layer=%u rect=(%u,%u %ux%u) surface=%ux%u gfx=%ux%u pixels=%p\n",
                          (unsigned long long)dbg_n,a.layer,a.x,a.y,a.w,a.h,
                          a.width,a.height,gfx_width,gfx_height,(void*)a.pixels);
             f->rax=0;return f;
         }
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\n",
+            SENTINEL_GFX_LOG("[gfx] present #%llu pid=%d layer=%u rect=(%u,%u %ux%u) surface=%ux%u\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h,a.width,a.height);
         int slot=wm_shared_window_slot(pid);
         KPROCESS *caller=MmCurrentProcess;
@@ -2125,7 +2125,7 @@ static Frame *syscall_handler(Frame *f) {
         else if(slot>=0)dst=wm_shared_windows[slot];
         if(!dst){
             if(wm_dbg_sample(dbg_n))
-                DbgPrint("[gfx] present #%llu REJECT no destination pid=%d layer=%u slot=%d\n",
+                SENTINEL_GFX_LOG("[gfx] present #%llu REJECT no destination pid=%d layer=%u slot=%d\n",
                          (unsigned long long)dbg_n,pid,a.layer,slot);
             f->rax=0;return f;
         }
@@ -2151,7 +2151,7 @@ static Frame *syscall_handler(Frame *f) {
            (a.layer==WM_LAYER_WINDOW && !desktop_owner))
             wm_shared_compose(a.x,a.y,a.w,a.h);
         if(wm_dbg_sample(dbg_n))
-            DbgPrint("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",
+            SENTINEL_GFX_LOG("[gfx] present #%llu ACCEPT pid=%d layer=%u damage=(%u,%u %ux%u)\n",
                      (unsigned long long)dbg_n,pid,a.layer,a.x,a.y,a.w,a.h);
         f->rax=1;
         return f;
@@ -2641,7 +2641,6 @@ static Frame *syscall_handler(Frame *f) {
             up_tab[up_n].rax = 0;
             up_n++;
 
-            DbgPrint("user: NtCreateProcess concurrent");
         }
 
         {
@@ -3595,7 +3594,7 @@ static Frame *user_exception_handler(Frame *f) {
             DbgPrint("  CALLSITE %016llx bytes:", (unsigned long long)(callsite - 16));
             for (unsigned int bi = 0; bi < 32; bi++)
                 DbgPrint(" %02x", (unsigned int)code[bi]);
-            DbgPrint("\\n");
+            SENTINEL_GFX_LOG("\\n");
         }
     }
     /* Stop the current thread before switching away from its address space. */

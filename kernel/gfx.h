@@ -1,4 +1,11 @@
 #pragma once
+
+#ifdef SENTINEL_GFX_DEBUG
+#define SENTINEL_GFX_LOG(...) DbgPrint(__VA_ARGS__)
+#else
+#define SENTINEL_GFX_LOG(...) ((void)0)
+#endif
+
 /* SentinelOS VirtIO-GPU 2D backend. PCI discovery, modern virtio-pci transport,
  * control virtqueue, 2D resource/scanout and explicit flush are implemented
  * here. Unsupported devices retain the firmware framebuffer path. */
@@ -184,13 +191,13 @@ static void gfx_log_display_adapters(void) {
                 else if(vendor==0x10DEu)name="NVIDIA";
                 else if(vendor==0x1002u || vendor==0x1022u)name="AMD";
                 else if(vendor==GFX_VIRTIO_VENDOR)name="VirtIO";
-                DbgPrint("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (PCI inventory; active graphics backend reported separately)\n",
+                SENTINEL_GFX_LOG("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (PCI inventory; active graphics backend reported separately)\n",
                     found,name,vendor,device,b,d,fn,base,sub);
                 found++;
             }
         }
     }
-    if(!found)DbgPrint("gfx: no PCI display-class adapter found; framebuffer fallback remains available\n");
+    if(!found)SENTINEL_GFX_LOG("gfx: no PCI display-class adapter found; framebuffer fallback remains available\n");
 }
 static int gfx_find_device(void) {
     for (uint32_t b=0;b<256;b++) for (uint32_t d=0;d<32;d++) {
@@ -256,7 +263,7 @@ static int gfx_queue_init(void) {
     *(volatile uint32_t*)(c+0)=1; /* device feature selector: high word */
     uint32_t device_features_hi=*(volatile uint32_t*)(c+4);
     if(!(device_features_hi&1u)) {
-        DbgPrint("gfx: device lacks VIRTIO_F_VERSION_1\n");
+        SENTINEL_GFX_LOG("gfx: device lacks VIRTIO_F_VERSION_1\n");
         return 0;
     }
     *(volatile uint32_t*)(c+8)=0; /* driver feature selector: low word */
@@ -266,10 +273,10 @@ static int gfx_queue_init(void) {
     *(volatile uint32_t*)(c+8)=1; /* driver feature selector: high word */
     *(volatile uint32_t*)(c+12)=1; /* negotiate VIRTIO_F_VERSION_1 */
     c[20]=11; /* FEATURES_OK */
-    if(!(c[20]&8u)) { DbgPrint("gfx: device rejected required feature set\n"); return 0; }
+    if(!(c[20]&8u)) { SENTINEL_GFX_LOG("gfx: device rejected required feature set\n"); return 0; }
     *(volatile uint16_t*)(c+22)=0; /* control queue */
     uint16_t q=*(volatile uint16_t*)(c+24);
-    if(q<2) { DbgPrint("gfx: control queue unavailable\n"); return 0; }
+    if(q<2) { SENTINEL_GFX_LOG("gfx: control queue unavailable\n"); return 0; }
     if(q>GFX_VQ_MAX) q=GFX_VQ_MAX;
     /* The queue memory below is allocated for at most GFX_VQ_MAX entries.
        VirtIO's queue_size register is the device-visible ring size, so write
@@ -278,7 +285,7 @@ static int gfx_queue_init(void) {
        rings even though the driver indexes them modulo the smaller value. */
     *(volatile uint16_t*)(c+24)=q;
     if(*(volatile uint16_t*)(c+24)!=q) {
-        DbgPrint("gfx: device rejected control queue size %u\n",(unsigned)q);
+        SENTINEL_GFX_LOG("gfx: device rejected control queue size %u\n",(unsigned)q);
         return 0;
     }
     gfx_queue_size=q;
@@ -321,10 +328,10 @@ static int gfx_command(const void *request, uint32_t request_len) {
         if(gfx_used->idx!=gfx_last_used) {gfx_last_used=gfx_used->idx;done=1;break;}
         __asm__ volatile("pause");
     }
-    if(!done) {DbgPrint("gfx: command timeout type=%x\n",((const GfxCtrlHdr*)request)->type);return 0;}
+    if(!done) {SENTINEL_GFX_LOG("gfx: command timeout type=%x\n",((const GfxCtrlHdr*)request)->type);return 0;}
     __asm__ volatile("lfence" ::: "memory");
     if(gfx_resp->hdr.type!=GFX_GPU_RESP_OK_NODATA) {
-        DbgPrint("gfx: command %x returned response %x\n",
+        SENTINEL_GFX_LOG("gfx: command %x returned response %x\n",
             ((const GfxCtrlHdr*)request)->type,gfx_resp->hdr.type);
         return 0;
     }
@@ -502,16 +509,16 @@ static int gfx_virgl_clear_present_test(void) {
         0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {
-        DbgPrint("gfx: VirGL clear test failed: host rejected command stream\n");
+        SENTINEL_GFX_LOG("gfx: VirGL clear test failed: host rejected command stream\n");
         return 0;
     }
     if(!gfx_present_virgl()) {
-        DbgPrint("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\n");
+        SENTINEL_GFX_LOG("gfx: VirGL clear accepted, but 3D-to-scanout transfer/presentation failed\n");
         return 0;
     }
     /* The virtio response confirms command completion, but this driver does
        not read back or inspect pixel values. Do not claim visual validation. */
-    DbgPrint("gfx: VirGL clear commands completed and scanout flushed; pixel contents not read back/verified\n");
+    SENTINEL_GFX_LOG("gfx: VirGL clear commands completed and scanout flushed; pixel contents not read back/verified\n");
     return 1;
 }
 static int gfx_create_resource(void) {
@@ -540,44 +547,44 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     if(gfx_gpu_ready)return 1;
     if(gfx_gpu_failed)return 0;
     if(width<320u||height<200u||width>GFX_GPU_MAX_W||height>GFX_GPU_MAX_H) {
-        DbgPrint("gfx: unsupported mode %ux%u for VirtIO-GPU\n",width,height);gfx_gpu_failed=1;return 0;
+        SENTINEL_GFX_LOG("gfx: unsupported mode %ux%u for VirtIO-GPU\n",width,height);gfx_gpu_failed=1;return 0;
     }
     if(!gfx_find_device()) {gfx_gpu_failed=1;return 0;}
-    DbgPrint("gfx: VirtIO-GPU at %02x:%02x.%u id=%04x:%04x\n",
+    SENTINEL_GFX_LOG("gfx: VirtIO-GPU at %02x:%02x.%u id=%04x:%04x\n",
         gfx_pci_bus,gfx_pci_dev,gfx_pci_fn,gfx_pci_vendor,gfx_pci_device);
     if(!gfx_find_caps()||!gfx_queue_init()) {gfx_gpu_failed=1;return 0;}
     gfx_width=width;gfx_height=height;gfx_pitch=width*4u;
     gfx_surface_bytes=(uint64_t)gfx_pitch*height;
     gfx_surface_pages=(gfx_surface_bytes+4095u)/4096u;
     gfx_surface_pa=pmm_alloc_n(gfx_surface_pages);
-    if(!gfx_surface_pa) {DbgPrint("gfx: unable to allocate contiguous scanout backing\n");gfx_gpu_failed=1;return 0;}
+    if(!gfx_surface_pa) {SENTINEL_GFX_LOG("gfx: unable to allocate contiguous scanout backing\n");gfx_gpu_failed=1;return 0;}
     for(uint64_t p=0;p<gfx_surface_pages;p++) {
         volatile uint64_t *page=(volatile uint64_t*)(gfx_surface_pa+p*4096u);
         for(unsigned int i=0;i<512;i++)page[i]=0;
     }
     if(!gfx_create_resource()) {
-        DbgPrint("gfx: resource setup failed; retaining firmware framebuffer\n");
+        SENTINEL_GFX_LOG("gfx: resource setup failed; retaining firmware framebuffer\n");
         gfx_gpu_failed=1;return 0;
     }
     gfx_gpu_ready=1;
-    DbgPrint("gfx: VirtIO feature negotiation: VIRGL=%u CONTEXT_INIT=%u\n",
+    SENTINEL_GFX_LOG("gfx: VirtIO feature negotiation: VIRGL=%u CONTEXT_INIT=%u\n",
         (unsigned)gfx_virgl_supported,(unsigned)gfx_context_init_supported);
     if(gfx_virgl_supported) {
         if(!gfx_create_virgl_context()) {
-            DbgPrint("gfx: VirGL context creation failed (CTX_CREATE rejected; verify host VirGL/capset 1 support)\n");
+            SENTINEL_GFX_LOG("gfx: VirGL context creation failed (CTX_CREATE rejected; verify host VirGL/capset 1 support)\n");
         } else if(!gfx_create_virgl_target()) {
-            DbgPrint("gfx: VirGL render-target creation/attachment failed (CREATE_3D, ATTACH_BACKING, or CTX_ATTACH_RESOURCE)\n");
+            SENTINEL_GFX_LOG("gfx: VirGL render-target creation/attachment failed (CREATE_3D, ATTACH_BACKING, or CTX_ATTACH_RESOURCE)\n");
         } else if(!gfx_create_virgl_buffer()) {
-            DbgPrint("gfx: VirGL shared buffer creation/attachment failed (buffer CREATE_3D/ATTACH_BACKING)\n");
+            SENTINEL_GFX_LOG("gfx: VirGL shared buffer creation/attachment failed (buffer CREATE_3D/ATTACH_BACKING)\n");
         } else {
             gfx_3d_ready=1;
-            DbgPrint("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");
+            SENTINEL_GFX_LOG("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");
             (void)gfx_virgl_clear_present_test();
         }
     } else {
-        DbgPrint("gfx: VirGL is not negotiated; this VM is using a 2D-only VirtIO-GPU device. Start with SENTINELOS_DISPLAY=window SENTINELOS_VIRGL=1 bash scripts/run.sh and host OpenGL support.\n");
+        SENTINEL_GFX_LOG("gfx: VirGL is not negotiated; this VM is using a 2D-only VirtIO-GPU device. Start with SENTINELOS_DISPLAY=window SENTINELOS_VIRGL=1 bash scripts/run.sh and host OpenGL support.\n");
     }
-    DbgPrint("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",
+    SENTINEL_GFX_LOG("gfx: VirtIO-GPU 2D scanout active %ux%u, %llu backing pages\n",
         gfx_width,gfx_height,(unsigned long long)gfx_surface_pages);
     return 1;
 }
@@ -644,7 +651,7 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
         out->vendor_id=gfx_pci_vendor;out->device_id=gfx_pci_device;
         out->pci_class=gfx_pci_class;out->pci_subclass=gfx_pci_subclass;out->pci_prog_if=gfx_pci_prog_if;
         if(gfx_map_surface_for_process(caller,&out->surface_va)) {
-            DbgPrint("gfx: mapped GPU surface into pid=%lu at %p\n",
+            SENTINEL_GFX_LOG("gfx: mapped GPU surface into pid=%lu at %p\n",
                 (unsigned long)caller->Pid,(void*)out->surface_va);
             if(gfx_3d_ready && gfx_map_virgl_buffer_for_process(caller,&out->virgl_buffer_va)) {
                 out->virgl_buffer_resource_id=GFX_VIRGL_BUFFER_ID;
@@ -658,9 +665,9 @@ static void gfx_boot_initialize(GfxBootInfo *out,uint32_t fb_width,
             out->capabilities&=~(GFX_CAP_VIRTIO_GPU|GFX_CAP_ACCEL_2D|GFX_CAP_ACCEL_3D);
             out->surface_va=0;out->virgl_buffer_va=0;
             out->virgl_buffer_resource_id=0;out->virgl_buffer_size=0;
-            DbgPrint("gfx: GPU is ready but user surface mapping failed; using framebuffer\n");
+            SENTINEL_GFX_LOG("gfx: GPU is ready but user surface mapping failed; using framebuffer\n");
         }
     } else {
-        DbgPrint("gfx: using firmware framebuffer fallback\n");
+        SENTINEL_GFX_LOG("gfx: using firmware framebuffer fallback\n");
     }
 }

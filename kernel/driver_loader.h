@@ -224,6 +224,8 @@ static int SentinelDriverLoadImage(const char *name,
          * kernel use-after-free until transactional device registration exists.
          */
         if (unload_valid) candidate.unload(&candidate);
+        if (!SentinelBlockReferencesRange((uintptr_t)image, info.image_size))
+            kfree(image);
         return status ? -13 : -14;
     }
 

@@ -3674,6 +3674,27 @@ static void user_enter(BootInfo *bi) {
     SentinelRegisterBuiltinBlockDevices();
     vfs_mount_c();
 
+    /*
+     * The root volume must be mounted before a disk-resident .sys can be
+     * read. Keep the legacy ATA path active when it already registered a
+     * device; loading the same hardware twice would race the block layer.
+     * On systems without a registered ATA device, try the real PE module
+     * from /magic/System32/drivers and report the exact loader result.
+     */
+    if (g_ext4_ok) {
+        if (SentinelBlockFind("ata0")) {
+            DbgPrint("driver: ata.sys skipped; legacy ATA device already registered\n");
+        } else {
+            int driver_status = SentinelDriverLoadFromDisk("ata.sys");
+            if (driver_status == 0)
+                DbgPrint("driver: ata.sys loaded and initialized from /magic/System32/drivers\n");
+            else
+                DbgPrint("driver: ata.sys load failed status=%d\n", driver_status);
+        }
+    } else {
+        DbgPrint("driver: .sys autoload deferred; root ext4 volume is not mounted\n");
+    }
+
     DbgPrint("\n-- usermode (smss) --\n");
 
     user_bootinfo = (BootInfo *)(HHDM_BASE + (uint64_t)bi);

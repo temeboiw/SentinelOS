@@ -164,6 +164,7 @@ for src in \
   kernel/driver.h \
   kernel/driver_pe.h \
   kernel/driver_loader.h \
+  drivers/ata/ata.c \
   kernel/block.h \
   kernel/pci_network.h \
   kernel/e1000.h \
@@ -255,6 +256,22 @@ COMMON=(
   -I"$ROOT/shared"
   -I"$ROOT/boot"
 )
+
+echo "==> Kernel driver modules"
+clang "${COMMON[@]}" \
+  -c "$ROOT/drivers/ata/ata.c" \
+  -o "$B/obj/ata_driver.o"
+
+lld -flavor link \
+  /subsystem:native /entry:DriverEntry /nodefaultlib \
+  /dynamicbase /base:0xFFFFFFFF90000000 /fixed:no \
+  "/out:$SYS32/drivers/ata.sys" \
+  "$B/obj/ata_driver.o"
+
+if [[ ! -s "$SYS32/drivers/ata.sys" ]]; then
+  echo "error: ATA driver module was not produced" >&2
+  exit 1
+fi
 
 build_efi() {
   local name="$1"

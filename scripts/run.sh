@@ -151,7 +151,7 @@ fi
 
 # Prefer the host CPU with KVM, but keep the launcher usable in
 # containers/proot and other environments where /dev/kvm is unavailable.
-CPU_MODE="${SENTINELOS_CPU:-auto}"
+CPU_MODE="${SENTINELOS_CPU:-host}"
 if [[ "$CPU_MODE" == "auto" ]]; then
     if [[ -e /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
         CPU_MODE="host"

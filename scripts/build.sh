@@ -162,6 +162,7 @@ for src in \
   hal/hal.c \
   kernel/kernel.c \
   kernel/driver.h \
+  kernel/block.h \
   kernel/pci_network.h \
   kernel/e1000.h \
   kernel/netstack.h \

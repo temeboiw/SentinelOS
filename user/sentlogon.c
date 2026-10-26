@@ -4,6 +4,11 @@
 typedef struct { int type, x, y, btn; char key; } InputEvent;
 typedef struct { u64 va; u32 w, h, pitch; } LogonFB;
 
+/* font_ttf.h shares this tiny rendering target contract with USER32. */
+static u32 *g_front;
+static u32 g_fw, g_fh, g_pitch;
+#include "font_ttf.h"
+
 static u32 mix(u32 a,u32 b,u32 t) {
     u32 r=(((a>>16)&255)*(255-t)+((b>>16)&255)*t)/255;
     u32 g=(((a>>8)&255)*(255-t)+((b>>8)&255)*t)/255;
@@ -18,16 +23,57 @@ static void rect(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,int rw,int rh,u32 col
     for(int yy=y;yy<y1;yy++)for(int xx=x;xx<x1;xx++)fb[(u64)yy*pitch+(u32)xx]=color;
 }
 static void text(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,const char *s,u32 color,int scale) {
-    for(;*s;s++,x+=8*scale) {
+    if(!s)return;
+    for(;*s;s++) {
         unsigned char ch=(unsigned char)*s;
+        if(u32_ttf_font.valid) {
+            unsigned int px=scale<=1?14u:(scale==2?20u:40u);
+            int adv=u32_ttf_draw(&u32_ttf_font,x,y+(int)px,ch,px,color);
+            if(adv>=0) { x+=adv>0?adv:1; continue; }
+        }
         if(ch>=128)ch='?';
         const unsigned char *g=font8x8_basic[ch];
         for(int row=0;row<8;row++)for(int col=0;col<8;col++)
             if(g[row]&(1u<<col))rect(fb,pitch,w,h,x+col*scale,y+row*scale,scale,scale,color);
+        x+=8*scale;
     }
 }
 /* Fast row-major wallpaper. Curved shoreline thresholds are computed once per column,
  * avoiding integer division and quadratic math in the per-pixel hot loop. */
+static void blend_pixel(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,u32 color,unsigned int alpha) {
+    if(!alpha||x<0||y<0||x>=(int)w||y>=(int)h)return;
+    if(alpha>=255u){fb[(u64)y*pitch+(u32)x]=color;return;}
+    u32 *p=&fb[(u64)y*pitch+(u32)x], old=*p;
+    unsigned int r=(((color>>16)&255u)*alpha+((old>>16)&255u)*(255u-alpha))/255u;
+    unsigned int g=(((color>>8)&255u)*alpha+((old>>8)&255u)*(255u-alpha))/255u;
+    unsigned int b=((color&255u)*alpha+(old&255u)*(255u-alpha))/255u;
+    *p=0xFF000000u|(r<<16)|(g<<8)|b;
+}
+/* True circular corners with 4x4 sub-pixel coverage, not diagonal bevels. */
+static void round_rect(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,int rw,int rh,int radius,u32 color) {
+    if(rw<=0||rh<=0)return;
+    if(radius>rw/2)radius=rw/2;if(radius>rh/2)radius=rh/2;if(radius<0)radius=0;
+    if(radius==0){rect(fb,pitch,w,h,x,y,rw,rh,color);return;}
+    for(int yy=0;yy<rh;yy++) {
+        int corner=(yy<radius||yy>=rh-radius);
+        if(!corner){rect(fb,pitch,w,h,x,y+yy,rw,1,color);continue;}
+        int cy=yy<radius?radius:rh-radius;
+        rect(fb,pitch,w,h,x+radius,y+yy,rw-2*radius,1,color);
+        for(int side=0;side<2;side++)for(int xx=0;xx<radius;xx++) {
+            int px=side?x+rw-radius+xx:x+xx;
+            int cx=side?rw-radius:radius;
+            unsigned int hits=0;
+            for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++) {
+                int dx4=(px-x)*4+sx*1+0; /* quarter-pixel sample */
+                int dy4=yy*4+sy;
+                int centerx4=cx*4+2, centery4=cy*4+2;
+                int ddx=dx4+1-centerx4, ddy=dy4+1-centery4;
+                if((long long)ddx*ddx+(long long)ddy*ddy<=(long long)radius*radius*16)hits++;
+            }
+            if(hits)blend_pixel(fb,pitch,w,h,px,y+yy,color,hits*255u/16u);
+        }
+    }
+}
 static void wallpaper(u32 *fb,u32 pitch,u32 w,u32 h) {
     for(u32 y=0;y<h;y++) {
         u32 t=(u32)((u64)y*95/(h>1?h-1:1));
@@ -58,19 +104,21 @@ static void paint(u32 *fb,LogonFB *f) {
     int pw=(int)f->w-80;if(pw>720)pw=720;if(pw<300)pw=(int)f->w-16;
     int ph=340;if(ph>(int)f->h-24)ph=(int)f->h-24;
     int x=((int)f->w-pw)/2,y=((int)f->h-ph)/2;
-    rect(fb,f->pitch,f->w,f->h,x+10,y+12,pw,ph,0xFF050609);
-    rect(fb,f->pitch,f->w,f->h,x-2,y-2,pw+4,ph+4,0xFFFF3B30);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,ph,0xFF171B22);
-    rect(fb,f->pitch,f->w,f->h,x+2,y+2,pw-4,ph-4,0xFF1D222A);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,48,0xFF101318);
-    rect(fb,f->pitch,f->w,f->h,x,y,pw,3,0xFFFF3B30);
+    round_rect(fb,f->pitch,f->w,f->h,x+10,y+12,pw,ph,18,0xFF050609);
+    round_rect(fb,f->pitch,f->w,f->h,x-2,y-2,pw+4,ph+4,18,0xFFFF3B30);
+    round_rect(fb,f->pitch,f->w,f->h,x,y,pw,ph,16,0xFF171B22);
+    round_rect(fb,f->pitch,f->w,f->h,x+2,y+2,pw-4,ph-4,14,0xFF1D222A);
+    round_rect(fb,f->pitch,f->w,f->h,x,y,pw,48,15,0xFF101318);
+    rect(fb,f->pitch,f->w,f->h,x,y+15,pw,33,0xFF101318);
+    round_rect(fb,f->pitch,f->w,f->h,x,y,pw,3,1,0xFFFF3B30);
     rect(fb,f->pitch,f->w,f->h,x+18,y+15,18,18,0xFFFF3B30);
     rect(fb,f->pitch,f->w,f->h,x+22,y+19,10,10,0xFF171B22);
     text(fb,f->pitch,f->w,f->h,x+46,y+15,"SENTINEL",0xFFF1F3F6,2);
     text(fb,f->pitch,f->w,f->h,x+pw-160,y+19,"SECURE SESSION",0xFF9AA3B1,1);
     rect(fb,f->pitch,f->w,f->h,x,y+48,pw,1,0xFF3A414C);
     int rail=pw/3;
-    rect(fb,f->pitch,f->w,f->h,x+1,y+49,rail,ph-50,0xFF12151A);
+    round_rect(fb,f->pitch,f->w,f->h,x+1,y+49,rail,ph-50,12,0xFF12151A);
+    rect(fb,f->pitch,f->w,f->h,x+rail-12,y+49,12,ph-50,0xFF12151A);
     rect(fb,f->pitch,f->w,f->h,x+rail,y+49,1,ph-50,0xFF3A414C);
     text(fb,f->pitch,f->w,f->h,x+22,y+76,"SYSTEM ACCESS",0xFFFF3B30,1);
     text(fb,f->pitch,f->w,f->h,x+22,y+111,"S",0xFFF1F3F6,5);
@@ -85,15 +133,15 @@ static void paint(u32 *fb,LogonFB *f) {
     text(fb,f->pitch,f->w,f->h,rx,y+77,"WELCOME BACK",0xFFF1F3F6,2);
     rect(fb,f->pitch,f->w,f->h,rx,y+102,140,2,0xFFFF3B30);
     text(fb,f->pitch,f->w,f->h,rx,y+124,"SELECT ACCOUNT",0xFF8B94A3,1);
-    rect(fb,f->pitch,f->w,f->h,rx,y+148,54,54,0xFFFF3B30);
-    rect(fb,f->pitch,f->w,f->h,rx+3,y+151,48,48,0xFF2B323D);
+    round_rect(fb,f->pitch,f->w,f->h,rx,y+148,54,54,12,0xFFFF3B30);
+    round_rect(fb,f->pitch,f->w,f->h,rx+3,y+151,48,48,10,0xFF2B323D);
     text(fb,f->pitch,f->w,f->h,rx+17,y+168,"A",0xFFF1F3F6,2);
     text(fb,f->pitch,f->w,f->h,rx+70,y+153,"ADMINISTRATOR",0xFFF1F3F6,1);
     text(fb,f->pitch,f->w,f->h,rx+70,y+174,"LOCAL PROFILE",0xFF8B94A3,1);
     int bx=x+pw-218,by=y+232,bw=190,bh=38;
-    rect(fb,f->pitch,f->w,f->h,bx+5,by+5,bw,bh,0xFF080A0D);
-    rect(fb,f->pitch,f->w,f->h,bx,by,bw,bh,0xFFFF3B30);
-    rect(fb,f->pitch,f->w,f->h,bx+3,by+3,bw-6,bh-6,0xFFDB3028);
+    round_rect(fb,f->pitch,f->w,f->h,bx+5,by+5,bw,bh,10,0xFF080A0D);
+    round_rect(fb,f->pitch,f->w,f->h,bx,by,bw,bh,10,0xFFFF3B30);
+    round_rect(fb,f->pitch,f->w,f->h,bx+3,by+3,bw-6,bh-6,8,0xFFDB3028);
     text(fb,f->pitch,f->w,f->h,bx+26,by+14,"SIGN IN",0xFFFFFFFF,1);
     rect(fb,f->pitch,f->w,f->h,bx+bw-28,by+12,12,12,0xFFFFFFFF);
     rect(fb,f->pitch,f->w,f->h,bx+bw-24,by+16,8,4,0xFFDB3028);
@@ -173,6 +221,8 @@ void sentlogon_main(void) {
     } else {
         fbinfo.pitch/=4;
         u32 *pixels=(u32 *)(u64)fbinfo.va;
+        g_front=pixels;g_fw=fbinfo.w;g_fh=fbinfo.h;g_pitch=fbinfo.pitch;
+        u32_ttf_load();
         paint(pixels,&fbinfo);
         int mx=(int)fbinfo.w/2,my=(int)fbinfo.h/2;
         cursor_draw(pixels,fbinfo.pitch,fbinfo.w,fbinfo.h,mx,my);

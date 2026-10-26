@@ -343,19 +343,19 @@ static void u32_pump_timers(void) {
 }
 
 /* Frutiger Aero palette: sky blue glass, aquatic cyan, white highlights. */
-#define COL_BG       0xFFB8E6F2
-#define COL_PANEL    0xFFEAF8FC
-#define COL_TITLE    0xFF247FA8
-#define COL_ACCENT   0xFF8DEBFA
-#define COL_ACCENT2  0xFF43BDA0
-#define COL_WARN     0xFFE8B95F
-#define COL_DANGER   0xFFE36F82
-#define COL_TEXT     0xFF173B52
-#define COL_MUTED    0xFF5D8295
-#define COL_TASK     0xFF246F91
-#define COL_TASKLINE 0xFFB8F4FC
-#define COL_WHITE    0xFFFFFFFF
-#define COL_ICON     0xFF168DC1
+#define COL_BG       0xFF101318
+#define COL_PANEL    0xFF1B2028
+#define COL_TITLE    0xFF252A33
+#define COL_ACCENT   0xFFFF3B30
+#define COL_ACCENT2  0xFF3DDC84
+#define COL_WARN     0xFFFFB454
+#define COL_DANGER   0xFFFF766E
+#define COL_TEXT     0xFFF1F3F6
+#define COL_MUTED    0xFF9AA3B1
+#define COL_TASK     0xFF252A33
+#define COL_TASKLINE 0xFF454B56
+#define COL_WHITE    0xFFF1F3F6
+#define COL_ICON     0xFFFF3B30
 
 #include "font8x8.h"
 
@@ -464,49 +464,48 @@ static void u32_ellipse_fill(int cx,int cy,int rx,int ry,u32 color) {
     }
 }
 static void aero_desktop(void) {
-    gradient_v(0,0,(int)g_fw,(int)g_fh,0xFFDDF7FC,0xFF3C9DC5);
     int h=(int)g_fh,w=(int)g_fw;
-    /* Sunlit coastal sky: layered warm/cool discs and distant shoreline.
-       The wallpaper is rasterized once into the static cache, so the extra
-       geometry never adds per-frame work or mouse-movement redraws. */
-    int sunx=w*3/4, suny=h*29/100, sunr=h/9;
-    if(sunr<24)sunr=24;if(sunr>105)sunr=105;
-    u32_ellipse_fill(sunx,suny,sunr+28,sunr+28,0xFF9DD9E9);
-    u32_ellipse_fill(sunx,suny,sunr+16,sunr+16,0xFFBDEAF0);
-    u32_ellipse_fill(sunx,suny,sunr+7,sunr+7,0xFFDDF5F4);
-    u32_ellipse_fill(sunx,suny,sunr,sunr,0xFFFFF3D5);
-    /* Soft distant hills frame the water without covering the bright sky. */
     int first_x=0,last_x=w;
     if(u32_render_clip) {
         if(first_x<u32_clip_x0)first_x=u32_clip_x0;
         if(last_x>u32_clip_x1)last_x=u32_clip_x1;
         if(first_x<0)first_x=0;if(last_x>w)last_x=w;
     }
-    /* Soft, layered water/sky ribbons. Preserve each wave's absolute X so a
-     * clipped repaint matches the cached full wallpaper exactly. */
-    int base=h*2/3;
-    for(int x=first_x;x<last_x;x++) {
-        int dx=x-w/2;
-        int curve=dx*dx;
-        int wave1=base+curve/(w>0?w*14:1);
-        int wave2=base+28+curve/(w>0?w*19:1);
-        if(wave1>=0&&wave1<h)fill(x,wave1,1,h-wave1,color_mix(0xFF80D5E9,0xFF2B8CB9,(unsigned int)(wave1*100/(h?h:1))));
-        if(wave2>=0&&wave2<h)fill(x,wave2,1,h-wave2,0xFF4DA9C4);
-        /* Layered coastal hills, using stable absolute X coordinates so
-           partial damage renders exactly the same pixels as a full frame. */
-        int dx_far=x-w*29/100;
-        int far_y=h*59/100+(dx_far*dx_far)/(w>0?w*11:1);
-        int dx_near=x-w*72/100;
-        int near_y=h*70/100+(dx_near*dx_near)/(w>0?w*20:1);
-        if(far_y<h)fill(x,far_y,1,h-far_y,0xFF287D91);
-        if(near_y<h)fill(x,near_y,1,h-near_y,0xFF15576F);
-        /* Thin sunlight streaks across the water add depth at no frame cost. */
-        if(x%37<2) {
-            int ry=base+18+(curve/(w>0?w*19:1));
-            if(ry<h-50)fill(x,ry,1,7,0xFFB0E7E8);
-        }
+    /* Sentinel industrial desktop: charcoal gradient, fine technical grid,
+       and a restrained red signal glow. Render only the damaged region. */
+    for(int y=0;y<h;y++) {
+        if(u32_render_clip&&(y<u32_clip_y0||y>=u32_clip_y1))continue;
+        u32 c=color_mix(0xFF202630,0xFF0B0D11,(unsigned int)(y*110/(h>1?h-1:1)));
+        fill(first_x,y,last_x-first_x,1,c);
     }
-    fill(0,0,w,2,0xDFFFFFFF);
+    int cx=w/2,cy=h/3;
+    for(int x=first_x;x<last_x;x++) {
+        int dx=x-cx;if(dx<0)dx=-dx;
+        if(dx<w/3) {
+            u32 strength=(u32)(48-(dx*48/(w/3+1)));
+            if(strength) {
+                for(int y=0;y<h;y++) {
+                    if(u32_render_clip&&(y<u32_clip_y0||y>=u32_clip_y1))continue;
+                    if(y>cy-h/3&&y<cy+h/2) {
+                        u32 *p=&g_front[(u64)y*g_pitch+(u32)x];
+                        *p=color_mix(*p,0xFF35191D,strength);
+                    }
+                }
+            }
+        }
+        if(x%48==0)fill(x,0,1,h,0xFF29303A);
+    }
+    for(int y=0;y<h;y++) {
+        if(y%48==0)fill(first_x,y,last_x-first_x,1,0xFF29303A);
+        if(y%4==0)fill(first_x,y,last_x-first_x,1,0xFF15191F);
+    }
+    /* Registration marks echo the website's red technical corner details. */
+    fill(28,28,42,3,0xFFFF3B30);
+    fill(28,31,3,26,0xFFFF3B30);
+    if(w>80) {
+        fill(w-70,28,42,3,0xFFFF3B30);
+        fill(w-31,28,3,26,0xFFFF3B30);
+    }
 }
 
 #include "font_ttf.h"

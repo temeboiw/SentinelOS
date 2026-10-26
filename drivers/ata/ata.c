@@ -203,17 +203,26 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
         !services->register_block_device)
         return -1;
 
-    uint64_t sectors = 0;
-    if (ata_identify(&sectors) != 0) {
-        if (services->debug_print) services->debug_print("ata.sys: no ATA LBA28 device\n");
-        return -2;
-    }
+    /* A Windows-style driver may load successfully even when Plug and
+       Play finds no matching device. Device discovery is separate from
+       image loading; absence of legacy ATA hardware is not a loader error. */
 
     /* Keep a relocatable function pointer in the image so the loader can
        rebase the module away from its preferred link address. */
     if (g_relocation_anchor != ata_unload) return -4;
 
     g_ata.services = services;
+    g_ata.sector_count = 0;
+    g_ata.online = 0;
+    driver->unload = ata_unload;
+
+    uint64_t sectors = 0;
+    if (ata_identify(&sectors) != 0) {
+        if (services->debug_print)
+            services->debug_print("ata.sys: loaded; no compatible primary-master ATA LBA28 device\n");
+        return 0;
+    }
+
     g_ata.sector_count = sectors;
     g_ata.online = 1;
 
@@ -233,7 +242,6 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
         return -3;
     }
 
-    driver->unload = ata_unload;
-    if (services->debug_print) services->debug_print("ata.sys: LBA28 PIO disk registered\n");
+    if (services->debug_print) services->debug_print("ata.sys: LBA28 PIO disk registered as ata0\n");
     return 0;
 }

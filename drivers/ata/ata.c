@@ -60,10 +60,14 @@ static int ata_wait_data(ATA_CONTEXT *ata) {
 }
 static int ata_identify(ATA_CONTEXT *ata, uint8_t drive_select, uint64_t *sectors) {
     uint8_t status;
-    if (ata_wait_not_busy(ata, &status) != 0) return -1;
+    /* Select first: an empty master slot can report 0xFF before the
+       slave is selected, so pre-selection polling would hide that slave. */
     ata_outb(ata->control_port, 0);
     ata_outb((uint16_t)(ata->io_base + 6), drive_select);
     for (volatile uint32_t i = 0; i < 1000; ++i) { }
+    status = ata_inb((uint16_t)(ata->io_base + 7));
+    if (status == 0 || status == 0xFF) return -1;
+    if (ata_wait_not_busy(ata, &status) != 0) return -1;
     ata_outb((uint16_t)(ata->io_base + 2), 0);
     ata_outb((uint16_t)(ata->io_base + 3), 0);
     ata_outb((uint16_t)(ata->io_base + 4), 0);

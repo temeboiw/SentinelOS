@@ -108,7 +108,7 @@ static int ata_identify(uint8_t drive_select, uint64_t *sectors) {
 }
 
 static int ata_read_sector(uint32_t lba, uint8_t *buffer) {
-    if (!g_ata.online || lba >= ATA_MAX_LBA28) return -1;
+    if (!g_ata.online || lba >= ATA_MAX_LBA28 || (uint64_t)lba >= g_ata.sector_count) return -1;
     if (ata_wait_not_busy(0) != 0) return -1;
     ata_outb(ATA_DEVICE, (uint8_t)(g_ata.drive_select | ((lba >> 24) & 0x0F)));
     ata_outb(ATA_COUNT, 1);
@@ -124,7 +124,7 @@ static int ata_read_sector(uint32_t lba, uint8_t *buffer) {
 static int ata_write_sector(uint32_t lba, const uint8_t *buffer) {
     if (!g_ata.online || lba >= ATA_MAX_LBA28) return -1;
     if (ata_wait_not_busy(0) != 0) return -1;
-    ata_outb(ATA_DEVICE, (uint8_t)(0xE0 | ((lba >> 24) & 0x0F)));
+    ata_outb(ATA_DEVICE, (uint8_t)(g_ata.drive_select | 0x40 | ((lba >> 24) & 0x0F)));
     ata_outb(ATA_COUNT, 1);
     ata_outb(ATA_LBA0, (uint8_t)lba);
     ata_outb(ATA_LBA1, (uint8_t)(lba >> 8));

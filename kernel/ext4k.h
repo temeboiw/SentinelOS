@@ -1,6 +1,7 @@
 #pragma once
 #include "ata.h"
 #include "virtio_blk.h"
+#include "block.h"
 
 #define E16(p,o) (*(uint16_t *)((uint8_t *)(p) + (o)))
 #define E32(p,o) (*(uint32_t *)((uint8_t *)(p) + (o)))
@@ -18,9 +19,52 @@ typedef struct {
     int write_faulted; /* Set if a failed write cannot be rolled back safely. */
 } Ext4k;
 
+static int SentinelVirtioBlockRead(void *context, uint64_t off, void *dst, uint64_t len) {
+    (void)context;
+    return vb_ok ? blk_read(off, dst, len) : -1;
+}
+static int SentinelVirtioBlockWrite(void *context, uint64_t off, const void *src, uint64_t len) {
+    (void)context;
+    return vb_ok ? blk_write(off, src, len) : -1;
+}
+static int SentinelAtaBlockRead(void *context, uint64_t off, void *dst, uint64_t len) {
+    (void)context;
+    return ata_present ? ata_read(off, dst, len) : -1;
+}
+static int SentinelAtaBlockWrite(void *context, uint64_t off, const void *src, uint64_t len) {
+    (void)context;
+    return ata_present ? ata_write(off, src, len) : -1;
+}
+
+/* Register available transports behind the common block-device interface.
+ * New AHCI, NVMe, USB mass-storage, or other drivers can register here without
+ * teaching ext4 about their controller-specific implementation. */
+static int SentinelRegisterBuiltinBlockDevices(void) {
+    int registered = 0;
+    if (vb_ok) {
+        SENTINEL_BLOCK_DEVICE d = {0};
+        d.size = sizeof(d); d.abi_version = SENTINEL_BLOCK_ABI_VERSION;
+        const char *name = "virtio-blk0";
+        for (uint32_t i = 0; i < SENTINEL_BLOCK_NAME_MAX && name[i]; ++i) d.name[i] = name[i];
+        d.sector_size = 512; d.sector_count = 0xFFFFFFFFULL;
+        d.read = SentinelVirtioBlockRead; d.write = SentinelVirtioBlockWrite;
+        if (SentinelBlockRegister(&d) == 0) ++registered;
+    }
+    if (ata_present) {
+        SENTINEL_BLOCK_DEVICE d = {0};
+        d.size = sizeof(d); d.abi_version = SENTINEL_BLOCK_ABI_VERSION;
+        const char *name = "ata0";
+        for (uint32_t i = 0; i < SENTINEL_BLOCK_NAME_MAX && name[i]; ++i) d.name[i] = name[i];
+        d.sector_size = 512; d.sector_count = 0x10000000ULL;
+        d.read = SentinelAtaBlockRead; d.write = SentinelAtaBlockWrite;
+        if (SentinelBlockRegister(&d) == 0) ++registered;
+    }
+    DbgPrint("block: registered %u device(s)\n", (unsigned)registered);
+    return registered;
+}
+
 static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
-    if (vb_ok) return blk_read(fs->part_off + off, dst, len);
-    return ata_read(fs->part_off + off, dst, len);
+    return SentinelBlockRead(fs->part_off + off, dst, len);
 }
 
 /*
@@ -30,8 +74,7 @@ static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
  */
 static int e4_raw_write(Ext4k *fs, uint64_t off,
                           const void *src, uint64_t len) {
-    if (vb_ok) return blk_write(fs->part_off + off, src, len);
-    return ata_write(fs->part_off + off, src, len);
+    return SentinelBlockWrite(fs->part_off + off, src, len);
 }
 
 /*

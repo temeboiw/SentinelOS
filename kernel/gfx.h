@@ -498,18 +498,19 @@ static int gfx_virgl_clear_present_test(void) {
     /* VIRGL_OBJ_SURFACE_SIZE is five dwords: handle, resource handle,
        format, mip level, and packed first/last array layer. The command
        header stores (length << 16) | (object << 8) | command. */
-    uint32_t stream[18]={
+    uint32_t stream[19]={
         0x00050801u, /* CREATE_OBJECT: SURFACE (8), command 1, len 5 */
         1u, GFX_VIRGL_TARGET_ID, GFX_GPU_FORMAT_B8G8R8X8_UNORM, 0u, 0u,
         0x00030005u, /* SET_FRAMEBUFFER_STATE: command 5, three payload dwords */
         1u, 0u, 1u, /* one color buffer, no depth surface, surface handle 1 */
-        0x00070007u, /* CLEAR: command 7, seven payload dwords */
+        0x00080007u, /* CLEAR: command 7, eight payload dwords */
         0x00000001u, /* PIPE_CLEAR_COLOR0 */
         0x3D23D70Au, /* R = 0.04 */
         0x3DCCCCCDu, /* G = 0.10 */
         0x3F19999Au, /* B = 0.60 */
         0x3F800000u, /* A = 1.00 */
-        0x3F800000u, /* depth = 1.0f */
+        0x00000000u, /* depth double low dword = 1.0 */
+        0x3FF00000u, /* depth double high dword = 1.0 */
         0u            /* stencil */
     };
     if(!gfx_submit_virgl((const uint8_t*)stream,sizeof(stream))) {

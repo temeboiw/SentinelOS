@@ -166,9 +166,15 @@ static int ata_block_write(void *context, uint64_t offset, const void *source, u
 static void ata_unload(SENTINEL_DRIVER_OBJECT *driver) {
     (void)driver;
     for (uint32_t i = 0; i < ATA_MAX_DRIVES; ++i) {
-        g_ata[i].online = 0;
-        g_ata[i].sector_count = 0;
-        g_ata[i].services = 0;
+        ATA_CONTEXT *ata = &g_ata[i];
+        if (ata->online && ata->services &&
+            ata->services->unregister_block_device) {
+            char name[5] = { 'a', 't', 'a', (char)('0' + i), 0 };
+            (void)ata->services->unregister_block_device(name, ata);
+        }
+        ata->online = 0;
+        ata->sector_count = 0;
+        ata->services = 0;
     }
 }
 static void (*volatile g_relocation_anchor)(SENTINEL_DRIVER_OBJECT *) = ata_unload;
@@ -177,9 +183,10 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
                     const SENTINEL_DRIVER_SERVICES *services) {
     if (!driver || !services ||
         services->abi_version != SENTINEL_DRIVER_ABI_VERSION ||
-        services->size < offsetof(SENTINEL_DRIVER_SERVICES, register_block_device) +
-                         sizeof(services->register_block_device) ||
-        !services->register_block_device) return -1;
+        services->size < offsetof(SENTINEL_DRIVER_SERVICES, unregister_block_device) +
+                         sizeof(services->unregister_block_device) ||
+        !services->register_block_device ||
+        !services->unregister_block_device) return -1;
     if (g_relocation_anchor != ata_unload) return -4;
     driver->unload = ata_unload;
 

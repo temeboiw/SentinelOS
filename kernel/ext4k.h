@@ -8,6 +8,7 @@
 
 typedef struct {
     uint64_t part_off;
+    SENTINEL_BLOCK_DEVICE *device;
     uint32_t blksz, ipg, isize, dsize, first_data, bpg;
     uint32_t feature_compat, feature_incompat, feature_ro_compat;
     uint64_t total_blocks,free_blocks,reserved_blocks;
@@ -64,6 +65,8 @@ static int SentinelRegisterBuiltinBlockDevices(void) {
 }
 
 static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
+    if (fs->device)
+        return SentinelBlockReadDevice(fs->device, fs->part_off + off, dst, len);
     return SentinelBlockRead(fs->part_off + off, dst, len);
 }
 
@@ -74,6 +77,8 @@ static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
  */
 static int e4_raw_write(Ext4k *fs, uint64_t off,
                           const void *src, uint64_t len) {
+    if (fs->device)
+        return SentinelBlockWriteDevice(fs->device, fs->part_off + off, src, len);
     return SentinelBlockWrite(fs->part_off + off, src, len);
 }
 
@@ -172,8 +177,22 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
     uint8_t sb[1024];
     fs->part_off = part_lba * 512;
     fs->ok = 0;
-    if (e4_read(fs, 1024, sb, 1024) < 0) return -1;
-    if (E16(sb, 56) != 0xEF53) return -1;
+    fs->device = 0;
+
+    /* Probe every registered disk for this partition's ext4 superblock.
+     * The filesystem is then pinned to that device for all reads and writes;
+     * it never silently switches disks halfway through a mounted volume. */
+    for (uint32_t i = 0; i < SentinelBlockDeviceCount; ++i) {
+        SENTINEL_BLOCK_DEVICE *candidate = SentinelBlockGet(i);
+        if (!candidate || !candidate->online) continue;
+        if (SentinelBlockReadDevice(candidate, fs->part_off + 1024, sb, sizeof(sb)) < 0)
+            continue;
+        if (E16(sb, 56) == 0xEF53) {
+            fs->device = candidate;
+            break;
+        }
+    }
+    if (!fs->device) return -1;
     fs->blksz = 1024u << E32(sb, 24);
     fs->first_data = E32(sb, 20);
     fs->bpg = E32(sb, 32);

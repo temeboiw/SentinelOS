@@ -3672,6 +3672,7 @@ static void user_enter(BootInfo *bi) {
     ata_init();
     virtio_blk_init();
     virtio_input_init();
+    SentinelRegisterBuiltinBlockDevices();
     vfs_mount_c();
 
     DbgPrint("\n-- usermode (smss) --\n");

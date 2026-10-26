@@ -1267,7 +1267,7 @@ static void PspForgetDiskModule(KPROCESS *owner) {
 }
 /*
  * Load an on-disk x64 PE32+ file into image layout. This handles PE headers
- * and section copies; imports still resolve only against boot-loaded DLLs.
+ * and section copies; imports are resolved from boot or disk-loaded modules.
  */
 /*
  * Load an on-disk x64 PE32+ file into image layout without reading the entire
@@ -3695,10 +3695,11 @@ static void user_enter(BootInfo *bi) {
                  i, user_bootinfo->modules[i].name);
     }
 
-    BootModule *smss = PspFindModule(user_bootinfo, "smss.exe");
+    UserDiskModule *smss_disk = PspLoadDiskModule("smss.exe", 0);
+    BootModule *smss = smss_disk ? &smss_disk->module : 0;
 
     if (!smss) {
-        DbgPrint("user: smss.exe not loaded\n");
+        DbgPrint("user: smss.exe disk load failed\n");
         return;
     }
 
@@ -3710,9 +3711,20 @@ static void user_enter(BootInfo *bi) {
 
     KPROCESS *proc = MmCreateAddressSpace("smss");
 
-    if (!proc || PspMapUserImage(proc, smss) != 0) {
+    if (!proc) {
+        DbgPrint("user: smss address-space creation failed\n");
+        PspFreeDiskModule(smss_disk);
+        MmSwitchToProcess(PspSystemProcess);
+        return;
+    }
+
+    smss_disk->owner = proc;
+    if (PspMapUserImage(proc, smss) != 0) {
         DbgPrint("user: map smss failed\n");
         MmSwitchToProcess(PspSystemProcess);
+        PspForgetUserImages(proc);
+        PspForgetDiskModule(proc);
+        MmDeleteAddressSpace(proc);
         return;
     }
 
@@ -3723,6 +3735,9 @@ static void user_enter(BootInfo *bi) {
     if (!smss_image) {
         DbgPrint("user: smss private image record missing\n");
         MmSwitchToProcess(PspSystemProcess);
+        PspForgetUserImages(proc);
+        PspForgetDiskModule(proc);
+        MmDeleteAddressSpace(proc);
         return;
     }
 
@@ -3775,7 +3790,8 @@ static void user_enter(BootInfo *bi) {
                 MmSwitchToProcess(PspSystemProcess);
                 if (ki_current) ki_current->Process = PspSystemProcess;
                 PspForgetUserImages(proc);
-                MmDeleteAddressSpace(proc);
+                PspForgetDiskModule(proc);
+MmDeleteAddressSpace(proc);
                 return;
             }
             map_4k_in(proc->Pml4,
@@ -3787,7 +3803,8 @@ static void user_enter(BootInfo *bi) {
         MmSwitchToProcess(PspSystemProcess);
         if (ki_current) ki_current->Process = PspSystemProcess;
         PspForgetUserImages(proc);
-        MmDeleteAddressSpace(proc);
+        PspForgetDiskModule(proc);
+MmDeleteAddressSpace(proc);
         return;
     }
 

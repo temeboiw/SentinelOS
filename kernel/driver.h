@@ -15,6 +15,7 @@
 
 typedef struct SENTINEL_DRIVER_OBJECT SENTINEL_DRIVER_OBJECT;
 typedef struct SENTINEL_DRIVER_SERVICES SENTINEL_DRIVER_SERVICES;
+struct SENTINEL_BLOCK_DEVICE;
 
 typedef int32_t (*SENTINEL_DRIVER_INITIALIZE)(
     SENTINEL_DRIVER_OBJECT *driver,
@@ -32,6 +33,11 @@ struct SENTINEL_DRIVER_SERVICES {
     int32_t (*map_device_memory)(uint64_t physical, uint64_t bytes,
                                  volatile void **virtual_address);
     uint64_t reserved[8];
+    int32_t (*allocate_dma)(uint64_t bytes, uint32_t alignment,
+                           uint64_t *physical_address, volatile void **virtual_address);
+    void (*release_dma)(uint64_t physical_address, uint64_t bytes);
+    int32_t (*register_block_device)(const struct SENTINEL_BLOCK_DEVICE *device);
+    uint64_t reserved_v2[8];
 };
 
 struct SENTINEL_DRIVER_OBJECT {

@@ -11,6 +11,7 @@
 #include "driver.h"
 #include "driver_pe.h"
 #include "heap.h"
+#include "pmm.h"
 #include "vmm.h"
 #include "serial.h"
 #include "ext4k.h"
@@ -49,6 +50,42 @@ static int32_t SentinelDriverServiceMapDeviceMemory(
     return 0;
 }
 
+static int32_t SentinelDriverServiceAllocateDma(
+    uint64_t bytes, uint32_t alignment,
+    uint64_t *physical_address, volatile void **virtual_address) {
+    if (!bytes || !physical_address || !virtual_address) return -1;
+    if (alignment < SENTINEL_DRIVER_PAGE_SIZE) alignment = SENTINEL_DRIVER_PAGE_SIZE;
+    if (alignment != SENTINEL_DRIVER_PAGE_SIZE) return -2;
+    if (bytes > UINT64_MAX - (SENTINEL_DRIVER_PAGE_SIZE - 1u)) return -3;
+    uint64_t pages = (bytes + SENTINEL_DRIVER_PAGE_SIZE - 1u) /
+                     SENTINEL_DRIVER_PAGE_SIZE;
+    uint64_t physical = pmm_alloc_n(pages);
+    if (!physical) return -4;
+    uint8_t *memory = (uint8_t *)(uintptr_t)(HHDM_BASE + physical);
+    for (uint64_t i = 0; i < pages * SENTINEL_DRIVER_PAGE_SIZE; ++i)
+        memory[i] = 0;
+    *physical_address = physical;
+    *virtual_address = memory;
+    return 0;
+}
+
+static void SentinelDriverServiceReleaseDma(uint64_t physical_address,
+                                             uint64_t bytes) {
+    if (!bytes || !physical_address ||
+        (physical_address & (SENTINEL_DRIVER_PAGE_SIZE - 1u)) ||
+        bytes > UINT64_MAX - (SENTINEL_DRIVER_PAGE_SIZE - 1u))
+        return;
+    uint64_t pages = (bytes + SENTINEL_DRIVER_PAGE_SIZE - 1u) /
+                     SENTINEL_DRIVER_PAGE_SIZE;
+    for (uint64_t i = 0; i < pages; ++i)
+        pmm_free(physical_address + i * SENTINEL_DRIVER_PAGE_SIZE);
+}
+
+static int32_t SentinelDriverServiceRegisterBlockDevice(
+    const struct SENTINEL_BLOCK_DEVICE *device) {
+    return SentinelBlockRegister(device);
+}
+
 static const SENTINEL_DRIVER_SERVICES SentinelDriverServices = {
     sizeof(SENTINEL_DRIVER_SERVICES),
     SENTINEL_DRIVER_ABI_VERSION,
@@ -56,6 +93,10 @@ static const SENTINEL_DRIVER_SERVICES SentinelDriverServices = {
     SentinelDriverServiceAllocate,
     SentinelDriverServiceRelease,
     SentinelDriverServiceMapDeviceMemory,
+    {0},
+    SentinelDriverServiceAllocateDma,
+    SentinelDriverServiceReleaseDma,
+    SentinelDriverServiceRegisterBlockDevice,
     {0}
 };
 

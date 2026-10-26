@@ -161,6 +161,7 @@ for src in \
   boot/loadufi.c \
   hal/hal.c \
   kernel/kernel.c \
+  kernel/driver.h \
   kernel/pci_network.h \
   kernel/e1000.h \
   kernel/netstack.h \

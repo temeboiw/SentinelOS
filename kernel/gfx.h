@@ -418,7 +418,10 @@ static int gfx_create_virgl_buffer(void) {
        (0x70) therefore require target 0, not a texture target. */
     cr.target=0; /* PIPE_BUFFER */
     cr.format=0; /* PIPE_BUFFER resources use format 0 */
-    cr.bind=(1u<<4)|(1u<<5)|(1u<<6); /* vertex, index, constant buffers */
+    /* virglrenderer accepts buffer bind usages as individual enum values,
+       not a bitwise union. Use the vertex-buffer role for this shared upload
+       resource; 0x70 is rejected as an invalid texture bind mask. */
+    cr.bind=(1u<<4); /* VIRGL_BIND_VERTEX_BUFFER */
     cr.width=GFX_VIRGL_BUFFER_BYTES;cr.height=1;cr.depth=1;cr.array_size=1;
     if(!gfx_command(&cr,sizeof cr))return 0;
     struct { GfxCtrlHdr hdr;uint32_t resource_id,nr_entries;GfxMemEntry entry; } attach={0};

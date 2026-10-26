@@ -13,11 +13,11 @@
 #include "pci_network.h"
 #include "e1000.h"
 #include "netstack.h"
-#include "user.h"
 #include "driver.h"
 #include "driver_loader.h"
+#include "user.h"
 
-/* MSVC/clang stack probe ºw^~)Şw we are freestanding */
+/* MSVC/clang stack probe Âºw^~)Ãw we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
     __asm__ volatile("ret");
 }
@@ -95,9 +95,9 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 #endif
 
     // ---- usermode demo ----
-    user_enter(bi);   // does not return on success (exit syscall ºw^~)Şv halt)
+    user_enter(bi);   // does not return on success (exit syscall Âºw^~)Ãv halt)
 
-    /* Usermode returned"éİyø§yÓ leave the framebuffer alone (taskbar stays). */
+    /* Usermode returned"Ã©ÃyÃ¸Â§yÃ“ leave the framebuffer alone (taskbar stays). */
     DbgPrint("kernel: idle\n");
     for (;;) __asm__ volatile("sti; hlt");
 }

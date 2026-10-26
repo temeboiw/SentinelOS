@@ -49,6 +49,35 @@ static int SentinelBlockRegister(const SENTINEL_BLOCK_DEVICE *device) {
     return 0;
 }
 
+/* Remove a device only when both its registered name and context match.
+ * This prevents a driver from accidentally removing another driver's device. */
+static int SentinelBlockUnregister(const char *name, void *context) {
+    if (!name || !name[0]) return -1;
+    for (uint32_t i = 0; i < SentinelBlockDeviceCount; ++i) {
+        SENTINEL_BLOCK_DEVICE *device = &SentinelBlockDevices[i];
+        uint32_t n = 0;
+        while (n < SENTINEL_BLOCK_NAME_MAX && name[n] &&
+               device->name[n] == name[n]) ++n;
+        if (n >= SENTINEL_BLOCK_NAME_MAX || name[n] ||
+            device->name[n] || device->context != context) continue;
+
+        for (uint32_t j = i + 1; j < SentinelBlockDeviceCount; ++j)
+            SentinelBlockDevices[j - 1] = SentinelBlockDevices[j];
+        --SentinelBlockDeviceCount;
+        for (uint32_t j = 0; j < SENTINEL_BLOCK_MAX_DEVICES; ++j)
+            if (j >= SentinelBlockDeviceCount)
+                SentinelBlockDevices[j] = (SENTINEL_BLOCK_DEVICE){0};
+
+        if (SentinelBlockPreferred == (int)i) {
+            SentinelBlockPreferred = SentinelBlockDeviceCount ? 0 : -1;
+        } else if (SentinelBlockPreferred > (int)i) {
+            --SentinelBlockPreferred;
+        }
+        return 0;
+    }
+    return -2;
+}
+
 static SENTINEL_BLOCK_DEVICE *SentinelBlockGet(uint32_t index) {
     return index < SentinelBlockDeviceCount ? &SentinelBlockDevices[index] : 0;
 }

@@ -14,6 +14,7 @@
 #include "e1000.h"
 #include "netstack.h"
 #include "user.h"
+#include "driver.h"
 
 /* MSVC/clang stack probe – we are freestanding */
 __attribute__((naked)) void __chkstk(void) {
@@ -69,7 +70,11 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
 
     DbgPrint("\n-- kernel heap --\n");
     heap_selftest();
-    heap_stats(); modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
+    heap_stats();
+    SentinelDriverManagerInitialize();
+    DbgPrint("driver manager: ABI v%u registry ready (%u slots); module loading not enabled yet\n",
+             SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);
+    modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
     smp_start_aps(bi);
 
 #if TEST_FAULT == 1

@@ -440,53 +440,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     load_module("hal.dll");
     Module *krnl = load_module("krnl.exe");
 
-    {
-        static const char *users[] = {
-            "smss.exe",
-            "instlr.exe",
-            "screen.exe",
-            "bootvid.exe",
-            "sentlogon.exe",
-            "explorer.exe",
-            "fileexplorer.exe",
-            "taskbar.dll",
-            "kernel32.dll",
-            "user32.dll",
-            "vulkan.dll",
-            "hello.exe",
-            "cmd.exe",
-            "msiexec.exe"
-        };
-        int nusers = sizeof(users) / sizeof(users[0]);
-        
-        for (int u = 0; u < nusers; u++) {
-            const char *path[3] = { "magic", "System32", users[u] };
-            VOID *file; UINTN fsize;
-            EFI_STATUS st2 = os_load_file(path, 3, &file, &fsize);
-            if (EFI_ERROR(st2)) {
-                say(L"loadufi: missing user image ");
-                say_a(users[u]);
-                say(L"\r\n");
-                continue;
-            }
-            if (nmods >= BOOT_MAX_MODULES) break;
-            Module *m = &mods[nmods];
-            int ii = 0;
-            for (; users[u][ii] && ii < 31; ii++) m->name[ii] = users[u][ii];
-            m->name[ii] = 0;
-            st2 = map_image(file, m);
-            if (EFI_ERROR(st2)) {
-                say(L"loadufi: bad PE ");
-                say_a(users[u]);
-                say(L"\r\n");
-                continue;
-            }
-            nmods++;
-            say(L"loadufi: loaded user image ");
-            say_a(users[u]);
-            say(L"\r\n");
-        }
-    }
+    /* User images are loaded by the kernel after mounting ext4. */
 
     for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) &&

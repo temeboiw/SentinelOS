@@ -192,6 +192,8 @@ static void ata_unload(SENTINEL_DRIVER_OBJECT *driver) {
     g_ata.services = 0;
 }
 
+static void (*volatile g_relocation_anchor)(SENTINEL_DRIVER_OBJECT *) = ata_unload;
+
 int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
                     const SENTINEL_DRIVER_SERVICES *services) {
     if (!driver || !services ||
@@ -206,6 +208,10 @@ int32_t DriverEntry(SENTINEL_DRIVER_OBJECT *driver,
         if (services->debug_print) services->debug_print("ata.sys: no ATA LBA28 device\n");
         return -2;
     }
+
+    /* Keep a relocatable function pointer in the image so the loader can
+       rebase the module away from its preferred link address. */
+    if (g_relocation_anchor != ata_unload) return -4;
 
     g_ata.services = services;
     g_ata.sector_count = sectors;

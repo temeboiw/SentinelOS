@@ -1143,22 +1143,22 @@ static void draw_taskbar(void) {
     /* Explorer-matched Aero glass taskbar: pale cyan edge, bright highlight,
        translucent blue glass, and the same cool palette as window chrome. */
     fill(0, ty-3, w, 3, 0x553B9CC6);
-    round_fill(0, ty, w, h-ty, 10, 0xD9B6E5EF);
-    fill(0, ty+14, w, h-ty-14, 0xD9B6E5EF);
-    gradient_v(0,ty+1,w,13,0xEFFFFFFF,0x99B6E9F5);
-    fill(10, ty+1, w-20, 1, 0xFFFFFFFF);
-    fill(0, ty+2, w, 1, 0xAA58B5D4);
+    round_fill(0, ty, w, h-ty, 10, 0xD91A1E25);
+    fill(0, ty+14, w, h-ty-14, 0xD91A1E25);
+    gradient_v(0,ty+1,w,13,0xD91A1E25,0xCC222731);
+    fill(10, ty+1, w-20, 1, 0xFFE9ECF2);
+    fill(0, ty+2, w, 1, 0xAAFF3B30);
 
     /* Glossy blue Start tile uses the same gradients as Explorer artwork. */
     round_fill(5,ty+5,68,38,9,0x66314F62);
-    round_fill(5,ty+4,68,37,9,0xFF3B9CC6);
-    gradient_v(7,ty+6,64,17,0xFFB9F2FC,0xFF69C5E1);
-    fill(7,ty+22,64,17,0xFF3B9CC6);
-    fill(14,ty+14,8,7,0xFFFFFFFF); fill(24,ty+13,8,8,0xFFFFFFFF);
-    fill(14,ty+23,8,7,0xFFFFFFFF); fill(24,ty+23,8,8,0xFFFFFFFF);
+    round_fill(5,ty+4,68,37,9,0xFFFF3B30);
+    gradient_v(7,ty+6,64,17,0xFFFF766E,0xFFDB3028);
+    fill(7,ty+22,64,17,0xFFFF3B30);
+    fill(14,ty+14,8,7,0xFFE9ECF2); fill(24,ty+13,8,8,0xFFE9ECF2);
+    fill(14,ty+23,8,7,0xFFE9ECF2); fill(24,ty+23,8,8,0xFFE9ECF2);
 
     /* Cool glass separator, consistent with Explorer's cyan chrome. */
-    fill(78,ty+9,1,h-ty-18,0x6658AFCB);
+    fill(78,ty+9,1,h-ty-18,0x66FF3B30);
 
     g_tb_n = 0;
     int ax = 54;
@@ -1172,19 +1172,19 @@ static void draw_taskbar(void) {
 
         int bw = 110;
         if (ax + bw > right_limit) break;
-        round_fill(ax,ty+4,bw,h-ty-8,6,minv?0x887CB8CC:0xCCF2FBFF);
-        round_fill(ax+1,ty+5,bw-2,h-ty-10,5,minv?0x887CB8CC:0xDDFBFEFF);
+        round_fill(ax,ty+4,bw,h-ty-8,6,minv?0x88464D58:0xCC282E38);
+        round_fill(ax+1,ty+5,bw-2,h-ty-10,5,minv?0x88464D58:0xDD20252D);
         if (!minv) {
-            gradient_v(ax+3,ty+5,bw-6,9,0xFFFFFFFF,0x8874D2EB);
-            fill(ax+7,ty+3,bw-14,2,0xFF3B9CC6);
+            gradient_v(ax+3,ty+5,bw-6,9,0xFFE9ECF2,0x88FF766E);
+            fill(ax+7,ty+3,bw-14,2,0xFFFF3B30);
         }
-        draw_text(ax + 9, ty + 19, name[0] ? name : "App", 0xFFFFFFFF);
+        draw_text(ax + 9, ty + 19, name[0] ? name : "App", 0xFFE9ECF2);
         ax += bw + 2;
     }
 
     /* Clock and date come from the RTC-backed kernel system-time service. */
-    round_fill(w > 104 ? w - 104 : 0, ty + 5, w > 104 ? 99 : w, h - ty - 10, 7, 0x88D9F1F8);
-    fill(w > 104 ? w-100 : 1,ty+7,w>104?94:w-2,1,0xAAFFFFFF);
+    round_fill(w > 104 ? w - 104 : 0, ty + 5, w > 104 ? 99 : w, h - ty - 10, 7, 0x88323843);
+    fill(w > 104 ? w-100 : 1,ty+7,w>104?94:w-2,1,0x66FF3B30);
     if (w >= 108) {
         U32_SYSTEM_TIME now;
         char clock_text[6] = {'-', '-', ':', '-', '-', 0};
@@ -1206,8 +1206,8 @@ static void draw_taskbar(void) {
             date_text[8] = (char)('0' + (now.day / 10) % 10);
             date_text[9] = (char)('0' + now.day % 10);
         }
-        draw_text(w - 40, ty + 10, clock_text, 0xFFFFFFFF);
-        draw_text(w - 68, ty + 29, date_text, 0xFFBDBDBD);
+        draw_text(w - 40, ty + 10, clock_text, 0xFFE9ECF2);
+        draw_text(w - 68, ty + 29, date_text, 0xFFB7BEC9);
     }
 
     if (g_menu) {
@@ -1221,53 +1221,53 @@ static void draw_taskbar(void) {
         /* Keep all menu geometry proportional to the available screen. */
         /* Start surface follows the desktop's bright cyan Aero glass,
            white highlights, and soft blue shadow instead of the old dark theme. */
-        round_fill(mx+4,my+5,mw,mh,12,0x55314F62);
-        round_fill(mx,my,mw,mh,11,0xFF6BB5D0);
+        round_fill(mx+4,my+5,mw,mh,12,0xB8080A0D);
+        round_fill(mx,my,mw,mh,11,0xFF454B56);
         round_fill(mx+1,my+1,mw-2,mh-2,10,0xEAF9FDFF);
-        fill(mx+2,my+2,mw-4,1,0xFFFFFFFF);
-        fill(mx,my,4,mh,0xFF3B9CC6);
-        gradient_v(mx+5,my+1,mw-6,54,0xFFFFFFFF,0xFFBDECF7);
-        fill(mx+12,my+12,30,30,0xFF0B78A8);
-        fill(mx+18,my+18,7,7,0xFFFFFFFF);fill(mx+27,my+18,7,7,0xFFFFFFFF);
-        fill(mx+18,my+27,7,7,0xFFFFFFFF);fill(mx+27,my+27,7,7,0xFFFFFFFF);
-        draw_text(mx+52,my+16,"SENTINELOS",0xFF145777);
-        draw_text(mx+52,my+32,"YOUR WORKSPACE",0xFF4E8297);
-        panel(mx+12,my+60,mw-24,32,0xFFF9FEFF,g_search_focus?0xFF3B9CC6:0xFFB2DDE9);
-        round_fill(mx+22,my+69,9,9,5,0xFF4E8297);
-        round_fill(mx+24,my+71,5,5,3,0xFFF9FEFF);
-        fill(mx+30,my+78,5,2,0xFF4E8297);
+        fill(mx+2,my+2,mw-4,1,0xFFE9ECF2);
+        fill(mx,my,4,mh,0xFFFF3B30);
+        gradient_v(mx+5,my+1,mw-6,54,0xFFE9ECF2,0xFF242A33);
+        fill(mx+12,my+12,30,30,0xFFFF3B30);
+        fill(mx+18,my+18,7,7,0xFFE9ECF2);fill(mx+27,my+18,7,7,0xFFE9ECF2);
+        fill(mx+18,my+27,7,7,0xFFE9ECF2);fill(mx+27,my+27,7,7,0xFFE9ECF2);
+        draw_text(mx+52,my+16,"SENTINELOS",0xFFF1F3F6);
+        draw_text(mx+52,my+32,"YOUR WORKSPACE",0xFF9AA3B1);
+        panel(mx+12,my+60,mw-24,32,0xFF252A33,g_search_focus?0xFFFF3B30:0xFF414854);
+        round_fill(mx+22,my+69,9,9,5,0xFF9AA3B1);
+        round_fill(mx+24,my+71,5,5,3,0xFF252A33);
+        fill(mx+30,my+78,5,2,0xFF9AA3B1);
         if(g_search_len>0) {
             g_search_text[g_search_len]=0;
             draw_text(mx+42,my+72,g_search_text,COL_TEXT);
-        } else draw_text(mx+42,my+72,"Search...",0xFF7199A8);
-        draw_text(mx+16,my+105,"PINNED",0xFF145777);
-        draw_text(mx+mw-66,my+105,"APPS",0xFF2387B0);
-        round_fill(mx+12,my+116,132,48,7,g_start_hover==1?0xFFB9EAF7:0xFFDDF3F9);
-        if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFF3B9CC6);
-        round_fill(mx+18,my+125,25,25,4,0xFF0A83B7);
-        fill(mx+23,my+131,15,3,0xFFFFFFFF);fill(mx+23,my+138,15,3,0xFFFFFFFF);
-        draw_text(mx+50,my+135,"Files",0xFF145777);
-        round_fill(mx+154,my+116,134,48,7,g_start_hover==2?0xFFB9EAF7:0xFFDDF3F9);
-        if(g_start_hover==2)fill(mx+154,my+116,134,2,0xFF3B9CC6);
-        round_fill(mx+160,my+125,25,25,4,0xFF167C67);
-        fill(mx+165,my+130,15,2,0xFFFFFFFF);fill(mx+165,my+136,15,2,0xFFFFFFFF);fill(mx+165,my+142,15,2,0xFFFFFFFF);
-        draw_text(mx+192,my+135,"Task Mgr",0xFF145777);
-        round_fill(mx+12,my+170,132,48,7,g_start_hover==3?0xFFB9EAF7:0xFFDDF3F9);
-        if(g_start_hover==3)fill(mx+12,my+170,132,2,0xFF3B9CC6);
-        round_fill(mx+18,my+179,25,25,4,0xFF4D5C70);
-        draw_text(mx+24,my+188,"C:",0xFF145777);
-        draw_text(mx+50,my+189,"Command",0xFF145777);
-        draw_text(mx+16,my+236,"POWER OPTIONS",0xFF4E8297);
-        fill(mx+12,my+248,mw-24,1,0xFFB2DDE9);
-        round_fill(mx+12,my+258,132,40,7,g_start_hover==4?0xFFB9EAF7:0xFFDDF3F9);
-        if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFF3B9CC6);
-        draw_text(mx+24,my+274,"Shut down",0xFFB74F69);
-        round_fill(mx+154,my+258,134,40,7,g_start_hover==5?0xFFB9EAF7:0xFFDDF3F9);
-        if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFF3B9CC6);
-        draw_text(mx+166,my+274,"Restart",0xFF9A762B);
-        fill(mx+12,my+310,mw-24,1,0xFFB2DDE9);
-        if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,4,0xFFB9EAF7);
-        draw_text(mx+16,my+329,"Settings / Help",0xFF145777);
+        } else draw_text(mx+42,my+72,"Search...",0xFF9AA3B1);
+        draw_text(mx+16,my+105,"PINNED",0xFFF1F3F6);
+        draw_text(mx+mw-66,my+105,"APPS",0xFFFF766E);
+        round_fill(mx+12,my+116,132,48,7,g_start_hover==1?0xFF422326:0xFF292E37);
+        if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFFFF3B30);
+        round_fill(mx+18,my+125,25,25,4,0xFFFF3B30);
+        fill(mx+23,my+131,15,3,0xFFE9ECF2);fill(mx+23,my+138,15,3,0xFFE9ECF2);
+        draw_text(mx+50,my+135,"Files",0xFFF1F3F6);
+        round_fill(mx+154,my+116,134,48,7,g_start_hover==2?0xFF422326:0xFF292E37);
+        if(g_start_hover==2)fill(mx+154,my+116,134,2,0xFFFF3B30);
+        round_fill(mx+160,my+125,25,25,4,0xFF3DDC84);
+        fill(mx+165,my+130,15,2,0xFFE9ECF2);fill(mx+165,my+136,15,2,0xFFE9ECF2);fill(mx+165,my+142,15,2,0xFFE9ECF2);
+        draw_text(mx+192,my+135,"Task Mgr",0xFFF1F3F6);
+        round_fill(mx+12,my+170,132,48,7,g_start_hover==3?0xFF422326:0xFF292E37);
+        if(g_start_hover==3)fill(mx+12,my+170,132,2,0xFFFF3B30);
+        round_fill(mx+18,my+179,25,25,4,0xFF454B56);
+        draw_text(mx+24,my+188,"C:",0xFFF1F3F6);
+        draw_text(mx+50,my+189,"Command",0xFFF1F3F6);
+        draw_text(mx+16,my+236,"POWER OPTIONS",0xFF9AA3B1);
+        fill(mx+12,my+248,mw-24,1,0xFF414854);
+        round_fill(mx+12,my+258,132,40,7,g_start_hover==4?0xFF422326:0xFF292E37);
+        if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFFFF3B30);
+        draw_text(mx+24,my+274,"Shut down",0xFFFF766E);
+        round_fill(mx+154,my+258,134,40,7,g_start_hover==5?0xFF422326:0xFF292E37);
+        if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFFFF3B30);
+        draw_text(mx+166,my+274,"Restart",0xFFFFB454);
+        fill(mx+12,my+310,mw-24,1,0xFF414854);
+        if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,4,0xFF422326);
+        draw_text(mx+16,my+329,"Settings / Help",0xFFF1F3F6);
         g_start_scale_active=0;
     }
 }
@@ -1529,32 +1529,32 @@ static void compose(void) {
         int u32_borderless = (u32_wnd_style & 0x80000000u) != 0;
         if (!u32_borderless) {
             /* Soft shadow, rounded glass frame, blue Aero caption. */
-            round_fill(x+4,y+7,w,h,11,0x55314F62);
-            round_fill(x,y,w,h,10,0xFF6BB5D0);
-            round_fill(x+1,y+1,w-2,h-2,9,0xFFEAF8FC);
-            round_fill(x+2,y+2,w-4,34,8,0xFF3B9CC6);
-            fill(x+2,y+20,w-4,16,0xFF3B9CC6);
-            gradient_v(x+3,y+3,w-6,11,0xFFB9F2FC,0xFF69C5E1);
-            fill(x+4,y+3,w-8,1,0xFFFFFFFF);
-            fill(x+3,y+35,w-6,1,0xFFFFFFFF);
-            draw_text(x + 13, y + 10, g_wnd.title, 0xFF104B69);
+            round_fill(x+5,y+8,w,h,18,0xB8080A0D);
+            round_fill(x,y,w,h,16,0xFF454B56);
+            round_fill(x+1,y+1,w-2,h-2,15,0xFF1B2028);
+            round_fill(x+2,y+2,w-4,42,14,0xFF252A33);
+            fill(x+2,y+24,w-4,18,0xFF252A33);
+            gradient_v(x+3,y+3,w-6,13,0xFF343A45,0xFF252A33);
+            fill(x+4,y+3,w-8,1,0xFFE9ECF2);
+            fill(x+3,y+43,w-6,1,0xFFE9ECF2);
+            draw_text(x + 15, y + 14, g_wnd.title, 0xFFF1F3F6);
             /* Render the standard caption controls as part of the retained
              * window frame, independent of child-HWND clipping or app menus. */
             if(w>=112) {
                 int bx=x+w-56, by=y+5;
-                round_fill(bx,by,23,23,5,0xFF2B83A8);
-                gradient_v(bx+1,by+1,21,10,0xFFB9F4FC,0xFF55B7D9);
-                fill(bx+6,by+15,11,2,0xFFFFFFFF);
+                round_fill(bx,by,23,23,8,0xFF303641);
+                gradient_v(bx+1,by+1,21,10,0xFF515966,0xFF303641);
+                fill(bx+6,by+15,11,2,0xFFE9ECF2);
                 bx=x+w-29;
-                round_fill(bx,by,23,23,5,0xFFB74F69);
-                gradient_v(bx+1,by+1,21,10,0xFFFFD4DD,0xFFE56D83);
-                fill(bx+6,by+6,2,11,0xFFFFFFFF);
-                fill(bx+15,by+6,2,11,0xFFFFFFFF);
-                fill(bx+6,by+6,11,2,0xFFFFFFFF);
-                fill(bx+6,by+15,11,2,0xFFFFFFFF);
+                round_fill(bx,by,23,23,5,0xFFFF3B30);
+                gradient_v(bx+1,by+1,21,10,0xFFFF766E,0xFFDB3028);
+                fill(bx+6,by+6,2,11,0xFFE9ECF2);
+                fill(bx+15,by+6,2,11,0xFFE9ECF2);
+                fill(bx+6,by+6,11,2,0xFFE9ECF2);
+                fill(bx+6,by+15,11,2,0xFFE9ECF2);
             }
-            round_fill(x+5,y+39,w-10,h-45,4,0xFFD9F1F8);
-            fill(x+7,y+41,w-14,h-49,0xFFF8FDFF);
+            round_fill(x+5,y+47,w-10,h-53,12,0xFF242A33);
+            fill(x+9,y+51,w-18,h-57,0xFF1B2028);
         } else {
             /* No title bar, border, or rounded inset in popup/borderless mode. */
             fill(x,y,w,h,0xFF000000);

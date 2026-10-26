@@ -357,6 +357,9 @@ static void u32_pump_timers(void) {
 #define COL_WHITE    0xFFF1F3F6
 #define COL_ICON     0xFFFF3B30
 
+static void putpx(int x,int y,u32 col);
+static void round_fill(int x,int y,int w,int h,int r,u32 col);
+
 /* Shared SentinelOS brand mark. The same staged BMP is used by bootvid,
  * the taskbar Start button, and the Start-menu header. */
 #define U32_LOGO_BMP_CAP 786486u

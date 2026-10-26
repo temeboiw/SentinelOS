@@ -1142,15 +1142,15 @@ static void draw_taskbar(void) {
 
     /* Rounded smoked-glass taskbar with restrained Sentinel red signal accents. */
     fill(0, ty-3, w, 3, 0x553B9CC6);
-    round_fill(0, ty, w, h-ty, 10, 0xD91A1E25);
-    fill(0, ty+14, w, h-ty-14, 0xD91A1E25);
+    round_fill(0, ty, w, h-ty, 14, 0xD91A1E25);
+    round_fill(0, ty+14, w, h-ty-14, 10, 0xD91A1E25);
     gradient_v(0,ty+1,w,13,0xD91A1E25,0xCC222731);
     fill(10, ty+1, w-20, 1, 0xFFE9ECF2);
     fill(0, ty+2, w, 1, 0xAAFF3B30);
 
     /* Rounded Sentinel red Start tile. */
-    round_fill(5,ty+5,68,38,9,0x66314F62);
-    round_fill(5,ty+4,68,37,9,0xFFFF3B30);
+    round_fill(5,ty+5,68,38,12,0xB8080A0D);
+    round_fill(5,ty+4,68,37,12,0xFFFF3B30);
     gradient_v(7,ty+6,64,17,0xFFFF766E,0xFFDB3028);
     fill(7,ty+22,64,17,0xFFFF3B30);
     fill(14,ty+14,8,7,0xFFE9ECF2); fill(24,ty+13,8,8,0xFFE9ECF2);
@@ -1171,8 +1171,8 @@ static void draw_taskbar(void) {
 
         int bw = 110;
         if (ax + bw > right_limit) break;
-        round_fill(ax,ty+4,bw,h-ty-8,6,minv?0x88464D58:0xCC282E38);
-        round_fill(ax+1,ty+5,bw-2,h-ty-10,5,minv?0x88464D58:0xDD20252D);
+        round_fill(ax,ty+4,bw,h-ty-8,10,minv?0x88464D58:0xCC282E38);
+        round_fill(ax+1,ty+5,bw-2,h-ty-10,9,minv?0x88464D58:0xDD20252D);
         if (!minv) {
             gradient_v(ax+3,ty+5,bw-6,9,0xFFE9ECF2,0x88FF766E);
             fill(ax+7,ty+3,bw-14,2,0xFFFF3B30);
@@ -1182,7 +1182,7 @@ static void draw_taskbar(void) {
     }
 
     /* Clock and date come from the RTC-backed kernel system-time service. */
-    round_fill(w > 104 ? w - 104 : 0, ty + 5, w > 104 ? 99 : w, h - ty - 10, 7, 0x88323843);
+    round_fill(w > 104 ? w - 104 : 0, ty + 5, w > 104 ? 99 : w, h - ty - 10, 10, 0x88323843);
     fill(w > 104 ? w-100 : 1,ty+7,w>104?94:w-2,1,0x66FF3B30);
     if (w >= 108) {
         U32_SYSTEM_TIME now;
@@ -2449,14 +2449,14 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
         compose();
         int by=g_wnd.y+g_wnd.h-42;
         int bx=yesno?g_wnd.x+g_wnd.w-190:g_wnd.x+g_wnd.w-100;
-        round_fill(bx,by,78,28,4,0xFF559EBB);
-        round_fill(bx+1,by+1,76,26,3,0xFFF5FCFF);
-        draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFF164E68);
+        round_fill(bx,by,78,28,10,0xFFFF3B30);
+        round_fill(bx+2,by+2,74,24,8,0xFF292E37);
+        draw_text(bx+(yesno?25:26),by+9,yesno?"Yes":"OK",0xFFF1F3F6);
         int nx=g_wnd.x+g_wnd.w-100;
         if(yesno) {
-            round_fill(nx,by,78,28,4,0xFF559EBB);
-            round_fill(nx+1,by+1,76,26,3,0xFFF5FCFF);
-            draw_text(nx+24,by+9,"No",0xFF164E68);
+            round_fill(nx,by,78,28,10,0xFFFF3B30);
+            round_fill(nx+2,by+2,74,24,8,0xFF292E37);
+            draw_text(nx+24,by+9,"No",0xFFF1F3F6);
         }
 
         /* The modal title is not "Desktop", so compose() does not paint the

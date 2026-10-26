@@ -64,11 +64,9 @@ static void round_rect(u32 *fb,u32 pitch,u32 w,u32 h,int x,int y,int rw,int rh,i
             int cx=side?rw-radius:radius;
             unsigned int hits=0;
             for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++) {
-                int dx4=(px-x)*4+sx*1+0; /* quarter-pixel sample */
-                int dy4=yy*4+sy;
-                int centerx4=cx*4+2, centery4=cy*4+2;
-                int ddx=dx4+1-centerx4, ddy=dy4+1-centery4;
-                if((long long)ddx*ddx+(long long)ddy*ddy<=(long long)radius*radius*16)hits++;
+                int dx8=(px-x)*8+sx*2+1-cx*8;
+                int dy8=yy*8+sy*2+1-cy*8;
+                if((long long)dx8*dx8+(long long)dy8*dy8<=(long long)radius*radius*64)hits++;
             }
             if(hits)blend_pixel(fb,pitch,w,h,px,y+yy,color,hits*255u/16u);
         }

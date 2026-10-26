@@ -186,3 +186,35 @@ static int SentinelPeGetImportSymbol(const void *mapped_image,uint64_t mapped_si
  }
  return 1;
 }
+
+/* Validate the complete import table before a loader resolves or writes any
+ * IAT entries. Both descriptor and thunk terminators must be present within
+ * their respective image bounds; malformed tables fail before partial binding. */
+static int SentinelPeValidateImports(const void *mapped_image,uint64_t mapped_size,
+                                     const SENTINEL_PE_IMAGE_INFO *info) {
+ if(!mapped_image||!info||mapped_size<info->image_size)return -1;
+ if(!info->import_rva&&!info->import_size)return 0;
+ if(!info->import_rva||info->import_size<20||
+    !SentinelPeRange(info->import_rva,info->import_size,info->image_size))return -2;
+ uint64_t descriptor_count=info->import_size/20;
+ int terminated=0;
+ for(uint64_t d=0;d<descriptor_count;d++){
+  SENTINEL_PE_IMPORT_DESCRIPTOR desc;
+  int dr=SentinelPeGetImportDescriptor(mapped_image,info->image_size,info,(uint32_t)d,&desc);
+  if(dr<0)return -3;
+  if(dr==0){terminated=1;break;}
+  uint64_t dll_len=0;
+  if(SentinelPeMappedString((const uint8_t*)mapped_image,info->image_size,desc.name_rva,&dll_len)||!dll_len)return -4;
+  uint32_t lookup=desc.original_first_thunk?desc.original_first_thunk:desc.first_thunk;
+  uint64_t available=(info->image_size-lookup)/8;
+  int thunk_terminated=0;
+  for(uint64_t i=0;i<available;i++){
+   SENTINEL_PE_IMPORT_SYMBOL symbol;
+   int sr=SentinelPeGetImportSymbol(mapped_image,info->image_size,&desc,(uint32_t)i,&symbol);
+   if(sr<0)return -5;
+   if(sr==0){thunk_terminated=1;break;}
+  }
+  if(!thunk_terminated)return -6;
+ }
+ return terminated?0:-7;
+}

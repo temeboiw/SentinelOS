@@ -3791,7 +3791,7 @@ static void user_enter(BootInfo *bi) {
                 if (ki_current) ki_current->Process = PspSystemProcess;
                 PspForgetUserImages(proc);
                 PspForgetDiskModule(proc);
-MmDeleteAddressSpace(proc);
+                MmDeleteAddressSpace(proc);
                 return;
             }
             map_4k_in(proc->Pml4,
@@ -3804,7 +3804,7 @@ MmDeleteAddressSpace(proc);
         if (ki_current) ki_current->Process = PspSystemProcess;
         PspForgetUserImages(proc);
         PspForgetDiskModule(proc);
-MmDeleteAddressSpace(proc);
+        MmDeleteAddressSpace(proc);
         return;
     }
 

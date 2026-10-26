@@ -559,6 +559,13 @@ static void draw_char(int x, int y, char ch, u32 col) {
     }
 }
 
+static int draw_glyph(int x,int y,unsigned int ch,u32 col) {
+    int adv=u32_ttf_font.valid
+        ? u32_ttf_draw(&u32_ttf_font,x,y+13,ch,14,col) : -1;
+    if(adv>=0)return adv>0?adv:1;
+    draw_char(x,y,(char)(ch<256u?ch:'?'),col);
+    return 8;
+}
 static void draw_text(int x, int y, const char *s, u32 col) {
     if (!s) return;
     if(g_start_scale_active) {
@@ -566,13 +573,7 @@ static void draw_text(int x, int y, const char *s, u32 col) {
         x=g_start_scale_x+((x-g_start_scale_x)*sc+50)/100;
         y=g_start_scale_y+((y-g_start_scale_y)*sc+50)/100;
     }
-    for (; *s; s++) {
-        int adv = u32_ttf_font.valid
-            ? u32_ttf_draw(&u32_ttf_font,x,y+13,(unsigned char)*s,14,col)
-            : -1;
-        if (adv < 0) { draw_char(x,y,*s,col); x += 8; }
-        else x += adv > 0 ? adv : 1;
-    }
+    for (; *s; s++) x+=draw_glyph(x,y,(unsigned char)*s,col);
 }
 
 /* Save-under for fast cursor motion. cur_under holds the framebuffer pixels
@@ -3638,9 +3639,9 @@ __attribute__((dllexport)) BOOL DrawIcon(void *dc,int x,int y,void *icon){(void)
 
 __attribute__((dllexport)) BOOL DrawIconEx(void *dc,int x,int y,void *icon,int cx,int cy,unsigned int step,void *brush,unsigned int flags){(void)step;(void)brush;(void)flags;(void)dc;(void)icon;if(cx<=0)cx=16;if(cy<=0)cy=16;panel(x,y,cx,cy,COL_ICON,COL_TEXT);return 1;}
 
-__attribute__((dllexport)) int DrawTextA(void *dc,const char *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0;while((count<0?text[n]!=0:n<count)&&text[n])n++;int x=r->left,y=r->top;for(int i=0;i<n;i++){if(text[i]=='\n'){x=r->left;y+=8;continue;}draw_char(x,y,text[i],COL_TEXT);x+=8;}return n;}
+__attribute__((dllexport)) int DrawTextA(void *dc,const char *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0;while((count<0?text[n]!=0:n<count)&&text[n])n++;int x=r->left,y=r->top;for(int i=0;i<n;i++){if(text[i]=='\n'){x=r->left;y+=16;continue;}x+=draw_glyph(x,y,(unsigned char)text[i],COL_TEXT);}return n;}
 
-__attribute__((dllexport)) int DrawTextW(void *dc,const unsigned short *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0,x=r->left,y=r->top;while((count<0?text[n]!=0:n<count)&&text[n]){if(text[n]=='\n'){x=r->left;y+=8;}else{draw_char(x,y,text[n]<128?(char)text[n]:'?',COL_TEXT);x+=8;}n++;}return n;}
+__attribute__((dllexport)) int DrawTextW(void *dc,const unsigned short *text,int count,U32_RECT *r,unsigned int format){(void)dc;(void)format;if(!text||!r)return 0;int n=0,x=r->left,y=r->top;while((count<0?text[n]!=0:n<count)&&text[n]){if(text[n]=='\n'){x=r->left;y+=16;}else{x+=draw_glyph(x,y,text[n],COL_TEXT);}n++;}return n;}
 
 __attribute__((dllexport)) BOOL GetTextExtentPoint32A(void *dc,const char *text,int count,U32_POINT *size){(void)dc;if(!text||!size||count<0)return 0;size->x=count*8;size->y=8;return 1;}
 
@@ -3901,7 +3902,7 @@ __attribute__((dllexport)) BOOL GetTextExtentExPointW(void *dc,const unsigned sh
 
 __attribute__((dllexport)) long long TabbedTextOutA(void *dc,int x,int y,const char *text,int count,int tabs,const int *stops,int origin){(void)dc;(void)tabs;(void)stops;(void)origin;if(!text||count<0)return 0;draw_text(x,y,text,COL_TEXT);return ((long long)8<<32)|(unsigned int)(count*8);}
 
-__attribute__((dllexport)) long long TabbedTextOutW(void *dc,int x,int y,const unsigned short *text,int count,int tabs,const int *stops,int origin){(void)dc;(void)tabs;(void)stops;(void)origin;if(!text||count<0)return 0;for(int i=0;i<count;i++)draw_char(x+i*8,y,text[i]<128?(char)text[i]:'?',COL_TEXT);return ((long long)8<<32)|(unsigned int)(count*8);}
+__attribute__((dllexport)) long long TabbedTextOutW(void *dc,int x,int y,const unsigned short *text,int count,int tabs,const int *stops,int origin){(void)dc;(void)tabs;(void)stops;(void)origin;if(!text||count<0)return 0;int width=0;for(int i=0;i<count;i++)width+=draw_glyph(x+width,y,text[i],COL_TEXT);return ((long long)14<<32)|(unsigned int)width;}
 
 __attribute__((dllexport)) void *GetClipboardOwner(void){return u32_clipboard_owner;}
 

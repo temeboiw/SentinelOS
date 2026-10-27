@@ -1195,6 +1195,10 @@ lld -flavor link \
   /export:WSAWaitForMultipleEvents \
   /export:WSAEnumNetworkEvents \
   /export:WSAAsyncSelect \
+  /export:WSASocketW /export:WSARecvFrom /export:WSASendTo \
+  /export:GetAddrInfoW /export:FreeAddrInfoW /export:GetNameInfoW \
+  /export:WSAAddressToStringW /export:WSAStringToAddressW \
+  /export:WSASetEvent /export:WSAResetEvent \
   /export:accept,@1 \
   /export:bind,@2 \
   /export:closesocket,@3 \

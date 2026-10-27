@@ -1139,6 +1139,7 @@ lld -flavor link \
   /export:UnhandledExceptionFilter \
   /export:InitializeCriticalSection \
   /export:EnterCriticalSection \
+  /export:TryEnterCriticalSection \
   /export:LeaveCriticalSection \
   /export:DeleteCriticalSection \
   /export:SetUnhandledExceptionFilter \

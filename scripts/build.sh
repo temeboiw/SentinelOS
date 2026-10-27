@@ -1275,6 +1275,12 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
   /export:GetOpenFileNameA /export:GetSaveFileNameA /export:CommDlgExtendedError \
   "/out:$SYS32/comdlg32.dll" "$B/obj/comdlg32.o"
 
+echo "  -> msvcp140.dll"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/msvcp140.c" -o "$B/obj/msvcp140.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43A00000 \
+  "/def:$ROOT/user/msvcp140.def" "/out:$SYS32/msvcp140.dll" \
+  "$B/obj/msvcp140.o" "$B/obj/kernel32.lib"
+
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
 for flag in "${USER_CFLAGS[@]}"; do

@@ -152,13 +152,22 @@ assign letter=$sysLetter
     Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
     $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
     $partitions = @(Get-Partition -DiskNumber $disk.Number)
-    if ($partitions.Count -ne 2) {
+    # Windows may create the standard 16 MiB Microsoft Reserved (MSR)
+    # partition automatically when preparing a GPT VHDX. It is not a data
+    # partition and must not be mistaken for the ESP or MAGIC volume.
+    $efiGuid = "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}"
+    $basicGuid = "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}"
+    $msrGuid = "{e3c9e316-0b5c-4db8-817d-f92df00215ae}"
+    $efiPartitions = @($partitions | Where-Object { "$($_.GptType)".Trim("{}").ToLowerInvariant() -eq $efiGuid.Trim("{}") })
+    $basicPartitions = @($partitions | Where-Object { "$($_.GptType)".Trim("{}").ToLowerInvariant() -eq $basicGuid.Trim("{}") })
+    $msrPartitions = @($partitions | Where-Object { "$($_.GptType)".Trim("{}").ToLowerInvariant() -eq $msrGuid.Trim("{}") })
+    if ($efiPartitions.Count -ne 1 -or $basicPartitions.Count -ne 1 -or $partitions.Count -ne (2 + $msrPartitions.Count) -or $msrPartitions.Count -gt 1) {
         $partitionSummary = ($partitions | Sort-Object PartitionNumber | ForEach-Object {
-            "number=$($_.PartitionNumber), type=$($_.Type), gptType=$($_.GptType), size=$($_.Size), drive=$($_.DriveLetter), filesystem=$($_.FileSystem), label=$($_.FileSystemLabel)"
+            "number=$($_.PartitionNumber), type=$($_.Type), gptType=$($_.GptType), size=$($_.Size), drive=$($_.DriveLetter)"
         }) -join [Environment]::NewLine
-        throw "Expected exactly two GPT partitions, found $($partitions.Count) on VHDX '$vhd':$([Environment]::NewLine)$partitionSummary"
+        throw "Expected one EFI System Partition and one MAGIC basic-data partition, optionally plus one MSR; found an unexpected GPT layout on VHDX '$vhd':$([Environment]::NewLine)$partitionSummary"
     }
-    $rootPartition = $partitions | Where-Object { $_.PartitionNumber -eq 2 } | Select-Object -First 1
+    $rootPartition = $basicPartitions[0]
     if (-not $rootPartition) { throw "NTFS system partition was not created." }
     if (-not (Test-Path -LiteralPath $sysRoot)) { throw "NTFS system partition was not mounted at $sysRoot" }
 

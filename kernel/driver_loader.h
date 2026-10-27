@@ -230,7 +230,14 @@ static int SentinelDriverLoadImage(const char *name,
     }
 
     if (candidate.unload && !unload_valid) {
-        kfree(image);
+        /*
+         * DriverEntry may already have published callbacks into this image.
+         * The unload pointer itself is invalid, so do not call it. Retain the
+         * image if the block registry still references any part of it; freeing
+         * it would turn a rejected driver into a kernel use-after-free.
+         */
+        if (!SentinelBlockReferencesRange((uintptr_t)image, info.image_size))
+            kfree(image);
         return -17;
     }
 

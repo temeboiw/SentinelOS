@@ -186,7 +186,15 @@ assign letter=$sysLetter
     # Copy the whole rootfs recursively: all built EXEs, DLLs, drivers, fonts,
     # assets, and any future files produced by build.sh are staged automatically.
     Copy-Item -Path (Join-Path $rootfs "*") -Destination $sysRoot -Recurse -Force
-    foreach ($relative in @("magic\System32\smss.exe","magic\System32\sentlogon.exe","magic\System32\bootvid.exe","magic\System32\explorer.exe","magic\System32\fileexplorer.exe","magic\System32\krnl.exe","magic\System32\hal.dll")) {
+
+    # The current kernel VFS looks up user-mode images by basename at the
+    # mounted system-volume root. rootfs\magic is the logical SentinelOS
+    # tree, so stage its contents at the volume root as well as preserving
+    # the enclosing \magic directory for bootloader/path compatibility.
+    $magicTree = Join-Path $rootfs "magic"
+    Copy-Item -Path (Join-Path $magicTree "*") -Destination $sysRoot -Recurse -Force
+
+    foreach ($relative in @("smss.exe","sentlogon.exe","bootvid.exe","explorer.exe","fileexplorer.exe","krnl.exe","hal.dll","System32\smss.exe","System32\sentlogon.exe","System32\bootvid.exe","System32\explorer.exe","System32\fileexplorer.exe","System32\krnl.exe","System32\hal.dll")) {
         $copied = Join-Path $sysRoot $relative
         if (-not (Test-Path -LiteralPath $copied -PathType Leaf) -or (Get-Item -LiteralPath $copied).Length -le 0) {
             throw "Staging verification failed; missing copied file: $copied"

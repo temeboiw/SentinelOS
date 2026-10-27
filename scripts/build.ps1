@@ -41,11 +41,18 @@ if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (diskpart 
 
 function Invoke-Tool {
     $exe, $rest = $args
+    $shown = @($rest | ForEach-Object { if ("$_" -match "\s") { '"'"' + $_ + '"'"' } else { "$_" } }) -join " "
+    Write-Host ("[BUILD] {0} {1}" -f $exe, $shown) -ForegroundColor Cyan
     & $exe @rest
     if ($LASTEXITCODE -ne 0) { throw "$exe failed (exit $LASTEXITCODE)" }
 }
+function Write-Stage([string]$name) {
+    Write-Host ""
+    Write-Host ("========== {0} ==========" -f $name) -ForegroundColor Yellow
+}
 function Fwd($p) { $p -replace '\\', '/' }
 
+Write-Stage "Prepare build directories and root filesystem staging"
 # Recreate a clean staged rootfs: /magic is the only volume-root entry.
 $rootfs = "$b\rootfs"
 if (Test-Path $rootfs) { Remove-Item $rootfs -Recurse -Force }
@@ -66,6 +73,7 @@ function Build-Efi($name, $out, [string[]]$extra = @()) {
         "/out:$out" "$b\obj\$name.o"
 }
 
+Write-Stage "UEFI boot applications"
 # ---- ESP (FAT): stage 0 = firmware fallback, stage 1 = bootuni, stage 2 = loadufi ----
 Build-Efi bootx64 "$b\esp\EFI\BOOT\BOOTX64.EFI"
 [string[]]$extra = @()
@@ -73,6 +81,7 @@ if ($KeepFallback) { $extra = @("-DKEEP_FALLBACK") }
 Build-Efi bootuni "$b\esp\EFI\magic\bootuni.efi" $extra
 Build-Efi loadufi "$b\esp\EFI\magic\loadufi.efi"
 
+Write-Stage "HAL and kernel (including SMP trampoline)"
 # ---- the kernel goes to the ext4 volume (magic\System32) ----
 Invoke-Tool clang @common -DHAL_BUILD -c "$root\hal\hal.c" -o "$b\obj\hal.o"
 Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\obj\hal.lib" /base:0xFFFFFFFF81000000 /fixed:no "/out:$sys32\hal.dll" "$b\obj\hal.o"
@@ -92,6 +101,7 @@ if (-not (Test-Path "$drivers" -PathType Container)) {
     throw "missing magic\System32\drivers directory"
 }
 
+Write-Stage "Create GPT virtual disk and FAT32 EFI System Partition"
 # ---- build one GPT disk: FAT32 ESP + ext4 system partition ----
 $feats = "^has_journal,^metadata_csum,^64bit,^resize_inode"   # keep it simple for the loader
 $usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
@@ -132,6 +142,7 @@ create partition primary size=96
     Detach-Vhd                               # also unmounts the ESP folder
 }
 
+Write-Stage "Format ext4 system partition (native Windows mke2fs)"
 # Format ext4 directly inside partition 2 using a native Windows mke2fs.exe.
 # No WSL, MSYS2, or shell fallback is permitted.
 if (-not (Test-Path $mke2fs -PathType Leaf)) {
@@ -144,6 +155,7 @@ if (-not (Test-Path $mke2fs -PathType Leaf)) {
 Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
     -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $vhd) "$extBlocks"
 
+Write-Stage "Convert VHD to raw SentinelOS disk image"
 Invoke-Tool qemu-img convert -f vpc -O raw $vhd $diskimg
 Remove-Item $vhd
 

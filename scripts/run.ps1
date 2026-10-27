@@ -27,14 +27,15 @@ if ($env:ProgramFiles) { $shareCandidates += (Join-Path $env:ProgramFiles "qemu\
 if ($env:ProgramW6432) { $shareCandidates += (Join-Path $env:ProgramW6432 "qemu\share") }
 $share = $shareCandidates | Where-Object {
     (Test-Path (Join-Path $_ "edk2-x86_64-code.fd")) -and
-    ((Test-Path (Join-Path $_ "edk2-i386-vars.fd")) -or (Test-Path (Join-Path $_ "edk2-x86_64-vars.fd")))
+    (Test-Path (Join-Path $_ "edk2-x86_64-vars.fd"))
 } | Select-Object -First 1
-if (-not $share) { throw "Could not find edk2-x86_64-code.fd and a writable vars template. Set QEMU_SHARE to the QEMU share directory." }
+if (-not $share) { throw "Could not find a matching edk2-x86_64-code.fd + edk2-x86_64-vars.fd firmware pair. Set QEMU_SHARE to a compatible QEMU share directory." }
 $code = Join-Path $share "edk2-x86_64-code.fd"
 if (-not (Test-Path $vars)) {
-    $templates = @((Join-Path $share "edk2-i386-vars.fd"), (Join-Path $share "edk2-x86_64-vars.fd"))
+    # Pair x86-64 code firmware with its x86-64 variable-store template.
+    $templates = @((Join-Path $share "edk2-x86_64-vars.fd"))
     $template = $templates | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $template) { throw "No writable UEFI vars template found in $share" }
+    if (-not $template) { throw "No matching x86-64 UEFI vars template found in $share. Do not pair x86-64 code firmware with an i386 vars template." }
     New-Item -ItemType Directory -Force $b | Out-Null
     Copy-Item $template $vars
 }

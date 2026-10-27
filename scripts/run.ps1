@@ -69,8 +69,13 @@ if ($NoGpuAcceleration) {
     Write-Host "SentinelOS: requesting NVIDIA-backed host OpenGL/VirGL on VirtIO VGA"
 }
 Write-Host "SentinelOS: boot disk: $disk (GPT / FAT32 ESP + NTFS system volume)"
-Write-Host "SentinelOS: starting QEMU. Unsupported -cpu host or virtio-vga-gl options will be reported by QEMU."
-$argsQemu = @("-machine", "q35") + $accelArgs + $cpuArgs + @(
+Write-Host "SentinelOS: starting QEMU. Firmware failures before SentinelOS starts should be isolated with -NoHostCpu -NoGpuAcceleration."
+# The platform switch isolates firmware/QEMU compatibility from the default q35 + VirtIO setup.
+$machineArgs = @("-machine", "q35")
+if ($NoHostCpu) {
+    $machineArgs = @("-machine", "q35")
+}
+$argsQemu = $machineArgs + $accelArgs + $cpuArgs + @(
     "-smp", "$CpuCount",
     "-m", "$($ramMb)M",
     "-drive", "if=pflash,format=raw,readonly=on,file=$code",

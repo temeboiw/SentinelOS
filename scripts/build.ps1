@@ -41,7 +41,7 @@ if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (diskpart 
 
 function Invoke-Tool {
     $exe, $rest = $args
-    $shown = @($rest | ForEach-Object { if ("$_" -match "\s") { '"'"' + $_ + '"'"' } else { "$_" } }) -join " "
+    $shown = @($rest | ForEach-Object { if ("$_" -match "\s") { '"' + ($_ -replace '"', '\" ') + '"' } else { "$_" } }) -join " "
     Write-Host ("[BUILD] {0} {1}" -f $exe, $shown) -ForegroundColor Cyan
     & $exe @rest
     if ($LASTEXITCODE -ne 0) { throw "$exe failed (exit $LASTEXITCODE)" }

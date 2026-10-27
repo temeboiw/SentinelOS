@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $b    = "$root\build"
 $edk2 = if ($env:EDK2) { $env:EDK2 } else { "C:\edk2" }
-$mke2fs = "C:\msys64\usr\bin\mke2fs.exe"
+$mke2fs = if ($env:MKE2FS) { $env:MKE2FS } else { "$root\tools\mke2fs.exe" }
 $vhd    = "$b\magic-disk.vhd"
 $diskimg = "$b\magic-disk.img"
 
@@ -132,16 +132,17 @@ create partition primary size=96
     Detach-Vhd                               # also unmounts the ESP folder
 }
 
-# Format ext4 directly inside partition 2 of the detached VHD.
-if (Test-Path $mke2fs) {
-    Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
-        -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $vhd) "$extBlocks"
-} else {
-    $wr = (wsl wslpath -a (Fwd "$b\rootfs")).Trim()
-    $wi = (wsl wslpath -a (Fwd $vhd)).Trim()
-    Invoke-Tool wsl mke2fs -t ext4 -b 4096 -L magic -O $feats `
-        -d $wr -E "offset=$extOffset" $wi "$extBlocks"
+# Format ext4 directly inside partition 2 using a native Windows mke2fs.exe.
+# No WSL, MSYS2, or shell fallback is permitted.
+if (-not (Test-Path $mke2fs -PathType Leaf)) {
+    $found = Get-Command mke2fs.exe -ErrorAction SilentlyContinue
+    if ($found) { $mke2fs = $found.Source }
 }
+if (-not (Test-Path $mke2fs -PathType Leaf)) {
+    throw "Native mke2fs.exe is required to create the ext4 partition. Place a standalone Windows e2fsprogs mke2fs.exe at '$root\tools\mke2fs.exe' or set `$env:MKE2FS to its full path. This build intentionally does not use WSL or MSYS2."
+}
+Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
+    -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $vhd) "$extBlocks"
 
 Invoke-Tool qemu-img convert -f vpc -O raw $vhd $diskimg
 Remove-Item $vhd

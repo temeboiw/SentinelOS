@@ -272,7 +272,6 @@ static int ntfsk_find_and_mount(NTFSK_VOLUME *v, SENTINEL_BLOCK_DEVICE *d) {
         d->read(d->context, 0, mbr, sizeof(mbr)) < 0 ||
         ntfsk_u16(mbr + 510) != 0xaa55) return -1;
 
-    uint8_t *protective = mbr + 446;
     int has_gpt = 0;
     for (unsigned i = 0; i < 4; ++i) {
         const uint8_t *e = mbr + 446 + i * 16;
@@ -284,11 +283,9 @@ static int ntfsk_find_and_mount(NTFSK_VOLUME *v, SENTINEL_BLOCK_DEVICE *d) {
     if (d->read(d->context, d->sector_size, hdr, sizeof(hdr)) < 0 ||
         ntfsk_u64(hdr) != 0x5452415020494645ULL) return -1; /* "EFI PART" */
     uint32_t hsize = ntfsk_u32(hdr + 12);
-    uint32_t hcrc = ntfsk_u32(hdr + 16);
     uint64_t entries_lba = ntfsk_u64(hdr + 72);
     uint32_t entry_count = ntfsk_u32(hdr + 80);
     uint32_t entry_size = ntfsk_u32(hdr + 84);
-    (void)hcrc;
     if (hsize < 92 || hsize > d->sector_size ||
         !entry_count || entry_count > 4096 ||
         entry_size < 128 || entry_size > 4096 ||

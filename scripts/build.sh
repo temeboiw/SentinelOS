@@ -1158,6 +1158,10 @@ lld -flavor link \
   /export:IsValidCodePage \
   /export:FormatMessageA \
   /export:FormatMessageW \
+  /export:FindResourceW \
+  /export:LoadResource \
+  /export:LockResource \
+  /export:SizeofResource \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 

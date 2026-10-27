@@ -241,7 +241,9 @@ static EFI_STATUS ntfs_load_file(const char *const *path, int depth, VOID **file
             ino=nt_lookup(&fs,ino,path[k]);
             if(!ino) {
                 say(L"ntfs: path component not found: ");
-                say_a(path[k]);
+                for (const char *ch=path[k]; *ch; ch++) {
+                    CHAR16 one[2]={(CHAR16)(UINT8)*ch,0}; say(one);
+                }
                 say(L"\\r\\n");
             }
         }

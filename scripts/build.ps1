@@ -77,8 +77,11 @@ Build-Efi loadufi "$b\esp\EFI\magic\loadufi.efi"
 Invoke-Tool clang @common -DHAL_BUILD -c "$root\hal\hal.c" -o "$b\obj\hal.o"
 Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\obj\hal.lib" /base:0xFFFFFFFF81000000 /fixed:no "/out:$sys32\hal.dll" "$b\obj\hal.o"
 Invoke-Tool clang @common -c "$root\kernel\kernel.c" -o "$b\obj\kernel.o"
+# The kernel references real-mode/protected-mode/long-mode AP startup labels.
+# Assemble the existing trampoline and link it into the kernel; do not stub symbols.
+Invoke-Tool clang @common -c "$root\kernel\smp_trampoline.S" -o "$b\obj\smp_trampoline.o"
 Invoke-Tool lld-link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase `
-    /base:0xFFFFFFFF80200000 /fixed:no "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\hal.lib"
+    /base:0xFFFFFFFF80200000 /fixed:no "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\smp_trampoline.o" "$b\obj\hal.lib"
 
 # Guard the filesystem layout before formatting the ext4 partition.
 $topLevel = @(Get-ChildItem -Force $rootfs)

@@ -1237,6 +1237,18 @@ lld -flavor link \
   "/out:$SYS32/ws2_32.dll" \
   "$B/obj/ws2_32.o"
 
+echo "  -> shell32.dll (command-line argument parsing)"
+clang "${USER_CFLAGS[@]}" -fno-builtin \
+  -c "$ROOT/user/shell32.c" \
+  -o "$B/obj/shell32.o"
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /dynamicbase /base:0x43500000 \
+  /export:CommandLineToArgvW \
+  "/out:$SYS32/shell32.dll" \
+  "$B/obj/shell32.o" \
+  "$B/obj/kernel32.lib"
+
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
 for flag in "${USER_CFLAGS[@]}"; do

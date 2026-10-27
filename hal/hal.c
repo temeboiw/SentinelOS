@@ -50,7 +50,12 @@ static inline VOID cpuid(ULONG leaf, ULONG subleaf,
 
 static inline ULONGLONG rdtsc(void) {
     ULONG lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
+    /*
+     * Serialize earlier execution before sampling the counter. LFENCE is
+     * available on the x86-64 baseline and prevents calibration/stall timing
+     * from starting or ending ahead of surrounding instructions.
+     */
+    __asm__ volatile("lfence; rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
     return ((ULONGLONG)hi << 32) | lo;
 }
 

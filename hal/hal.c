@@ -6,12 +6,35 @@
 #endif
 #include "hal.h"
 
-static inline UCHAR  inb(USHORT p) { UCHAR v;  __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p)); return v; }
-static inline USHORT inw(USHORT p) { USHORT v; __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"(p)); return v; }
-static inline ULONG  inl(USHORT p) { ULONG v;  __asm__ volatile("inl %1, %0" : "=a"(v) : "Nd"(p)); return v; }
-static inline VOID outb(USHORT p, UCHAR v)  { __asm__ volatile("outb %0, %1" :: "a"(v), "Nd"(p)); }
-static inline VOID outw(USHORT p, USHORT v) { __asm__ volatile("outw %0, %1" :: "a"(v), "Nd"(p)); }
-static inline VOID outl(USHORT p, ULONG v)  { __asm__ volatile("outl %0, %1" :: "a"(v), "Nd"(p)); }
+/*
+ * Port I/O is a compiler ordering boundary for device-register sequences.
+ * The memory clobber prevents ordinary loads/stores from being moved across
+ * these operations by optimization.
+ */
+static inline UCHAR inb(USHORT p) {
+    UCHAR v;
+    __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p) : "memory");
+    return v;
+}
+static inline USHORT inw(USHORT p) {
+    USHORT v;
+    __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"(p) : "memory");
+    return v;
+}
+static inline ULONG inl(USHORT p) {
+    ULONG v;
+    __asm__ volatile("inl %1, %0" : "=a"(v) : "Nd"(p) : "memory");
+    return v;
+}
+static inline VOID outb(USHORT p, UCHAR v) {
+    __asm__ volatile("outb %0, %1" :: "a"(v), "Nd"(p) : "memory");
+}
+static inline VOID outw(USHORT p, USHORT v) {
+    __asm__ volatile("outw %0, %1" :: "a"(v), "Nd"(p) : "memory");
+}
+static inline VOID outl(USHORT p, ULONG v) {
+    __asm__ volatile("outl %0, %1" :: "a"(v), "Nd"(p) : "memory");
+}
 
 static inline VOID cpuid(ULONG leaf, ULONG subleaf,
                          ULONG *a, ULONG *b, ULONG *c, ULONG *d) {
@@ -85,11 +108,19 @@ static void com1_init(void) {
 }
 
 static void com1_putc(char c) {
-    for (ULONG i = 0; i < 100000 && !(inb(COM1 + 5) & 0x20); i++) {}     // bounded wait for the transmitter
-    outb(COM1, (UCHAR)c);
+    for (ULONG i = 0; i < 100000; i++) {
+        if (inb(COM1 + 5) & 0x20) {
+            outb(COM1, (UCHAR)c);
+            return;
+        }
+        __asm__ volatile("pause");
+    }
+    /* A stuck/missing UART must not stall boot forever or receive a write
+       while its transmitter is still busy. Drop this character on timeout. */
 }
 
 HALAPI VOID HalDisplayString(PCSTR String) {
+    if (!String) return;
     for (; *String; String++) {
         if (*String == '\n') com1_putc('\r');
         com1_putc(*String);

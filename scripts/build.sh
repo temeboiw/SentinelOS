@@ -1134,6 +1134,26 @@ lld -flavor link \
   /export:GetFileAttributesTransactedW \
   /export:SetFileAttributesTransactedA \
   /export:SetFileAttributesTransactedW \
+  /export:RtlLookupFunctionEntry \
+  /export:RtlVirtualUnwind \
+  /export:UnhandledExceptionFilter \
+  /export:InitializeCriticalSection \
+  /export:EnterCriticalSection \
+  /export:LeaveCriticalSection \
+  /export:DeleteCriticalSection \
+  /export:SetUnhandledExceptionFilter \
+  /export:GetExitCodeThread \
+  /export:RtlCaptureContext \
+  /export:DisableThreadLibraryCalls \
+  /export:InitializeSListHead \
+  /export:TlsGetValue \
+  /export:TlsSetValue \
+  /export:WakeAllConditionVariable \
+  /export:SleepConditionVariableSRW \
+  /export:AcquireSRWLockExclusive \
+  /export:ReleaseSRWLockExclusive \
+  /export:InitializeConditionVariable \
+  /export:WakeConditionVariable \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 

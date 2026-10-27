@@ -181,7 +181,8 @@ static void calibrate_tsc(void) {
     outb(0x61, (UCHAR)(v | 1));
     ULONGLONG t0 = rdtsc();
     ULONG spins = 0;
-    while (!(inb(0x61) & 0x20) && ++spins < 50000000UL)\n        __asm__ volatile("pause" ::: "memory");
+    while (!(inb(0x61) & 0x20) && ++spins < 50000000UL)
+        __asm__ volatile("pause" ::: "memory");
     ULONGLONG t1 = rdtsc();
     outb(0x61, gate);
     if (spins < 50000000UL && t1 > t0) {

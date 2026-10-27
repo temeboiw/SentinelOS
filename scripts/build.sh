@@ -157,12 +157,19 @@ lld() {
         value="${arg#/implib:}"
         args+=("-implib:$(cygpath -aw "$value")")
         ;;
+      /def:*)
+        # MSYS path conversion treats /def:C:/... as a path-list fragment
+        # and prepends the Git installation's /def directory. Convert the
+        # definition-file path explicitly, just like /out and /implib.
+        value="${arg#/def:}"
+        args+=("-def:$(cygpath -aw "$value")")
+        ;;
       *)
         args+=("$arg")
         ;;
     esac
   done
-  MSYS2_ARG_CONV_EXCL='/nodefaultlib;/dynamicbase;/subsystem;/entry;/base;/fixed;/dll;/noentry;/export' "$LLD_BIN" "${args[@]}"
+  MSYS2_ARG_CONV_EXCL='/nodefaultlib;/dynamicbase;/subsystem;/entry;/base;/fixed;/dll;/noentry;/export;/def' "$LLD_BIN" "${args[@]}"
 }
 
 # Catch broken compiler wrappers before starting parallel EFI builds.

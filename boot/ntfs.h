@@ -216,6 +216,14 @@ static EFI_STATUS nt_file_data(Ntfs *fs, UINT64 idx, VOID **file, UINTN *size) {
     bs->FreePool(rec);return s;
 }
 
+static void ntfs_say_status(EFI_STATUS status) {
+    static const CHAR16 hex[] = L"0123456789ABCDEF";
+    say(L"0x");
+    for (INTN shift = (INTN)(sizeof(EFI_STATUS) * 8) - 4; shift >= 0; shift -= 4) {
+        CHAR16 ch[2] = { hex[((UINTN)status >> shift) & 0xF], 0 };
+        say(ch);
+    }
+}
 static EFI_STATUS ntfs_load_file(const char *const *path, int depth, VOID **file, UINTN *size) {
     EFI_HANDLE *handles=NULL; UINTN count=0;
     EFI_STATUS s=bs->LocateHandleBuffer(ByProtocol,&gNtfsBlockIoGuid,NULL,&count,&handles);

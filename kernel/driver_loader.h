@@ -372,6 +372,35 @@ static int SentinelDriverLoadFromDisk(const char *name) {
 
 
 /*
+ * Reload a driver from disk using the same serialized lifecycle contract as
+ * SentinelDriverUnloadByName. Never load a second copy while the old image is
+ * still registered or retained after an incomplete teardown.
+ */
+static int SentinelDriverReloadFromDisk(const char *name) {
+    if (!SentinelDriverRegistryReady || !SentinelDriverHasSysSuffix(name))
+        return -1;
+
+    SENTINEL_DRIVER_OBJECT *existing = SentinelDriverFind(name);
+    if (existing) {
+        int unload_status = SentinelDriverUnloadByName(name);
+        if (unload_status != 0) {
+            DbgPrint("driver: %s reload stopped; unload status=%d\\n",
+                     name, unload_status);
+            return -2;
+        }
+    }
+
+    int load_status = SentinelDriverLoadFromDisk(name);
+    if (load_status != 0) {
+        DbgPrint("driver: %s reload failed during load status=%d\\n",
+                 name, load_status);
+        return -3;
+    }
+    DbgPrint("driver: %s reload complete\\n", name);
+    return 0;
+}
+
+/*
  * Enumerate /magic/System32/drivers and attempt every regular .sys module.
  * Directory records are validated before their names are copied; the scan is
  * bounded so a corrupt filesystem cannot make boot spend unbounded time here.

@@ -140,7 +140,30 @@ run_cc() {
 
 clang()   { run_cc "$CLANG_BIN" "$@"; }
 clang++() { run_cc "$CLANGXX_BIN" "$@"; }
-lld()     { "$LLD_BIN" "$@"; }
+# Git Bash/MSYS rewrites slash-prefixed PE linker switches (for example
+# /nodefaultlib) into paths before launching native Windows lld.exe. Exclude
+# those switches from automatic path conversion, while explicitly converting
+# linker output paths to native Windows paths below.
+lld() {
+  local arg value
+  local -a args=()
+  for arg in "$@"; do
+    case "$arg" in
+      /out:*)
+        value="${arg#/out:}"
+        args+=("-out:$(cygpath -aw "$value")")
+        ;;
+      /implib:*)
+        value="${arg#/implib:}"
+        args+=("-implib:$(cygpath -aw "$value")")
+        ;;
+      *)
+        args+=("$arg")
+        ;;
+    esac
+  done
+  MSYS2_ARG_CONV_EXCL='/nodefaultlib;/dynamicbase;/subsystem;/entry;/base;/fixed;/dll;/noentry;/export' "$LLD_BIN" "${args[@]}"
+}
 
 # Catch broken compiler wrappers before starting parallel EFI builds.
 PROBE_SRC="$(mktemp --suffix=.c)"

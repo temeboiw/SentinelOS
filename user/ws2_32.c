@@ -132,6 +132,38 @@ static int ws2_hex(char c) {
     return -1;
 }
 
+/* Legacy Winsock database calls have explicit failure semantics until the
+ * SentinelOS DNS/protocol/service database is implemented. */
+typedef struct { char *h_name; char **h_aliases; short h_addrtype; short h_length; char **h_addr_list; } WS2_HOSTENT;
+typedef struct { char *s_name; char **s_aliases; short s_port; char *s_proto; } WS2_SERVENT;
+typedef struct { char *p_name; char **p_aliases; short p_proto; } WS2_PROTOENT;
+__attribute__((dllexport)) WS2_HOSTENT *gethostbyaddr(const char *addr,int len,int type) {
+    (void)addr;(void)len;(void)type;ws2_last_error=WSAHOST_NOT_FOUND;return 0;
+}
+__attribute__((dllexport)) WS2_HOSTENT *gethostbyname(const char *name) {
+    (void)name;ws2_last_error=WSAHOST_NOT_FOUND;return 0;
+}
+__attribute__((dllexport)) WS2_PROTOENT *getprotobyname(const char *name) {
+    (void)name;ws2_last_error=WSAEOPNOTSUPP;return 0;
+}
+__attribute__((dllexport)) WS2_PROTOENT *getprotobynumber(int number) {
+    (void)number;ws2_last_error=WSAEOPNOTSUPP;return 0;
+}
+__attribute__((dllexport)) WS2_SERVENT *getservbyname(const char *name,const char *proto) {
+    (void)name;(void)proto;ws2_last_error=WSAEOPNOTSUPP;return 0;
+}
+__attribute__((dllexport)) WS2_SERVENT *getservbyport(int port,const char *proto) {
+    (void)port;(void)proto;ws2_last_error=WSAEOPNOTSUPP;return 0;
+}
+__attribute__((dllexport)) int __WSAFDIsSet(SOCKET s, void *set) {
+    if(!set)return 0;
+    struct ws2_fd_set_min { unsigned int count; SOCKET sockets[64]; };
+    struct ws2_fd_set_min *fds=(struct ws2_fd_set_min *)set;
+    unsigned int count=fds->count>64?64:fds->count;
+    for(unsigned int i=0;i<count;i++)if(fds->sockets[i]==s)return 1;
+    return 0;
+}
+
 __attribute__((dllexport)) int WSAStartup(WORD version, WSADATA *data) {
     unsigned int requested=version;
     if (!data) return WSAEFAULT;

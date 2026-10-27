@@ -96,7 +96,7 @@ static EFI_STATUS nt_runs_read(Ntfs *fs, const UINT8 *runs, UINTN runlen,
 }
 
 static EFI_STATUS nt_record(Ntfs *fs, UINT64 index, UINT8 *out) {
-    if (index > fs->mft_size / fs->record || fs->record > 65536) return EFI_NOT_FOUND;
+    if (index >= fs->mft_size / fs->record || fs->record > 65536) return EFI_NOT_FOUND;
     EFI_STATUS s=nt_runs_read(fs,fs->mft_runs,fs->mft_runs_len,index*fs->record,fs->record,out);
     if (EFI_ERROR(s)) return s;
     return nt_fixup(out,fs->record,fs->sector);
@@ -158,9 +158,8 @@ static UINT64 nt_lookup(Ntfs *fs, UINT64 parent, const char *name) {
         for(UINT32 p=ao;p+16<fs->record;) {
             UINT32 type=N32(rec,p); if(type==0xffffffff)break;
             UINT32 al=N32(rec,p+4); if(al<16||p+al>fs->record)break;
-            if(type==0x30 && !rec[p+8] && al>=0x60) {
+            if(type==0x30 && !rec[p+8] && al>=0x5c) {
                 UINT8 *v=rec+p+N16(rec,p+20);
-                if(N64(v,0)%0x100000000ULL==parent && N64(v,0)>>48==0) { /* low file reference checked below */ }
                 UINT64 pref=N64(v,0)&0x0000ffffffffffffULL;
                 UINT8 nl=v[64], ns=v[65];
                 if(pref==parent && ns!=2 && nl && (UINT32)66+(UINT32)nl*2<=al-N16(rec,p+20) &&

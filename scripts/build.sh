@@ -1249,6 +1249,32 @@ lld -flavor link \
   "$B/obj/shell32.o" \
   "$B/obj/kernel32.lib"
 
+echo "  -> advapi32.dll"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/advapi32.c" -o "$B/obj/advapi32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43600000 \
+  /export:RegCloseKey /export:RegOpenKeyExW /export:RegGetValueW /export:RegQueryValueExW \
+  /export:GetUserNameW /export:OpenProcessToken /export:OpenThreadToken /export:GetTokenInformation \
+  /export:ConvertSidToStringSidA /export:AllocateAndInitializeSid /export:FreeSid \
+  /export:SetEntriesInAclA /export:GetSecurityInfo /export:SetSecurityInfo /export:SystemFunction036 \
+  "/out:$SYS32/advapi32.dll" "$B/obj/advapi32.o"
+
+echo "  -> iphlpapi.dll"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/iphlpapi.c" -o "$B/obj/iphlpapi.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43700000 \
+  /export:GetAdaptersAddresses /export:ConvertInterfaceIndexToLuid /export:ConvertInterfaceLuidToNameW \
+  "/out:$SYS32/iphlpapi.dll" "$B/obj/iphlpapi.o"
+
+echo "  -> userenv.dll"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/userenv.c" -o "$B/obj/userenv.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43800000 \
+  /export:GetUserProfileDirectoryW "/out:$SYS32/userenv.dll" "$B/obj/userenv.o"
+
+echo "  -> comdlg32.dll"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/comdlg32.c" -o "$B/obj/comdlg32.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43900000 \
+  /export:GetOpenFileNameA /export:GetSaveFileNameA /export:CommDlgExtendedError \
+  "/out:$SYS32/comdlg32.dll" "$B/obj/comdlg32.o"
+
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
 for flag in "${USER_CFLAGS[@]}"; do

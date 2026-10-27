@@ -292,12 +292,12 @@ static BOOLEAN apic_init(void) {
         return FALSE;
     }
     lapic = (volatile ULONG *)(uintptr_t)apic_phys;
-    pic_disable();
 
     lapic_write(LAPIC_TPR, 0);                  // accept every priority
     lapic_write(LAPIC_SVR, 0x100 | 0xFF);       // APIC software-enable, spurious vector 0xFF
 
-    // calibrate the APIC timer against the TSC: divide by 16, free-run for 10 ms
+    // Calibrate before masking the legacy PIC; failure must not strand the machine
+    // with both the local APIC timer unavailable and all 8259 interrupts masked.
     lapic_write(LAPIC_TMR_DIV, 0x3);
     lapic_write(LAPIC_LVT_TMR, 0x10000);        // masked
     lapic_write(LAPIC_TMR_INI, 0xFFFFFFFF);
@@ -309,7 +309,13 @@ static BOOLEAN apic_init(void) {
     ULONG left = lapic_read(LAPIC_TMR_CUR);
     lapic_write(LAPIC_TMR_INI, 0);              // stop
     apic_timer_hz = (ULONGLONG)(0xFFFFFFFFUL - left) * 100;
-    return apic_timer_hz != 0;
+    if (!apic_timer_hz) {
+        HalDisplayString("HAL: local APIC timer calibration failed; leaving legacy PIC enabled\\n");
+        return FALSE;
+    }
+
+    pic_disable();
+    return TRUE;
 }
 
 HALAPI BOOLEAN HalStartClockInterrupt(ULONG Hz, ULONG Vector) {

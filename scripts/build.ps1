@@ -2,11 +2,27 @@
 # Uses Windows LLVM + Git for Windows Bash (MSYS), never WSL. The canonical
 # build script compiles all images and stages rootfs/ESP; PowerShell creates VHDX.
 # Run from an Administrator PowerShell because DiskPart creates the VHDX.
-param([switch]$Clean, [switch]$Run, [switch]$KeepFallback, [switch]$ResetNvram)
+param([switch]$Clean, [switch]$Run, [switch]$KeepFallback, [switch]$DropFallback, [switch]$ResetNvram)
 $ErrorActionPreference = "Stop"
+# run.ps1 boots with -bios, so UEFI variables are NOT persisted between runs. The
+# first-boot stage (bootuni.efi) registers a boot entry in NVRAM and then deletes
+# \EFI\BOOT\BOOTX64.EFI from the ESP. With volatile NVRAM that leaves a disk
+# nothing can boot on the second run ("failed to load Boot0002 ... Not Found",
+# then PXE). So keep the fallback loader unless -DropFallback is given.
+if (-not $DropFallback) { $KeepFallback = $true }
 $root = Split-Path $PSScriptRoot -Parent
 $b = Join-Path $root "build"
 $vhd = Join-Path $b "magic-disk.vhdx"
+$vhdFinal = $vhd
+# Build into a scratch image and swap it in only after it is verified, so a
+# failed build can never leave you with no disk at all.
+$vhd = Join-Path $b "magic-disk.building.vhdx"
+trap {
+    Write-Host ""
+    Write-Host "BUILD FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    if (Test-Path -LiteralPath $vhdFinal) { Write-Host "Previous disk image kept: $vhdFinal" -ForegroundColor Yellow }
+    break
+}
 
 function Write-Stage([string]$name) {
     Write-Host ""
@@ -19,15 +35,65 @@ function Run-Diskpart([string]$text, [switch]$IgnoreErrors) {
     if ($LASTEXITCODE -ne 0 -and -not $IgnoreErrors) { throw "diskpart failed:" + [Environment]::NewLine + $out }
     return $out
 }
-function Detach-Vhd {
-    if (Test-Path -LiteralPath $vhd) {
-        $cmd = "select vdisk file=" + [char]34 + $vhd + [char]34 + [Environment]::NewLine + "detach vdisk"
-        [void](Run-Diskpart $cmd -IgnoreErrors)
+function Detach-Image([string]$p) {
+    if (-not (Test-Path -LiteralPath $p)) { return }
+    $cmd = "select vdisk file=" + [char]34 + $p + [char]34 + [Environment]::NewLine + "detach vdisk"
+    [void](Run-Diskpart $cmd -IgnoreErrors)
+    # diskpart errors are ignored above, so prove it detached and retry with the
+    # storage cmdlet. A silent failure here is what leaves extra drives behind.
+    $img = Get-DiskImage -ImagePath $p -ErrorAction SilentlyContinue
+    if ($img -and $img.Attached) {
+        try { [void](Dismount-DiskImage -ImagePath $p) } catch { }
+        $img = Get-DiskImage -ImagePath $p -ErrorAction SilentlyContinue
+        if ($img -and $img.Attached) { Write-Warning "Could not detach $p. Run .\scripts\vhd.ps1 Clean" }
+    }
+}
+function Get-VirtualDiskInfo {
+    foreach ($d in @(Get-Disk | Where-Object { $_.BusType -eq 'File Backed Virtual' })) {
+        $ip = $null
+        try { $ip = (Get-DiskImage -DevicePath ("\\.\PhysicalDrive" + $d.Number) -ErrorAction Stop).ImagePath } catch { }
+        [pscustomobject]@{ Number = $d.Number; ImagePath = $ip }
+    }
+}
+# Detach every attached virtual disk that belongs to this project. Leftovers show
+# up in Explorer as extra "Local Disk" drives. Disks from other projects are left
+# alone, and orphans with an unknown image are only touched with -Force.
+function Clear-StaleDisks([string]$projectBuildDir, [switch]$Force) {
+    $found = 0
+    foreach ($v in @(Get-VirtualDiskInfo)) {
+        $mine = $v.ImagePath -and ($v.ImagePath -like "$projectBuildDir\*" -or $v.ImagePath -like "*magic-disk*")
+        if (-not ($mine -or ((-not $v.ImagePath) -and $Force))) { continue }
+        $found++
+        Write-Host ("Detaching leftover disk {0}: {1}" -f $v.Number, $(if ($v.ImagePath) { $v.ImagePath } else { "(image file gone)" })) -ForegroundColor Yellow
+        foreach ($l in @(Get-Partition -DiskNumber $v.Number -ErrorAction SilentlyContinue | ForEach-Object { $_.DriveLetter } | Where-Object { $_ -and $_ -ne [char]0 })) {
+            try { Write-VolumeCache -DriveLetter $l } catch { }
+        }
+        try { [void](Dismount-DiskImage -DevicePath ("\\.\PhysicalDrive" + $v.Number)) }
+        catch { Write-Warning ("Could not detach disk {0}: {1}" -f $v.Number, $_.Exception.Message) }
+    }
+    Start-Sleep -Milliseconds 500
+    $left = @(Get-VirtualDiskInfo | Where-Object { $_.ImagePath -and ($_.ImagePath -like "$projectBuildDir\*" -or $_.ImagePath -like "*magic-disk*") })
+    if ($left.Count -gt 0) { Write-Warning ("{0} Sentinel disk(s) are still attached. Close Explorer windows or terminals open on them, then run .\scripts\vhd.ps1 Clean (or reboot)." -f $left.Count) }
+    elseif ($found -gt 0) { Write-Host "Leftover disks cleaned up." -ForegroundColor Green }
+}
+function Detach-Vhd { Detach-Image $vhd }
+# Copy a tree largest-files-first. Big files then land in one contiguous run on
+# the fresh NTFS volume, which is all the kernel's read-only NTFS driver supports
+# (single runlist, no ATTRIBUTE_LIST).
+function Copy-Tree([string]$src, [string]$dst) {
+    $src = (Resolve-Path -LiteralPath $src).Path.TrimEnd('\')
+    foreach ($d in Get-ChildItem -LiteralPath $src -Directory -Recurse -Force) {
+        $rel = $d.FullName.Substring($src.Length).TrimStart('\')
+        New-Item -ItemType Directory -Force -Path (Join-Path $dst $rel) | Out-Null
+    }
+    foreach ($f in (Get-ChildItem -LiteralPath $src -File -Recurse -Force | Sort-Object Length -Descending)) {
+        $rel = $f.FullName.Substring($src.Length).TrimStart('\')
+        Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $dst $rel) -Force
     }
 }
 
 if ($Clean) {
-    if (Test-Path -LiteralPath $b) { Detach-Vhd }
+    if (Test-Path -LiteralPath $b) { Detach-Vhd; Detach-Image $vhdFinal }
     Remove-Item -LiteralPath $b -Recurse -Force -ErrorAction SilentlyContinue
     return
 }
@@ -38,6 +104,7 @@ if ($ResetNvram) {
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (DiskPart needs it)." }
 New-Item -ItemType Directory -Force -Path $b | Out-Null
+Clear-StaleDisks $b   # drop disks leaked by earlier builds before making a new one
 
 # Always discard the previous disk image at build start. This prevents a failed
 # or partial build from leaving a stale VHDX that can accidentally be booted.
@@ -185,14 +252,14 @@ assign letter=$sysLetter
 
     # Copy the whole rootfs recursively: all built EXEs, DLLs, drivers, fonts,
     # assets, and any future files produced by build.sh are staged automatically.
-    Copy-Item -Path (Join-Path $rootfs "*") -Destination $sysRoot -Recurse -Force
+    Copy-Tree $rootfs $sysRoot
 
     # The current kernel VFS looks up user-mode images by basename at the
     # mounted system-volume root. rootfs\magic is the logical SentinelOS
     # tree, so stage its contents at the volume root as well as preserving
     # the enclosing \magic directory for bootloader/path compatibility.
     $magicTree = Join-Path $rootfs "magic"
-    Copy-Item -Path (Join-Path $magicTree "*") -Destination $sysRoot -Recurse -Force
+    Copy-Tree $magicTree $sysRoot
 
     foreach ($relative in @("smss.exe","sentlogon.exe","bootvid.exe","explorer.exe","fileexplorer.exe","krnl.exe","hal.dll","System32\smss.exe","System32\sentlogon.exe","System32\bootvid.exe","System32\explorer.exe","System32\fileexplorer.exe","System32\krnl.exe","System32\hal.dll")) {
         $copied = Join-Path $sysRoot $relative
@@ -200,8 +267,39 @@ assign letter=$sysLetter
             throw "Staging verification failed; missing copied file: $copied"
         }
     }
+
+    # Prove the image holds exactly what was built: every file present at the
+    # volume root AND under \magic with the same byte length as the source.
+    $mismatch = @()
+    foreach ($f in Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force) {
+        $rel = $f.FullName.Substring($magicTree.Length).TrimStart('\')
+        foreach ($dest in @((Join-Path $sysRoot $rel), (Join-Path (Join-Path $sysRoot "magic") $rel))) {
+            $g = Get-Item -LiteralPath $dest -ErrorAction SilentlyContinue
+            if (-not $g -or $g.Length -ne $f.Length) { $mismatch += $dest }
+        }
+    }
+    if ($mismatch.Count -gt 0) {
+        throw ("Staging verification failed for {0} file(s), e.g.:`r`n{1}" -f $mismatch.Count, (($mismatch | Select-Object -First 10) -join "`r`n"))
+    }
+    # The kernel rejects anything that is not an MZ PE, so check the boot chain.
+    foreach ($relative in @("smss.exe","krnl.exe","sentlogon.exe","explorer.exe")) {
+        $fs = [IO.File]::OpenRead((Join-Path $sysRoot $relative))
+        try { $mz = New-Object byte[] 2; [void]$fs.Read($mz, 0, 2) } finally { $fs.Close() }
+        if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) { throw "$relative on the image is not a PE file (no MZ header)." }
+    }
+    foreach ($l in @($espLetter, $sysLetter)) { try { Write-VolumeCache -DriveLetter $l } catch { } }
+    Write-Host ("Verified {0} files; smss.exe is {1} bytes at the volume root." -f @(Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force).Count, (Get-Item -LiteralPath (Join-Path $sysRoot "smss.exe")).Length) -ForegroundColor Green
 } finally {
     Detach-Vhd
 }
+Write-Stage "Install verified disk image"
+Detach-Image $vhdFinal
+Remove-Item -LiteralPath $vhdFinal -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $vhdFinal) {
+    throw "Cannot replace $vhdFinal (locked). Close QEMU or run .\scripts\vhd.ps1 Dismount, then rerun. The verified new image is $vhd"
+}
+Move-Item -LiteralPath $vhd -Destination $vhdFinal -Force
+$vhd = $vhdFinal
+Clear-StaleDisks $b
 Write-Host "build ok: complete build.sh output staged to $vhd" -ForegroundColor Green
 if ($Run) { & (Join-Path $PSScriptRoot "run.ps1") }

@@ -1304,7 +1304,44 @@ static int vfs_find_regular_file(const char *name, uint32_t *ino_out,
     }
     return -1;
 }
+/*
+ * Image loading from the read-only NTFS system volume. The PE loader below
+ * only knew how to read ext4 inodes, so with an NTFS root it reported
+ * "disk image not found: smss.exe" even though the volume was mounted.
+ * The MFT index plays the role of the inode number when ext4 is absent.
+ */
+static uint8_t *g_psp_ntfs_buf;
+static uint64_t g_psp_ntfs_size, g_psp_ntfs_idx;
+static void vfs_release_ntfs_image_cache(void) {
+    if (g_psp_ntfs_buf) kfree(g_psp_ntfs_buf);
+    g_psp_ntfs_buf = 0; g_psp_ntfs_size = 0; g_psp_ntfs_idx = 0;
+}
+static int vfs_find_image_file(const char *name, uint32_t *ino_out,
+                               uint64_t *size_out) {
+    if (g_ext4_ok) return vfs_find_regular_file(name, ino_out, size_out);
+    if (!g_ntfsk_ok || !name || !name[0]) return -1;
+    uint64_t idx = 0, size = 0;
+    if (vfs_ntfsk_open_path(name, &idx, &size) < 0 || idx > UINT32_MAX) return -1;
+    *ino_out = (uint32_t)idx; *size_out = size;
+    return 0;
+}
+static int vfs_read_ntfs_image_at(uint32_t ino, uint64_t pos, void *dst,
+                                  uint64_t len) {
+    if (!dst || !g_ntfsk_ok) return -1;
+    if (!g_psp_ntfs_buf || g_psp_ntfs_idx != ino) {
+        void *whole = 0; uint64_t actual = 0;
+        if (ntfsk_read_file(&g_ntfsk_volume, ino, &whole, &actual) < 0) return -1;
+        vfs_release_ntfs_image_cache();
+        g_psp_ntfs_buf = (uint8_t *)whole; g_psp_ntfs_size = actual;
+        g_psp_ntfs_idx = ino;
+    }
+    if (pos >= g_psp_ntfs_size || !len) return 0;
+    if (len > g_psp_ntfs_size - pos) len = g_psp_ntfs_size - pos;
+    memcpy(dst, g_psp_ntfs_buf + pos, (size_t)len);
+    return (int)len;
+}
 static int vfs_read_inode_at(uint32_t ino,uint64_t pos,void *dst,uint64_t len) {
+    if (!g_ext4_ok && g_ntfsk_ok) return vfs_read_ntfs_image_at(ino,pos,dst,len);
     uint8_t inode[256];
     if(!dst || e4_inode(&g_ext4,ino,inode)<0) return -1;
     uint64_t size=e4_size(inode);
@@ -1358,7 +1395,13 @@ static void PspForgetDiskModule(KPROCESS *owner) {
  * section data is streamed directly from the filesystem into the allocated
  * image. Actual limits are the PE format, address space, filesystem and RAM.
  */
+static UserDiskModule *PspLoadDiskModuleImpl(const char *name, KPROCESS *owner);
 static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
+    UserDiskModule *m = PspLoadDiskModuleImpl(name, owner);
+    vfs_release_ntfs_image_cache();
+    return m;
+}
+static UserDiskModule *PspLoadDiskModuleImpl(const char *name, KPROCESS *owner) {
     uint32_t ino=0;
     uint64_t raw_size=0;
     char system_path[224];
@@ -1387,7 +1430,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
                 for (unsigned int j=0;j<path_len;j++)
                     system_path[dir_len+j]=(name[j]=='\\')?'/':name[j];
                 system_path[dir_len+path_len]=0;
-                found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
+                found = vfs_find_image_file(system_path, &ino, &raw_size) >= 0;
                 if (!found) {
                     unsigned int start=0;
                     if (dir_len>=2 && system_path[1]==':') start=2;
@@ -1399,13 +1442,13 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
                             relative_path[n]=system_path[start+n]; n++;
                         }
                         relative_path[n]=0;
-                        found = vfs_find_regular_file(relative_path, &ino, &raw_size) >= 0;
+                        found = vfs_find_image_file(relative_path, &ino, &raw_size) >= 0;
                     }
                 }
             }
         }
     }
-    if (!found) found = vfs_find_regular_file(name, &ino, &raw_size) >= 0;
+    if (!found) found = vfs_find_image_file(name, &ino, &raw_size) >= 0;
 
     const char prefix0[] = "magic/System32/";
     const char prefix1[] = "C:/magic/System32/";
@@ -1428,7 +1471,7 @@ static UserDiskModule *PspLoadDiskModule(const char *name, KPROCESS *owner) {
         }
         if (j != path_len) continue;
         system_path[i + j] = 0;
-        found = vfs_find_regular_file(system_path, &ino, &raw_size) >= 0;
+        found = vfs_find_image_file(system_path, &ino, &raw_size) >= 0;
     }
     if (!found) { DbgPrint("user: disk image not found: %s\n", name); return 0; }
     DbgPrint("user: PE probe path=%s size=%llu ino=%u\n",name,(unsigned long long)raw_size,ino);

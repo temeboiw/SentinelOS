@@ -2557,3 +2557,7 @@ __attribute__((dllexport)) BOOL FlushViewOfFile(LPCVOID address,u64 bytes) {
     }
     k32_last_error=87;return 0;
 }
+
+__attribute__((dllexport)) BOOL AreFileApisANSI(void){return 1;}
+__attribute__((dllexport)) DWORD FormatMessageA(DWORD flags,const void *src,DWORD id,DWORD lang,char *buf,DWORD cap,void *args){(void)src;(void)lang;(void)args;if(!buf||!cap||(flags&0x100u)||!(flags&0x1000u)){k32_last_error=87;return 0;}const char *s=id==0?"The operation completed successfully.":id==2?"The system cannot find the file specified.":id==3?"The system cannot find the path specified.":id==5?"Access is denied.":id==6?"The handle is invalid.":id==87?"The parameter is incorrect.":0;if(!s){k32_last_error=317;return 0;}DWORD n=0;while(s[n]&&n+1<cap){buf[n]=s[n];n++;}buf[n]=0;k32_last_error=0;return n;}
+__attribute__((dllexport)) DWORD FormatMessageW(DWORD flags,const void *src,DWORD id,DWORD lang,K32_LPWSTR buf,DWORD cap,void *args){char tmp[256];DWORD n=FormatMessageA(flags,src,id,lang,tmp,sizeof(tmp),args);if(!n||!buf||!cap)return 0;DWORD i=0;while(i<n&&i+1<cap){buf[i]=(unsigned short)(unsigned char)tmp[i];i++;}buf[i]=0;return i;}

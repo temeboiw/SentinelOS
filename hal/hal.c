@@ -307,7 +307,7 @@ static BOOLEAN apic_init(void) {
         HalDisplayString("HAL: invalid local APIC physical base\n");
         return FALSE;
     }
-    lapic = (volatile ULONG *)(uintptr_t)apic_phys;
+    lapic = (volatile ULONG *)apic_phys;
 
     lapic_write(LAPIC_TPR, 0);                  // accept every priority
     lapic_write(LAPIC_SVR, 0x100 | 0xFF);       // APIC software-enable, spurious vector 0xFF

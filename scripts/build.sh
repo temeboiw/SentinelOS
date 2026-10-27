@@ -1281,6 +1281,11 @@ lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0
   "/def:$ROOT/user/msvcp140.def" "/out:$SYS32/msvcp140.dll" \
   "$B/obj/msvcp140.o" "$B/obj/kernel32.lib"
 
+echo "  -> vcruntime140_1.dll (EH4 continue-search fallback)"
+clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/vcruntime140_1.c" -o "$B/obj/vcruntime140_1.o"
+lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43B00000 \
+  /export:__CxxFrameHandler4 "/out:$SYS32/vcruntime140_1.dll" "$B/obj/vcruntime140_1.o"
+
 echo "  -> opengl32.dll (bounded framebuffer software OpenGL runtime)"
 OGL_CFLAGS=()
 for flag in "${USER_CFLAGS[@]}"; do

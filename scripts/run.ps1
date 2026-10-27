@@ -5,7 +5,7 @@ param([switch]$NoGpuAcceleration, [switch]$NoHostCpu)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $b = Join-Path $root "build"
-$disk = Join-Path $b "magic-disk.img"
+$disk = Join-Path $b "magic-disk.vhdx"
 $vars = Join-Path $b "vars.fd"
 $qemuCommand = Get-Command "qemu-system-x86_64.exe" -ErrorAction SilentlyContinue
 if (-not $qemuCommand) { $qemuCommand = Get-Command "qemu-system-x86_64" -ErrorAction SilentlyContinue }
@@ -66,7 +66,7 @@ $argsQemu = @("-machine", "q35") + $accelArgs + $cpuArgs + @(
     "-m", "$($ramMb)M",
     "-drive", "if=pflash,format=raw,readonly=on,file=$code",
     "-drive", "if=pflash,format=raw,file=$vars",
-    "-drive", "file=$disk,format=raw,if=none,id=d0",
+    "-drive", "file=$disk,format=vhdx,if=none,id=d0",
     "-device", "virtio-blk-pci,drive=d0",
     "-netdev", "user,id=net0",
     "-device", "e1000,netdev=net0"

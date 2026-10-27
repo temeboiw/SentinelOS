@@ -139,9 +139,35 @@ static void hput_hex(ULONGLONG v) {
 }
 
 // ---------------------------------------------------------------- time source (TSC, calibrated against the PIT)
-static ULONGLONG tsc_hz = 2000000000ULL;        // fallback if calibration fails
-static ULONGLONG tsc_per_us = 2000;
+static ULONGLONG tsc_hz;
+static ULONGLONG tsc_per_us;
 static BOOLEAN   tsc_calibrated;
+
+/*
+ * PIT channel 2 is an independent fallback when TSC calibration is unavailable.
+ * Keep each one-shot below 55 ms so its 16-bit count cannot wrap.
+ */
+static void pit_stall_chunk(ULONG microseconds) {
+    if (!microseconds) return;
+    ULONGLONG scaled = (ULONGLONG)microseconds * 1193182ULL;
+    ULONG count = (ULONG)((scaled + 999999ULL) / 1000000ULL);
+    if (!count) count = 1;
+    if (count > 65535) count = 65535;
+
+    UCHAR saved_gate = inb(0x61);
+    UCHAR gate_off = (UCHAR)(saved_gate & 0xFC);
+    outb(0x61, gate_off);
+    outb(0x43, 0xB0);                 // PIT channel 2, lobyte/hibyte, mode 0
+    outb(0x42, (UCHAR)count);
+    outb(0x42, (UCHAR)(count >> 8));
+    outb(0x61, (UCHAR)(gate_off | 1)); // gate on, speaker data disabled
+
+    ULONG spins = 0;
+    while (!(inb(0x61) & 0x20) && ++spins < 50000000UL)
+        __asm__ volatile("pause" ::: "memory");
+
+    outb(0x61, saved_gate);
+}
 
 static void calibrate_tsc(void) {
     const ULONG count = 11932;                  // 11932 / 1193182 Hz = 10 ms
@@ -174,7 +200,15 @@ static void calibrate_tsc(void) {
 
 HALAPI VOID KeStallExecutionProcessor(ULONG Microseconds) {
     if (!Microseconds) return;
-    /* HAL initialization calibrates before exporting timing to the kernel. */
+    if (!tsc_calibrated || !tsc_per_us) {
+        while (Microseconds) {
+            ULONG chunk = Microseconds > 50000 ? 50000 : Microseconds;
+            pit_stall_chunk(chunk);
+            Microseconds -= chunk;
+        }
+        return;
+    }
+
     ULONGLONG ticks = (ULONGLONG)Microseconds * tsc_per_us;
     ULONGLONG start = rdtsc();
     while ((ULONGLONG)(rdtsc() - start) < ticks)
@@ -183,7 +217,9 @@ HALAPI VOID KeStallExecutionProcessor(ULONG Microseconds) {
 
 HALAPI LARGE_INTEGER KeQueryPerformanceCounter(PLARGE_INTEGER PerformanceFrequency) {
     LARGE_INTEGER r;
-    if (PerformanceFrequency) PerformanceFrequency->QuadPart = (LONGLONG)tsc_hz;
+    /* A zero frequency explicitly reports that the HAL could not calibrate TSC. */
+    if (PerformanceFrequency)
+        PerformanceFrequency->QuadPart = tsc_calibrated ? (LONGLONG)tsc_hz : 0;
     r.QuadPart = (LONGLONG)rdtsc();
     return r;
 }
@@ -310,8 +346,12 @@ HALAPI BOOLEAN HalInitSystem(ULONG Phase, PVOID LoaderBlock) {
         else
             HalDisplayString("HAL: CPU does not advertise TSC\\n");
         HalDisplayString("HAL: debug port COM1 ready, TSC ");
-        hput_dec(tsc_hz / 1000000);
-        HalDisplayString(tsc_calibrated ? " MHz (calibrated against the PIT)\n" : " MHz (assumed, calibration failed)\n");
+        if (tsc_calibrated) {
+            hput_dec(tsc_hz / 1000000);
+            HalDisplayString(" MHz (calibrated against the PIT)\n");
+        } else {
+            HalDisplayString("frequency unavailable; PIT stall fallback enabled\n");
+        }
     } else if (Phase == 1) {
         apic_ready = apic_init();
         if (apic_ready) {

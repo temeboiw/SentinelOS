@@ -183,6 +183,15 @@ static void pic_disable(void) {
 }
 
 static BOOLEAN apic_init(void) {
+    /*
+     * Timer calibration below uses the TSC as its reference. Do not publish
+     * a guessed APIC frequency if the PIT-based TSC calibration failed.
+     */
+    if (!tsc_calibrated) {
+        HalDisplayString("HAL: refusing APIC timer calibration with an uncalibrated TSC\\n");
+        return FALSE;
+    }
+
     /* Never touch the APIC MSR/register window unless CPUID advertises it. */
     if (!cpu_has_apic()) {
         HalDisplayString("HAL: CPU does not advertise a local APIC\\n");
@@ -224,10 +233,17 @@ static BOOLEAN apic_init(void) {
 }
 
 HALAPI BOOLEAN HalStartClockInterrupt(ULONG Hz, ULONG Vector) {
-    if (!apic_ready || !Hz || apic_timer_hz / Hz == 0) return FALSE;
+    if (!apic_ready || !Hz || Vector < 0x20 || Vector >= 0xFF)
+        return FALSE;
+
+    ULONGLONG initial = apic_timer_hz / Hz;
+    /* A zero or >32-bit initial count cannot produce the requested period. */
+    if (!initial || initial > 0xFFFFFFFFULL)
+        return FALSE;
+
     lapic_write(LAPIC_TMR_DIV, 0x3);
     lapic_write(LAPIC_LVT_TMR, (Vector & 0xFF) | 0x20000);       // periodic mode
-    lapic_write(LAPIC_TMR_INI, (ULONG)(apic_timer_hz / Hz));
+    lapic_write(LAPIC_TMR_INI, (ULONG)initial);
     return TRUE;
 }
 

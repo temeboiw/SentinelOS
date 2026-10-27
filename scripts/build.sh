@@ -1435,6 +1435,7 @@ lld -flavor link \
   /export:_purecall \
   /export:__std_terminate \
   /export:_invoke_watson \
+  /export:_CxxThrowException \
   "/out:$SYS32/vcruntime140.dll" \
   "$B/obj/ucrt_runtime.o"
 

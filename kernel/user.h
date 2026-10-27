@@ -8,6 +8,7 @@
 #include "bootinfo.h"
 #include "ps2.h"
 #include "ext4k.h"
+#include "ntfsk.h"
 #include "virtio_input.h"
 #include "uthread.h"
 #include "wm.h"
@@ -1006,7 +1007,7 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 typedef struct {
     uint32_t ino;
     uint64_t pos, size;
-    int used, writable;
+    int used, writable, ntfs;
 } VfsUserHandle;
 typedef struct {
     uint64_t creation_time,access_time,write_time,change_time,size;
@@ -1019,14 +1020,69 @@ typedef struct {
     char volume_label[17];
 } UserVolumeMetadata;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
+static NTFSK_VOLUME g_ntfsk_volume;
+static int g_ntfsk_ok;
 static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }
 
 static int vfs_find_regular_file(const char *name, uint32_t *ino_out, uint64_t *size_out);
 
+static uint64_t vfs_ntfsk_resolve(const char *name) {
+    if (!g_ntfsk_ok || !name || !name[0]) return 0;
+    char path[256];
+    unsigned int n=0;
+    while(name[n] && n<sizeof(path)-1) {
+        path[n]=(name[n]=='\\')?'/':name[n];
+        ++n;
+    }
+    if(name[n] || !n) return 0;
+    path[n]=0;
+    unsigned int pos=0;
+    if(n>=2 && path[1]==':') pos=2;
+    while(path[pos]=='/') ++pos;
+    uint64_t parent=5, found=0;
+    while(pos<n) {
+        unsigned int end=pos;
+        while(end<n && path[end]!='/') ++end;
+        if(end==pos) { ++pos; continue; }
+        char part[256]; unsigned int len=end-pos;
+        if(len>=sizeof(part)) return 0;
+        for(unsigned int i=0;i<len;i++) part[i]=path[pos+i];
+        part[len]=0;
+        found=ntfsk_lookup(&g_ntfsk_volume,parent,part);
+        if(!found) return 0;
+        parent=found;
+        pos=end;
+        while(path[pos]=='/') ++pos;
+    }
+    return found;
+}
+
+static int vfs_ntfsk_open_path(const char *name, uint64_t *index_out,
+                               uint64_t *size_out) {
+    if(!name || !index_out || !size_out) return -1;
+    uint64_t idx=vfs_ntfsk_resolve(name);
+    const char *prefixes[]={"magic/System32/","magic/","magic/Program Files/"};
+    char candidate[256];
+    for(unsigned int p=0;!idx && p<sizeof(prefixes)/sizeof(prefixes[0]);p++) {
+        unsigned int i=0,j=0;
+        while(prefixes[p][i] && i+1<sizeof(candidate)){candidate[i]=prefixes[p][i];i++;}
+        while(name[j] && i+j+1<sizeof(candidate)){candidate[i+j]=(name[j]=='\\')?'/':name[j];j++;}
+        if(name[j]) continue;
+        candidate[i+j]=0;
+        idx=vfs_ntfsk_resolve(candidate);
+    }
+    if(!idx) return -1;
+    void *data=0; uint64_t size=0;
+    if(ntfsk_read_file(&g_ntfsk_volume,idx,&data,&size)<0) return -1;
+    kfree(data);
+    *index_out=idx; *size_out=size;
+    return 0;
+}
+
 static int vfs_open_user_file(const char *name) {
-    if (!g_ext4_ok || !name || !name[0]) return -1;
+    if ((!g_ext4_ok && !g_ntfsk_ok) || !name || !name[0]) return -1;
     uint32_t ino = 0;
     for (int i = 0; i < vfs_nent; i++) {
         const char *a = vfs_ents[i].name, *b = name;
@@ -1059,7 +1115,18 @@ static int vfs_open_user_file(const char *name) {
             if(vfs_find_regular_file(candidate,&ino,&ignored_size)<0) ino=0;
         }
     }
-    if (!ino) return -1;
+    if (!ino && g_ntfsk_ok) {
+        uint64_t ntfs_index=0, ntfs_size=0;
+        if(vfs_ntfsk_open_path(name,&ntfs_index,&ntfs_size)==0 && ntfs_index<=UINT32_MAX) {
+            for(int i=0;i<VFS_USER_HANDLES;i++) if(!vfs_user_handles[i].used) {
+                vfs_user_handles[i].ino=(uint32_t)ntfs_index;
+                vfs_user_handles[i].pos=0; vfs_user_handles[i].size=ntfs_size;
+                vfs_user_handles[i].used=1; vfs_user_handles[i].writable=0;
+                vfs_user_handles[i].ntfs=1; return 0x100+i;
+            }
+        }
+    }
+    if (!ino || !g_ext4_ok) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, ino, inode) < 0 ||
         (E16(inode, 0) & 0xF000) != 0x8000) return -1;
@@ -1070,6 +1137,7 @@ static int vfs_open_user_file(const char *name) {
             vfs_user_handles[i].size = e4_size(inode);
             vfs_user_handles[i].used = 1;
             vfs_user_handles[i].writable = 0;
+            vfs_user_handles[i].ntfs = 0;
             return 0x100 + i;
         }
     }
@@ -1124,6 +1192,17 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
     if (!h->used || !proc ||
         !MmValidateUserRange(proc, dst, len, 1)) return -1;
     if (h->pos >= h->size) return 0;
+    if (h->ntfs) {
+        if(!g_ntfsk_ok) return -1;
+        if(len>h->size-h->pos) len=h->size-h->pos;
+        void *whole=0; uint64_t actual=0;
+        if(ntfsk_read_file(&g_ntfsk_volume,h->ino,&whole,&actual)<0) return -1;
+        if(actual!=h->size || h->pos>actual || len>actual-h->pos) {
+            kfree(whole); return -1;
+        }
+        memcpy((void *)(uintptr_t)dst,(const uint8_t *)whole+h->pos,(size_t)len);
+        kfree(whole); h->pos+=len; return (int)len;
+    }
     if (len > h->size - h->pos) len = h->size - h->pos;
 
     uint8_t inode[256];
@@ -1162,6 +1241,7 @@ static void vfs_close_user_file(uint64_t handle) {
         if (h->used && h->writable) (void)vfs_listdir(vfs_cwd_ino);
         h->used = 0;
         h->writable = 0;
+        h->ntfs = 0;
     }
 }
 
@@ -3680,6 +3760,18 @@ static void user_enter(BootInfo *bi) {
     virtio_input_init();
     SentinelRegisterBuiltinBlockDevices();
     vfs_mount_c();
+    if (!g_ext4_ok) {
+        for(uint32_t i=0;i<SentinelBlockDeviceCount;i++) {
+            SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet(i);
+            if(d && ntfsk_find_and_mount(&g_ntfsk_volume,d)==0) {
+                g_ntfsk_ok=1;
+                DbgPrint("fs: NTFS read-only system volume mounted\n");
+                break;
+            }
+        }
+        if(!g_ntfsk_ok)
+            DbgPrint("fs: no supported NTFS system volume found\n");
+    }
 
     if (g_ext4_ok) {
         int driver_count = SentinelDriverLoadAllFromDisk();

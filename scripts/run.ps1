@@ -2,7 +2,11 @@
 # Disk layout: FAT32 EFI System Partition + NTFS magic system partition.
 # Host CPU and host-rendered VirtIO GPU are requested explicitly.
 [CmdletBinding()]
-param([switch]$NoGpuAcceleration, [switch]$NoHostCpu)
+param(
+    [switch]$NoGpuAcceleration,
+    [switch]$NoHostCpu,
+    [ValidateRange(1, 64)][int]$CpuCount = 1
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $b = Join-Path $root "build"
@@ -41,6 +45,7 @@ if ($env:SENTINELOS_RAM_MB) {
 }
 if ($ramMb -gt 131072) { throw "SentinelOS supports at most 131072 MiB (128 GiB) of RAM." }
 Write-Host "SentinelOS: RAM $ramMb MiB"
+Write-Host "SentinelOS: virtual CPUs $CpuCount (use -CpuCount 4 to test SMP)"
 
 # Keep the requested host CPU default; some Windows QEMU builds reject it because it is KVM-oriented.
 if ($NoHostCpu) {
@@ -66,7 +71,7 @@ if ($NoGpuAcceleration) {
 Write-Host "SentinelOS: boot disk: $disk (GPT / FAT32 ESP + NTFS system volume)"
 Write-Host "SentinelOS: starting QEMU. Unsupported -cpu host or virtio-vga-gl options will be reported by QEMU."
 $argsQemu = @("-machine", "q35") + $accelArgs + $cpuArgs + @(
-    "-smp", "4",
+    "-smp", "$CpuCount",
     "-m", "$($ramMb)M",
     "-drive", "if=pflash,format=raw,readonly=on,file=$code",
     "-drive", "if=pflash,format=raw,file=$vars",
@@ -76,4 +81,4 @@ $argsQemu = @("-machine", "q35") + $accelArgs + $cpuArgs + @(
     "-device", "e1000,netdev=net0"
 ) + $gpuArgs + $displayArgs + @("-serial", "stdio", "-no-reboot")
 & $qemu @argsQemu
-if ($LASTEXITCODE -ne 0) { throw "QEMU exited with code $LASTEXITCODE. Check WHPX + -cpu host and virtio-vga-gl + SDL OpenGL support in this QEMU build." }
+if ($LASTEXITCODE -ne 0) { throw "QEMU exited with code $LASTEXITCODE. For diagnosis, retry with -CpuCount 1 (default), -NoGpuAcceleration, or -NoHostCpu to isolate firmware, GPU, and WHPX/CPU issues." }

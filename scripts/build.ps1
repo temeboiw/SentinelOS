@@ -1,6 +1,6 @@
-# SentinelOS Windows-host build entry point.
-# The complete PE/user-mode build lives in build.sh. Run that canonical build
-# in WSL, then stage its ESP and full rootfs into the native Windows VHDX.
+# SentinelOS native Windows-host build entry point.
+# Uses Windows LLVM + Git for Windows Bash (MSYS), never WSL. The canonical
+# build script compiles all images and stages rootfs/ESP; PowerShell creates VHDX.
 # Run from an Administrator PowerShell because DiskPart creates the VHDX.
 param([switch]$Clean, [switch]$Run, [switch]$KeepFallback, [switch]$ResetNvram)
 $ErrorActionPreference = "Stop"
@@ -39,26 +39,37 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (DiskPart needs it)." }
 New-Item -ItemType Directory -Force -Path $b | Out-Null
 
-# Keep one authoritative build definition: build.sh builds every real PE image,
-# DLL export table, driver, resource, font and application. WSL runs that Linux
-# toolchain, then this script stages its complete output into a native VHDX.
-if (-not (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
-    throw "WSL is required for the complete build.sh pipeline. Install/configure WSL with SentinelOS build dependencies; no partial VHDX was created."
+# Locate Git for Windows Bash. This is a Windows process; WSL is never invoked.
+$bashCandidates = @(
+    (Join-Path $env:ProgramFiles "Git\\bin\\bash.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Git\\bin\\bash.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\\Git\\bin\\bash.exe")
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+$bashCommand = Get-Command bash.exe -ErrorAction SilentlyContinue
+if ($bashCommand) { $bashCandidates += $bashCommand.Source }
+$bash = $bashCandidates | Select-Object -First 1
+if (-not $bash) {
+    throw "Git for Windows Bash is required (not WSL). Install Git for Windows and native LLVM for Windows, then rerun."
 }
-Write-Stage "Build every SentinelOS component via scripts/build.sh in WSL"
-$wslRootResult = & wsl.exe --exec wslpath -u $root 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Could not translate repository path into WSL: $($wslRootResult -join [Environment]::NewLine)" }
-$wslRoot = ($wslRootResult -join [Environment]::NewLine).Trim()
-if ([string]::IsNullOrWhiteSpace($wslRoot)) { throw "wslpath returned an empty repository path." }
-$quotedRoot = "'" + ($wslRoot -replace "'", "'\''") + "'"
-$buildArgs = @()
-if ($KeepFallback) { $buildArgs += "--keep-fallback" }
-if ($ResetNvram) { $buildArgs += "--reset-nvram" }
-$argText = ($buildArgs | ForEach-Object { "'" + $_ + "'" }) -join " "
-$bashCommand = "cd $quotedRoot && chmod +x scripts/build.sh && ./scripts/build.sh $argText"
-Write-Host "[WSL] bash -lc $bashCommand" -ForegroundColor Cyan
-& wsl.exe --exec bash -lc $bashCommand
-if ($LASTEXITCODE -ne 0) { throw "scripts/build.sh failed inside WSL (exit $LASTEXITCODE). VHDX staging was not started." }
+$clang = Get-Command clang.exe -ErrorAction SilentlyContinue
+$clangxx = Get-Command clang++.exe -ErrorAction SilentlyContinue
+$lld = Get-Command lld.exe -ErrorAction SilentlyContinue
+if (-not $clang -or -not $clangxx -or -not $lld) {
+    throw "Native LLVM tools are missing from PATH. Install LLVM for Windows (clang.exe, clang++.exe, lld.exe); WSL is not used."
+}
+Write-Stage "Build all PE/EFI images with native Windows LLVM"
+$nativeArgs = @()
+if ($KeepFallback) { $nativeArgs += "--keep-fallback" }
+if ($ResetNvram) { $nativeArgs += "--reset-nvram" }
+$argString = ($nativeArgs -join " ")
+$escapedRoot = $root.Replace("\\", "/")
+$escapedRoot = $escapedRoot -replace "'", "'\\''"
+$command = "cd '$escapedRoot' && ./scripts/build.sh --no-disk-image $argString"
+Write-Host "[Windows/Git Bash] $command" -ForegroundColor Cyan
+& $bash --noprofile --norc -lc $command
+if ($LASTEXITCODE -ne 0) {
+    throw "Native Windows compile/staging failed (exit $LASTEXITCODE). No VHDX was created."
+}
 
 $rootfs = Join-Path $b "rootfs"
 $sys32 = Join-Path $rootfs "magic\System32"

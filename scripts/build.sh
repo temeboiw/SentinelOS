@@ -5,6 +5,7 @@
 #   ./scripts/build.sh --keep-fallback
 #   ./scripts/build.sh --reset-nvram
 #   ./scripts/build.sh --clean
+#   ./scripts/build.sh --no-disk-image (compile/stage outputs using host-native tooling)
 
 set -euo pipefail
 
@@ -44,6 +45,7 @@ KEEP_FALLBACK=0
 RESET_NVRAM=0
 DO_RUN=0
 DO_CLEAN=0
+DO_NO_DISK_IMAGE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -51,8 +53,9 @@ for arg in "$@"; do
     --keep-fallback|-k)  KEEP_FALLBACK=1 ;;
     --reset-nvram)       RESET_NVRAM=1 ;;
     --clean|-c)          DO_CLEAN=1 ;;
+    --no-disk-image)     DO_NO_DISK_IMAGE=1 ;;
     -h|--help)
-      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean]"
+      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image]"
       exit 0
       ;;
     *)
@@ -147,13 +150,15 @@ rm -f "$PROBE_SRC"
 echo "  -> clang: $CLANG_BIN"
 echo "  -> clang++: $CLANGXX_BIN"
 echo "  -> lld: $LLD_BIN"
-need qemu-img
-need sfdisk
-need mkfs.vfat
-need mke2fs
-need mmd
-need mcopy
-need dd
+if (( DO_NO_DISK_IMAGE == 0 )); then
+  need qemu-img
+  need sfdisk
+  need mkfs.vfat
+  need mke2fs
+  need mmd
+  need mcopy
+  need dd
+fi
 
 for src in \
   boot/bootx64.c \
@@ -2095,6 +2100,11 @@ while IFS= read -r top_entry; do
   fi
 done < "$ROOTFS_TOP_ENTRIES"
 rm -f "$ROOTFS_TOP_ENTRIES"
+
+if (( DO_NO_DISK_IMAGE == 1 )); then
+  echo "build ok -> PE/EFI images and rootfs staged at $B (disk-image creation skipped)"
+  exit 0
+fi
 
 echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
 

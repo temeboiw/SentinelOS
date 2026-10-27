@@ -111,6 +111,8 @@ if (-not $espLetter) { throw "no free drive letter is available to stage the EFI
 $espRoot = "$($espLetter):\"
 Detach-Vhd                                   # a failed earlier run may have left it attached
 Remove-Item $vhd, $rawimg -Force -ErrorAction SilentlyContinue
+if (Test-Path $vhd) { throw "Cannot recreate disk because the old VHDX still exists or is locked: $vhd. Close QEMU and detach it in Disk Management, then retry." }
+if (Test-Path $rawimg) { throw "Cannot remove stale temporary raw image: $rawimg" }
 
 try {
     [void](Run-Diskpart @"

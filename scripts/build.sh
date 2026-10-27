@@ -2124,6 +2124,14 @@ if [[ "$MAZE_FORMAT" != *"PE32+"* || "$MAZE_FORMAT" != *"x86-64"* ]]; then
 fi
 ls -lh "$B/rootfs/magic/Program Files/maze.exe"
 
+# The current VFS resolves user images and dependent DLLs by basename at the
+# volume root; it does not yet walk System32 for imports. Mirror generated PE
+# images there so smss.exe and its DLL dependencies are actually loadable.
+if ! cp "$SYS32"/*.dll "$SYS32"/*.exe "$B/rootfs/magic/"; then
+  echo "FATAL: unable to stage PE images at the VFS volume root" >&2
+  exit 1
+fi
+
 echo "==> Checking required images"
 
 for image in \

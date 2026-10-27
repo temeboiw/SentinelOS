@@ -2,6 +2,7 @@ typedef unsigned short WCHAR;
 typedef unsigned int DWORD;
 typedef unsigned int UINT;
 typedef void *HLOCAL;
+extern const WCHAR *GetCommandLineW(void);
 extern HLOCAL LocalAlloc(UINT flags,unsigned long long bytes);
 extern HLOCAL LocalFree(HLOCAL memory);
 __attribute__((dllexport)) WCHAR **CommandLineToArgvW(const WCHAR *cmdline,int *argc_out) {

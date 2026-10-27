@@ -13,10 +13,46 @@ static inline VOID outb(USHORT p, UCHAR v)  { __asm__ volatile("outb %0, %1" :: 
 static inline VOID outw(USHORT p, USHORT v) { __asm__ volatile("outw %0, %1" :: "a"(v), "Nd"(p)); }
 static inline VOID outl(USHORT p, ULONG v)  { __asm__ volatile("outl %0, %1" :: "a"(v), "Nd"(p)); }
 
+static inline VOID cpuid(ULONG leaf, ULONG subleaf,
+                         ULONG *a, ULONG *b, ULONG *c, ULONG *d) {
+    ULONG ra, rb, rc, rd;
+    __asm__ volatile("cpuid"
+                     : "=a"(ra), "=b"(rb), "=c"(rc), "=d"(rd)
+                     : "a"(leaf), "c"(subleaf));
+    if (a) *a = ra;
+    if (b) *b = rb;
+    if (c) *c = rc;
+    if (d) *d = rd;
+}
+
 static inline ULONGLONG rdtsc(void) {
     ULONG lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
     return ((ULONGLONG)hi << 32) | lo;
+}
+
+static BOOLEAN cpu_has_tsc(void) {
+    ULONG max_leaf, a, b, c, d;
+    cpuid(0, 0, &max_leaf, &b, &c, &d);
+    if (max_leaf < 1) return FALSE;
+    cpuid(1, 0, &a, &b, &c, &d);
+    return (d & (1u << 4)) != 0;
+}
+
+static BOOLEAN cpu_has_apic(void) {
+    ULONG max_leaf, a, b, c, d;
+    cpuid(0, 0, &max_leaf, &b, &c, &d);
+    if (max_leaf < 1) return FALSE;
+    cpuid(1, 0, &a, &b, &c, &d);
+    return (d & (1u << 9)) != 0;
+}
+
+static BOOLEAN cpu_has_x2apic(void) {
+    ULONG max_leaf, a, b, c, d;
+    cpuid(0, 0, &max_leaf, &b, &c, &d);
+    if (max_leaf < 1) return FALSE;
+    cpuid(1, 0, &a, &b, &c, &d);
+    return (c & (1u << 21)) != 0;
 }
 static inline ULONGLONG rdmsr(ULONG msr) {
     ULONG lo, hi;
@@ -92,16 +128,25 @@ static void calibrate_tsc(void) {
     ULONGLONG t1 = rdtsc();
     outb(0x61, gate);
     if (spins < 50000000UL && t1 > t0) {
-        tsc_hz = (t1 - t0) * 100;
-        tsc_per_us = tsc_hz / 1000000;
-        if (!tsc_per_us) tsc_per_us = 1;
-        tsc_calibrated = TRUE;
+        ULONGLONG delta = t1 - t0;
+        /* Guard the scale operation even if a broken virtual clock jumps. */
+        if (delta <= (~(ULONGLONG)0) / 100) {
+            tsc_hz = delta * 100;
+            /* Round up so short stalls are not systematically too short. */
+            tsc_per_us = (tsc_hz + 999999ULL) / 1000000ULL;
+            if (!tsc_per_us) tsc_per_us = 1;
+            tsc_calibrated = TRUE;
+        }
     }
 }
 
 HALAPI VOID KeStallExecutionProcessor(ULONG Microseconds) {
-    ULONGLONG end = rdtsc() + (ULONGLONG)Microseconds * tsc_per_us;
-    while (rdtsc() < end) __asm__ volatile("pause");
+    if (!Microseconds) return;
+    /* HAL initialization calibrates before exporting timing to the kernel. */
+    ULONGLONG ticks = (ULONGLONG)Microseconds * tsc_per_us;
+    ULONGLONG start = rdtsc();
+    while ((ULONGLONG)(rdtsc() - start) < ticks)
+        __asm__ volatile("pause" ::: "memory");
 }
 
 HALAPI LARGE_INTEGER KeQueryPerformanceCounter(PLARGE_INTEGER PerformanceFrequency) {
@@ -138,10 +183,29 @@ static void pic_disable(void) {
 }
 
 static BOOLEAN apic_init(void) {
+    /* Never touch the APIC MSR/register window unless CPUID advertises it. */
+    if (!cpu_has_apic()) {
+        HalDisplayString("HAL: CPU does not advertise a local APIC\\n");
+        return FALSE;
+    }
+
     ULONGLONG base = rdmsr(MSR_APIC_BASE);
-    if (!(base & (1ULL << 11))) { base |= 1ULL << 11; wrmsr(MSR_APIC_BASE, base); }   // global enable
+    if ((base & (1ULL << 10)) && !cpu_has_x2apic()) {
+        HalDisplayString("HAL: x2APIC enabled but unsupported by CPUID\\n");
+        return FALSE;
+    }
+    if (!(base & (1ULL << 11))) {
+        base |= 1ULL << 11;
+        wrmsr(MSR_APIC_BASE, base);
+        base = rdmsr(MSR_APIC_BASE);
+        if (!(base & (1ULL << 11))) {
+            HalDisplayString("HAL: failed to enable local APIC\\n");
+            return FALSE;
+        }
+    }
     x2apic = (base & (1ULL << 10)) != 0;
     lapic  = (volatile ULONG *)(base & 0xFFFFF000ULL);
+    if (!x2apic && !lapic) return FALSE;
     pic_disable();
 
     lapic_write(LAPIC_TPR, 0);                  // accept every priority
@@ -181,7 +245,10 @@ HALAPI BOOLEAN HalInitSystem(ULONG Phase, PVOID LoaderBlock) {
     (void)LoaderBlock;
     if (Phase == 0) {
         com1_init();
-        calibrate_tsc();
+        if (cpu_has_tsc())
+            calibrate_tsc();
+        else
+            HalDisplayString("HAL: CPU does not advertise TSC\\n");
         HalDisplayString("HAL: debug port COM1 ready, TSC ");
         hput_dec(tsc_hz / 1000000);
         HalDisplayString(tsc_calibrated ? " MHz (calibrated against the PIT)\n" : " MHz (assumed, calibration failed)\n");

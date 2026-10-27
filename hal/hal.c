@@ -256,19 +256,19 @@ static BOOLEAN apic_init(void) {
      * a guessed APIC frequency if the PIT-based TSC calibration failed.
      */
     if (!tsc_calibrated) {
-        HalDisplayString("HAL: refusing APIC timer calibration with an uncalibrated TSC\\n");
+        HalDisplayString("HAL: refusing APIC timer calibration with an uncalibrated TSC\n");
         return FALSE;
     }
 
     /* Never touch the APIC MSR/register window unless CPUID advertises it. */
     if (!cpu_has_apic()) {
-        HalDisplayString("HAL: CPU does not advertise a local APIC\\n");
+        HalDisplayString("HAL: CPU does not advertise a local APIC\n");
         return FALSE;
     }
 
     ULONGLONG base = rdmsr(MSR_APIC_BASE);
     if ((base & (1ULL << 10)) && !cpu_has_x2apic()) {
-        HalDisplayString("HAL: x2APIC enabled but unsupported by CPUID\\n");
+        HalDisplayString("HAL: x2APIC enabled but unsupported by CPUID\n");
         return FALSE;
     }
     if (!(base & (1ULL << 11))) {
@@ -276,7 +276,7 @@ static BOOLEAN apic_init(void) {
         wrmsr(MSR_APIC_BASE, base);
         base = rdmsr(MSR_APIC_BASE);
         if (!(base & (1ULL << 11))) {
-            HalDisplayString("HAL: failed to enable local APIC\\n");
+            HalDisplayString("HAL: failed to enable local APIC\n");
             return FALSE;
         }
     }
@@ -288,7 +288,7 @@ static BOOLEAN apic_init(void) {
      */
     ULONGLONG apic_phys = base & 0xFFFFFFFFFFFFF000ULL;
     if (!x2apic && !apic_phys) {
-        HalDisplayString("HAL: invalid local APIC physical base\\n");
+        HalDisplayString("HAL: invalid local APIC physical base\n");
         return FALSE;
     }
     lapic = (volatile ULONG *)(uintptr_t)apic_phys;
@@ -310,7 +310,7 @@ static BOOLEAN apic_init(void) {
     lapic_write(LAPIC_TMR_INI, 0);              // stop
     apic_timer_hz = (ULONGLONG)(0xFFFFFFFFUL - left) * 100;
     if (!apic_timer_hz) {
-        HalDisplayString("HAL: local APIC timer calibration failed; leaving legacy PIC enabled\\n");
+        HalDisplayString("HAL: local APIC timer calibration failed; leaving legacy PIC enabled\n");
         return FALSE;
     }
 
@@ -350,7 +350,7 @@ HALAPI BOOLEAN HalInitSystem(ULONG Phase, PVOID LoaderBlock) {
         if (cpu_has_tsc())
             calibrate_tsc();
         else
-            HalDisplayString("HAL: CPU does not advertise TSC\\n");
+            HalDisplayString("HAL: CPU does not advertise TSC\n");
         HalDisplayString("HAL: debug port COM1 ready, TSC ");
         if (tsc_calibrated) {
             hput_dec(tsc_hz / 1000000);

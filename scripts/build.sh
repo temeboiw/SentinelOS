@@ -1154,6 +1154,10 @@ lld -flavor link \
   /export:ReleaseSRWLockExclusive \
   /export:InitializeConditionVariable \
   /export:WakeConditionVariable \
+  /export:AreFileApisANSI \
+  /export:IsValidCodePage \
+  /export:FormatMessageA \
+  /export:FormatMessageW \
   "/out:$SYS32/kernel32.dll" \
   "$B/obj/kernel32.o"
 

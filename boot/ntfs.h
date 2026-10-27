@@ -219,14 +219,43 @@ static EFI_STATUS nt_file_data(Ntfs *fs, UINT64 idx, VOID **file, UINTN *size) {
 static EFI_STATUS ntfs_load_file(const char *const *path, int depth, VOID **file, UINTN *size) {
     EFI_HANDLE *handles=NULL; UINTN count=0;
     EFI_STATUS s=bs->LocateHandleBuffer(ByProtocol,&gNtfsBlockIoGuid,NULL,&count,&handles);
-    if(EFI_ERROR(s))return s;
+    if(EFI_ERROR(s)) {
+        say(L"ntfs: no Block I/O handles found\\r\\n");
+        return s;
+    }
+    say(L"ntfs: Block I/O handles: ");
+    CHAR16 digits[12]; UINTN nd=0; UINTN value=count;
+    do { digits[nd++]=(CHAR16)(L'0'+value%10); value/=10; } while(value && nd<12);
+    while(nd) { CHAR16 ch[2]={digits[--nd],0}; say(ch); }
+    say(L"\\r\\n");
+    EFI_STATUS last=EFI_NOT_FOUND;
     for(UINTN i=0;i<count;i++) {
         EFI_BLOCK_IO_PROTOCOL *bio=NULL; Ntfs fs;
-        if(EFI_ERROR(bs->HandleProtocol(handles[i],&gNtfsBlockIoGuid,(VOID **)&bio)))continue;
-        if(EFI_ERROR(nt_mount(&fs,bio)))continue;
+        s=bs->HandleProtocol(handles[i],&gNtfsBlockIoGuid,(VOID **)&bio);
+        if(EFI_ERROR(s) || !bio || !bio->Media) continue;
+        s=nt_mount(&fs,bio);
+        if(EFI_ERROR(s)) { last=s; continue; }
+        say(L"ntfs: mounted candidate volume\\r\\n");
         UINT64 ino=5; /* NTFS root directory record */
-        for(int k=0;k<depth && ino;k++)ino=nt_lookup(&fs,ino,path[k]);
-        if(ino && !EFI_ERROR(nt_file_data(&fs,ino,file,size)))return EFI_SUCCESS;
+        for(int k=0;k<depth && ino;k++) {
+            ino=nt_lookup(&fs,ino,path[k]);
+            if(!ino) {
+                say(L"ntfs: path component not found: ");
+                say_a(path[k]);
+                say(L"\\r\\n");
+            }
+        }
+        if(ino) {
+            s=nt_file_data(&fs,ino,file,size);
+            if(!EFI_ERROR(s)) {
+                bs->FreePool(handles);
+                return EFI_SUCCESS;
+            }
+            last=s;
+            say(L"ntfs: found path but could not read file data\\r\\n");
+        }
+        if(fs.mft_runs) bs->FreePool(fs.mft_runs);
     }
-    return EFI_NOT_FOUND;
+    bs->FreePool(handles);
+    return last;
 }

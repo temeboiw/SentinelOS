@@ -86,31 +86,32 @@ static EFI_STATUS nt_runs_read(Ntfs *fs, const UINT8 *runs, UINTN runlen,
     while (p<runlen && runs[p]) {
         UINT64 count=0; int sparse=0;
         int rc=nt_run_next(runs,runlen,&p,&vcn,&lcn,&count,&sparse);
-        if (rc<=0) return EFI_LOAD_ERROR;
+        if (rc<=0) { say(L"ntfs: invalid runlist entry\\r\\n"); return EFI_LOAD_ERROR; }
         if (count > UINT64_MAX / fs->cluster ||
-            vcn > UINT64_MAX / fs->cluster) return EFI_LOAD_ERROR;
+            vcn > UINT64_MAX / fs->cluster) { say(L"ntfs: runlist cluster overflow\\r\\n"); return EFI_LOAD_ERROR; }
         UINT64 bytes=count*fs->cluster, start=vcn*fs->cluster;
-        if (start > UINT64_MAX - bytes) return EFI_LOAD_ERROR;
+        if (start > UINT64_MAX - bytes) { say(L"ntfs: runlist VCN range overflow\\r\\n"); return EFI_LOAD_ERROR; }
         UINT64 end=start+bytes;
         if (offset<end && request_end>start) {
             UINT64 a=offset>start?offset:start, b=request_end<end?request_end:end;
-            if (a > covered) return EFI_LOAD_ERROR;
+            if (a > covered) { say(L"ntfs: runlist has a VCN gap\\r\\n"); return EFI_LOAD_ERROR; }
             if (b > covered) covered = b;
             UINTN n=(UINTN)(b-a); VOID *out=(UINT8 *)dst+(a-offset);
             if (sparse) memset(out,0,n);
             else {
                 if (lcn<0 || (UINT64)lcn > UINT64_MAX / fs->cluster)
-                    return EFI_LOAD_ERROR;
+                     { say(L"ntfs: invalid runlist LCN\\r\\n"); return EFI_LOAD_ERROR; }
                 UINT64 disk_off=(UINT64)lcn*fs->cluster;
-                if (disk_off > UINT64_MAX - (a-start)) return EFI_LOAD_ERROR;
+                if (disk_off > UINT64_MAX - (a-start)) { say(L"ntfs: runlist disk offset overflow\\r\\n"); return EFI_LOAD_ERROR; }
                 EFI_STATUS s=nt_read_disk(fs,disk_off+(a-start),n,out);
                 if (EFI_ERROR(s)) return s;
             }
         }
-        if (vcn > UINT64_MAX - count) return EFI_LOAD_ERROR;
+        if (vcn > UINT64_MAX - count) { say(L"ntfs: runlist VCN addition overflow\\r\\n"); return EFI_LOAD_ERROR; }
         vcn+=count;
     }
-    return covered == request_end ? EFI_SUCCESS : EFI_LOAD_ERROR;
+    if (covered != request_end) { say(L"ntfs: runlist does not cover requested file size\\r\\n"); return EFI_LOAD_ERROR; }
+    return EFI_SUCCESS;
 }
 
 static EFI_STATUS nt_record(Ntfs *fs, UINT64 index, UINT8 *out) {

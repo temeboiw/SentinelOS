@@ -125,8 +125,9 @@ static void ntfsk_unmount(NTFSK_VOLUME *v) {
 static int ntfsk_mount(NTFSK_VOLUME *v,SENTINEL_BLOCK_DEVICE *d,
                        uint64_t partition_offset,uint64_t partition_bytes) {
     if(!v||!d||!d->online||!d->read||!d->sector_size||
-       partition_offset>d->sector_count*(uint64_t)d->sector_size||
-       partition_bytes>d->sector_count*(uint64_t)d->sector_size-partition_offset)
+       d->sector_count>UINT64_MAX/d->sector_size)return -1;
+    uint64_t device_bytes=d->sector_count*(uint64_t)d->sector_size;
+    if(partition_offset>device_bytes||partition_bytes>device_bytes-partition_offset)
         return -1;
     memset(v,0,sizeof(*v));v->device=d;v->partition_offset=partition_offset;
     v->volume_bytes=partition_bytes;v->sector_size=d->sector_size;

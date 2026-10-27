@@ -7,6 +7,7 @@
 #include <IndustryStandard/PeImage.h>
 #include "bootinfo.h"
 #include "ext4.h"
+#include "ntfs.h"
 
 EFI_GUID gEfiGraphicsOutputProtocolGuid = {0x9042a9de,0x23dc,0x4a38,{0x96,0xfb,0x7a,0xde,0xd0,0x80,0x51,0x6a}};
 EFI_GUID gEfiLoadedImageProtocolGuid = {0x5B1B31A1,0x9562,0x11d2,{0x8E,0x3F,0x00,0xA0,0xC9,0x69,0x72,0x3B}};
@@ -192,6 +193,8 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
 static EFI_STATUS os_load_file(const char *const *parts, int depth,
                                VOID **file, UINTN *size) {
     EFI_STATUS status = esp_load_file(parts, depth, file, size);
+    if (!EFI_ERROR(status)) return status;
+    status = ntfs_load_file(parts, depth, file, size);
     if (!EFI_ERROR(status)) return status;
     return ext_load_file(parts, depth, file, size);
 }

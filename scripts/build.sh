@@ -491,15 +491,32 @@ echo "  -> Vulkan CPU runtime regression tests"
 # This is a native host test, not a PE object. Use the host C compiler
 # directly; the Clang wrapper above intentionally executes compile-only cc1
 # jobs and must not reinterpret GNU ld flags as compiler arguments.
-HOST_CC="${HOST_CC:-cc}"
-need "$HOST_CC"
-# Termux proot exports TERMUX_EXEC__PROC_SELF_EXE, which can make Clang
-# mistake the proot executable for its internal -cc1 frontend. The host test
-# compiler may itself be a Clang wrapper, so remove the marker here too.
-env -u TERMUX_EXEC__PROC_SELF_EXE "$HOST_CC" -O2 -Wall \
-  "$ROOT/tests/vulkan_test.c" \
-  -o "$B/vulkan_test"
-"$B/vulkan_test"
+# The Vulkan regression test is a host executable, so prefer a native
+# host compiler when available. Windows Git Bash commonly has no cc/gcc;
+# use the installed native clang.exe in that case. This test is independent
+# of the freestanding PE target built above.
+HOST_CC="${HOST_CC:-}"
+if [[ -z "$HOST_CC" ]]; then
+  if command -v cc >/dev/null 2>&1; then
+    HOST_CC="$(command -v cc)"
+  elif command -v clang.exe >/dev/null 2>&1; then
+    HOST_CC="$(command -v clang.exe)"
+  elif command -v clang >/dev/null 2>&1; then
+    HOST_CC="$(command -v clang)"
+  else
+    echo "error: Vulkan regression test requires a host C compiler (cc or clang.exe)" >&2
+    exit 1
+  fi
+fi
+if [[ "$HOST_CC" == *clang* ]]; then
+  "$HOST_CC" -O2 -Wall "$ROOT/tests/vulkan_test.c" -o "$B/vulkan_test.exe"
+  "$B/vulkan_test.exe"
+else
+  env -u TERMUX_EXEC__PROC_SELF_EXE "$HOST_CC" -O2 -Wall \
+    "$ROOT/tests/vulkan_test.c" \
+    -o "$B/vulkan_test"
+  "$B/vulkan_test"
+fi
 
 
 echo "  -> bootvid.exe"

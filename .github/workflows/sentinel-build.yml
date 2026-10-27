@@ -22,6 +22,8 @@ jobs:
           sudo apt-get install -y clang lld llvm qemu-utils qemu-system-x86 ovmf dosfstools e2fsprogs mtools
       - name: Fetch EDK2 headers
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
+      - name: Test File Explorer filesystem contract
+        run: bash tests/fileexplorer_filesystem_contract_test.sh
       - name: Test CPU Vulkan runtime subset
         run: |
           clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-ignored-attributes -fdeclspec -Iuser tests/vulkan_test.c -o "$RUNNER_TEMP/vulkan-test"

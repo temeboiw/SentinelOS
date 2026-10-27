@@ -513,3 +513,5 @@ __attribute__((dllexport)) unsigned long long mbstowcs(unsigned short *dst, cons
     if(dst&&o<cap)dst[o]=0;
     return o;
 }
+
+__attribute__((dllexport)) void _CxxThrowException(void *object,void *throw_info){(void)object;(void)throw_info;__builtin_trap();}

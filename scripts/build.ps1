@@ -41,9 +41,9 @@ New-Item -ItemType Directory -Force -Path $b | Out-Null
 
 # Locate Git for Windows Bash. This is a Windows process; WSL is never invoked.
 $bashCandidates = @(
-    (Join-Path $env:ProgramFiles "Git\\bin\\bash.exe"),
-    (Join-Path ${env:ProgramFiles(x86)} "Git\\bin\\bash.exe"),
-    (Join-Path $env:LOCALAPPDATA "Programs\\Git\\bin\\bash.exe")
+    (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
 $bashCommand = Get-Command bash.exe -ErrorAction SilentlyContinue
 if ($bashCommand) { $bashCandidates += $bashCommand.Source }
@@ -62,8 +62,8 @@ $nativeArgs = @()
 if ($KeepFallback) { $nativeArgs += "--keep-fallback" }
 if ($ResetNvram) { $nativeArgs += "--reset-nvram" }
 $argString = ($nativeArgs -join " ")
-$escapedRoot = $root.Replace("\\", "/")
-$escapedRoot = $escapedRoot -replace "'", "'\\''"
+$escapedRoot = $root.Replace("\", "/")
+$escapedRoot = $escapedRoot -replace "'", "'\''"
 $command = "cd '$escapedRoot' && ./scripts/build.sh --no-disk-image $argString"
 Write-Host "[Windows/Git Bash] $command" -ForegroundColor Cyan
 & $bash --noprofile --norc -lc $command

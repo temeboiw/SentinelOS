@@ -11,8 +11,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $b    = "$root\build"
 $edk2 = if ($env:EDK2) { $env:EDK2 } else { "C:\edk2" }
 $mke2fs = if ($env:MKE2FS) { $env:MKE2FS } else { "$root\tools\mke2fs.exe" }
-$vhd    = "$b\magic-disk.vhd"
-$diskimg = "$b\magic-disk.img"
+$vhd    = "$b\magic-disk.vhdx"
+$rawimg = "$b\magic-disk.raw.tmp"
 
 function Run-Diskpart($text, [switch]$IgnoreErrors) {
     $f = "$b\dp.txt"
@@ -110,11 +110,11 @@ $espLetter = @("Z", "Y", "X", "W", "V", "U", "T", "S") |
 if (-not $espLetter) { throw "no free drive letter is available to stage the EFI System Partition" }
 $espRoot = "$($espLetter):\"
 Detach-Vhd                                   # a failed earlier run may have left it attached
-Remove-Item $vhd, $diskimg -ErrorAction SilentlyContinue
+Remove-Item $vhd, $rawimg -Force -ErrorAction SilentlyContinue
 
 try {
     [void](Run-Diskpart @"
-create vdisk file="$vhd" maximum=256 type=fixed
+create vdisk file="$vhd" maximum=256 type=expandable
 select vdisk file="$vhd"
 attach vdisk
 convert gpt
@@ -152,12 +152,18 @@ if (-not (Test-Path $mke2fs -PathType Leaf)) {
 if (-not (Test-Path $mke2fs -PathType Leaf)) {
     throw "Native mke2fs.exe is required to create the ext4 partition. Place a standalone Windows e2fsprogs mke2fs.exe at '$root\tools\mke2fs.exe' or set `$env:MKE2FS to its full path. This build intentionally does not use WSL or MSYS2."
 }
-Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
-    -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $vhd) "$extBlocks"
+Write-Stage "Convert VHDX to temporary raw image for ext4 formatting"
+# mke2fs offset writes to a raw disk layout, not to the VHDX container format.
+Invoke-Tool qemu-img convert -f vhdx -O raw $vhd $rawimg
 
-Write-Stage "Convert VHD to raw SentinelOS disk image"
-Invoke-Tool qemu-img convert -f vpc -O raw $vhd $diskimg
-Remove-Item $vhd
+Write-Stage "Format ext4 system partition in temporary raw image"
+Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
+    -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $rawimg) "$extBlocks"
+
+Write-Stage "Repack finished disk as VHDX"
+Remove-Item $vhd -Force
+Invoke-Tool qemu-img convert -f raw -O vhdx $rawimg $vhd
+Remove-Item $rawimg -Force
 
 Write-Host "build ok" -ForegroundColor Green
 if ($Run) { & "$PSScriptRoot\run.ps1" }

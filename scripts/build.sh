@@ -1219,6 +1219,13 @@ lld -flavor link \
   /export:WSASetLastError,@112 \
   /export:WSAStartup,@115 \
   /export:WSACleanup,@116 \
+  /export:gethostbyaddr,@51 \
+  /export:gethostbyname,@52 \
+  /export:getprotobyname,@53 \
+  /export:getprotobynumber,@54 \
+  /export:getservbyname,@55 \
+  /export:getservbyport,@56 \
+  /export:__WSAFDIsSet,@151 \
   "/out:$SYS32/ws2_32.dll" \
   "$B/obj/ws2_32.o"
 
@@ -1362,14 +1369,6 @@ lld -flavor link \
   /export:realloc \
   /export:free \
   /export:_msize \
-  /export:memcpy \
-  /export:memset \
-  /export:strchr \
-  /export:memcmp \
-  /export:memchr \
-  /export:strstr \
-  /export:memmove \
-  /export:strrchr \
   /export:__std_type_info_destroy_list \
   /export:__C_specific_handler \
   /export:_purecall \

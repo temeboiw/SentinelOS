@@ -262,7 +262,9 @@ static EFI_STATUS ntfs_load_file(const char *const *path, int depth, VOID **file
                 return EFI_SUCCESS;
             }
             last=s;
-            say(L"ntfs: found path but could not read file data\\r\\n");
+            say(L"ntfs: file-data read failed, EFI_STATUS=");
+            ntfs_say_status(s);
+            say(L"\\r\\n");
         }
         if(fs.mft_runs) bs->FreePool(fs.mft_runs);
     }

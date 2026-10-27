@@ -252,3 +252,80 @@ static int ntfsk_read_file(NTFSK_VOLUME *v,uint64_t index,void **out,uint64_t *o
     }
     kfree(r);return result;
 }
+
+
+/*
+ * Probe a GPT disk for a mountable NTFS partition. This is intentionally a
+ * discovery helper only: callers still decide whether the mounted volume is
+ * suitable to become the system volume. The Microsoft Basic Data GUID is
+ * used by Windows for NTFS partitions (it is also used by other filesystems,
+ * so ntfsk_mount remains the authoritative filesystem check).
+ */
+static int ntfsk_find_and_mount(NTFSK_VOLUME *v, SENTINEL_BLOCK_DEVICE *d) {
+    if (!v || !d || !d->online || !d->read || !d->sector_size ||
+        d->sector_size < 512 ||
+        d->sector_count > UINT64_MAX / d->sector_size) return -1;
+
+    uint64_t disk_bytes = d->sector_count * (uint64_t)d->sector_size;
+    uint8_t mbr[512];
+    if (disk_bytes < 1024 ||
+        d->read(d->context, 0, mbr, sizeof(mbr)) < 0 ||
+        ntfsk_u16(mbr + 510) != 0xaa55) return -1;
+
+    uint8_t *protective = mbr + 446;
+    int has_gpt = 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        const uint8_t *e = mbr + 446 + i * 16;
+        if (e[4] == 0xee) has_gpt = 1;
+    }
+    if (!has_gpt) return -1;
+
+    uint8_t hdr[512];
+    if (d->read(d->context, d->sector_size, hdr, sizeof(hdr)) < 0 ||
+        ntfsk_u64(hdr) != 0x5452415020494645ULL) return -1; /* "EFI PART" */
+    uint32_t hsize = ntfsk_u32(hdr + 12);
+    uint32_t hcrc = ntfsk_u32(hdr + 16);
+    uint64_t entries_lba = ntfsk_u64(hdr + 72);
+    uint32_t entry_count = ntfsk_u32(hdr + 80);
+    uint32_t entry_size = ntfsk_u32(hdr + 84);
+    (void)hcrc;
+    if (hsize < 92 || hsize > d->sector_size ||
+        !entry_count || entry_count > 4096 ||
+        entry_size < 128 || entry_size > 4096 ||
+        entries_lba > UINT64_MAX / d->sector_size) return -1;
+
+    uint64_t entries_off = entries_lba * (uint64_t)d->sector_size;
+    uint64_t entries_bytes = (uint64_t)entry_count * entry_size;
+    if (entries_off > disk_bytes || entries_bytes > disk_bytes - entries_off)
+        return -1;
+
+    uint8_t entry[4096];
+    for (uint32_t i = 0; i < entry_count; ++i) {
+        uint64_t off = entries_off + (uint64_t)i * entry_size;
+        if (d->read(d->context, off, entry, entry_size) < 0) return -1;
+
+        /* Microsoft Basic Data: EBD0A0A2-B9E5-4433-87C0-68B6B72699C7.
+         * GPT stores the first three GUID fields little-endian. */
+        static const uint8_t basic_data_guid[16] = {
+            0xA2,0xA0,0xD0,0xEB,0xE5,0xB9,0x33,0x44,
+            0x87,0xC0,0x68,0xB6,0xB7,0x26,0x99,0xC7
+        };
+        unsigned g;
+        for (g = 0; g < 16 && entry[g] == basic_data_guid[g]; ++g) {}
+        if (g != 16) continue;
+
+        uint64_t first_lba = ntfsk_u64(entry + 32);
+        uint64_t last_lba = ntfsk_u64(entry + 40);
+        if (last_lba < first_lba ||
+            first_lba > UINT64_MAX / d->sector_size ||
+            last_lba == UINT64_MAX) continue;
+        uint64_t part_off = first_lba * (uint64_t)d->sector_size;
+        uint64_t sectors = last_lba - first_lba + 1;
+        if (sectors > UINT64_MAX / d->sector_size) continue;
+        uint64_t part_bytes = sectors * (uint64_t)d->sector_size;
+        if (part_off > disk_bytes || part_bytes > disk_bytes - part_off)
+            continue;
+        if (ntfsk_mount(v, d, part_off, part_bytes) == 0) return 0;
+    }
+    return -1;
+}

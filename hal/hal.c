@@ -189,12 +189,21 @@ static void calibrate_tsc(void) {
         ULONGLONG delta = t1 - t0;
         /* Guard the scale operation even if a broken virtual clock jumps. */
         if (delta <= (~(ULONGLONG)0) / 100) {
-            tsc_hz = delta * 100;
-            /* Round up so short stalls are not systematically too short. */
-            tsc_per_us = tsc_hz / 1000000ULL;
-            if (tsc_hz % 1000000ULL) ++tsc_per_us;
-            if (!tsc_per_us) tsc_per_us = 1;
-            tsc_calibrated = TRUE;
+            ULONGLONG measured_hz = delta * 100;
+            /*
+             * Reject clearly broken PIT/TSC measurements instead of publishing
+             * a wildly wrong performance-counter frequency. This broad range
+             * covers common x86 TSC rates while excluding zero/overflow-like
+             * calibration results.
+             */
+            if (measured_hz >= 1000000ULL && measured_hz <= 10000000000ULL) {
+                tsc_hz = measured_hz;
+                /* Round up so short stalls are not systematically too short. */
+                tsc_per_us = tsc_hz / 1000000ULL;
+                if (tsc_hz % 1000000ULL) ++tsc_per_us;
+                if (!tsc_per_us) tsc_per_us = 1;
+                tsc_calibrated = TRUE;
+            }
         }
     }
 }

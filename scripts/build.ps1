@@ -39,6 +39,18 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (DiskPart needs it)." }
 New-Item -ItemType Directory -Force -Path $b | Out-Null
 
+# Always discard the previous disk image at build start. This prevents a failed
+# or partial build from leaving a stale VHDX that can accidentally be booted.
+if (Test-Path -LiteralPath $vhd) {
+    Write-Stage "Remove previous VHDX before rebuilding"
+    Detach-Vhd
+    Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $vhd) {
+        throw "Cannot remove previous VHDX: $vhd. Close QEMU and detach the disk in Disk Management, then run the build again."
+    }
+    Write-Host "Removed previous disk image: $vhd" -ForegroundColor Yellow
+}
+
 # Locate Git for Windows Bash. This is a Windows process; WSL is never invoked.
 $bashCandidates = @(
     (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),

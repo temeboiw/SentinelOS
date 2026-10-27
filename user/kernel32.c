@@ -2595,9 +2595,9 @@ __attribute__((dllexport)) void *FindResourceW(HANDLE module,K32_LPCWSTR name,K3
  unsigned char *nt=base+peoff;if(*(unsigned int *)nt!=0x00004550){k32_last_error=193;return 0;}
  unsigned int rva=*(unsigned int *)(nt+152);if(!rva){k32_last_error=1813;return 0;}
  K32_RES_DIRECTORY *root=(K32_RES_DIRECTORY *)(base+rva);
- K32_RES_ENTRY *te=k32_res_find(base,root,type);if(!te||(te->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
+ K32_RES_ENTRY *te=k32_res_find(base+rva,root,type);if(!te||(te->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
  K32_RES_DIRECTORY *td=(K32_RES_DIRECTORY *)(base+rva+(te->offset&0x7fffffffu));
- K32_RES_ENTRY *ne=k32_res_find(base,td,name);if(!ne||(ne->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
+ K32_RES_ENTRY *ne=k32_res_find(base+rva,td,name);if(!ne||(ne->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
  K32_RES_DIRECTORY *nd=(K32_RES_DIRECTORY *)(base+rva+(ne->offset&0x7fffffffu));
  K32_RES_ENTRY *le=(K32_RES_ENTRY *)((unsigned char *)nd+sizeof(*nd));
  if((unsigned)nd->named+(unsigned)nd->ids==0){k32_last_error=1813;return 0;}

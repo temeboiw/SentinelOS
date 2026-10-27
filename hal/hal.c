@@ -265,8 +265,11 @@ static BOOLEAN apic_init(void) {
     lapic_write(LAPIC_TMR_DIV, 0x3);
     lapic_write(LAPIC_LVT_TMR, 0x10000);        // masked
     lapic_write(LAPIC_TMR_INI, 0xFFFFFFFF);
-    ULONGLONG end = rdtsc() + tsc_per_us * 10000;
-    while (rdtsc() < end) __asm__ volatile("pause");
+    ULONGLONG calibration_start = rdtsc();
+    ULONGLONG calibration_ticks = tsc_per_us * 10000;
+    /* Unsigned elapsed-time arithmetic remains valid across TSC wraparound. */
+    while ((ULONGLONG)(rdtsc() - calibration_start) < calibration_ticks)
+        __asm__ volatile("pause" ::: "memory");
     ULONG left = lapic_read(LAPIC_TMR_CUR);
     lapic_write(LAPIC_TMR_INI, 0);              // stop
     apic_timer_hz = (ULONGLONG)(0xFFFFFFFFUL - left) * 100;
@@ -311,12 +314,16 @@ HALAPI BOOLEAN HalInitSystem(ULONG Phase, PVOID LoaderBlock) {
         HalDisplayString(tsc_calibrated ? " MHz (calibrated against the PIT)\n" : " MHz (assumed, calibration failed)\n");
     } else if (Phase == 1) {
         apic_ready = apic_init();
-        HalDisplayString("HAL: local APIC at ");
-        hput_hex((ULONGLONG)lapic);
-        HalDisplayString(x2apic ? " (x2APIC)" : " (xAPIC)");
-        HalDisplayString(", timer ");
-        hput_dec(apic_timer_hz / 1000000);
-        HalDisplayString(" MHz at divide-by-16, 8259 PIC masked\n");
+        if (apic_ready) {
+            HalDisplayString("HAL: local APIC at ");
+            hput_hex((ULONGLONG)lapic);
+            HalDisplayString(x2apic ? " (x2APIC)" : " (xAPIC)");
+            HalDisplayString(", timer ");
+            hput_dec(apic_timer_hz / 1000000);
+            HalDisplayString(" MHz at divide-by-16; 8259 PIC masked\n");
+        } else {
+            HalDisplayString("HAL: local APIC initialization failed; legacy PIC was not necessarily masked\n");
+        }
         return apic_ready;
     }
     return TRUE;

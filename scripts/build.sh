@@ -491,31 +491,25 @@ echo "  -> Vulkan CPU runtime regression tests"
 # This is a native host test, not a PE object. Use the host C compiler
 # directly; the Clang wrapper above intentionally executes compile-only cc1
 # jobs and must not reinterpret GNU ld flags as compiler arguments.
-# The Vulkan regression test is a host executable, so prefer a native
-# host compiler when available. Windows Git Bash commonly has no cc/gcc;
-# use the installed native clang.exe in that case. This test is independent
-# of the freestanding PE target built above.
+# The Vulkan regression test is a host executable using stdio. Git for Windows
+# plus LLVM alone does not provide a Windows C runtime/SDK, so do not try to
+# compile this host-only test with freestanding native Clang. Run it whenever
+# a host cc/gcc is installed; otherwise report the skipped test explicitly.
 HOST_CC="${HOST_CC:-}"
 if [[ -z "$HOST_CC" ]]; then
   if command -v cc >/dev/null 2>&1; then
     HOST_CC="$(command -v cc)"
-  elif command -v clang.exe >/dev/null 2>&1; then
-    HOST_CC="$(command -v clang.exe)"
-  elif command -v clang >/dev/null 2>&1; then
-    HOST_CC="$(command -v clang)"
-  else
-    echo "error: Vulkan regression test requires a host C compiler (cc or clang.exe)" >&2
-    exit 1
+  elif command -v gcc >/dev/null 2>&1; then
+    HOST_CC="$(command -v gcc)"
   fi
 fi
-if [[ "$HOST_CC" == *clang* ]]; then
-  "$HOST_CC" -O2 -Wall "$ROOT/tests/vulkan_test.c" -o "$B/vulkan_test.exe"
-  "$B/vulkan_test.exe"
-else
+if [[ -n "$HOST_CC" ]]; then
   env -u TERMUX_EXEC__PROC_SELF_EXE "$HOST_CC" -O2 -Wall \
     "$ROOT/tests/vulkan_test.c" \
     -o "$B/vulkan_test"
   "$B/vulkan_test"
+else
+  echo "warning: skipping host Vulkan regression test; install a host C runtime/compiler (cc or gcc) to run it"
 fi
 
 

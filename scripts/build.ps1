@@ -57,6 +57,18 @@ $lld = Get-Command lld.exe -ErrorAction SilentlyContinue
 if (-not $clang -or -not $clangxx -or -not $lld) {
     throw "Native LLVM tools are missing from PATH. Install LLVM for Windows (clang.exe, clang++.exe, lld.exe); WSL is not used."
 }
+$edkCandidates = @()
+if ($env:EDK2) { $edkCandidates += $env:EDK2 }
+$edkCandidates += (Join-Path $root "edk2")
+$edkCandidates += "C:\edk2"
+$edk2 = $edkCandidates | Where-Object {
+    $_ -and (Test-Path -LiteralPath (Join-Path $_ "MdePkg\Include\Uefi.h") -PathType Leaf)
+} | Select-Object -First 1
+if (-not $edk2) {
+    throw "EDK2 headers were not found. Set EDK2 to an EDK2 checkout containing MdePkg\Include\Uefi.h. WSL is not used."
+}
+$env:EDK2 = $edk2
+Write-Host "EDK2 headers: $edk2"
 Write-Stage "Build all PE/EFI images with native Windows LLVM"
 $nativeArgs = @()
 if ($KeepFallback) { $nativeArgs += "--keep-fallback" }

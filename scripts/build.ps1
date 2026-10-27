@@ -44,10 +44,12 @@ $bashCandidates = @(
     (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe"),
     (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
-) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-$bashCommand = Get-Command bash.exe -ErrorAction SilentlyContinue
-if ($bashCommand) { $bashCandidates += $bashCommand.Source }
-$bash = $bashCandidates | Select-Object -First 1
+)
+$bash = $bashCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+if (-not $bash) {
+    $bashCommand = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($bashCommand) { $bash = $bashCommand.Source }
+}
 if (-not $bash) {
     throw "Git for Windows Bash is required (not WSL). Install Git for Windows and native LLVM for Windows, then rerun."
 }

@@ -2563,3 +2563,52 @@ __attribute__((dllexport)) DWORD FormatMessageA(DWORD flags,const void *src,DWOR
 __attribute__((dllexport)) DWORD FormatMessageW(DWORD flags,const void *src,DWORD id,DWORD lang,K32_LPWSTR buf,DWORD cap,void *args){char tmp[256];DWORD n=FormatMessageA(flags,src,id,lang,tmp,sizeof(tmp),args);if(!n||!buf||!cap)return 0;DWORD i=0;while(i<n&&i+1<cap){buf[i]=(unsigned short)(unsigned char)tmp[i];i++;}buf[i]=0;return i;}
 
 __attribute__((dllexport)) BOOL IsValidCodePage(UINT cp){return cp==437||cp==850||cp==852||cp==866||cp==874||cp==932||cp==936||cp==949||cp==950||(cp>=1250&&cp<=1258)||cp==1200||cp==1201||cp==65001;}
+
+typedef struct { unsigned int rva,size; } K32_RES_DIR;
+typedef struct { unsigned int characteristics,time; unsigned short major,minor,named,ids; } K32_RES_DIRECTORY;
+typedef struct { unsigned int name,offset; } K32_RES_ENTRY;
+typedef struct { unsigned int rva,size,codepage,reserved; } K32_RES_DATA;
+typedef struct { void *module; K32_RES_DATA *entry; } K32_RES_HANDLE;
+static K32_RES_HANDLE k32_res_handles[64];
+static unsigned k32_res_next;
+static int k32_res_name_eq(const unsigned char *base,unsigned int name,K32_LPCWSTR wanted) {
+ if(!wanted)return 0;
+ if((unsigned long long)wanted<=0xffffu)return !(name&0x80000000u)&&((name&0xffffu)==(unsigned long long)wanted);
+ if(!(name&0x80000000u))return 0;
+ const unsigned short *s=(const unsigned short *)(base+(name&0x7fffffffu));
+ unsigned short n=*(const unsigned short *)s++;if(n>512)return 0;
+ unsigned i=0;while(i<n&&wanted[i]&&s[i]==wanted[i])i++;
+ return i==n&&wanted[i]==0;
+}
+static K32_RES_ENTRY *k32_res_find(const unsigned char *base,K32_RES_DIRECTORY *dir,K32_LPCWSTR wanted) {
+ if(!dir)return 0;
+ K32_RES_ENTRY *e=(K32_RES_ENTRY *)((unsigned char *)dir+sizeof(*dir));
+ unsigned total=(unsigned)dir->named+dir->ids;if(total>4096)return 0;
+ for(unsigned i=0;i<total;i++)if(k32_res_name_eq(base,e[i].name,wanted))return &e[i];
+ return 0;
+}
+__attribute__((dllexport)) void *FindResourceW(HANDLE module,K32_LPCWSTR name,K32_LPCWSTR type) {
+ if(!module||!name||!type){k32_last_error=87;return 0;}
+ unsigned char *base=(unsigned char *)module;
+ if(*(unsigned short *)base!=0x5a4d){k32_last_error=193;return 0;}
+ int peoff=*(int *)(base+0x3c);if(peoff<0||peoff>0x100000){k32_last_error=193;return 0;}
+ unsigned char *nt=base+peoff;if(*(unsigned int *)nt!=0x00004550){k32_last_error=193;return 0;}
+ unsigned int rva=*(unsigned int *)(nt+152);if(!rva){k32_last_error=1813;return 0;}
+ K32_RES_DIRECTORY *root=(K32_RES_DIRECTORY *)(base+rva);
+ K32_RES_ENTRY *te=k32_res_find(base,root,type);if(!te||(te->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
+ K32_RES_DIRECTORY *td=(K32_RES_DIRECTORY *)(base+rva+(te->offset&0x7fffffffu));
+ K32_RES_ENTRY *ne=k32_res_find(base,td,name);if(!ne||(ne->offset&0x80000000u)==0){k32_last_error=1813;return 0;}
+ K32_RES_DIRECTORY *nd=(K32_RES_DIRECTORY *)(base+rva+(ne->offset&0x7fffffffu));
+ K32_RES_ENTRY *le=(K32_RES_ENTRY *)((unsigned char *)nd+sizeof(*nd));
+ if((unsigned)nd->named+(unsigned)nd->ids==0){k32_last_error=1813;return 0;}
+ if(le->offset&0x80000000u){K32_RES_DIRECTORY *ld=(K32_RES_DIRECTORY *)(base+rva+(le->offset&0x7fffffffu));le=(K32_RES_ENTRY *)((unsigned char *)ld+sizeof(*ld));if((unsigned)ld->named+(unsigned)ld->ids==0){k32_last_error=1813;return 0;}}
+ K32_RES_DATA *data=(K32_RES_DATA *)(base+rva+(le->offset&0x7fffffffu));
+ unsigned slot=k32_res_next++%64;k32_res_handles[slot].module=base;k32_res_handles[slot].entry=data;k32_last_error=0;return &k32_res_handles[slot];
+}
+__attribute__((dllexport)) HANDLE LoadResource(HANDLE module,void *resource) {
+ (void)module;K32_RES_HANDLE *h=(K32_RES_HANDLE *)resource;
+ if(!h||!h->module||!h->entry){k32_last_error=6;return 0;}
+ k32_last_error=0;return (unsigned char *)h->module+h->entry->rva;
+}
+__attribute__((dllexport)) void *LockResource(HANDLE resource){return resource;}
+__attribute__((dllexport)) DWORD SizeofResource(HANDLE module,void *resource){(void)module;K32_RES_HANDLE *h=(K32_RES_HANDLE *)resource;if(!h||!h->entry){k32_last_error=6;return 0;}k32_last_error=0;return h->entry->size;}

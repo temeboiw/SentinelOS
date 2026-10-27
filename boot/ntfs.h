@@ -66,7 +66,7 @@ static int nt_run_next(const UINT8 *runs, UINTN len, UINTN *pos,
     *sparse = lb==0;
     if (lb) {
         UINT64 raw=0; for (UINT8 i=0;i<lb;i++) raw|=(UINT64)runs[(*pos)++]<<(8*i);
-        if (runs[*pos-lb] & 0x80) {
+        if (runs[*pos-1] & 0x80) {
             for (UINT8 i=lb;i<8;i++) raw|=(UINT64)0xff<<(8*i);
         }
         *lcn += (INT64)raw;

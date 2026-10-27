@@ -10,7 +10,6 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $b    = "$root\build"
 $edk2 = if ($env:EDK2) { $env:EDK2 } else { "C:\edk2" }
-$mke2fs = if ($env:MKE2FS) { $env:MKE2FS } else { "$root\tools\mke2fs.exe" }
 $vhd    = "$b\magic-disk.vhdx"
 $rawimg = "$b\magic-disk.raw.tmp"
 
@@ -82,7 +81,7 @@ Build-Efi bootuni "$b\esp\EFI\magic\bootuni.efi" $extra
 Build-Efi loadufi "$b\esp\EFI\magic\loadufi.efi"
 
 Write-Stage "HAL and kernel (including SMP trampoline)"
-# ---- the kernel goes to the ext4 volume (magic\System32) ----
+# ---- the kernel goes to the NTFS volume (magic\System32) ----
 Invoke-Tool clang @common -DHAL_BUILD -c "$root\hal\hal.c" -o "$b\obj\hal.o"
 Invoke-Tool lld-link /dll /noentry /subsystem:native /nodefaultlib "/implib:$b\obj\hal.lib" /base:0xFFFFFFFF81000000 /fixed:no "/out:$sys32\hal.dll" "$b\obj\hal.o"
 Invoke-Tool clang @common -c "$root\kernel\kernel.c" -o "$b\obj\kernel.o"
@@ -92,7 +91,7 @@ Invoke-Tool clang @common -c "$root\kernel\smp_trampoline.S" -o "$b\obj\smp_tram
 Invoke-Tool lld-link /subsystem:native /entry:kmain /nodefaultlib /dynamicbase `
     /base:0xFFFFFFFF80200000 /fixed:no "/out:$sys32\krnl.exe" "$b\obj\kernel.o" "$b\obj\smp_trampoline.o" "$b\obj\hal.lib"
 
-# Guard the filesystem layout before formatting the ext4 partition.
+# Guard the filesystem layout before formatting the NTFS partition.
 $topLevel = @(Get-ChildItem -Force $rootfs)
 if ($topLevel.Count -ne 1 -or $topLevel[0].Name -ne "magic" -or -not $topLevel[0].PSIsContainer) {
     throw "rootfs must contain exactly one top-level directory: magic"
@@ -101,14 +100,16 @@ if (-not (Test-Path "$drivers" -PathType Container)) {
     throw "missing magic\System32\drivers directory"
 }
 
-Write-Stage "Create GPT virtual disk and FAT32 EFI System Partition"
-# ---- build one GPT disk: FAT32 ESP + ext4 system partition ----
-$feats = "^has_journal,^metadata_csum,^64bit,^resize_inode"   # keep it simple for the loader
+Write-Stage "Create GPT virtual disk with FAT32 ESP and NTFS system partition"
+# ---- build one expandable GPT disk: FAT32 ESP + NTFS system partition ----
 $usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
-$espLetter = @("Z", "Y", "X", "W", "V", "U", "T", "S") |
-    Where-Object { $_ -notin $usedLetters } | Select-Object -First 1
-if (-not $espLetter) { throw "no free drive letter is available to stage the EFI System Partition" }
-$espRoot = "$($espLetter):\"
+$freeLetters = @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P", "O", "N", "M") |
+    Where-Object { $_ -notin $usedLetters }
+if (@($freeLetters).Count -lt 2) { throw "two free drive letters are required to stage the ESP and NTFS system partition" }
+$espLetter = $freeLetters[0]
+$sysLetter = $freeLetters[1]
+$espRoot = "$($espLetter):\\"
+$sysRoot = "$($sysLetter):\\"
 Detach-Vhd                                   # a failed earlier run may have left it attached
 Remove-Item $vhd, $rawimg -Force -ErrorAction SilentlyContinue
 if (Test-Path $vhd) { throw "Cannot recreate disk because the old VHDX still exists or is locked: $vhd. Close QEMU and detach it in Disk Management, then retry." }
@@ -116,7 +117,7 @@ if (Test-Path $rawimg) { throw "Cannot remove stale temporary raw image: $rawimg
 
 try {
     [void](Run-Diskpart @"
-create vdisk file="$vhd" maximum=256 type=expandable
+create vdisk file="$vhd" maximum=131072 type=expandable
 select vdisk file="$vhd"
 attach vdisk
 convert gpt
@@ -125,7 +126,9 @@ delete partition override
 create partition efi size=128
 format fs=fat32 quick label=MAGICESP
 assign letter=$espLetter
-create partition primary size=96
+create partition primary
+format fs=ntfs quick label=MAGIC
+assign letter=$sysLetter
 "@)
     if (-not (Test-Path $espRoot)) { throw "the EFI System Partition was not mounted at $espRoot" }
     Copy-Item "$b\esp\*" $espRoot -Recurse -Force
@@ -135,37 +138,13 @@ create partition primary size=96
     if ($partitions.Count -ne 2) {
         throw "expected exactly two GPT partitions, found $($partitions.Count)"
     }
-    $rootPartition = $partitions |
-        Where-Object { $_.Size -eq 96MB } | Select-Object -First 1
-    if (-not $rootPartition) { throw "the ext4 partition was not created" }
-    $extOffset = [uint64]$rootPartition.Offset
-    $extBlocks = [uint64][Math]::Floor($rootPartition.Size / 4096)
+    $rootPartition = $partitions | Where-Object { $_.PartitionNumber -eq 2 } | Select-Object -First 1
+    if (-not $rootPartition) { throw "the NTFS system partition was not created" }
+    if (-not (Test-Path $sysRoot)) { throw "the NTFS system partition was not mounted at $sysRoot" }
+    Copy-Item "$rootfs\\*" $sysRoot -Recurse -Force
 } finally {
     Detach-Vhd                               # also unmounts the ESP folder
 }
-
-Write-Stage "Format ext4 system partition (native Windows mke2fs)"
-# Format ext4 directly inside partition 2 using a native Windows mke2fs.exe.
-# No WSL, MSYS2, or shell fallback is permitted.
-if (-not (Test-Path $mke2fs -PathType Leaf)) {
-    $found = Get-Command mke2fs.exe -ErrorAction SilentlyContinue
-    if ($found) { $mke2fs = $found.Source }
-}
-if (-not (Test-Path $mke2fs -PathType Leaf)) {
-    throw "Native mke2fs.exe is required to create the ext4 partition. Place a standalone Windows e2fsprogs mke2fs.exe at '$root\tools\mke2fs.exe' or set `$env:MKE2FS to its full path. This build intentionally does not use WSL or MSYS2."
-}
-Write-Stage "Convert VHDX to temporary raw image for ext4 formatting"
-# mke2fs offset writes to a raw disk layout, not to the VHDX container format.
-Invoke-Tool qemu-img convert -f vhdx -O raw $vhd $rawimg
-
-Write-Stage "Format ext4 system partition in temporary raw image"
-Invoke-Tool $mke2fs -t ext4 -b 4096 -L magic -O $feats `
-    -d (Fwd "$b\rootfs") -E "offset=$extOffset" (Fwd $rawimg) "$extBlocks"
-
-Write-Stage "Repack finished disk as VHDX"
-Remove-Item $vhd -Force
-Invoke-Tool qemu-img convert -f raw -O vhdx $rawimg $vhd
-Remove-Item $rawimg -Force
 
 Write-Host "build ok" -ForegroundColor Green
 if ($Run) { & "$PSScriptRoot\run.ps1" }

@@ -164,7 +164,8 @@ static void calibrate_tsc(void) {
         if (delta <= (~(ULONGLONG)0) / 100) {
             tsc_hz = delta * 100;
             /* Round up so short stalls are not systematically too short. */
-            tsc_per_us = (tsc_hz + 999999ULL) / 1000000ULL;
+            tsc_per_us = tsc_hz / 1000000ULL;
+            if (tsc_hz % 1000000ULL) ++tsc_per_us;
             if (!tsc_per_us) tsc_per_us = 1;
             tsc_calibrated = TRUE;
         }
@@ -244,8 +245,17 @@ static BOOLEAN apic_init(void) {
         }
     }
     x2apic = (base & (1ULL << 10)) != 0;
-    lapic  = (volatile ULONG *)(base & 0xFFFFF000ULL);
-    if (!x2apic && !lapic) return FALSE;
+    /*
+     * IA32_APIC_BASE carries the physical address in bits 12 and above.
+     * Preserve the full physical-address field; a 32-bit mask truncates
+     * systems whose local APIC window is mapped above 4 GiB.
+     */
+    ULONGLONG apic_phys = base & 0xFFFFFFFFFFFFF000ULL;
+    if (!x2apic && !apic_phys) {
+        HalDisplayString("HAL: invalid local APIC physical base\\n");
+        return FALSE;
+    }
+    lapic = (volatile ULONG *)(uintptr_t)apic_phys;
     pic_disable();
 
     lapic_write(LAPIC_TPR, 0);                  // accept every priority

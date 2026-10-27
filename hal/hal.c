@@ -41,7 +41,8 @@ static inline VOID cpuid(ULONG leaf, ULONG subleaf,
     ULONG ra, rb, rc, rd;
     __asm__ volatile("cpuid"
                      : "=a"(ra), "=b"(rb), "=c"(rc), "=d"(rd)
-                     : "a"(leaf), "c"(subleaf));
+                     : "a"(leaf), "c"(subleaf)
+                     : "memory");
     if (a) *a = ra;
     if (b) *b = rb;
     if (c) *c = rc;
@@ -84,11 +85,11 @@ static BOOLEAN cpu_has_x2apic(void) {
 }
 static inline ULONGLONG rdmsr(ULONG msr) {
     ULONG lo, hi;
-    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr) : "memory");
     return ((ULONGLONG)hi << 32) | lo;
 }
 static inline VOID wrmsr(ULONG msr, ULONGLONG v) {
-    __asm__ volatile("wrmsr" :: "c"(msr), "a"((ULONG)v), "d"((ULONG)(v >> 32)));
+    __asm__ volatile("wrmsr" :: "c"(msr), "a"((ULONG)v), "d"((ULONG)(v >> 32)) : "memory");
 }
 
 // ---------------------------------------------------------------- port I/O exports

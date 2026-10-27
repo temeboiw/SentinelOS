@@ -1,4 +1,5 @@
-# Launch SentinelOS in QEMU on native Windows.
+# Launch SentinelOS from the expandable GPT VHDX built by scripts/build.ps1.
+# Disk layout: FAT32 EFI System Partition + NTFS magic system partition.
 # Host CPU and host-rendered VirtIO GPU are requested explicitly.
 [CmdletBinding()]
 param([switch]$NoGpuAcceleration, [switch]$NoHostCpu)
@@ -11,7 +12,9 @@ $qemuCommand = Get-Command "qemu-system-x86_64.exe" -ErrorAction SilentlyContinu
 if (-not $qemuCommand) { $qemuCommand = Get-Command "qemu-system-x86_64" -ErrorAction SilentlyContinue }
 if (-not $qemuCommand) { throw "qemu-system-x86_64 was not found. Install a Windows QEMU build and add its bin directory to PATH." }
 $qemu = $qemuCommand.Source
-if (-not (Test-Path $disk -PathType Leaf)) { throw "SentinelOS disk image is missing: $disk. Build the current OS image first." }
+if (-not (Test-Path $disk -PathType Leaf)) { throw "SentinelOS VHDX is missing: $disk. Run .\scripts\build.ps1 first to create the GPT disk with a FAT32 ESP and NTFS system partition." }
+$diskInfo = Get-Item $disk
+if ($diskInfo.Length -lt 1MB) { throw "SentinelOS VHDX is unexpectedly small ($($diskInfo.Length) bytes): $disk. Rebuild it with .\scripts\build.ps1." }
 
 # Locate firmware in common Windows QEMU install locations.
 $shareCandidates = @()
@@ -60,6 +63,7 @@ if ($NoGpuAcceleration) {
     $displayArgs = @("-display", "sdl,gl=on")
     Write-Host "SentinelOS: requesting NVIDIA-backed host OpenGL/VirGL on VirtIO VGA"
 }
+Write-Host "SentinelOS: boot disk: $disk (GPT / FAT32 ESP + NTFS system volume)"
 Write-Host "SentinelOS: starting QEMU. Unsupported -cpu host or virtio-vga-gl options will be reported by QEMU."
 $argsQemu = @("-machine", "q35") + $accelArgs + $cpuArgs + @(
     "-smp", "4",

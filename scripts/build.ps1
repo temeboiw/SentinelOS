@@ -108,8 +108,8 @@ $freeLetters = @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P", "O", "N"
 if (@($freeLetters).Count -lt 2) { throw "two free drive letters are required to stage the ESP and NTFS system partition" }
 $espLetter = $freeLetters[0]
 $sysLetter = $freeLetters[1]
-$espRoot = "$($espLetter):\\"
-$sysRoot = "$($sysLetter):\\"
+$espRoot = "$($espLetter):\"
+$sysRoot = "$($sysLetter):\"
 Detach-Vhd                                   # a failed earlier run may have left it attached
 Remove-Item $vhd, $rawimg -Force -ErrorAction SilentlyContinue
 if (Test-Path $vhd) { throw "Cannot recreate disk because the old VHDX still exists or is locked: $vhd. Close QEMU and detach it in Disk Management, then retry." }
@@ -141,7 +141,7 @@ assign letter=$sysLetter
     $rootPartition = $partitions | Where-Object { $_.PartitionNumber -eq 2 } | Select-Object -First 1
     if (-not $rootPartition) { throw "the NTFS system partition was not created" }
     if (-not (Test-Path $sysRoot)) { throw "the NTFS system partition was not mounted at $sysRoot" }
-    Copy-Item "$rootfs\\*" $sysRoot -Recurse -Force
+    Copy-Item "$rootfs\*" $sysRoot -Recurse -Force
 } finally {
     Detach-Vhd                               # also unmounts the ESP folder
 }

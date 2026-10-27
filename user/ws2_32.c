@@ -466,4 +466,64 @@ __attribute__((dllexport)) BOOL WSACloseEvent(HANDLE e) { (void)e;ws2_last_error
 __attribute__((dllexport)) int WSAWaitForMultipleEvents(DWORD n,const HANDLE *e,BOOL all,DWORD ms,BOOL alert) { (void)n;(void)e;(void)all;(void)ms;(void)alert;ws2_last_error=WSAENETDOWN;return -1; }
 __attribute__((dllexport)) int WSAEnumNetworkEvents(SOCKET s,HANDLE e,void *events) { (void)s;(void)e;(void)events;return ws2_no_io(); }
 __attribute__((dllexport)) int WSAAsyncSelect(SOCKET s,void *w,unsigned int msg,long events) { (void)s;(void)w;(void)msg;(void)events;return ws2_no_io(); }
+
+typedef struct { unsigned long len; char *buf; } WS2_BUF;
+typedef struct WS2_ADDRINFOW {
+ int ai_flags,ai_family,ai_socktype,ai_protocol;
+ unsigned long ai_addrlen;
+ unsigned short *ai_canonname;
+ SOCKADDR *ai_addr;
+ struct WS2_ADDRINFOW *ai_next;
+} WS2_ADDRINFOW;
+static WS2_ADDRINFOW ws2_wide_info[8];
+static unsigned short ws2_wide_canon[8][256];
+static void ws2_wide_to_ascii(char *out,unsigned cap,const unsigned short *in) {
+ unsigned i=0;if(!cap)return;if(!in){out[0]=0;return;}
+ while(in[i]&&i+1<cap){out[i]=(in[i]<128)?(char)in[i]:'?';i++;}out[i]=0;
+}
+static void ws2_ascii_to_wide(unsigned short *out,unsigned cap,const char *in) {
+ unsigned i=0;if(!cap)return;if(!in){out[0]=0;return;}
+ while(in[i]&&i+1<cap){out[i]=(unsigned char)in[i];i++;}out[i]=0;
+}
+__attribute__((dllexport)) SOCKET WSASocketW(int af,int type,int protocol,void *info,unsigned int group,DWORD flags) {
+ (void)info;(void)group;(void)flags;return socket(af,type,protocol);
+}
+__attribute__((dllexport)) int WSARecvFrom(SOCKET s,WS2_BUF *buffers,DWORD count,DWORD *received,DWORD *flags,SOCKADDR *from,int *fromlen,void *overlapped,void *completion) {
+ if(received)*received=0;if(!buffers||!count||overlapped||completion){ws2_last_error=WSAEOPNOTSUPP;return SOCKET_ERROR;}
+ int r=recvfrom(s,buffers[0].buf,(int)buffers[0].len,flags?*flags:0,from,fromlen);
+ if(r==SOCKET_ERROR)return r;if(received)*received=(DWORD)r;if(flags)*flags=0;return 0;
+}
+__attribute__((dllexport)) int WSASendTo(SOCKET s,WS2_BUF *buffers,DWORD count,DWORD *sent,DWORD flags,const SOCKADDR *to,int tolen,void *overlapped,void *completion) {
+ if(sent)*sent=0;if(!buffers||!count||overlapped||completion){ws2_last_error=WSAEOPNOTSUPP;return SOCKET_ERROR;}
+ int r=sendto(s,buffers[0].buf,(int)buffers[0].len,(int)flags,to,tolen);
+ if(r==SOCKET_ERROR)return r;if(sent)*sent=(DWORD)r;return 0;
+}
+__attribute__((dllexport)) int GetAddrInfoW(const unsigned short *node,const unsigned short *service,const void *hints,WS2_ADDRINFOW **result) {
+ if(result)*result=0;if(!node||!result){ws2_last_error=WSAEFAULT;return WSAEINVAL;}
+ char n[256],s[32];ws2_wide_to_ascii(n,sizeof(n),node);ws2_wide_to_ascii(s,sizeof(s),service);
+ WS2_ADDRINFO *a=0;int r=getaddrinfo(n,service?s:0,hints,(void **)&a);if(r)return r;
+ unsigned slot=0;while(a&&slot<8){WS2_ADDRINFOW *d=&ws2_wide_info[slot];d->ai_flags=a->ai_flags;d->ai_family=a->ai_family;d->ai_socktype=a->ai_socktype;d->ai_protocol=a->ai_protocol;d->ai_addrlen=a->ai_addrlen;d->ai_addr=a->ai_addr;d->ai_canonname=ws2_wide_canon[slot];ws2_ascii_to_wide(ws2_wide_canon[slot],256,a->ai_canonname);d->ai_next=0;if(slot)(ws2_wide_info[slot-1]).ai_next=d;else *result=d;a=a->ai_next;slot++;}
+ ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) void FreeAddrInfoW(WS2_ADDRINFOW *result) {(void)result;}
+__attribute__((dllexport)) int GetNameInfoW(const SOCKADDR *sa,unsigned int salen,unsigned short *host,unsigned int hostlen,unsigned short *serv,unsigned int servlen,int flags) {
+ char h[256],s[32];int r=getnameinfo(sa,salen,h,sizeof(h),s,sizeof(s),flags);if(r)return r;
+ if(host)ws2_ascii_to_wide(host,hostlen,h);if(serv)ws2_ascii_to_wide(serv,servlen,s);return 0;
+}
+__attribute__((dllexport)) int WSAAddressToStringW(SOCKADDR *address,DWORD length,void *protocol,unsigned short *text,DWORD *textlen) {
+ (void)protocol;if(!address||!textlen||length<sizeof(SOCKADDR_IN)||address->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+ const unsigned char *p=(const unsigned char *)&((SOCKADDR_IN *)address)->sin_addr;
+ char tmp[32];unsigned ip=(unsigned)p[0]|((unsigned)p[1]<<8)|((unsigned)p[2]<<16)|((unsigned)p[3]<<24);
+ unsigned char *oct=(unsigned char *)&ip;unsigned pos=0;
+ for(unsigned i=0;i<4;i++){unsigned v=oct[i];char rev[4];unsigned n=0;do{rev[n++]=(char)('0'+v%10);v/=10;}while(v&&n<4);while(n)tmp[pos++]=rev[--n];if(i<3)tmp[pos++]='.';}tmp[pos]=0;
+ unsigned need=pos+1;if(!text||*textlen<need){*textlen=need;ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}ws2_ascii_to_wide(text,*textlen,tmp);*textlen=need;ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) int WSAStringToAddressW(unsigned short *text,int family,void *protocol,SOCKADDR *address,int *length) {
+ (void)protocol;if(!text||!address||!length||*length<(int)sizeof(SOCKADDR_IN)||family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return SOCKET_ERROR;}
+ char tmp[64];ws2_wide_to_ascii(tmp,sizeof(tmp),text);unsigned ip=inet_addr(tmp);if(ip==0xffffffffu&&!ws2_eq(tmp,"255.255.255.255")){ws2_last_error=WSAEINVAL;return SOCKET_ERROR;}
+ SOCKADDR_IN *a=(SOCKADDR_IN *)address;a->sin_family=AF_INET;a->sin_addr=ip;ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) BOOL WSASetEvent(HANDLE event) {(void)event;ws2_last_error=WSAENETDOWN;return 0;}
+__attribute__((dllexport)) BOOL WSAResetEvent(HANDLE event) {(void)event;ws2_last_error=WSAENETDOWN;return 0;}
+
 __attribute__((dllexport)) int WSAGetLastErrorCompat2(void) { return ws2_last_error; }

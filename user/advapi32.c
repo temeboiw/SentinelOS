@@ -2,6 +2,7 @@ typedef unsigned char BYTE;
 typedef unsigned short WCHAR;
 typedef unsigned int DWORD;
 typedef unsigned int UINT;
+typedef unsigned long ULONG;
 typedef int BOOL;
 typedef long LONG;
 typedef void *HANDLE;
@@ -28,4 +29,3 @@ __attribute__((dllexport)) DWORD SetEntriesInAclA(DWORD count,void *entries,void
 __attribute__((dllexport)) DWORD GetSecurityInfo(HANDLE object,int type,DWORD info,void **owner,void **group,void **dacl,void **sacl,void **descriptor){(void)object;(void)type;(void)info;if(owner)*owner=0;if(group)*group=0;if(dacl)*dacl=0;if(sacl)*sacl=0;if(descriptor)*descriptor=0;return ERROR_NOT_SUPPORTED;}
 __attribute__((dllexport)) DWORD SetSecurityInfo(HANDLE object,int type,DWORD info,void *owner,void *group,void *dacl,void *sacl){(void)object;(void)type;(void)info;(void)owner;(void)group;(void)dacl;(void)sacl;return ERROR_NOT_SUPPORTED;}
 __attribute__((dllexport)) BOOL SystemFunction036(void *buffer,ULONG length){if(!buffer&&length)return 0;unsigned int a,b,c,d;__asm__ volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(1),"c"(0));if(!(c&(1u<<30)))return 0;BYTE *p=(BYTE *)buffer;for(ULONG i=0;i<length;){unsigned long long v;unsigned char ok;__asm__ volatile("rdrand %0; setc %1":"=r"(v),"=qm"(ok));if(!ok)return 0;for(unsigned j=0;j<8&&i<length;j++,i++)p[i]=(BYTE)(v>>(j*8));}return 1;}
-typedef unsigned long ULONG;

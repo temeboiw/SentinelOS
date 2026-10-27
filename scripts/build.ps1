@@ -152,7 +152,12 @@ assign letter=$sysLetter
     Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
     $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
     $partitions = @(Get-Partition -DiskNumber $disk.Number)
-    if ($partitions.Count -ne 2) { throw "Expected exactly two GPT partitions, found $($partitions.Count)." }
+    if ($partitions.Count -ne 2) {
+        $partitionSummary = ($partitions | Sort-Object PartitionNumber | ForEach-Object {
+            "number=$($_.PartitionNumber), type=$($_.Type), gptType=$($_.GptType), size=$($_.Size), drive=$($_.DriveLetter), filesystem=$($_.FileSystem), label=$($_.FileSystemLabel)"
+        }) -join [Environment]::NewLine
+        throw "Expected exactly two GPT partitions, found $($partitions.Count) on VHDX '$vhd':$([Environment]::NewLine)$partitionSummary"
+    }
     $rootPartition = $partitions | Where-Object { $_.PartitionNumber -eq 2 } | Select-Object -First 1
     if (-not $rootPartition) { throw "NTFS system partition was not created." }
     if (-not (Test-Path -LiteralPath $sysRoot)) { throw "NTFS system partition was not mounted at $sysRoot" }

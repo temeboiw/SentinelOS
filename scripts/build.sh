@@ -1187,6 +1187,34 @@ lld -flavor link \
   /export:ioctlsocket /export:setsockopt /export:getsockopt /export:getsockname /export:getpeername \
   /export:WSAIoctl /export:WSAEventSelect /export:WSACreateEvent /export:WSACloseEvent \
   /export:WSAWaitForMultipleEvents /export:WSAEnumNetworkEvents /export:WSAAsyncSelect \
+  /export:accept,@1 \
+  /export:bind,@2 \
+  /export:closesocket,@3 \
+  /export:connect,@4 \
+  /export:getpeername,@5 \
+  /export:getsockname,@6 \
+  /export:getsockopt,@7 \
+  /export:htonl,@8 \
+  /export:htons,@9 \
+  /export:ioctlsocket,@10 \
+  /export:inet_addr,@11 \
+  /export:inet_ntoa,@12 \
+  /export:listen,@13 \
+  /export:ntohl,@14 \
+  /export:ntohs,@15 \
+  /export:recv,@16 \
+  /export:recvfrom,@17 \
+  /export:select,@18 \
+  /export:send,@19 \
+  /export:sendto,@20 \
+  /export:setsockopt,@21 \
+  /export:shutdown,@22 \
+  /export:socket,@23 \
+  /export:gethostname,@57 \
+  /export:WSAGetLastError,@111 \
+  /export:WSASetLastError,@112 \
+  /export:WSAStartup,@115 \
+  /export:WSACleanup,@116 \
   "/out:$SYS32/ws2_32.dll" \
   "$B/obj/ws2_32.o"
 

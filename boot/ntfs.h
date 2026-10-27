@@ -20,8 +20,11 @@ typedef struct {
 
 static EFI_STATUS nt_read_disk(Ntfs *fs, UINT64 off, UINTN len, VOID *dst) {
     UINT32 ss = fs->bio->Media->BlockSize;
-    if (!ss || off > fs->total_sectors * fs->sector ||
-        len > fs->total_sectors * fs->sector - off) return EFI_DEVICE_ERROR;
+    if (!ss || ss != fs->sector || !fs->total_sectors ||
+        fs->total_sectors > UINT64_MAX / fs->sector) return EFI_DEVICE_ERROR;
+    UINT64 disk_bytes = fs->total_sectors * fs->sector;
+    if (off > disk_bytes || (UINT64)len > disk_bytes - off)
+        return EFI_DEVICE_ERROR;
     while (len) {
         UINT64 lba = off / ss;
         UINTN skip = (UINTN)(off % ss);
@@ -74,25 +77,40 @@ static int nt_run_next(const UINT8 *runs, UINTN len, UINTN *pos,
 
 static EFI_STATUS nt_runs_read(Ntfs *fs, const UINT8 *runs, UINTN runlen,
                                UINT64 offset, UINTN len, VOID *dst) {
+    if (!fs || !runs || !runlen || (!dst && len) ||
+        offset > UINT64_MAX - (UINT64)len) return EFI_INVALID_PARAMETER;
+    if (!len) return EFI_SUCCESS;
+    UINT64 request_end = offset + (UINT64)len;
+    UINT64 covered = offset;
     UINT64 vcn=0; INT64 lcn=0; UINTN p=0;
     while (p<runlen && runs[p]) {
         UINT64 count=0; int sparse=0;
         int rc=nt_run_next(runs,runlen,&p,&vcn,&lcn,&count,&sparse);
         if (rc<=0) return EFI_LOAD_ERROR;
-        UINT64 bytes=count*fs->cluster, start=vcn*fs->cluster, end=start+bytes;
-        if (offset<end && offset+(UINT64)len>start) {
-            UINT64 a=offset>start?offset:start, b=offset+(UINT64)len<end?offset+(UINT64)len:end;
+        if (count > UINT64_MAX / fs->cluster ||
+            vcn > UINT64_MAX / fs->cluster) return EFI_LOAD_ERROR;
+        UINT64 bytes=count*fs->cluster, start=vcn*fs->cluster;
+        if (start > UINT64_MAX - bytes) return EFI_LOAD_ERROR;
+        UINT64 end=start+bytes;
+        if (offset<end && request_end>start) {
+            UINT64 a=offset>start?offset:start, b=request_end<end?request_end:end;
+            if (a > covered) return EFI_LOAD_ERROR;
+            if (b > covered) covered = b;
             UINTN n=(UINTN)(b-a); VOID *out=(UINT8 *)dst+(a-offset);
             if (sparse) memset(out,0,n);
             else {
-                if (lcn<0) return EFI_LOAD_ERROR;
-                EFI_STATUS s=nt_read_disk(fs,((UINT64)lcn*fs->cluster)+(a-start),n,out);
+                if (lcn<0 || (UINT64)lcn > UINT64_MAX / fs->cluster)
+                    return EFI_LOAD_ERROR;
+                UINT64 disk_off=(UINT64)lcn*fs->cluster;
+                if (disk_off > UINT64_MAX - (a-start)) return EFI_LOAD_ERROR;
+                EFI_STATUS s=nt_read_disk(fs,disk_off+(a-start),n,out);
                 if (EFI_ERROR(s)) return s;
             }
         }
+        if (vcn > UINT64_MAX - count) return EFI_LOAD_ERROR;
         vcn+=count;
     }
-    return EFI_SUCCESS;
+    return covered == request_end ? EFI_SUCCESS : EFI_LOAD_ERROR;
 }
 
 static EFI_STATUS nt_record(Ntfs *fs, UINT64 index, UINT8 *out) {
@@ -116,7 +134,11 @@ static EFI_STATUS nt_mount(Ntfs *fs, EFI_BLOCK_IO_PROTOCOL *bio) {
     INT8 cr=(INT8)boot[64];
     if (cr<0) { if(cr < -16) return EFI_UNSUPPORTED; fs->record=1u<<(-cr); }
     else fs->record=(UINT32)cr*fs->cluster;
-    if (fs->record<512 || fs->record>65536 || fs->mft_lcn*fs->cluster>=fs->total_sectors*fs->sector) return EFI_UNSUPPORTED;
+    if (fs->record<512 || fs->record>65536 ||
+        fs->mft_lcn > UINT64_MAX / fs->cluster ||
+        fs->total_sectors > UINT64_MAX / fs->sector ||
+        fs->mft_lcn * fs->cluster >= fs->total_sectors * fs->sector)
+        return EFI_UNSUPPORTED;
     UINT8 *rec=NULL;
     s=bs->AllocatePool(EfiLoaderData,fs->record,(VOID **)&rec); if(EFI_ERROR(s)) return s;
     s=nt_read_disk(fs,fs->mft_lcn*fs->cluster,fs->record,rec);

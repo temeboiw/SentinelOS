@@ -46,7 +46,7 @@ if (-not (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
     throw "WSL is required for the complete build.sh pipeline. Install/configure WSL with SentinelOS build dependencies; no partial VHDX was created."
 }
 Write-Stage "Build every SentinelOS component via scripts/build.sh in WSL"
-$wslRootResult = & wsl.exe --exec wslpath -a $root 2>&1
+$wslRootResult = & wsl.exe --exec wslpath -u $root 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Could not translate repository path into WSL: $($wslRootResult -join [Environment]::NewLine)" }
 $wslRoot = ($wslRootResult -join [Environment]::NewLine).Trim()
 if ([string]::IsNullOrWhiteSpace($wslRoot)) { throw "wslpath returned an empty repository path." }

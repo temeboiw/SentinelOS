@@ -1,0 +1,14 @@
+LIBRARY msvcp140.dll
+EXPORTS
+  _Mtx_lock
+  _Mtx_unlock
+  _Cnd_broadcast
+  _Cnd_signal
+  _Cnd_wait
+  _Cnd_do_broadcast_at_thread_exit
+  _Thrd_join
+  _Thrd_id
+  "?_Xout_of_range@std@@YAXPEBD@Z"=msvcp_Xout_of_range
+  "?_Xlength_error@std@@YAXPEBD@Z"=msvcp_Xlength_error
+  "?_Throw_Cpp_error@std@@YAXH@Z"=msvcp_Throw_Cpp_error
+  "?_Xbad_function_call@std@@YAXXZ"=msvcp_Xbad_function_call

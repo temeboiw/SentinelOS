@@ -24,6 +24,13 @@ trap {
     break
 }
 
+# This entry point relies on Windows-only APIs (DiskPart, Get-DiskImage, and
+# Windows security principals). Fail clearly when invoked under PowerShell Core
+# on Linux instead of throwing a confusing WindowsPrincipal platform exception.
+if (-not $IsWindows) {
+    throw "scripts/build.ps1 is Windows-host-only. On Linux/Ubuntu/proot, run: bash ./scripts/build.sh (or bash ./scripts/build.sh --no-disk-image to compile and stage without creating a disk image)."
+}
+
 function Write-Stage([string]$name) {
     Write-Host ""
     Write-Host ("========== {0} ==========" -f $name) -ForegroundColor Yellow

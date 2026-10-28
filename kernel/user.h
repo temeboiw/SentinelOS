@@ -1020,8 +1020,6 @@ typedef struct {
     char volume_label[17];
 } UserVolumeMetadata;
 static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
-static NTFSK_VOLUME g_ntfsk_volume;
-static int g_ntfsk_ok;
 static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }

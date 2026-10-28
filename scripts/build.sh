@@ -196,8 +196,8 @@ if (( DO_NO_DISK_IMAGE == 0 )); then
   need mkfs.vfat
   need mkntfs
   need ntfscp
-  need ntfsmkdir
   need ntfscat
+  need cc
   need mmd
   need mcopy
   need dd
@@ -2390,42 +2390,50 @@ rm -f "$B/ntfs.tmp"
 qemu-img create -f raw "$B/ntfs.tmp" "${NTFS_MIB}M" >/dev/null
 mkntfs -F -Q -L magic -s 512 -c 4096 "$B/ntfs.tmp" >/dev/null
 
-# Populate NTFS with ntfs-3g's image utilities instead of mounting it.
-# This is deliberately FUSE-free: Android/proot often denies /dev/fuse and
-# mount syscalls, while ntfscp/ntfsmkdir can write directly to a regular image.
-# Create all directories first, in parent-before-child order, then copy files.
+# Populate NTFS without mounting. ntfscp can write file data but cannot
+# create parent directories; scripts/ntfs-mkdir.c uses libntfs-3g directly,
+# avoiding FUSE and mount permissions (which are unavailable in Android/proot).
 NTFS_DIR_LIST="$B/ntfs-directories.list"
 NTFS_FILE_LIST="$B/ntfs-files.list"
-if ! find "$B/rootfs" -mindepth 1 -type d -print0 | sort -z > "$NTFS_DIR_LIST"; then
-  echo "error: failed to enumerate rootfs directories for NTFS population" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST"
+NTFS_MKDIR="$B/ntfs-mkdir"
+if ! cc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
+  echo "error: failed to build the FUSE-free NTFS directory helper; install ntfs-3g-dev" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi
+
+if ! find "$B/rootfs" -mindepth 1 -type d -print0 | sort -z > "$NTFS_DIR_LIST"; then
+  echo "error: failed to enumerate rootfs directories for NTFS population" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
+NTFS_DIR_ARGS=()
 while IFS= read -r -d '' entry; do
   [[ "$entry" == "$B/rootfs" ]] && continue
   relative="${entry#"$B/rootfs"/}"
-  if ! ntfsmkdir "$B/ntfs.tmp" "/$relative"; then
-    echo "error: failed to create NTFS directory: /$relative" >&2
-    rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST"
-    exit 1
-  fi
+  NTFS_DIR_ARGS+=("/$relative")
 done < "$NTFS_DIR_LIST"
+if (("${#NTFS_DIR_ARGS[@]}" > 0)) && ! "$NTFS_MKDIR" "$B/ntfs.tmp" "${NTFS_DIR_ARGS[@]}"; then
+  echo "error: failed to create one or more directories in NTFS system volume" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
 rm -f "$NTFS_DIR_LIST"
 
 if ! find "$B/rootfs" -type f -print0 | sort -z > "$NTFS_FILE_LIST"; then
   echo "error: failed to enumerate rootfs files for NTFS population" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST"
+  rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi
 while IFS= read -r -d '' entry; do
   relative="${entry#"$B/rootfs"/}"
   if ! ntfscp "$B/ntfs.tmp" "$entry" "/$relative"; then
     echo "error: failed to copy file into NTFS volume: /$relative" >&2
-    rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST"
+    rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
     exit 1
   fi
 done < "$NTFS_FILE_LIST"
-rm -f "$NTFS_FILE_LIST"
+rm -f "$NTFS_FILE_LIST" "$NTFS_MKDIR"
 
 # Fail the build if NTFS population did not preserve the expected Windows-like
 # system tree. ntfscat reads these files directly from the image without FUSE.

@@ -3918,12 +3918,12 @@ static void user_enter(BootInfo *bi) {
         vfs_mount_c();
     }
 
-    if (g_ext4_ok) {
+    if (g_ext4_ok || g_ntfsk_ok) {
         int driver_count = SentinelDriverLoadAllFromDisk();
         if (driver_count < 0)
             DbgPrint("driver: .sys autoload scan failed status=%d\n", driver_count);
     } else {
-        DbgPrint("driver: .sys autoload deferred; root ext4 volume is not mounted\n");
+        DbgPrint("driver: .sys autoload deferred; no supported system volume is mounted\n");
     }
 
     DbgPrint("\n-- usermode (smss) --\n");

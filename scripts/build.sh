@@ -2380,8 +2380,9 @@ if [[ ! -x /usr/bin/gcc ]]; then
 fi
 
 echo "  -> compiling NTFS helper with /usr/bin/gcc"
-if ! /usr/bin/gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
-  status=$?
+/usr/bin/gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
+status=$?
+if (( status != 0 )); then
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
   echo "diagnostic: gcc=$(readlink -f /usr/bin/gcc 2>/dev/null || printf '%s' /usr/bin/gcc)" >&2
   echo "diagnostic: ntfs-3g pkg-config flags:" >&2

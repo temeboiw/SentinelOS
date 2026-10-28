@@ -55,7 +55,15 @@ typedef struct {
 static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
 static int g_count;
-static char g_path[128];
+static char g_path[260];
+static int g_win_x = 40;
+#define FE_HISTORY_MAX 32
+static char g_history[FE_HISTORY_MAX][260];
+static int g_history_count;
+static int g_history_index = -1;
+static int g_address_mode;
+static char g_address_edit[260];
+static int g_address_len;
 static int g_win_y = 40; /* live window origin */
 static int g_context_menu = 0;
 static int g_context_row = -1;
@@ -175,8 +183,9 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         char toolbar[80]; int q=0;
         const char *prefix="Back  Forward  Up  Refresh  |  Address: ";
         while(prefix[q] && q<78) { toolbar[q]=prefix[q]; q++; }
-        const char *address=g_home ? "Quick access" : g_path;
+        const char *address=g_address_mode ? g_address_edit : (g_home ? "Quick access" : g_path);
         for(int j=0;address[j] && q<78;j++) toolbar[q++]=address[j];
+        if(g_address_mode && q<78) toolbar[q++]='_';
         if(g_filter_len && q<68) {
             const char *search="  |  Search: ";
             for(int j=0;search[j] && q<78;j++) toolbar[q++]=search[j];
@@ -251,7 +260,7 @@ static int fe_build_launch_path(const char *name, char *out, int cap) {
 static void fe_append_component(const char *name) {
     int n=0; while (g_path[n]) n++;
     if (n>0 && g_path[n-1]!='\\') g_path[n++]='\\';
-    for (int i=0; name[i] && n<126; i++) g_path[n++]=name[i];
+    for (int i=0; name[i] && n<259; i++) g_path[n++]=name[i];
     g_path[n]=0;
 }
 
@@ -303,6 +312,75 @@ static int fe_open_pin(int row, SetCurrentDirectoryA_t pChdir) {
         return 1;
     }
     return 0;
+}
+/* Directory navigation uses the existing relative-chdir syscall. */
+static void fe_history_visit(const char *path) {
+    if (!path || !path[0]) return;
+    if (g_history_index >= 0 && g_history_index < g_history_count &&
+        name_compare_ci(g_history[g_history_index], path) == 0) return;
+    if (g_history_index + 1 < g_history_count) g_history_count = g_history_index + 1;
+    if (g_history_count >= FE_HISTORY_MAX) {
+        for (int i=1;i<FE_HISTORY_MAX;i++) {
+            int j=0; while(g_history[i][j] && j<259){g_history[i-1][j]=g_history[i][j];j++;}
+            g_history[i-1][j]=0;
+        }
+        g_history_count=FE_HISTORY_MAX-1;
+        if(g_history_index>0)g_history_index--;
+    }
+    int n=0; while(path[n] && n<259){g_history[g_history_count][n]=path[n];n++;}
+    g_history[g_history_count][n]=0;
+    g_history_index=g_history_count++;
+}
+static int fe_walk_path_raw(SetCurrentDirectoryA_t pChdir, const char *target) {
+    if (!target || !target[0]) return 0;
+    if (!((target[0]=='C'||target[0]=='c') && target[1]==':' &&
+          (target[2]=='\\' || target[2]=='/'))) return 0;
+    if (!fe_go_root(pChdir)) return 0;
+    int pos=3;
+    while(target[pos]) {
+        while(target[pos]=='\\' || target[pos]=='/') pos++;
+        if(!target[pos]) break;
+        char component[256]; int n=0;
+        while(target[pos] && target[pos]!='\\' && target[pos]!='/' && n<255)
+            component[n++]=target[pos++];
+        if(target[pos] && target[pos]!='\\' && target[pos]!='/') return 0;
+        component[n]=0;
+        if(!n || (n==1&&component[0]=='.')) continue;
+        if(n==2&&component[0]=='.'&&component[1]=='.') {
+            if(!fe_chdir(pChdir,".."))return 0;
+            int k=0;while(g_path[k])k++;
+            if(k>3){k--;while(k>2&&g_path[k]!='\\')k--;if(g_path[k]=='\\')k++;g_path[k]=0;if(k<=3)path_init();}
+            continue;
+        }
+        if(!fe_chdir(pChdir,component))return 0;
+        int k=0;while(g_path[k])k++;
+        if(k>3 && g_path[k-1]!='\\')g_path[k++]='\\';
+        for(int j=0;component[j]&&k<259;j++)g_path[k++]=component[j];
+        g_path[k]=0;
+    }
+    return 1;
+}
+static int fe_set_path(SetCurrentDirectoryA_t pChdir, const char *target) {
+    char previous[260]; int n=0;
+    while(g_path[n]&&n<259){previous[n]=g_path[n];n++;} previous[n]=0;
+    if(fe_walk_path_raw(pChdir,target)) return 1;
+    (void)fe_walk_path_raw(pChdir,previous);
+    return 0;
+}
+static int fe_history_move(SetCurrentDirectoryA_t pChdir, int delta) {
+    int next=g_history_index+delta;
+    if(next<0 || next>=g_history_count) return 0;
+    if(!fe_set_path(pChdir,g_history[next])) return 0;
+    g_history_index=next; g_home=0; g_filter_len=0; g_filter[0]=0;
+    return 1;
+}
+static int fe_address_commit(SetCurrentDirectoryA_t pChdir) {
+    g_address_edit[g_address_len]=0;
+    if(!fe_set_path(pChdir,g_address_edit)) return 0;
+    fe_history_visit(g_path);
+    g_home=0; g_filter_len=0; g_filter[0]=0; g_scroll=0;
+    g_address_mode=0;
+    return 1;
 }
 static int ends_with(const char *n, const char *ext) {
     int i = 0, j = 0;
@@ -417,6 +495,7 @@ void mainCRTStartup(void) {
     }
 
     path_init();
+    fe_history_visit(g_path);
     print("fileexplorer: create window\n");
     g_win_y = 40;
     if (pBeginBatch) pBeginBatch();
@@ -450,7 +529,7 @@ void mainCRTStartup(void) {
          * after the user moves the window; ask USER32 for its live rectangle. */
         if (pGetWindowRect) {
             FE_RECT live_rect;
-            if (pGetWindowRect(g_window, &live_rect)) g_win_y = live_rect.top;
+            if (pGetWindowRect(g_window, &live_rect)) { g_win_x = live_rect.left; g_win_y = live_rect.top; }
         }
 
         /*
@@ -505,6 +584,16 @@ void mainCRTStartup(void) {
         }
         if(msg.message==0x0102) {
             int ch=(int)msg.wParam;
+            if(g_address_mode) {
+                if(ch==27) { g_address_mode=0; draw_rows(pText,pInv); }
+                else if(ch==13) {
+                    if(!fe_address_commit(pChdir) && pMsgBox)
+                        pMsgBox(g_window,"That path could not be opened. Enter an existing C:\\ path.","File Explorer",0x10);
+                    if(!g_address_mode) reload(pQuery,pText,pInv); else draw_rows(pText,pInv);
+                } else if(ch==8 && g_address_len>0) { g_address_edit[--g_address_len]=0; draw_rows(pText,pInv); }
+                else if(ch>=32 && ch<127 && g_address_len<258) { g_address_edit[g_address_len++]=(char)ch; g_address_edit[g_address_len]=0; draw_rows(pText,pInv); }
+                continue;
+            }
             if (g_context_menu) {
                 if (ch==27) { g_context_menu=0; draw_rows(pText,pInv); }
             } else if(g_search_mode) {
@@ -515,6 +604,32 @@ void mainCRTStartup(void) {
             } else if(ch=='/'||ch=='?') {g_search_mode=1;g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
             else if(ch=='h'||ch=='H') {g_home=1;g_search_mode=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
             else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
+        }
+        if (msg.message == 0x0100 && !g_context_menu) {
+            if (msg.wParam==0x74) { g_address_mode=0; reload(pQuery,pText,pInv); continue; } /* F5 */
+            if (msg.wParam==0x08 && !g_address_mode) {
+                if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv);
+                continue;
+            }
+            if (msg.wParam==0x25 && (msg.lParam & (1LL<<29))) {
+                if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv);
+                continue;
+            }
+            if (msg.wParam==0x27 && (msg.lParam & (1LL<<29))) {
+                if(fe_history_move(pChdir,1)) reload(pQuery,pText,pInv);
+                continue;
+            }
+            if (msg.wParam==0x4C && (msg.lParam & (1LL<<29))) {
+                g_address_mode=1; g_address_len=0;
+                while(g_path[g_address_len] && g_address_len<258) { g_address_edit[g_address_len]=g_path[g_address_len]; g_address_len++; }
+                g_address_edit[g_address_len]=0; draw_rows(pText,pInv); continue;
+            }
+            if (msg.wParam==0x26 && (msg.lParam & (1LL<<29)) && !g_home) {
+                char parent[260]; int n=0; while(g_path[n]&&n<259){parent[n]=g_path[n];n++;}parent[n]=0;
+                if(n>3){n--;while(n>3&&parent[n-1]!='\\')n--;if(n<3)n=3;parent[n]=0;}
+                if(fe_set_path(pChdir,parent)){fe_history_visit(g_path);g_home=0;reload(pQuery,pText,pInv);}
+                continue;
+            }
         }
         if (msg.message == 0x0100 && g_context_menu) {
             if (msg.wParam == 0x1B) { g_context_menu=0; draw_rows(pText,pInv); }
@@ -529,7 +644,7 @@ void mainCRTStartup(void) {
                     print("fileexplorer: Enter launch ");
                     print(g_names[selected]);
                     print("\n");
-                    char launch_path[160];
+                    char launch_path[260];
                     long long pid = -1;
                     if (fe_build_launch_path(g_names[selected], launch_path, sizeof launch_path))
                         pid = (long long)sy3(SYS_CreateProcess, (u64)launch_path, 0, 0);
@@ -588,6 +703,24 @@ void mainCRTStartup(void) {
         }
 
         if (msg.message == 0x0201) {
+            if (!g_context_menu) {
+                int line=(msg.y-(g_win_y+44))/16;
+                if(line==1) {
+                    int relx=msg.x-g_win_x;
+                    if(relx>=0&&relx<40) { if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv); continue; }
+                    if(relx>=40&&relx<100) { if(fe_history_move(pChdir,1)) reload(pQuery,pText,pInv); continue; }
+                    if(relx>=100&&relx<130) {
+                        if(!g_home) { char parent[260];int n=0;while(g_path[n]&&n<259){parent[n]=g_path[n];n++;}parent[n]=0;if(n>3){n--;while(n>3&&parent[n-1]!='\\')n--;if(n<3)n=3;parent[n]=0;}if(fe_set_path(pChdir,parent)){fe_history_visit(g_path);reload(pQuery,pText,pInv);} }
+                        continue;
+                    }
+                    if(relx>=130&&relx<190) { reload(pQuery,pText,pInv); continue; }
+                    if(relx>=240) {
+                        g_address_mode=1;g_address_len=0;
+                        while(g_path[g_address_len]&&g_address_len<258){g_address_edit[g_address_len]=g_path[g_address_len];g_address_len++;}
+                        g_address_edit[g_address_len]=0;draw_rows(pText,pInv);continue;
+                    }
+                }
+            }
             if (g_context_menu) {
                 int line = (msg.y - (g_win_y + 44)) / 16;
                 int item = line - g_context_start_line;
@@ -698,6 +831,7 @@ void mainCRTStartup(void) {
                                     for(int k=0;g_names[selected][k]&&n<120;k++)g_path[n++]=g_names[selected][k];
                                     g_path[n]=0;
                                 }
+                                fe_history_visit(g_path);
                                 g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);
                             } else if(pMsgBox) pMsgBox(g_window,"Could not open this folder.","File Explorer",0);
                         } else if (ends_with(g_names[selected], ".exe")) {
@@ -743,6 +877,7 @@ void mainCRTStartup(void) {
                          */
                         int ok=fe_open_pin(row,pChdir);
                         if(ok) {
+                            fe_history_visit(g_path);
                             g_home=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;
                             reload(pQuery,pText,pInv);
                         } else {
@@ -780,6 +915,7 @@ void mainCRTStartup(void) {
                                 g_path[n++] = g_names[row][k];
                             g_path[n] = 0;
                         }
+                        fe_history_visit(g_path);
                         print("fileexplorer: now ");
                         print(g_path);
                         print("\n");

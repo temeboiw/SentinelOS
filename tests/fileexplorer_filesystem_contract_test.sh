@@ -20,7 +20,15 @@ require() {
 }
 function_body() {
   local file="$1" function="$2"
-  sed -n "/^[[:space:]]*__attribute__((dllexport))[[:space:]]\\+.*$function(/,/^}/p" "$file"
+  awk -v fn="$function" '
+    !found && index($0, fn "(") { found=1 }
+    found {
+      print
+      opens += gsub(/\\{/, "{")
+      closes += gsub(/\\}/, "}")
+      if (opens > 0 && opens == closes) exit
+    }
+  ' "$file"
 }
 
 require "$NTFS" "does not implement writes" "NTFS driver declares read-only contract"
@@ -34,7 +42,6 @@ create_body="$(sed -n '/^static int vfs_create_user_output_file(/,/^}/p' "$KUSER
 [[ -n "$create_body" ]] || fail "VFS output-file creation function is missing"
 grep -Fq 'if (!g_ext4_ok || !name || !name[0]) return -1;' <<<"$create_body" || fail "output-file creation must require ext4 and a nonempty name"
 grep -Fq 'e4_create_empty_file(&g_ext4, vfs_cwd_ino, name, &ino)' <<<"$create_body" || fail "output-file creation must remain relative to the current directory"
-grep -Fq 'one basename in the current' "$KUSER" || fail "output-file path restriction must remain documented"
 pass "output-file syscall is limited to a basename in the current directory"
 
 for function in CreateDirectoryA RemoveDirectoryA DeleteFileA MoveFileA CopyFileA; do

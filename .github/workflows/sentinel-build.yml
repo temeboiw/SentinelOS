@@ -24,6 +24,8 @@ jobs:
         run: git clone --depth 1 https://github.com/tianocore/edk2.git "$RUNNER_TEMP/edk2"
       - name: Test File Explorer filesystem contract
         run: bash tests/fileexplorer_filesystem_contract_test.sh
+      - name: Test File Explorer navigation contract
+        run: bash tests/fileexplorer_navigation_test.sh
       - name: Test CPU Vulkan runtime subset
         run: |
           clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-ignored-attributes -fdeclspec -Iuser tests/vulkan_test.c -o "$RUNNER_TEMP/vulkan-test"

@@ -415,8 +415,21 @@ static int fe_copy_to_clipboard(int row, MessageBoxA_t pMsgBox) {
     for(int i=0;i<=n;i++)g_clip_name[i]=g_names[row][i];
     return 1;
 }
+static int fe_protected_destination(void) {
+    const char *prefix="C:\\Windows\\System32";
+    int i=0;
+    while(prefix[i]) {
+        char a=g_path[i],b=prefix[i];
+        if(a>='a'&&a<='z')a-=32;
+        if(b>='a'&&b<='z')b-=32;
+        if(!a||a!=b)return 0;
+        i++;
+    }
+    return g_path[i]==0||g_path[i]=='\\';
+}
 static int fe_new_file(MessageBoxA_t pMsgBox) {
     if(g_home) { if(pMsgBox)pMsgBox(g_window,"Open a folder before creating a file.","New file",0x10);return 0; }
+    if(fe_protected_destination()) { if(pMsgBox)pMsgBox(g_window,"Access denied: System32 is protected. No files were changed.","Protected system folder",0x10);return 0; }
     const char *names[]={"New File.txt","New File (2).txt","New File (3).txt","New File (4).txt","New File (5).txt"};
     for(int i=0;i<5;i++) {
         long long h=(long long)sy3(SYS_CreateOutputFile,(u64)names[i],0,0);
@@ -435,6 +448,10 @@ static int fe_paste_file(MessageBoxA_t pMsgBox) {
     }
     if(g_home) {
         if(pMsgBox)pMsgBox(g_window,"Open a destination folder before pasting.","Paste file",0x10);
+        return 0;
+    }
+    if(fe_protected_destination()) {
+        if(pMsgBox)pMsgBox(g_window,"Access denied: System32 is protected. No files were changed.","Protected system folder",0x10);
         return 0;
     }
     char dest[64];

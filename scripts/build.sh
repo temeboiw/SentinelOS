@@ -2370,21 +2370,30 @@ mkntfs -F -Q -L magic -s 512 -c 4096 -p "$NTFS_START" -H 255 -S 63 "$B/ntfs.tmp"
 NTFS_DIR_LIST="$B/ntfs-directories.list"
 NTFS_FILE_LIST="$B/ntfs-files.list"
 NTFS_MKDIR="$B/ntfs-mkdir"
-if [[ ! -x /usr/bin/gcc ]]; then
-  echo "error: /usr/bin/gcc is not executable in this build environment" >&2
+# Prefer a compiler installed inside the active Linux/proot distro, but do not
+# assume /usr/bin/gcc exists: Termux can expose a working gcc via PATH.
+NTFS_CC=""
+for candidate in /usr/bin/gcc /usr/local/bin/gcc "$(command -v gcc 2>/dev/null || true)" "$(command -v cc 2>/dev/null || true)"; do
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    NTFS_CC="$candidate"
+    break
+  fi
+done
+if [[ -z "$NTFS_CC" ]]; then
+  echo "error: no executable gcc or cc found for the NTFS helper" >&2
   echo "diagnostic: PATH=$PATH" >&2
   command -v gcc >&2 || true
-  ls -l /usr/bin/gcc 2>&1 || true
+  command -v cc >&2 || true
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi
 
-echo "  -> compiling NTFS helper with /usr/bin/gcc"
-/usr/bin/gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
+echo "  -> compiling NTFS helper with $NTFS_CC"
+"$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
 status=$?
 if (( status != 0 )); then
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
-  echo "diagnostic: gcc=$(readlink -f /usr/bin/gcc 2>/dev/null || printf '%s' /usr/bin/gcc)" >&2
+  echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2
   echo "diagnostic: ntfs-3g pkg-config flags:" >&2
   pkg-config --cflags --libs libntfs-3g 2>&1 || true
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"

@@ -24,11 +24,30 @@ trap {
     break
 }
 
-# This entry point relies on Windows-only APIs (DiskPart, Get-DiskImage, and
-# Windows security principals). Fail clearly when invoked under PowerShell Core
-# on Linux instead of throwing a confusing WindowsPrincipal platform exception.
-if (-not $IsWindows) {
-    throw "scripts/build.ps1 is Windows-host-only. On Linux/Ubuntu/proot, run: bash ./scripts/build.sh (or bash ./scripts/build.sh --no-disk-image to compile and stage without creating a disk image)."
+# Share one PowerShell entry point across native Windows and Linux/proot.
+# Windows uses the native VHDX + DiskPart workflow below. Linux delegates to
+# build.sh, which uses host-native Linux tooling and creates the Linux disk image.
+# Detect the OS with RuntimeInformation so this also works in Windows PowerShell
+# 5.1, where the PowerShell Core $IsWindows variable does not exist.
+$isWindowsHost = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+)
+if (-not $isWindowsHost) {
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if (-not $bash) { throw "Bash is required on Linux/proot. Install it with: apt install bash" }
+
+    $linuxArgs = @()
+    if ($Clean) { $linuxArgs += "--clean" }
+    if ($Run) { $linuxArgs += "--run" }
+    if ($ResetNvram) { $linuxArgs += "--reset-nvram" }
+    if ($KeepFallback -or -not $DropFallback) { $linuxArgs += "--keep-fallback" }
+
+    Write-Host "Linux/proot host detected; forwarding build to scripts/build.sh" -ForegroundColor Cyan
+    & $bash.Source (Join-Path $PSScriptRoot "build.sh") @linuxArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Linux/proot build failed (exit $LASTEXITCODE)."
+    }
+    return
 }
 
 function Write-Stage([string]$name) {

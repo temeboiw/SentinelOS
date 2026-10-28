@@ -1165,9 +1165,12 @@ static int u32_menu_text_is(const char *wanted) {
     return *a==0&&*b==0;
 }
 
-#define U32_START_APP_MAX 1024
-#define U32_SCAN_DIR_MAX 4096
-typedef struct { char path[260]; char name[64]; } U32_START_APP;
+/* Search index sized for large application trees; the old 1,024-entry /
+   4,096-directory caps silently omitted executables in larger installs. */
+#define U32_START_APP_MAX 8192
+#define U32_SCAN_DIR_MAX 32768
+#define U32_SCAN_DEPTH_MAX 24
+typedef struct { char path[512]; char name[96]; } U32_START_APP;
 static U32_START_APP u32_start_apps[U32_START_APP_MAX];
 static unsigned int u32_start_app_count;
 static unsigned int u32_scan_dir_count;
@@ -1204,7 +1207,7 @@ static int u32_path_append(char *out,unsigned int cap,const char *base,const cha
 /* SYS_QueryDir enumerates the current working directory. Walk real directories,
    restoring the parent after every recursive descent; never invent a list of apps. */
 static void u32_scan_apps_dir(const char *path,unsigned int depth) {
-    if(!path||depth>8||u32_scan_dir_count>=U32_SCAN_DIR_MAX)return;
+    if(!path||depth>U32_SCAN_DEPTH_MAX||u32_scan_dir_count>=U32_SCAN_DIR_MAX)return;
     if(sy3(SYS_SetCurrentDirectory,(u64)path,0,0)!=0)return;
     u32_scan_dir_count++;
     for(u64 index=0;index<4096&&u32_start_app_count<U32_START_APP_MAX;index++) {
@@ -1212,10 +1215,10 @@ static void u32_scan_apps_dir(const char *path,unsigned int depth) {
         u64 type=sy3(SYS_QueryDir,index,(u64)entry,0);
         if(!type)break;
         if(!entry[0]||u32_text_equal_ci(entry,".")||u32_text_equal_ci(entry,".."))continue;
-        char child[260];
+        char child[512];
         if(!u32_path_append(child,sizeof(child),path,entry))continue;
         if(type==2) {
-            if(depth<8&&u32_scan_dir_count<U32_SCAN_DIR_MAX) {
+            if(depth<U32_SCAN_DEPTH_MAX&&u32_scan_dir_count<U32_SCAN_DIR_MAX) {
                 u32_scan_apps_dir(child,depth+1);
                 /* Recursive enumeration changes the process working directory;
                    return to this parent before requesting its next entry. */
@@ -1232,13 +1235,7 @@ static void u32_scan_start_apps(void) {
     u32_apps_scanned=1;
     u32_start_app_count=0;u32_scan_dir_count=0;
     u32_scan_apps_dir("C:\\",0);
-    /* Keep the core tools discoverable if a filesystem image has no root
-       directory index support yet; normal results always come from the scan. */
-    if(!u32_start_app_count) {
-        u32_start_add_app("cmd.exe","cmd.exe");
-        u32_start_add_app("taskmgr.exe","taskmgr.exe");
-        u32_start_add_app("fileexplorer.exe","fileexplorer.exe");
-    }
+    /* An empty index stays empty: don't report made-up paths as installed apps. */
     (void)sy3(SYS_SetCurrentDirectory,(u64)"C:\\",0,0);
 }
 static int u32_app_matches(const U32_START_APP *app,const char *query) {
@@ -1259,6 +1256,7 @@ static int u32_app_matches(const U32_START_APP *app,const char *query) {
     return 0;
 }
 static int u32_search_result_count(void) {
+    if(g_search_len>0)u32_scan_start_apps();
     int count=0;
     for(unsigned int i=0;i<u32_start_app_count;i++)if(u32_app_matches(&u32_start_apps[i],g_search_text))count++;
     return count;
@@ -1292,7 +1290,7 @@ static void submit_search(void) {
     U32_START_APP *app=u32_search_result_at(0);
     g_menu=0;g_search_focus=0;g_start_hover=-1;
     if(app) {
-        char path[260];unsigned int i=0;
+        char path[512];unsigned int i=0;
         while(app->path[i]&&i<sizeof(path)-1){path[i]=app->path[i];i++;}path[i]=0;
         u32_menu_launch(path);
     } else if(g_search_len>0) {

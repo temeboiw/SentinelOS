@@ -601,6 +601,10 @@ void mainCRTStartup(void) {
                 else if(ch==13){g_search_mode=0;draw_rows(pText,pInv);}
                 else if(ch==27){g_search_mode=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}
                 else if(ch>=32&&ch<127&&g_filter_len<62){g_home=0;g_filter[g_filter_len++]=(char)ch;g_filter[g_filter_len]=0;reload(pQuery,pText,pInv);}
+            } else if(ch==12) {
+                g_address_mode=1; g_address_len=0;
+                while(g_path[g_address_len] && g_address_len<258) { g_address_edit[g_address_len]=g_path[g_address_len]; g_address_len++; }
+                g_address_edit[g_address_len]=0; draw_rows(pText,pInv);
             } else if(ch=='/'||ch=='?') {g_search_mode=1;g_filter_len=0;g_filter[0]=0;g_home=0;draw_rows(pText,pInv);}
             else if(ch=='h'||ch=='H') {g_home=1;g_search_mode=0;g_filter_len=0;g_filter[0]=0;g_scroll=0;draw_rows(pText,pInv);}
             else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}

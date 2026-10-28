@@ -24,8 +24,12 @@ function_body() {
     !found && index($0, fn "(") { found=1 }
     found {
       print
-      opens += gsub(/\\{/, "{")
-      closes += gsub(/\\}/, "}")
+      line=$0
+      for (i=1; i<=length(line); i++) {
+        c=substr(line,i,1)
+        if (c=="{") opens++
+        if (c=="}") closes++
+      }
       if (opens > 0 && opens == closes) exit
     }
   ' "$file"

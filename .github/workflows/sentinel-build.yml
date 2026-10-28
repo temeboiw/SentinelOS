@@ -30,6 +30,8 @@ jobs:
         run: bash tests/fileexplorer_operations_test.sh
       - name: Test File Explorer views and search contract
         run: bash tests/fileexplorer_views_test.sh
+      - name: Test File Explorer keyboard navigation contract
+        run: bash tests/fileexplorer_keyboard_test.sh
       - name: Test CPU Vulkan runtime subset
         run: |
           clang -std=c11 -Wall -Wextra -Wno-unused-function -Wno-ignored-attributes -fdeclspec -Iuser tests/vulkan_test.c -o "$RUNNER_TEMP/vulkan-test"

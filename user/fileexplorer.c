@@ -786,9 +786,26 @@ void mainCRTStartup(void) {
             continue;
         }
         if (msg.message == 0x0100 && msg.wParam == 0x0D && !g_context_menu) {
-            /* Enter activates the file from the most recent single click.
-               Double-click remains supported for normal mouse use. */
+            /* Enter activates the current keyboard/mouse selection. */
             int selected = g_last_file_row;
+            if(selected>=0 && selected<g_count && g_isdir[selected]) {
+                int ok=pChdir?pChdir(g_names[selected]):0;
+                if(!ok)ok=(sy3(SYS_Chdir,(u64)g_names[selected],0,0)==0);
+                if(ok) {
+                    if(g_names[selected][0]=='.'&&g_names[selected][1]=='.'&&!g_names[selected][2]) {
+                        int n=0;while(g_path[n])n++;
+                        if(n>3){n--;while(n>2&&g_path[n]!='\\')n--;if(g_path[n]=='\\')n++;g_path[n]=0;if(n<=3)path_init();}
+                    } else {
+                        int n=0;while(g_path[n])n++;
+                        if(n>0&&g_path[n-1]!='\\')g_path[n++]='\\';
+                        for(int k=0;g_names[selected][k]&&n<258;k++)g_path[n++]=g_names[selected][k];
+                        g_path[n]=0;
+                    }
+                    fe_history_visit(g_path);g_filter_len=0;g_filter[0]=0;g_home=0;
+                    g_last_file_row=-1;reload(pQuery,pText,pInv);
+                } else if(pMsgBox)pMsgBox(g_window,"Could not open this folder.","File Explorer",0);
+                continue;
+            }
             if (selected >= 0 && selected < g_count && !g_isdir[selected]) {
                 if (ends_with(g_names[selected], ".exe")) {
                     print("fileexplorer: Enter launch ");
@@ -824,16 +841,23 @@ void mainCRTStartup(void) {
             continue;
         }
 
-        if (msg.message == 0x0100) {
-            if (msg.wParam == 0x26 && g_scroll > 0) g_scroll--;
-            if (msg.wParam == 0x28 && g_scroll < g_count - VISIBLE_ROWS) g_scroll++;
-            if (msg.wParam == 0x21) g_scroll -= VISIBLE_ROWS;
-            if (msg.wParam == 0x22) g_scroll += VISIBLE_ROWS;
-            if (g_scroll < 0) g_scroll = 0;
-            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
-            if (g_scroll < 0) g_scroll = 0;
-            g_hover_row = -1;
-            draw_rows(pText, pInv);
+        if (msg.message == 0x0100 && !g_context_menu && !g_home &&
+            (msg.wParam==0x26 || msg.wParam==0x28 ||
+             msg.wParam==0x21 || msg.wParam==0x22)) {
+            int step=(msg.wParam==0x21 || msg.wParam==0x22)?VISIBLE_ROWS:1;
+            int direction=(msg.wParam==0x26 || msg.wParam==0x21)?-1:1;
+            if(g_last_file_row<0 || g_last_file_row>=g_count)
+                g_last_file_row=(direction<0)?g_count-1:0;
+            else
+                g_last_file_row+=direction*step;
+            if(g_last_file_row<0)g_last_file_row=0;
+            if(g_last_file_row>=g_count)g_last_file_row=g_count-1;
+            if(g_last_file_row<g_scroll)g_scroll=g_last_file_row;
+            if(g_last_file_row>=g_scroll+VISIBLE_ROWS)
+                g_scroll=g_last_file_row-VISIBLE_ROWS+1;
+            g_hover_row=g_last_file_row;
+            draw_rows(pText,pInv);
+            continue;
         }
 
         if (msg.message == 0x0204) {

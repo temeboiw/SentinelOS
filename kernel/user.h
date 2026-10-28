@@ -3900,21 +3900,24 @@ static void user_enter(BootInfo *bi) {
     virtio_blk_init();
     virtio_input_init();
     SentinelRegisterBuiltinBlockDevices();
-    vfs_mount_c();
-    if (!g_ext4_ok) {
-        for(uint32_t i=0;i<SentinelBlockDeviceCount;i++) {
-            SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet(i);
-            if(d && ntfsk_find_and_mount(&g_ntfsk_volume,d)==0) {
-                g_ntfsk_ok=1;
-                vfs_ntfsk_cwd_storage=5;
-                if(vfs_ntfsk_refresh()<0)
-                    DbgPrint("fs: NTFS root directory enumeration failed\n");
-                DbgPrint("fs: NTFS read-only system volume mounted\n");
-                break;
-            }
+
+    /* NTFS is the preferred system filesystem. Keep ext4 as a temporary
+       fallback until NTFS read/write and boot-path coverage is complete. */
+    for(uint32_t i=0;i<SentinelBlockDeviceCount;i++) {
+        SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet(i);
+        if(d && ntfsk_find_and_mount(&g_ntfsk_volume,d)==0) {
+            g_ntfsk_ok=1;
+            vfs_ntfsk_cwd_storage=5;
+            if(vfs_ntfsk_refresh()<0)
+                DbgPrint("fs: NTFS root directory enumeration failed\n");
+            DbgPrint("fs: NTFS read-only system volume mounted\n");
+            break;
         }
-        if(!g_ntfsk_ok)
-            DbgPrint("fs: no supported NTFS system volume found\n");
+    }
+
+    if(!g_ntfsk_ok) {
+        DbgPrint("fs: no supported NTFS system volume found; trying legacy ext4 volume\n");
+        vfs_mount_c();
     }
 
     if (g_ext4_ok) {

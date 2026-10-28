@@ -2412,6 +2412,24 @@ if ! cp -a "$B/rootfs/." "$NTFS_MOUNT/"; then
   echo "error: failed to populate the NTFS system volume" >&2
   exit 1
 fi
+
+# Fail the build if NTFS population did not preserve the expected Windows-like
+# system tree. This prevents producing a boot image with an empty/partial volume.
+for required in \
+  magic/System32/krnl.exe \
+  magic/System32/hal.dll \
+  magic/System32/smss.exe \
+  magic/System32/bootvid.exe \
+  magic/System32/sentlogon.exe \
+  magic/System32/drivers/ata.sys
+do
+  if [[ ! -s "$NTFS_MOUNT/$required" ]]; then
+    echo "error: required file missing from NTFS system volume: /$required" >&2
+    "$FUSERMOUNT" -u "$NTFS_MOUNT" || true
+    rm -rf "$NTFS_MOUNT" "$B/ntfs.tmp"
+    exit 1
+  fi
+done
 sync
 if ! "$FUSERMOUNT" -u "$NTFS_MOUNT"; then
   echo "error: failed to unmount the populated NTFS system volume" >&2

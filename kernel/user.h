@@ -336,12 +336,50 @@ static int up_pick_next(void) {
 
 /* System images are explicitly trusted session/boot components.
  * Ordinary user applications cannot create these processes. */
+/* Return the final path component so protected image names cannot be
+ * bypassed by supplying an absolute or mixed-separator path. */
+static const char *PspImageBaseName(const char *name) {
+    if (!name) return "";
+    const char *base = name;
+    for (const char *p = name; *p; p++)
+        if (*p == '\\\\' || *p == '/') base = p + 1;
+    return base;
+}
+
+/* Explicit paths into the system image directory are never executable via
+ * NtCreateProcess. Trusted boot components launch permitted system processes
+ * by basename, while File Explorer cannot execute files by browsing System32.
+ * Match path components case-insensitively and accept either separator. */
+static int PspIsExplicitSystemPath(const char *name) {
+    if (!name) return 0;
+    const char *p = name;
+    while (*p) {
+        while (*p == '\\\\' || *p == '/' || *p == ':' ) p++;
+        const char *start = p;
+        while (*p && *p != '\\\\' && *p != '/' && *p != ':') p++;
+        size_t len = (size_t)(p - start);
+        if (len == 7) {
+            static const char system32[] = "system32";
+            size_t i = 0;
+            for (; i < len; i++) {
+                char ch = start[i];
+                if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + ('a' - 'A'));
+                if (ch != system32[i]) break;
+            }
+            if (i == len) return 1;
+        }
+        if (!*p) break;
+    }
+    return 0;
+}
+
 static int PspIsSystemAppName(const char *name) {
     static const char *const names[] = {
         "smss.exe", "bootvid.exe", "sentlogon.exe",
         "instlr.exe", "screen.exe"
     };
-    if (!name) return 0;
+    name = PspImageBaseName(name);
+    if (!*name) return 0;
     for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         const char *a = name;
         const char *b = names[i];
@@ -2693,6 +2731,18 @@ static Frame *syscall_handler(Frame *f) {
             has_child_arg = 1;
 
         KPROCESS *caller = MmCurrentProcess;
+
+        /*
+         * Never execute a file by an explicit path into System32. System
+         * components are launched by their approved basename during startup;
+         * this prevents browsing to C:\\magic\\System32 and clicking an EXE
+         * from starting another copy of a protected OS component.
+         */
+        if (PspIsExplicitSystemPath(name)) {
+            DbgPrint("user: denied explicit system-directory execution: %s\\n", name);
+            f->rax = (uint64_t)-2LL;
+            return f;
+        }
 
         /*
          * System applications are a protected launch class. User applications

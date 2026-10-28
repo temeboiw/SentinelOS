@@ -39,7 +39,8 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42
+    SYS_WmRect=20, SYS_CreateProcess=4, SYS_QueryDir=7, SYS_SetCurrentDirectory=12,
+    SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -1157,8 +1158,117 @@ static int u32_menu_text_is(const char *wanted) {
     return *a==0&&*b==0;
 }
 
+#define U32_START_APP_MAX 256
+#define U32_SCAN_DIR_MAX 1024
+typedef struct { char path[260]; char name[64]; } U32_START_APP;
+static U32_START_APP u32_start_apps[U32_START_APP_MAX];
+static unsigned int u32_start_app_count;
+static unsigned int u32_scan_dir_count;
+static int u32_apps_scanned;
+
+static int u32_char_lower(int c) {
+    return c>='A'&&c<='Z'?c+('a'-'A'):c;
+}
+static int u32_text_equal_ci(const char *a,const char *b) {
+    if(!a||!b)return 0;
+    while(*a&&*b)if(u32_char_lower((unsigned char)*a++)!=u32_char_lower((unsigned char)*b++))return 0;
+    return *a==0&&*b==0;
+}
+static int u32_has_exe_extension(const char *name) {
+    unsigned int n=0;while(name&&name[n])n++;
+    return n>=4&&name[n-4]=='.'&&u32_char_lower(name[n-3])=='e'&&
+           u32_char_lower(name[n-2])=='x'&&u32_char_lower(name[n-1])=='e';
+}
+static void u32_start_add_app(const char *path,const char *name) {
+    if(!path||!name||!u32_has_exe_extension(name)||u32_start_app_count>=U32_START_APP_MAX)return;
+    for(unsigned int i=0;i<u32_start_app_count;i++)
+        if(u32_text_equal_ci(u32_start_apps[i].path,path))return;
+    U32_START_APP *app=&u32_start_apps[u32_start_app_count++];
+    unsigned int i=0;while(path[i]&&i<sizeof(app->path)-1){app->path[i]=path[i];i++;}app->path[i]=0;
+    i=0;while(name[i]&&i<sizeof(app->name)-1){app->name[i]=name[i];i++;}app->name[i]=0;
+}
+static int u32_path_append(char *out,unsigned int cap,const char *base,const char *leaf) {
+    unsigned int n=0;
+    while(base[n]&&n+1<cap){out[n]=base[n];n++;}
+    if(n&&out[n-1]!='\\'&&out[n-1]!='/'){if(n+1>=cap)return 0;out[n++]='\\';}
+    unsigned int j=0;while(leaf[j]&&n+1<cap)out[n++]=leaf[j++];
+    out[n]=0;return leaf[j]==0;
+}
+/* SYS_QueryDir enumerates the current working directory. Walk real directories,
+   restoring the parent after every recursive descent; never invent a list of apps. */
+static void u32_scan_apps_dir(const char *path,unsigned int depth) {
+    if(!path||depth>8||u32_scan_dir_count>=U32_SCAN_DIR_MAX)return;
+    if(sy3(SYS_SetCurrentDirectory,(u64)path,0,0)!=0)return;
+    u32_scan_dir_count++;
+    for(u64 index=0;index<4096&&u32_start_app_count<U32_START_APP_MAX;index++) {
+        char entry[256]={0};
+        u64 type=sy3(SYS_QueryDir,index,(u64)entry,0);
+        if(!type)break;
+        if(!entry[0]||u32_text_equal_ci(entry,".")||u32_text_equal_ci(entry,".."))continue;
+        char child[260];
+        if(!u32_path_append(child,sizeof(child),path,entry))continue;
+        if(type==2) {
+            if(depth<8&&u32_scan_dir_count<U32_SCAN_DIR_MAX)
+                u32_scan_apps_dir(child,depth+1);
+        } else if(u32_has_exe_extension(entry)) {
+            u32_start_add_app(child,entry);
+        }
+    }
+    (void)sy3(SYS_SetCurrentDirectory,(u64)path,0,0);
+}
+static void u32_scan_start_apps(void) {
+    if(u32_apps_scanned)return;
+    u32_apps_scanned=1;
+    u32_start_app_count=0;u32_scan_dir_count=0;
+    u32_scan_apps_dir("C:\\",0);
+    /* Keep the core tools discoverable if a filesystem image has no root
+       directory index support yet; normal results always come from the scan. */
+    if(!u32_start_app_count) {
+        u32_start_add_app("cmd.exe","cmd.exe");
+        u32_start_add_app("taskmgr.exe","taskmgr.exe");
+        u32_start_add_app("fileexplorer.exe","fileexplorer.exe");
+    }
+    (void)sy3(SYS_SetCurrentDirectory,(u64)"C:\\",0,0);
+}
+static int u32_app_matches(const U32_START_APP *app,const char *query) {
+    if(!app||!query||!*query)return 0;
+    /* Ignore spaces in either side so "file explorer" can find fileexplorer.exe. */
+    for(unsigned int start=0;app->name[start];start++) {
+        unsigned int i=start,j=0;
+        while(query[j]) {
+            while(query[j]==' ')j++;
+            if(!query[j])break;
+            while(app->name[i]==' ')i++;
+            if(!app->name[i]||u32_char_lower((unsigned char)app->name[i])!=u32_char_lower((unsigned char)query[j]))break;
+            i++;j++;
+        }
+        while(query[j]==' ')j++;
+        if(!query[j])return 1;
+    }
+    return 0;
+}
+static int u32_search_result_count(void) {
+    int count=0;
+    for(unsigned int i=0;i<u32_start_app_count;i++)if(u32_app_matches(&u32_start_apps[i],g_search_text))count++;
+    return count;
+}
+static U32_START_APP *u32_search_result_at(int wanted) {
+    int found=0;
+    for(unsigned int i=0;i<u32_start_app_count;i++)if(u32_app_matches(&u32_start_apps[i],g_search_text)) {
+        if(found++==wanted)return &u32_start_apps[i];
+    }
+    return 0;
+}
 static void u32_menu_launch(const char *name) {
+    if(!name||!*name)return;
     u64 result=sy3(SYS_CreateProcess,(u64)name,0,0);
+    if((!result||result==(u64)-1)) {
+        /* Some loader paths still resolve by image leaf name. Retry only when
+           the absolute path failed, keeping the successful full-path path first. */
+        const char *leaf=name;
+        for(const char *p=name;*p;p++)if(*p=='\\'||*p=='/')leaf=p+1;
+        if(leaf!=name)result=sy3(SYS_CreateProcess,(u64)leaf,0,0);
+    }
     if(!result||result==(u64)-1) {
         static const char error[]="Start menu: application launch failed\\n";
         sy3(SYS_Write,1,(u64)error,sizeof(error)-1);
@@ -1167,20 +1277,15 @@ static void u32_menu_launch(const char *name) {
 
 static void submit_search(void) {
     g_search_text[g_search_len]=0;
-    static char cmd_name[]="cmd.exe";
-    static char taskmgr_name[]="taskmgr.exe";
-    static char files_name[]="fileexplorer.exe";
-    g_menu=0;g_search_focus=0;
-    if(u32_menu_text_is("cmd")||u32_menu_text_is("cmd.exe"))
-        u32_menu_launch(cmd_name);
-    else if(u32_menu_text_is("taskmgr")||u32_menu_text_is("taskmgr.exe")||
-            u32_menu_text_is("task manager"))
-        u32_menu_launch(taskmgr_name);
-    else if(u32_menu_text_is("file explorer")||u32_menu_text_is("explorer")||
-            u32_menu_text_is("fileexplorer.exe"))
-        u32_menu_launch(files_name);
-    else if(g_search_len>0) {
-        static const char message[]="Start menu: no match; try cmd, taskmgr, or file explorer\\n";
+    u32_scan_start_apps();
+    U32_START_APP *app=u32_search_result_at(0);
+    g_menu=0;g_search_focus=0;g_start_hover=-1;
+    if(app) {
+        char path[260];unsigned int i=0;
+        while(app->path[i]&&i<sizeof(path)-1){path[i]=app->path[i];i++;}path[i]=0;
+        u32_menu_launch(path);
+    } else if(g_search_len>0) {
+        static const char message[]="Start menu: no matching executable found\\n";
         sy3(SYS_Write,1,(u64)message,sizeof(message)-1);
     }
 }
@@ -1249,7 +1354,7 @@ static void draw_taskbar(void) {
     fill(78,ty+9,1,h-ty-18,0x66FF3B30);
 
     g_tb_n = 0;
-    int ax = 54;
+    int ax = 88;
     int right_limit = w - 108;
     for (int i = 0; i < 8; i++) {
         char name[40];
@@ -1260,14 +1365,17 @@ static void draw_taskbar(void) {
 
         int bw = 110;
         if (ax + bw > right_limit) break;
-        round_fill(ax,ty+4,bw,h-ty-8,10,minv?0x88464D58:0xCC282E38);
-        round_fill(ax+1,ty+5,bw-2,h-ty-10,9,minv?0x88464D58:0xDD20252D);
+        round_fill(ax,ty+4,bw,h-ty-8,9,minv?0x88464D58:0xDD252B35);
+        round_fill(ax+1,ty+5,bw-2,h-ty-10,8,minv?0x88464D58:0xEE1D222B);
         if (!minv) {
-            gradient_v(ax+3,ty+5,bw-6,9,0xFFE9ECF2,0x88FF766E);
+            gradient_v(ax+3,ty+5,bw-6,8,0x44FFFFFF,0x00FFFFFF);
             fill(ax+7,ty+3,bw-14,2,0xFFFF3B30);
+            fill(ax+7,ty+h-7,bw-14,1,0x88FF766E);
+        } else {
+            fill(ax+8,ty+h-7,bw-16,1,0x667D8796);
         }
-        draw_text(ax + 9, ty + 19, name[0] ? name : "App", 0xFFE9ECF2);
-        ax += bw + 2;
+        draw_text(ax + 10, ty + 19, name[0] ? name : "App", 0xFFE9ECF2);
+        ax += bw + 5;
     }
 
     /* Clock and date come from the RTC-backed kernel system-time service. */
@@ -1326,34 +1434,52 @@ static void draw_taskbar(void) {
             g_search_text[g_search_len]=0;
             draw_text(mx+42,my+72,g_search_text,COL_TEXT);
         } else draw_text(mx+42,my+72,"Search...",0xFF9AA3B1);
-        draw_text(mx+16,my+105,"PINNED",0xFFF1F3F6);
-        draw_text(mx+mw-66,my+105,"APPS",0xFFFF766E);
-        round_fill(mx+12,my+116,132,48,7,g_start_hover==1?0xFF422326:0xFF292E37);
-        if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFFFF3B30);
-        round_fill(mx+18,my+125,25,25,4,0xFFFF3B30);
-        fill(mx+23,my+131,15,3,0xFFE9ECF2);fill(mx+23,my+138,15,3,0xFFE9ECF2);
-        draw_text(mx+50,my+135,"Files",0xFFF1F3F6);
-        round_fill(mx+154,my+116,134,48,7,g_start_hover==2?0xFF422326:0xFF292E37);
-        if(g_start_hover==2)fill(mx+154,my+116,134,2,0xFFFF3B30);
-        round_fill(mx+160,my+125,25,25,4,0xFF3DDC84);
-        fill(mx+165,my+130,15,2,0xFFE9ECF2);fill(mx+165,my+136,15,2,0xFFE9ECF2);fill(mx+165,my+142,15,2,0xFFE9ECF2);
-        draw_text(mx+192,my+135,"Task Mgr",0xFFF1F3F6);
-        round_fill(mx+12,my+170,132,48,7,g_start_hover==3?0xFF422326:0xFF292E37);
-        if(g_start_hover==3)fill(mx+12,my+170,132,2,0xFFFF3B30);
-        round_fill(mx+18,my+179,25,25,4,0xFF454B56);
-        draw_text(mx+24,my+188,"C:",0xFFF1F3F6);
-        draw_text(mx+50,my+189,"Command",0xFFF1F3F6);
-        draw_text(mx+16,my+236,"POWER OPTIONS",0xFF9AA3B1);
-        fill(mx+12,my+248,mw-24,1,0xFF414854);
-        round_fill(mx+12,my+258,132,40,7,g_start_hover==4?0xFF422326:0xFF292E37);
-        if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFFFF3B30);
-        draw_text(mx+24,my+274,"Shut down",0xFFFF766E);
-        round_fill(mx+154,my+258,134,40,7,g_start_hover==5?0xFF422326:0xFF292E37);
-        if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFFFF3B30);
-        draw_text(mx+166,my+274,"Restart",0xFFFFB454);
-        fill(mx+12,my+310,mw-24,1,0xFF414854);
-        if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,4,0xFF422326);
-        draw_text(mx+16,my+329,"Settings / Help",0xFFF1F3F6);
+        if(g_search_len>0) {
+            g_search_text[g_search_len]=0;
+            int shown=0,total=0;
+            for(unsigned int ai=0;ai<u32_start_app_count;ai++)if(u32_app_matches(&u32_start_apps[ai],g_search_text)) {
+                if(shown<5) {
+                    int ry=my+108+shown*30;
+                    int hover=(g_start_hover==10+shown);
+                    round_fill(mx+12,ry,mw-24,26,6,hover?0xFF422326:0xFF292E37);
+                    if(hover)fill(mx+12,ry,mw-24,2,0xFFFF3B30);
+                    round_fill(mx+19,ry+6,14,14,4,0xFF3D5668);
+                    draw_text(mx+40,ry+10,u32_start_apps[ai].name,0xFFF1F3F6);
+                }
+                shown++;total++;
+            }
+            if(!total)draw_text(mx+18,my+126,"No matching apps",0xFF9AA3B1);
+            else if(total>5)draw_text(mx+18,my+270,"Type more to narrow results",0xFF9AA3B1);
+        } else {
+            draw_text(mx+16,my+105,"PINNED",0xFFF1F3F6);
+            draw_text(mx+mw-66,my+105,"APPS",0xFFFF766E);
+            round_fill(mx+12,my+116,132,48,7,g_start_hover==1?0xFF422326:0xFF292E37);
+            if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFFFF3B30);
+            round_fill(mx+18,my+125,25,25,4,0xFFFF3B30);
+            fill(mx+23,my+131,15,3,0xFFE9ECF2);fill(mx+23,my+138,15,3,0xFFE9ECF2);
+            draw_text(mx+50,my+135,"Files",0xFFF1F3F6);
+            round_fill(mx+154,my+116,134,48,7,g_start_hover==2?0xFF422326:0xFF292E37);
+            if(g_start_hover==2)fill(mx+154,my+116,134,2,0xFFFF3B30);
+            round_fill(mx+160,my+125,25,25,4,0xFF3DDC84);
+            fill(mx+165,my+130,15,2,0xFFE9ECF2);fill(mx+165,my+136,15,2,0xFFE9ECF2);fill(mx+165,my+142,15,2,0xFFE9ECF2);
+            draw_text(mx+192,my+135,"Task Mgr",0xFFF1F3F6);
+            round_fill(mx+12,my+170,132,48,7,g_start_hover==3?0xFF422326:0xFF292E37);
+            if(g_start_hover==3)fill(mx+12,my+170,132,2,0xFFFF3B30);
+            round_fill(mx+18,my+179,25,25,4,0xFF454B56);
+            draw_text(mx+24,my+188,"C:",0xFFF1F3F6);
+            draw_text(mx+50,my+189,"Command",0xFFF1F3F6);
+            draw_text(mx+16,my+236,"POWER OPTIONS",0xFF9AA3B1);
+            fill(mx+12,my+248,mw-24,1,0xFF414854);
+            round_fill(mx+12,my+258,132,40,7,g_start_hover==4?0xFF422326:0xFF292E37);
+            if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFFFF3B30);
+            draw_text(mx+24,my+274,"Shut down",0xFFFF766E);
+            round_fill(mx+154,my+258,134,40,7,g_start_hover==5?0xFF422326:0xFF292E37);
+            if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFFFF3B30);
+            draw_text(mx+166,my+274,"Restart",0xFFFFB454);
+            fill(mx+12,my+310,mw-24,1,0xFF414854);
+            if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,4,0xFF422326);
+            draw_text(mx+16,my+329,"Settings / Help",0xFFF1F3F6);
+        }
         g_start_scale_active=0;
     }
 }
@@ -1916,7 +2042,7 @@ static void on_click(int x, int y) {
     }
 
     if (y >= ty) {
-        int ax=90;
+        int ax=88;
         for(int i=0;i<g_tb_n;i++) {
             int bw=110;
             if(hit(x,y,ax,ty+6,ax+bw,ty+38)) {
@@ -1936,6 +2062,8 @@ static void on_click(int x, int y) {
             g_menu=!g_menu;g_search_focus=0;g_start_hover=-1;
             if(g_menu) {
                 g_search_len=0;g_search_text[0]=0;
+                g_start_hover=-1;
+                u32_scan_start_apps();
                 menu_layout=u32_start_layout();
                 damage_y=menu_layout.y;
             }
@@ -1954,6 +2082,25 @@ static void on_click(int x, int y) {
         if(hit(x,y,mx+12,my+60,mx+mw-12,my+92)) {
             g_search_focus=1;
             u32_taskbar_dirty=1;compose_region(0,my,(int)g_fw,(int)g_fh);return;
+        }
+        if(g_search_len>0) {
+            for(int ri=0;ri<5;ri++) {
+                int ry=my+108+ri*30;
+                if(hit(x,y,mx+12,ry,mx+mw-12,ry+26)) {
+                    U32_START_APP *app=u32_search_result_at(ri);
+                    if(app) {
+                        char path[260];unsigned int pi=0;
+                        while(app->path[pi]&&pi<sizeof(path)-1){path[pi]=app->path[pi];pi++;}path[pi]=0;
+                        g_menu=0;g_search_focus=0;g_start_hover=-1;u32_taskbar_dirty=1;
+                        compose_region(0,my,(int)g_fw,(int)g_fh);u32_menu_launch(path);return;
+                    }
+                }
+            }
+            if(!hit(x,y,mx,my,mx+mw,my+mh)) {
+                g_menu=0;g_search_focus=0;g_start_hover=-1;u32_taskbar_dirty=1;
+                compose_region(0,my,(int)g_fw,(int)g_fh);return;
+            }
+            return;
         }
         if(hit(x,y,mx+12,my+116,mx+144,my+164)) {
             static char files_name[]="fileexplorer.exe";

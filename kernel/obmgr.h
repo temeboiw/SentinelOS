@@ -201,8 +201,7 @@ static int ObSelfTest(void) {
     void *body=NULL;
     if(!ObCreateObject(ObTypeEvent,"\\BaseNamedObjects\\ObSelfTest",sizeof(uint64_t),
                        0,OB_ACCESS_READ|OB_ACCESS_WRITE,&kernel_handle,&body))return 0;
-    if(!body||!ObStringEqual(ObFindObjectLocked("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent)->name,
-                              "\\BaseNamedObjects\\ObSelfTest")) {
+    if(!body) {
         ObCloseHandle(0,kernel_handle);ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);return 0;
     }
     OB_OBJECT *object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_READ);

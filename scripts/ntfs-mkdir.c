@@ -8,10 +8,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 
-#include <ntfs-3g/dir.h>
+/*
+ * volume.h supplies ntfs_volume/ntfs_inode definitions used by dir.h.
+ * Keep it first: some libntfs-3g versions do not make dir.h self-contained.
+ */
 #include <ntfs-3g/volume.h>
+#include <ntfs-3g/dir.h>
 #include <ntfs-3g/unistr.h>
 
 static int make_directory(ntfs_volume *vol, const char *path)

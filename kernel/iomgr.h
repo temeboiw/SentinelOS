@@ -83,6 +83,8 @@ struct _IO_IRP {
 
 static IO_DRIVER_OBJECT IoDrivers[IO_MAX_DEVICES];
 static IO_DEVICE_OBJECT IoDevices[IO_MAX_DEVICES];
+static IO_IRP IoIrpPool[IO_MAX_DEVICES];
+static uint8_t IoIrpUsed[IO_MAX_DEVICES];
 static volatile uint32_t IoLockWord;
 static uint32_t IoDeviceCount,IoDriverCount,IoIrpCount;
 
@@ -107,6 +109,7 @@ static void IoInitialize(void) {
         IoDevices[i].used=0;IoDevices[i].signature=0;IoDevices[i].name[0]=0;
         IoDevices[i].driver=NULL;IoDevices[i].attached_device=NULL;IoDevices[i].lower_device=NULL;
     }
+    for(unsigned i=0;i<IO_MAX_DEVICES;i++)IoIrpUsed[i]=0;
     IoDeviceCount=IoDriverCount=IoIrpCount=0;
     IoUnlock();
 }
@@ -158,10 +161,8 @@ static IO_DEVICE_OBJECT *IoAttachDeviceToDeviceStack(IO_DEVICE_OBJECT *source,IO
 static IO_IRP *IoAllocateIrp(uint8_t major,void *buffer,uint32_t input_length,uint32_t output_length) {
     if(major>IRP_MJ_MAXIMUM_FUNCTION||input_length>IO_IRP_BUFFER_MAX||output_length>IO_IRP_BUFFER_MAX||
        (input_length&&!buffer)||(output_length&&!buffer))return NULL;
-    static IO_IRP IrpPool[IO_MAX_DEVICES];
-    static uint8_t IrpUsed[IO_MAX_DEVICES];
     IoLock();IO_IRP *irp=NULL;
-    for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(!IrpUsed[i]){IrpUsed[i]=1;irp=&IrpPool[i];break;}
+    for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(!IoIrpUsed[i]){IoIrpUsed[i]=1;irp=&IoIrpPool[i];break;}
     if(irp){irp->signature=IO_IRP_SIGNATURE;irp->major_function=major;irp->stack_count=1;
         irp->current_location=0;irp->completed=0;irp->status=IO_STATUS_PENDING;irp->information=0;
         irp->system_buffer=buffer;irp->input_length=input_length;irp->output_length=output_length;
@@ -190,16 +191,12 @@ static IO_STATUS IoCallDriver(IO_DEVICE_OBJECT *device,IO_IRP *irp) {
 }
 static int IoFreeIrp(IO_IRP *irp) {
     if(!irp||irp->signature!=IO_IRP_SIGNATURE)return 0;
-    /* Pool ownership is tracked by address, not by trusting caller-supplied fields. */
-    extern void IoReleaseIrpPoolSlot(IO_IRP *irp);
-    IoReleaseIrpPoolSlot(irp);return 1;
-}
-static void IoReleaseIrpPoolSlot(IO_IRP *irp) {
-    static IO_IRP IrpPool[IO_MAX_DEVICES];
-    static uint8_t IrpUsed[IO_MAX_DEVICES];
-    /* Kept as a separate function for API symmetry; the allocator pool is
-       function-local in IoAllocateIrp, so release is intentionally unavailable. */
-    (void)irp;(void)IrpPool;(void)IrpUsed;
+    IoLock();
+    int found=0;
+    for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(irp==&IoIrpPool[i]&&IoIrpUsed[i]) {
+        IoIrpUsed[i]=0;irp->signature=0;found=1;if(IoIrpCount)IoIrpCount--;break;
+    }
+    IoUnlock();return found;
 }
 /* A tiny boot-time contract test validates real dispatch and completion flow. */
 static IO_STATUS IoSelfTestDispatch(IO_DEVICE_OBJECT *device,IO_IRP *irp) {

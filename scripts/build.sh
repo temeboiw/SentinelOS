@@ -2360,7 +2360,7 @@ rm -f "$B/esp.fat"
 # only after every staged file has been written successfully.
 rm -f "$B/ntfs.tmp"
 qemu-img create -f raw "$B/ntfs.tmp" "${NTFS_MIB}M" >/dev/null
-mkntfs -F -Q -L magic -s 512 -c 4096 "$B/ntfs.tmp" >/dev/null
+mkntfs -F -Q -L magic -s 512 -c 4096 -p "$NTFS_START" -H 255 -S 63 "$B/ntfs.tmp" >/dev/null
 
 # Populate NTFS without mounting. ntfscp can write file data but cannot
 # create parent directories; scripts/ntfs-mkdir.c uses libntfs-3g directly,

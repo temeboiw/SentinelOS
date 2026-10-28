@@ -38,7 +38,6 @@ typedef struct {
 /* Shared mounted system volume state; this header is included once per kernel TU. */
 static NTFSK_VOLUME g_ntfsk_volume;
 static int g_ntfsk_ok;
-static uint64_t vfs_ntfsk_cwd_storage = 5;
 
 static uint16_t ntfsk_u16(const void *p) {
     const uint8_t *b=(const uint8_t *)p; return (uint16_t)(b[0]|((uint16_t)b[1]<<8));

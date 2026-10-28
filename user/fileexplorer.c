@@ -92,7 +92,7 @@ static const char *context_item(int i) {
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
-static int g_home = 1;
+static int g_home = 0;
 static int g_sort_mode = 0;
 static char g_filter[64];
 static int g_filter_len = 0;

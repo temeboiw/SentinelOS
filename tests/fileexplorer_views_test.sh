@@ -16,3 +16,6 @@ require "$EXPLORER" '" | Sort: A-Z"' "alphabetical sort is labelled in the toolb
 require "$EXPLORER" 'else if(ch==27){g_search_mode=0;g_filter_len=0;g_filter[0]=0;reload(pQuery,pText,pInv);}' "Escape clears the active search filter"
 require "$EXPLORER" 'if(ch==8&&g_filter_len>0)' "Backspace edits the active search filter"
 echo "File Explorer views/search source-contract checks passed."
+
+require "$EXPLORER" 'static int g_home = 0;' "File Explorer starts at the real C: root instead of the synthetic Quick Access summary"
+echo "File Explorer real-root startup check passed."

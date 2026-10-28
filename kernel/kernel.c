@@ -80,7 +80,7 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("object manager: namespace/handles/access checks %s (objects=%u handles=%u)\n", ob_ok ? "ok" : "FAILED", ObGetObjectCount(), ObGetHandleCount());
     DbgPrint("I/O manager: device/IRP dispatch %s\n", io_ok ? "ok" : "FAILED");
     SentinelDriverManagerInitialize();
-    DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and ext4 loader ready\n",
+    DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and filesystem loader ready\n",
              SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);
     modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
     smp_start_aps(bi);

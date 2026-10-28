@@ -52,7 +52,7 @@ typedef struct {
     int x, y;
 } MSG;
 
-#define MAX_ENT 256
+#define MAX_ENT 1024
 #define VISIBLE_ROWS 28
 static char g_names[MAX_ENT][256];
 static int g_isdir[MAX_ENT];
@@ -193,9 +193,16 @@ static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
         const char *address=g_address_mode ? g_address_edit : (g_home ? "Quick access" : g_path);
         for(int j=0;address[j] && q<78;j++) toolbar[q++]=address[j];
         if(g_address_mode && q<78) toolbar[q++]='_';
-        if(g_filter_len && q<68) {
-            const char *search="  |  Search: ";
+        if(q<78) {
+            const char *sort_label = g_sort_mode==0 ? " | Sort: Native" :
+                                     g_sort_mode==1 ? " | Sort: Folders" :
+                                                      " | Sort: A-Z";
+            for(int j=0;sort_label[j] && q<78;j++) toolbar[q++]=sort_label[j];
+        }
+        if((g_filter_len || g_search_mode) && q<68) {
+            const char *search=" | Search: ";
             for(int j=0;search[j] && q<78;j++) toolbar[q++]=search[j];
+            if(!g_filter_len && g_search_mode && q<78) toolbar[q++]='_';
             for(int j=0;g_filter[j] && q<78;j++) toolbar[q++]=g_filter[j];
         }
         toolbar[q]=0;

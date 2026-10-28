@@ -100,7 +100,7 @@ find_llvm_tool() {
     description="$(file -b "$resolved" 2>/dev/null || true)"
     [[ "$description" == *"script"* || "$description" == *"text executable"* ]] && continue
     [[ "$(basename "$resolved")" == "proot" ]] && continue
-    printf '%s\\n' "$resolved"
+    printf '%s\n' "$resolved"
     return 0
   done
   echo "error: could not find a real LLVM executable for $tool; set the corresponding *_BIN variable" >&2

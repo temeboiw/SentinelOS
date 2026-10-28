@@ -1059,6 +1059,26 @@ static uint64_t vfs_ntfsk_resolve(const char *name) {
     return found;
 }
 
+static int vfs_ntfsk_internal_root_name(const uint8_t *fn,uint8_t nl) {
+    static const char *const internal[]={
+        "$MFT","$MFTMirr","$LogFile","$Volume","$AttrDef","$Bitmap",
+        "$Boot","$BadClus","$Secure","$UpCase","$Extend","$Quota",
+        "$ObjId","$Reparse","$UsnJrnl"
+    };
+    for(unsigned int n=0;n<sizeof(internal)/sizeof(internal[0]);n++) {
+        const char *s=internal[n];unsigned int i=0;
+        while(s[i]&&i<nl) {
+            uint16_t ch=ntfsk_u16(fn+66+i*2);
+            char a=(char)ch,b=s[i];
+            if(a>='a'&&a<='z')a-=32;
+            if(b>='a'&&b<='z')b-=32;
+            if(ch>127||a!=b)break;
+            i++;
+        }
+        if(i==nl&&!s[i])return 1;
+    }
+    return 0;
+}
 static uint64_t vfs_ntfsk_cwd_storage=5;
 static int vfs_ntfsk_refresh(void) {
     vfs_nent=0;
@@ -1081,7 +1101,8 @@ static int vfs_ntfsk_refresh(void) {
                 if(vo<=al&&al-vo>=66) {
                     uint8_t *fn=r+p+vo;uint8_t nl=fn[64],ns=fn[65];
                     if(ns!=2&&nl&&66u+(uint32_t)nl*2u<=al-vo&&
-                       (ntfsk_u64(fn)&0x0000ffffffffffffULL)==vfs_ntfsk_cwd_storage) {
+                       (ntfsk_u64(fn)&0x0000ffffffffffffULL)==vfs_ntfsk_cwd_storage&&
+                       !(vfs_ntfsk_cwd_storage==5&&vfs_ntfsk_internal_root_name(fn,nl))) {
                         VfsEnt *entry=&vfs_ents[vfs_nent];
                         uint32_t out=0;
                         for(uint32_t j=0;j<nl&&out<sizeof(entry->name)-1;j++) {

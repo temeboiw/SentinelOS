@@ -175,6 +175,15 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
         line[p] = 0;
     }
     pText(g_window, 0, 2 + visible, line, -1);
+    /* Visible right-gutter scrollbar; its thumb tracks the first visible item. */
+    {
+        int count = g_home ? HOME_ITEM_COUNT : g_count;
+        int max_scroll = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
+        int thumb_start = max_scroll ? (g_scroll * (VISIBLE_ROWS - 1)) / max_scroll : 0;
+        int thumb_end = max_scroll ? ((g_scroll + VISIBLE_ROWS - 1) * (VISIBLE_ROWS - 1)) / max_scroll : VISIBLE_ROWS - 1;
+        pText(g_window, 92, 2 + visible,
+              (visible >= thumb_start && visible <= thumb_end) ? "##" : "||", -1);
+    }
     if (pInv) {
         FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
                           760, 44 + (3 + visible) * 16 };
@@ -701,17 +710,19 @@ void mainCRTStartup(void) {
             }
         }
 
-        /* Mouse wheel and arrow/Page keys scroll the visible directory rows. */
+        /* Mouse wheel scrolls three rows; clamp against Home or the live listing. */
         if (msg.message == 0x020A && !g_context_menu) {
             int delta = (int)((msg.wParam >> 16) & 0xFFFF);
             if (delta & 0x8000) delta -= 0x10000;
             if (delta > 0) g_scroll -= 3;
             else if (delta < 0) g_scroll += 3;
+            int count = g_home ? HOME_ITEM_COUNT : g_count;
+            int max_scroll = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
             if (g_scroll < 0) g_scroll = 0;
-            if (g_scroll > g_count - VISIBLE_ROWS) g_scroll = g_count - VISIBLE_ROWS;
-            if (g_scroll < 0) g_scroll = 0;
+            if (g_scroll > max_scroll) g_scroll = max_scroll;
             g_hover_row = -1;
             draw_rows(pText, pInv);
+            continue;
         }
         if(msg.message==0x0102) {
             int ch=(int)msg.wParam;
@@ -813,10 +824,19 @@ void mainCRTStartup(void) {
                     print("\n");
                     char launch_path[260];
                     long long pid = -1;
-                    if (fe_build_launch_path(g_names[selected], launch_path, sizeof launch_path))
+                    if (fe_build_launch_path(g_names[selected], launch_path, sizeof launch_path)) {
+                        print("fileexplorer: launch full path "); print(launch_path); print("\\n");
                         pid = (long long)sy3(SYS_CreateProcess, (u64)launch_path, 0, 0);
-                    else
-                        print("fileexplorer: executable path too long\n");
+                    } else {
+                        print("fileexplorer: executable path too long\\n");
+                    }
+                    /* If the drive alias differs from the VFS mount, retry via
+                       the kernel's established disk-image search paths. */
+                    if (pid <= 0) {
+                        print("fileexplorer: retry executable by basename ");
+                        print(g_names[selected]); print("\\n");
+                        pid = (long long)sy3(SYS_CreateProcess, (u64)g_names[selected], 0, 0);
+                    }
                     if (pid <= 0) {
                         print("fileexplorer: EXE launch failed, status=");
                         char digits[24]; int n=0; unsigned long long v=(unsigned long long)(-pid);
@@ -879,6 +899,16 @@ void mainCRTStartup(void) {
         if (msg.message == 0x0201) {
             if (!g_context_menu) {
                 int line=(msg.y-(g_win_y+44))/16;
+                int relx=msg.x-g_win_x;
+                /* Right gutter click jumps to the matching scrollbar position. */
+                if(relx>=736 && relx<760 && line>=2 && line<2+VISIBLE_ROWS) {
+                    int count=g_home?HOME_ITEM_COUNT:g_count;
+                    int max_scroll=count>VISIBLE_ROWS?count-VISIBLE_ROWS:0;
+                    g_scroll=max_scroll?((line-2)*max_scroll)/(VISIBLE_ROWS-1):0;
+                    g_hover_row=-1;
+                    draw_rows(pText,pInv);
+                    continue;
+                }
                 if(line==1) {
                     int relx=msg.x-g_win_x;
                     if(relx>=0&&relx<40) { if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv); continue; }

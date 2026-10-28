@@ -193,3 +193,26 @@ static int ObDeleteNamedObject(const char *name,OB_TYPE type) {
 }
 static uint32_t ObGetObjectCount(void){return ObObjectCount;}
 static uint32_t ObGetHandleCount(void){return ObHandleCount;}
+
+/* Boot-time invariant test: namespace reference, access validation, per-owner
+ * handles, explicit references, close, and namespace deletion. */
+static int ObSelfTest(void) {
+    OB_HANDLE kernel_handle=0,user_handle=0;
+    void *body=NULL;
+    if(!ObCreateObject(ObTypeEvent,"\\BaseNamedObjects\\ObSelfTest",sizeof(uint64_t),
+                       0,OB_ACCESS_READ|OB_ACCESS_WRITE,&kernel_handle,&body))return 0;
+    if(!body||!ObStringEqual(ObFindObjectLocked("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent)->name,
+                              "\\BaseNamedObjects\\ObSelfTest")) {
+        ObCloseHandle(0,kernel_handle);ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);return 0;
+    }
+    OB_OBJECT *object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_READ);
+    int ok=object!=NULL;
+    if(object)ObDereferenceObject(object);
+    if(ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_EXECUTE)!=NULL)ok=0;
+    if(!ObOpenObjectByName(7,"\\BaseNamedObjects\\ObSelfTest",ObTypeEvent,OB_ACCESS_READ,&user_handle))ok=0;
+    if(ObReferenceObjectByHandle(8,user_handle,ObTypeEvent,OB_ACCESS_READ)!=NULL)ok=0;
+    if(user_handle)ObCloseHandle(7,user_handle);
+    ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);
+    if(!ObCloseHandle(0,kernel_handle))ok=0;
+    return ok;
+}

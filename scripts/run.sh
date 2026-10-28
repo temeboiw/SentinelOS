@@ -43,10 +43,31 @@ CPUS="${SENTINELOS_CPUS:-1}"
 [[ "$RAM" =~ ^[1-9][0-9]*$ ]] || { echo "error: SENTINELOS_RAM_MB must be a positive integer (MiB)." >&2; exit 1; }
 [[ "$CPUS" =~ ^[1-9][0-9]*$ ]] || { echo "error: SENTINELOS_CPUS must be a positive integer." >&2; exit 1; }
 
+# proot usually has no usable native SDL window. Detect common proot markers
+# and expose the guest display through QEMU's VNC server on TCP port 5900.
+IS_PROOT=0
+if [[ -n "${PROOT_TMP_DIR:-}" || -n "${PROOT_LOADER:-}" || -n "${PROOT_ROOTFS:-}" ]] ||
+   grep -qiE 'proot|termux' /proc/self/mountinfo 2>/dev/null; then
+  IS_PROOT=1
+fi
+
+QEMU_DISPLAY_ARGS=(-vga std)
+if [[ "$IS_PROOT" == 1 ]]; then
+  QEMU_DISPLAY_ARGS+=(-display none -vnc 127.0.0.1:0)
+else
+  QEMU_DISPLAY_ARGS+=(-display sdl)
+fi
+
 echo "SentinelOS Linux runner"
 echo "  Disk: $DISK (raw GPT image)"
 echo "  Firmware: $FIRMWARE"
 echo "  RAM: $RAM MiB; CPUs: $CPUS"
+if [[ "$IS_PROOT" == 1 ]]; then
+  echo "  Environment: proot detected; VNC listening on 127.0.0.1:5900"
+  echo "  Connect with a VNC viewer to localhost:5900."
+else
+  echo "  Display: SDL"
+fi
 echo "  Note: on ARM64 proot, QEMU will emulate x86_64 with TCG."
 
 exec "$QEMU" \
@@ -60,7 +81,6 @@ exec "$QEMU" \
   -device virtio-blk-pci,drive=d0 \
   -netdev user,id=net0 \
   -device e1000,netdev=net0 \
-  -vga std \
-  -display sdl \
+  "${QEMU_DISPLAY_ARGS[@]}" \
   -serial stdio \
   -no-reboot

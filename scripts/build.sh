@@ -2389,10 +2389,38 @@ if [[ -z "$NTFS_CC" ]]; then
 fi
 
 echo "  -> compiling NTFS helper with $NTFS_CC"
-# Termux's exec wrapper can mistake GCC's internal driver arguments for
-# proot options. Clear the same wrapper-control variable used by the LLVM
-# compiler wrappers elsewhere in this script; never invoke compiler internals.
-env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
+# Use libntfs-3g's own pkg-config metadata for both include and linker paths.
+# This matters when the compiler is provided by Termux but development headers
+# and the library are installed under a distro/proot sysroot.
+if ! command -v pkg-config >/dev/null 2>&1; then
+  echo "error: pkg-config is required to locate libntfs-3g headers and library" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
+if ! NTFS_CFLAGS="$(pkg-config --cflags libntfs-3g 2>&1)"; then
+  echo "error: pkg-config could not locate libntfs-3g development files:" >&2
+  printf '%s\\n' "$NTFS_CFLAGS" >&2
+  echo "diagnostic: pkg-config executable=$(command -v pkg-config)" >&2
+  echo "diagnostic: PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-<unset>}" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
+if ! NTFS_LIBS="$(pkg-config --libs libntfs-3g 2>&1)"; then
+  echo "error: pkg-config could not locate libntfs-3g linker flags:" >&2
+  printf '%s\\n' "$NTFS_LIBS" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
+echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<none>}"
+echo "  -> libntfs-3g libs: $NTFS_LIBS"
+# shellcheck disable=SC2086
+if ! env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+  status=$?
+  echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
+  echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2
+  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  exit 1
+fi
 status=$?
 if (( status != 0 )); then
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2

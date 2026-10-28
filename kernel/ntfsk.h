@@ -235,7 +235,7 @@ static int ntfsk_list_child(NTFSK_VOLUME *v,uint64_t parent,uint32_t ordinal,
                     uint8_t *fn=r+p+vo;uint8_t nl=fn[64],ns=fn[65];
                     if(ns!=2&&nl&&66u+(uint32_t)nl*2u<=al-vo&&
                        (ntfsk_u64(fn)&0x0000ffffffffffffULL)==parent) {
-                        if(ordinal) { ordinal--; }
+                        if(ordinal) { ordinal--; break; }
                         else {
                             uint64_t out=0;
                             for(uint32_t i=0;i<nl&&out+1<capacity;i++) {

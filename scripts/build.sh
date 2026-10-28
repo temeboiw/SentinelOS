@@ -195,18 +195,12 @@ if (( DO_NO_DISK_IMAGE == 0 )); then
   need sfdisk
   need mkfs.vfat
   need mkntfs
-  need ntfs-3g
+  need ntfscp
+  need ntfsmkdir
+  need ntfscat
   need mmd
   need mcopy
   need dd
-  if command -v fusermount3 >/dev/null 2>&1; then
-    FUSERMOUNT="$(command -v fusermount3)"
-  elif command -v fusermount >/dev/null 2>&1; then
-    FUSERMOUNT="$(command -v fusermount)"
-  else
-    echo "error: NTFS image population requires fusermount3 or fusermount (FUSE support)" >&2
-    exit 1
-  fi
 fi
 
 for src in \
@@ -2323,11 +2317,11 @@ if (( DO_NO_DISK_IMAGE == 1 )); then
   exit 0
 fi
 
-echo "==> GPT disk image (content-sized FAT32 ESP + ext4, with 100 MiB extra)"
+echo "==> GPT disk image (content-sized FAT32 ESP + NTFS, with 100 MiB extra)"
 
 # Size the ESP from the EFI files (minimum 64 MiB for a practical FAT32 ESP),
-# and size ext4 from the rootfs contents plus at least 100 MiB of spare space.
-# Additional allowance covers ext4 metadata and avoids packing files too tightly.
+# and size NTFS from the rootfs contents plus at least 100 MiB of spare space.
+# Additional allowance covers filesystem metadata and avoids packing files too tightly.
 MIB=$((1024 * 1024))
 SECTOR_SIZE=512
 SECTORS_PER_MIB=$((MIB / SECTOR_SIZE))
@@ -2396,25 +2390,31 @@ rm -f "$B/ntfs.tmp"
 qemu-img create -f raw "$B/ntfs.tmp" "${NTFS_MIB}M" >/dev/null
 mkntfs -F -Q -L magic -s 512 -c 4096 "$B/ntfs.tmp" >/dev/null
 
-NTFS_MOUNT="$B/ntfs-mount"
-mkdir -p "$NTFS_MOUNT"
-if ! ntfs-3g "$B/ntfs.tmp" "$NTFS_MOUNT"; then
-  rmdir "$NTFS_MOUNT" 2>/dev/null || true
-  echo "error: could not mount the temporary NTFS image through FUSE." >&2
-  echo "       This build environment must expose /dev/fuse and permit FUSE mounts." >&2
-  rm -f "$B/ntfs.tmp"
-  exit 1
-fi
+# Populate NTFS with ntfs-3g's image utilities instead of mounting it.
+# This is deliberately FUSE-free: Android/proot often denies /dev/fuse and
+# mount syscalls, while ntfscp/ntfsmkdir can write directly to a regular image.
+# Create all directories first, in parent-before-child order, then copy files.
+while IFS= read -r -d '' entry; do
+  [[ "$entry" == "$B/rootfs" ]] && continue
+  relative="${entry#"$B/rootfs"/}"
+  if ! ntfsmkdir "$B/ntfs.tmp" "/$relative"; then
+    echo "error: failed to create NTFS directory: /$relative" >&2
+    rm -f "$B/ntfs.tmp"
+    exit 1
+  fi
+done < <(find "$B/rootfs" -mindepth 1 -type d -print0 | sort -z)
 
-if ! cp -a "$B/rootfs/." "$NTFS_MOUNT/"; then
-  "$FUSERMOUNT" -u "$NTFS_MOUNT" || true
-  rm -rf "$NTFS_MOUNT" "$B/ntfs.tmp"
-  echo "error: failed to populate the NTFS system volume" >&2
-  exit 1
-fi
+while IFS= read -r -d '' entry; do
+  relative="${entry#"$B/rootfs"/}"
+  if ! ntfscp "$B/ntfs.tmp" "$entry" "/$relative"; then
+    echo "error: failed to copy file into NTFS volume: /$relative" >&2
+    rm -f "$B/ntfs.tmp"
+    exit 1
+  fi
+done < <(find "$B/rootfs" -type f -print0 | sort -z)
 
 # Fail the build if NTFS population did not preserve the expected Windows-like
-# system tree. This prevents producing a boot image with an empty/partial volume.
+# system tree. ntfscat reads these files directly from the image without FUSE.
 for required in \
   magic/System32/krnl.exe \
   magic/System32/hal.dll \
@@ -2423,19 +2423,13 @@ for required in \
   magic/System32/sentlogon.exe \
   magic/System32/drivers/ata.sys
 do
-  if [[ ! -s "$NTFS_MOUNT/$required" ]]; then
-    echo "error: required file missing from NTFS system volume: /$required" >&2
-    "$FUSERMOUNT" -u "$NTFS_MOUNT" || true
-    rm -rf "$NTFS_MOUNT" "$B/ntfs.tmp"
+  if ! ntfscat "$B/ntfs.tmp" "/$required" >/dev/null; then
+    echo "error: required file missing or unreadable in NTFS system volume: /$required" >&2
+    rm -f "$B/ntfs.tmp"
     exit 1
   fi
 done
 sync
-if ! "$FUSERMOUNT" -u "$NTFS_MOUNT"; then
-  echo "error: failed to unmount the populated NTFS system volume" >&2
-  exit 1
-fi
-rmdir "$NTFS_MOUNT"
 
 dd if="$B/ntfs.tmp" \
   of="$DISKIMG" \

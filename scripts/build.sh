@@ -2389,7 +2389,10 @@ if [[ -z "$NTFS_CC" ]]; then
 fi
 
 echo "  -> compiling NTFS helper with $NTFS_CC"
-"$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
+# Termux's exec wrapper can mistake GCC's internal driver arguments for
+# proot options. Clear the same wrapper-control variable used by the LLVM
+# compiler wrappers elsewhere in this script; never invoke compiler internals.
+env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g
 status=$?
 if (( status != 0 )); then
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2

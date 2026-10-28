@@ -222,6 +222,7 @@ for src in \
   user/taskmgr.c \
   user/msiexec.c \
   UserTestApps/game.cpp \
+  UserTestApps/win32_compat.c \
   UserTestApps/maze.cpp
 do
   if [[ ! -f "$ROOT/$src" ]]; then
@@ -2155,6 +2156,31 @@ if [[ ! -s "$B/rootfs/magic/Program Files/game.exe" ]]; then
 fi
 
 ls -lh "$B/rootfs/magic/Program Files/game.exe"
+
+echo "  -> win32compat.exe (ordinary kernel32/user32 import-table smoke test)"
+clang "${USER_CXXFLAGS[@]}" \
+  -x c -c "$ROOT/UserTestApps/win32_compat.c" \
+  -o "$B/obj/win32_compat.o"
+
+lld -flavor link \
+  /machine:x64 /subsystem:windows /entry:win32_compat_main /nodefaultlib \
+  /fixed:no /base:0x42200000 \
+  "/out:$B/rootfs/magic/Program Files/win32compat.exe" \
+  "$B/obj/win32_compat.o" \
+  "$B/obj/kernel32.lib" "$B/obj/user32.lib"
+
+if [[ ! -s "$B/rootfs/magic/Program Files/win32compat.exe" ]]; then
+  echo "FATAL: win32compat.exe was not produced"
+  exit 1
+fi
+
+WIN32COMPAT_FORMAT="$(file -b "$B/rootfs/magic/Program Files/win32compat.exe")"
+echo "  -> win32compat.exe format: $WIN32COMPAT_FORMAT"
+if [[ "$WIN32COMPAT_FORMAT" != *"PE32+"* || "$WIN32COMPAT_FORMAT" != *"x86-64"* ]]; then
+  echo "FATAL: win32compat.exe is not a PE32+ x86-64 executable"
+  exit 1
+fi
+ls -lh "$B/rootfs/magic/Program Files/win32compat.exe"
 
 echo "  -> maze.exe (VirGL shader-driven spinning 3D triangle; GPU-only)"
 

@@ -89,4 +89,24 @@ grep -Fq 'return 0;' "$OGL_SOURCE" || fail "wglGetProcAddress must return NULL f
 [[ "$(grep -Fc 'static int ogl_streq(' "$OGL_SOURCE")" -eq 1 ]] || fail "duplicate or missing ogl_streq helper in OpenGL runtime"
 pass "WGL proc-address source coverage and helper uniqueness"
 
+# This executable is linked against the generated import libraries, not
+# SentinelOS syscall numbers. Check that it remains a real PE import consumer.
+WIN32_COMPAT="$ROOT/magic/Program Files/win32compat.exe"
+require_file "$WIN32_COMPAT"
+IMPORTS="$("$READOBJ" --coff-imports "$WIN32_COMPAT" 2>&1)" ||
+  fail "cannot read Win32 compatibility smoke-test imports"
+grep -Fq "kernel32.dll" <<<"${IMPORTS,,}" ||
+  fail "win32compat.exe does not import kernel32.dll"
+grep -Fq "user32.dll" <<<"${IMPORTS,,}" ||
+  fail "win32compat.exe does not import user32.dll"
+for symbol in ExitProcess; do
+  grep -Fq "Symbol: $symbol" <<<"$IMPORTS" ||
+    fail "win32compat.exe does not import kernel32!$symbol"
+done
+for symbol in RegisterClassA CreateWindowExA GetMessageA DispatchMessageA; do
+  grep -Fq "Symbol: $symbol" <<<"$IMPORTS" ||
+    fail "win32compat.exe does not import user32!$symbol"
+done
+pass "win32compat.exe has real kernel32/user32 PE imports"
+
 echo "Compatibility DLL export/package regression checks passed."

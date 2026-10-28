@@ -14,6 +14,7 @@
 #include "e1000.h"
 #include "netstack.h"
 #include "driver.h"
+#include "iomgr.h"
 #include "driver_loader.h"
 #include "user.h"
 
@@ -72,6 +73,12 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("\n-- kernel heap --\n");
     heap_selftest();
     heap_stats();
+    ObInitialize();
+    IoInitialize();
+    int ob_ok = ObSelfTest();
+    int io_ok = IoSelfTest();
+    DbgPrint("object manager: namespace/handles/access checks %s (objects=%u handles=%u)\n", ob_ok ? "ok" : "FAILED", ObGetObjectCount(), ObGetHandleCount());
+    DbgPrint("I/O manager: device/IRP dispatch %s\n", io_ok ? "ok" : "FAILED");
     SentinelDriverManagerInitialize();
     DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and ext4 loader ready\n",
              SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);

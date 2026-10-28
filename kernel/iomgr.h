@@ -213,5 +213,7 @@ static int IoSelfTest(void) {
     IO_IRP *irp=IoAllocateIrp(IRP_MJ_DEVICE_CONTROL,NULL,0,0);
     if(!irp)return 0;
     IO_STATUS status=IoCallDriver(device,irp);
-    return status==IO_STATUS_SUCCESS&&irp->completed&&irp->status==IO_STATUS_SUCCESS;
+    int ok=status==IO_STATUS_SUCCESS&&irp->completed&&irp->status==IO_STATUS_SUCCESS;
+    IoFreeIrp(irp);
+    return ok;
 }

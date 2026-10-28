@@ -10,6 +10,14 @@ A pull request, issue comment, commit, or this document alone is not a signed co
 
 Until the agreement is completed and accepted, the contributor retains rights in their own original contribution. This policy does not retroactively transfer rights in code already contributed, and it cannot transfer rights in third-party code.
 
+## Kernel integrity and attribution
+
+- Do not add a separate or replacement kernel to SentinelOS and present it as the original SentinelOS kernel.
+- Do not rename, repackage, or relabel existing kernel source files or kernel components to imply that you authored the original kernel or that the original kernel is your work.
+- Do not remove or falsify existing authorship, copyright, or provenance notices.
+- Kernel redesigns, kernel replacements, and kernel-file renames require explicit approval from the maintainer before they are proposed for merging. Any genuinely new work must be clearly distinguished from the existing kernel and accurately attributed.
+- These rules govern contributions to this project; they do not erase lawful third-party rights or override applicable law.
+
 ## What contributors must submit
 
 1. Submit only work you created or are legally authorized to contribute.

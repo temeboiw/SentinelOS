@@ -825,16 +825,16 @@ void mainCRTStartup(void) {
                     char launch_path[260];
                     long long pid = -1;
                     if (fe_build_launch_path(g_names[selected], launch_path, sizeof launch_path)) {
-                        print("fileexplorer: launch full path "); print(launch_path); print("\\n");
+                        print("fileexplorer: launch full path "); print(launch_path); print("\n");
                         pid = (long long)sy3(SYS_CreateProcess, (u64)launch_path, 0, 0);
                     } else {
-                        print("fileexplorer: executable path too long\\n");
+                        print("fileexplorer: executable path too long\n");
                     }
                     /* If the drive alias differs from the VFS mount, retry via
                        the kernel's established disk-image search paths. */
                     if (pid <= 0) {
                         print("fileexplorer: retry executable by basename ");
-                        print(g_names[selected]); print("\\n");
+                        print(g_names[selected]); print("\n");
                         pid = (long long)sy3(SYS_CreateProcess, (u64)g_names[selected], 0, 0);
                     }
                     if (pid <= 0) {

@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="${1:-.}"
 USER_H="$ROOT/kernel/user.h"
+FE="$ROOT/user/fileexplorer.c"
 EXT4_H="$ROOT/kernel/ext4k.h"
 NTFS_H="$ROOT/kernel/ntfsk.h"
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -18,8 +19,8 @@ QUERY="$(sed -n '/case SYS_NtQueryDirectoryFile:/,/case SYS_NtUploadVirGLBuffer:
 if grep -Fq 'user_bootinfo->module_count' <<<"$QUERY"; then
   fail "boot modules must never be exposed as filesystem root entries"
 fi
-echo "File Explorer real-root/NTFS enumeration checks passed."
 require "$USER_H" 'vfs_ntfsk_internal_root_name(fn,nl)' "NTFS internal metadata is hidden from the normal root listing"
 require "$USER_H" '"$MFT","$MFTMirr","$LogFile"' "common NTFS metadata names are filtered"
 require "$FE" 'Right gutter click jumps to the matching scrollbar position' "File Explorer exposes a clickable scrollbar"
 require "$FE" 'retry executable by basename' "Explorer retries executable using the disk-loader search path"
+echo "File Explorer real-root/NTFS enumeration checks passed."

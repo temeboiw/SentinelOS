@@ -2408,5 +2408,5 @@ echo "build ok -> $DISKIMG"
 # scripts or generate an installer ISO from this entry point.
 
 if [[ $DO_RUN -eq 1 ]]; then
-  exec "$ROOT/scripts/run.sh"
+  exec bash "$ROOT/scripts/run.sh"
 fi

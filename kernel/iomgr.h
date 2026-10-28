@@ -179,8 +179,9 @@ static void IoCompleteRequest(IO_IRP *irp,IO_STATUS status,uint64_t information)
 static IO_STATUS IoCallDriver(IO_DEVICE_OBJECT *device,IO_IRP *irp) {
     if(!device||device->signature!=IO_DEVICE_SIGNATURE||!device->used||!irp||
        irp->signature!=IO_IRP_SIGNATURE||irp->completed)return IO_STATUS_INVALID_PARAMETER;
+    /* Dispatch to exactly the device supplied by the caller. A filter driver
+       explicitly forwards to its lower_device by calling IoCallDriver again. */
     IO_DEVICE_OBJECT *target=device;
-    if(device->lower_device)target=device->lower_device;
     if(!target->driver||target->driver->signature!=IO_DRIVER_SIGNATURE)return IO_STATUS_NO_SUCH_DEVICE;
     IO_DISPATCH_ROUTINE dispatch=target->driver->MajorFunction[irp->major_function];
     if(!dispatch)return IO_STATUS_NOT_SUPPORTED;

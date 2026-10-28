@@ -2413,7 +2413,7 @@ while IFS= read -r -d '' entry; do
   relative="${entry#"$B/rootfs"/}"
   NTFS_DIR_ARGS+=("/$relative")
 done < "$NTFS_DIR_LIST"
-if (("${#NTFS_DIR_ARGS[@]}" > 0)) && ! "$NTFS_MKDIR" "$B/ntfs.tmp" "${NTFS_DIR_ARGS[@]}"; then
+if ((${#NTFS_DIR_ARGS[@]} > 0)) && ! "$NTFS_MKDIR" "$B/ntfs.tmp" "${NTFS_DIR_ARGS[@]}"; then
   echo "error: failed to create one or more directories in NTFS system volume" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1

@@ -1132,12 +1132,19 @@ static U32_START_LAYOUT u32_start_layout(void) {
     return l;
 }
 
+static int u32_search_result_count(void);
 static int u32_start_hover_at(int x, int y) {
     U32_START_LAYOUT l=u32_start_layout();
     int sc=l.scale;
     x=l.x+((x-l.x)*100)/sc;
     y=l.y+((y-l.y)*100)/sc;
     if(hit(x,y,l.x+12,l.y+60,l.x+l.width-12,l.y+92)) return 0;
+    if(g_search_len>0) {
+        int count=u32_search_result_count();
+        for(int i=0;i<5&&i<count;i++)
+            if(hit(x,y,l.x+12,l.y+108+i*30,l.x+l.width-12,l.y+134+i*30))return 10+i;
+        return -1;
+    }
     if(hit(x,y,l.x+12,l.y+116,l.x+144,l.y+164)) return 1;
     if(hit(x,y,l.x+154,l.y+116,l.x+288,l.y+164)) return 2;
     if(hit(x,y,l.x+12,l.y+170,l.x+144,l.y+218)) return 3;
@@ -1208,8 +1215,12 @@ static void u32_scan_apps_dir(const char *path,unsigned int depth) {
         char child[260];
         if(!u32_path_append(child,sizeof(child),path,entry))continue;
         if(type==2) {
-            if(depth<8&&u32_scan_dir_count<U32_SCAN_DIR_MAX)
+            if(depth<8&&u32_scan_dir_count<U32_SCAN_DIR_MAX) {
                 u32_scan_apps_dir(child,depth+1);
+                /* Recursive enumeration changes the process working directory;
+                   return to this parent before requesting its next entry. */
+                (void)sy3(SYS_SetCurrentDirectory,(u64)path,0,0);
+            }
         } else if(u32_has_exe_extension(entry)) {
             u32_start_add_app(child,entry);
         }

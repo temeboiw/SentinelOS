@@ -2220,11 +2220,10 @@ if [[ "$MAZE_FORMAT" != *"PE32+"* || "$MAZE_FORMAT" != *"x86-64"* ]]; then
 fi
 ls -lh "$B/rootfs/magic/Program Files/maze.exe"
 
-# The current VFS resolves user images and dependent DLLs by basename at the
-# volume root; it does not yet walk System32 for imports. Mirror generated PE
-# images there so smss.exe and its DLL dependencies are actually loadable.
-if ! cp "$SYS32"/*.dll "$SYS32"/*.exe "$B/rootfs/magic/"; then
-  echo "FATAL: unable to stage PE images at the VFS volume root" >&2
+# System executables and DLLs belong only in System32. The PE loader resolves
+# dependencies through magic/System32; do not mirror binaries into magic's root.
+if find "$B/rootfs/magic" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.exe' \) -print -quit | grep -q .; then
+  echo "FATAL: system PE image found in magic root; binaries must stay in System32" >&2
   exit 1
 fi
 

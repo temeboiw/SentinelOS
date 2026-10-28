@@ -1059,6 +1059,52 @@ static uint64_t vfs_ntfsk_resolve(const char *name) {
     return found;
 }
 
+static uint64_t vfs_ntfsk_cwd_storage=5;\nstatic uint64_t vfs_ntfsk_resolve_from(const char *name,uint64_t start) {
+    if(!g_ntfsk_ok||!name||!name[0])return 0;
+    char path[256];unsigned int n=0;
+    while(name[n]&&n<sizeof(path)-1){path[n]=(name[n]=='\\')?'/':name[n];n++;}
+    if(name[n]||!n)return 0;
+    path[n]=0;
+    unsigned int pos=0;int absolute=0;
+    if(n>=2&&path[1]==':'){pos=2;absolute=1;}
+    if(path[pos]=='/'){absolute=1;}
+    while(path[pos]=='/')pos++;
+    uint64_t parent=absolute?5:start,found=parent;
+    while(pos<n) {
+        unsigned int end=pos;while(end<n&&path[end]!='/')end++;
+        if(end==pos){pos++;continue;}
+        char part[256];unsigned int len=end-pos;if(len>=sizeof(part))return 0;
+        for(unsigned int i=0;i<len;i++)part[i]=path[pos+i];part[len]=0;
+        if(part[0]=='.'&&part[1]=='.'&&!part[2]) {
+            if(parent!=5)parent=ntfsk_parent(&g_ntfsk_volume,parent);
+            found=parent;
+        } else if(!(part[0]=='.'&&!part[1])) {
+            found=ntfsk_lookup(&g_ntfsk_volume,parent,part);
+            if(!found)return 0;
+            parent=found;
+        }
+        pos=end;while(path[pos]=='/')pos++;
+    }
+    return found;
+}
+static int vfs_ntfsk_chdir(const char *name) {
+    uint64_t cwd=vfs_ntfsk_cwd_storage;
+    if(!g_ntfsk_ok||!name||!name[0])return -1;
+    uint64_t target;
+    if(name[0]=='.'&&name[1]=='.'&&!name[2]) {
+        if(cwd!=5)cwd=ntfsk_parent(&g_ntfsk_volume,cwd);vfs_ntfsk_cwd_storage=cwd;
+        return 0;
+    }
+    if(name[0]=='.'&&!name[1])return 0;
+    target=vfs_ntfsk_resolve_from(name,cwd);
+    if(!target||!ntfsk_is_directory(&g_ntfsk_volume,target))return -1;
+    cwd=target;vfs_ntfsk_cwd_storage=cwd;return 0;
+}
+static uint64_t vfs_ntfsk_cwd_ino(void) {
+    /* Kept in the VFS layer so enumeration and chdir share the same directory. */
+    extern uint64_t vfs_ntfsk_cwd_storage;
+    return vfs_ntfsk_cwd_storage;
+}
 static int vfs_ntfsk_open_path(const char *name, uint64_t *index_out,
                                uint64_t *size_out) {
     if(!name || !index_out || !size_out) return -1;
@@ -3036,28 +3082,19 @@ static Frame *syscall_handler(Frame *f) {
         }
 
         if (g_ext4_ok) {
-            /* A mounted filesystem is the sole source of directory entries.
-               Never append boot modules after the current directory ends. */
             if (index < (uint32_t)vfs_nent) {
                 const char *n = vfs_ents[index].name;
                 uint64_t i = 0;
-                for (; n[i] && i + 1 < capacity; i++)
-                    name[i] = n[i];
+                for (; n[i] && i + 1 < capacity; i++) name[i] = n[i];
                 name[i] = 0;
                 f->rax = vfs_ents[index].is_dir ? 2 : 1;
-            } else {
-                f->rax = 0;
-            }
-        } else if (user_bootinfo &&
-                   index < user_bootinfo->module_count &&
-                   index < BOOT_MAX_MODULES) {
-            const char *n = user_bootinfo->modules[index].name;
-            uint64_t i = 0;
-            for (; n[i] && i + 1 < capacity; i++)
-                name[i] = n[i];
-            name[i] = 0;
-            f->rax = 1;
+            } else f->rax = 0;
+        } else if (g_ntfsk_ok) {
+            f->rax = (uint64_t)ntfsk_list_child(&g_ntfsk_volume,
+                vfs_ntfsk_cwd_storage, index, name, capacity, 0);
         } else {
+            /* No mounted filesystem: never misrepresent boot modules as files. */
+            name[0] = 0;
             f->rax = 0;
         }
         return f;
@@ -3436,7 +3473,8 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
-        int r = g_ext4_ok ? vfs_chdir(name) : -1;
+        int r = g_ext4_ok ? vfs_chdir(name) :
+                (g_ntfsk_ok ? vfs_ntfsk_chdir(name) : -1);
         f->rax = (uint64_t)(int64_t)r;
         return f;
     }

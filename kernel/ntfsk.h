@@ -210,6 +210,85 @@ static uint64_t ntfsk_lookup(NTFSK_VOLUME *v,uint64_t parent,const char *name) {
     }
     kfree(r);return found;
 }
+/* Enumerate a real NTFS directory by scanning MFT FILE_NAME attributes.
+ * Returns 1 for a file, 2 for a directory, and 0 when ordinal is past the end.
+ * This is intentionally read-only; unsupported/corrupt records are skipped. */
+static int ntfsk_list_child(NTFSK_VOLUME *v,uint64_t parent,uint32_t ordinal,
+                            char *name,uint64_t capacity,uint64_t *index_out) {
+    if(!v||!v->mounted||!name||capacity<2)return 0;
+    name[0]=0;
+    uint8_t *r=kmalloc(v->record_size);if(!r)return 0;
+    uint64_t max=v->mft_bytes/v->record_size;
+    for(uint64_t idx=0;idx<max;idx++) {
+        if(ntfsk_record(v,idx,r)<0 ||
+           (ntfsk_u16(r+22)&NTFSK_FILE_IN_USE)==0)continue;
+        uint16_t ao=ntfsk_u16(r+20);
+        int is_dir=(ntfsk_u16(r+22)&NTFSK_FILE_DIRECTORY)!=0;
+        for(uint32_t p=ao;p+16<v->record_size;) {
+            uint32_t type=ntfsk_u32(r+p);
+            if(type==NTFSK_ATTR_END)break;
+            uint32_t al=ntfsk_u32(r+p+4);
+            if(al<16||p+al>v->record_size)break;
+            if(type==NTFSK_ATTR_FILE_NAME&&!r[p+8]) {
+                uint16_t vo=ntfsk_u16(r+p+20);
+                if(vo<=al&&al-vo>=66) {
+                    uint8_t *fn=r+p+vo;uint8_t nl=fn[64],ns=fn[65];
+                    if(ns!=2&&nl&&66u+(uint32_t)nl*2u<=al-vo&&
+                       (ntfsk_u64(fn)&0x0000ffffffffffffULL)==parent) {
+                        if(ordinal) { ordinal--; }
+                        else {
+                            uint64_t out=0;
+                            for(uint32_t i=0;i<nl&&out+1<capacity;i++) {
+                                uint16_t ch=ntfsk_u16(fn+66+i*2);
+                                name[out++]=(ch>=32&&ch<127)?(char)ch:'?';
+                            }
+                            name[out]=0;
+                            if(index_out)*index_out=idx;
+                            kfree(r);
+                            return is_dir?2:1;
+                        }
+                    }
+                }
+            }
+            p+=al;
+        }
+    }
+    kfree(r);return 0;
+}
+static int ntfsk_is_directory(NTFSK_VOLUME *v,uint64_t index) {
+    if(!v||!v->mounted||index>=v->mft_bytes/v->record_size)return 0;
+    uint8_t *r=kmalloc(v->record_size);if(!r)return 0;
+    int result=ntfsk_record(v,index,r)==0&&
+        (ntfsk_u16(r+22)&NTFSK_FILE_IN_USE)&&
+        (ntfsk_u16(r+22)&NTFSK_FILE_DIRECTORY);
+    kfree(r);return result;
+}
+static uint64_t ntfsk_parent(NTFSK_VOLUME *v,uint64_t index) {
+    if(!v||!v->mounted||index>=v->mft_bytes/v->record_size)return 5;
+    uint8_t *r=kmalloc(v->record_size);if(!r)return 5;
+    uint64_t parent=5;
+    if(ntfsk_record(v,index,r)==0) {
+        uint16_t ao=ntfsk_u16(r+20);
+        for(uint32_t p=ao;p+16<v->record_size;) {
+            uint32_t type=ntfsk_u32(r+p);
+            if(type==NTFSK_ATTR_END)break;
+            uint32_t al=ntfsk_u32(r+p+4);
+            if(al<16||p+al>v->record_size)break;
+            if(type==NTFSK_ATTR_FILE_NAME&&!r[p+8]) {
+                uint16_t vo=ntfsk_u16(r+p+20);
+                if(vo<=al&&al-vo>=66) {
+                    uint8_t *fn=r+p+vo;
+                    if(fn[64]&&66u+(uint32_t)fn[64]*2u<=al-vo) {
+                        parent=ntfsk_u64(fn)&0x0000ffffffffffffULL;
+                        break;
+                    }
+                }
+            }
+            p+=al;
+        }
+    }
+    kfree(r);return parent;
+}
 /* Read an unnamed $DATA stream. The caller owns *out and must kfree it. */
 static int ntfsk_read_file(NTFSK_VOLUME *v,uint64_t index,void **out,uint64_t *out_size) {
     if(!v||!v->mounted||!out||!out_size)return -1;

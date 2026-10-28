@@ -342,7 +342,7 @@ static const char *PspImageBaseName(const char *name) {
     if (!name) return "";
     const char *base = name;
     for (const char *p = name; *p; p++)
-        if (*p == '\\\\' || *p == '/') base = p + 1;
+        if (*p == '\\' || *p == '/') base = p + 1;
     return base;
 }
 
@@ -354,9 +354,9 @@ static int PspIsExplicitSystemPath(const char *name) {
     if (!name) return 0;
     const char *p = name;
     while (*p) {
-        while (*p == '\\\\' || *p == '/' || *p == ':' ) p++;
+        while (*p == '\\' || *p == '/' || *p == ':' ) p++;
         const char *start = p;
-        while (*p && *p != '\\\\' && *p != '/' && *p != ':') p++;
+        while (*p && *p != '\\' && *p != '/' && *p != ':') p++;
         size_t len = (size_t)(p - start);
         if (len == 7) {
             static const char system32[] = "system32";

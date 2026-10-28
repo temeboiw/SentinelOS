@@ -1059,7 +1059,53 @@ static uint64_t vfs_ntfsk_resolve(const char *name) {
     return found;
 }
 
-static uint64_t vfs_ntfsk_cwd_storage=5;\nstatic uint64_t vfs_ntfsk_resolve_from(const char *name,uint64_t start) {
+static uint64_t vfs_ntfsk_cwd_storage=5;
+static int vfs_ntfsk_refresh(void) {
+    vfs_nent=0;
+    if(!g_ntfsk_ok||!g_ntfsk_volume.mounted)return -1;
+    uint8_t *r=kmalloc(g_ntfsk_volume.record_size);
+    if(!r)return -1;
+    uint64_t max=g_ntfsk_volume.mft_bytes/g_ntfsk_volume.record_size;
+    for(uint64_t idx=0;idx<max&&vfs_nent<VFS_MAX_ENT;idx++) {
+        if(ntfsk_record(&g_ntfsk_volume,idx,r)<0 ||
+           (ntfsk_u16(r+22)&NTFSK_FILE_IN_USE)==0)continue;
+        int is_dir=(ntfsk_u16(r+22)&NTFSK_FILE_DIRECTORY)!=0;
+        uint16_t ao=ntfsk_u16(r+20);
+        for(uint32_t p=ao;p+16<g_ntfsk_volume.record_size;) {
+            uint32_t type=ntfsk_u32(r+p);
+            if(type==NTFSK_ATTR_END)break;
+            uint32_t al=ntfsk_u32(r+p+4);
+            if(al<16||p+al>g_ntfsk_volume.record_size)break;
+            if(type==NTFSK_ATTR_FILE_NAME&&!r[p+8]) {
+                uint16_t vo=ntfsk_u16(r+p+20);
+                if(vo<=al&&al-vo>=66) {
+                    uint8_t *fn=r+p+vo;uint8_t nl=fn[64],ns=fn[65];
+                    if(ns!=2&&nl&&66u+(uint32_t)nl*2u<=al-vo&&
+                       (ntfsk_u64(fn)&0x0000ffffffffffffULL)==vfs_ntfsk_cwd_storage) {
+                        VfsEnt *entry=&vfs_ents[vfs_nent];
+                        uint32_t out=0;
+                        for(uint32_t j=0;j<nl&&out<sizeof(entry->name)-1;j++) {
+                            uint16_t ch=ntfsk_u16(fn+66+j*2);
+                            entry->name[out++]=(ch>=32&&ch<127)?(char)ch:'?';
+                        }
+                        entry->name[out]=0;
+                        entry->ino=(uint32_t)idx;
+                        entry->is_dir=(uint8_t)is_dir;
+                        vfs_nent++;
+                        /* One visible name per MFT record; skip DOS aliases. */
+                        break;
+                    }
+                }
+            }
+            p+=al;
+        }
+    }
+    kfree(r);
+    if(vfs_nent>=VFS_MAX_ENT)
+        DbgPrint("fs: NTFS directory listing reached %u-entry limit",(unsigned)VFS_MAX_ENT);
+    return vfs_nent;
+}
+static uint64_t vfs_ntfsk_resolve_from(const char *name,uint64_t start_ino) {
     if(!g_ntfsk_ok||!name||!name[0])return 0;
     char path[256];unsigned int n=0;
     while(name[n]&&n<sizeof(path)-1){path[n]=(name[n]=='\\')?'/':name[n];n++;}
@@ -1067,14 +1113,15 @@ static uint64_t vfs_ntfsk_cwd_storage=5;\nstatic uint64_t vfs_ntfsk_resolve_from
     path[n]=0;
     unsigned int pos=0;int absolute=0;
     if(n>=2&&path[1]==':'){pos=2;absolute=1;}
-    if(path[pos]=='/'){absolute=1;}
+    if(path[pos]=='/')absolute=1;
     while(path[pos]=='/')pos++;
-    uint64_t parent=absolute?5:start,found=parent;
+    uint64_t parent=absolute?5:start_ino,found=parent;
     while(pos<n) {
         unsigned int end=pos;while(end<n&&path[end]!='/')end++;
         if(end==pos){pos++;continue;}
         char part[256];unsigned int len=end-pos;if(len>=sizeof(part))return 0;
-        for(unsigned int i=0;i<len;i++)part[i]=path[pos+i];part[len]=0;
+        for(unsigned int i=0;i<len;i++)part[i]=path[pos+i];
+        part[len]=0;
         if(part[0]=='.'&&part[1]=='.'&&!part[2]) {
             if(parent!=5)parent=ntfsk_parent(&g_ntfsk_volume,parent);
             found=parent;
@@ -1088,22 +1135,17 @@ static uint64_t vfs_ntfsk_cwd_storage=5;\nstatic uint64_t vfs_ntfsk_resolve_from
     return found;
 }
 static int vfs_ntfsk_chdir(const char *name) {
-    uint64_t cwd=vfs_ntfsk_cwd_storage;
     if(!g_ntfsk_ok||!name||!name[0])return -1;
-    uint64_t target;
     if(name[0]=='.'&&name[1]=='.'&&!name[2]) {
-        if(cwd!=5)cwd=ntfsk_parent(&g_ntfsk_volume,cwd);vfs_ntfsk_cwd_storage=cwd;
-        return 0;
+        if(vfs_ntfsk_cwd_storage!=5)
+            vfs_ntfsk_cwd_storage=ntfsk_parent(&g_ntfsk_volume,vfs_ntfsk_cwd_storage);
+        return vfs_ntfsk_refresh()>=0?0:-1;
     }
     if(name[0]=='.'&&!name[1])return 0;
-    target=vfs_ntfsk_resolve_from(name,cwd);
+    uint64_t target=vfs_ntfsk_resolve_from(name,vfs_ntfsk_cwd_storage);
     if(!target||!ntfsk_is_directory(&g_ntfsk_volume,target))return -1;
-    cwd=target;vfs_ntfsk_cwd_storage=cwd;return 0;
-}
-static uint64_t vfs_ntfsk_cwd_ino(void) {
-    /* Kept in the VFS layer so enumeration and chdir share the same directory. */
-    extern uint64_t vfs_ntfsk_cwd_storage;
-    return vfs_ntfsk_cwd_storage;
+    vfs_ntfsk_cwd_storage=target;
+    return vfs_ntfsk_refresh()>=0?0:-1;
 }
 static int vfs_ntfsk_open_path(const char *name, uint64_t *index_out,
                                uint64_t *size_out) {
@@ -3081,7 +3123,7 @@ static Frame *syscall_handler(Frame *f) {
             return f;
         }
 
-        if (g_ext4_ok) {
+        if (g_ext4_ok || g_ntfsk_ok) {
             if (index < (uint32_t)vfs_nent) {
                 const char *n = vfs_ents[index].name;
                 uint64_t i = 0;
@@ -3089,9 +3131,6 @@ static Frame *syscall_handler(Frame *f) {
                 name[i] = 0;
                 f->rax = vfs_ents[index].is_dir ? 2 : 1;
             } else f->rax = 0;
-        } else if (g_ntfsk_ok) {
-            f->rax = (uint64_t)ntfsk_list_child(&g_ntfsk_volume,
-                vfs_ntfsk_cwd_storage, index, name, capacity, 0);
         } else {
             /* No mounted filesystem: never misrepresent boot modules as files. */
             name[0] = 0;
@@ -3846,6 +3885,9 @@ static void user_enter(BootInfo *bi) {
             SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet(i);
             if(d && ntfsk_find_and_mount(&g_ntfsk_volume,d)==0) {
                 g_ntfsk_ok=1;
+                vfs_ntfsk_cwd_storage=5;
+                if(vfs_ntfsk_refresh()<0)
+                    DbgPrint("fs: NTFS root directory enumeration failed\n");
                 DbgPrint("fs: NTFS read-only system volume mounted\n");
                 break;
             }

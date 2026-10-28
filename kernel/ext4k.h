@@ -992,7 +992,7 @@ static int e4_create_file_with_data(Ext4k *fs, uint32_t dir_ino,
     return 0;
 }
 
-#define VFS_MAX_ENT 256
+#define VFS_MAX_ENT 1024
 typedef struct { char name[256]; uint8_t is_dir; uint32_t ino; } VfsEnt;
 static VfsEnt vfs_ents[VFS_MAX_ENT];
 static int vfs_nent;

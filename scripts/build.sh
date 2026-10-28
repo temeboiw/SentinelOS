@@ -87,13 +87,15 @@ need() {
 find_llvm_tool() {
   local tool="$1" candidate resolved description path_name
   local -a candidates=()
-  if [[ -n "${!tool:-}" ]]; then candidates+=("${!tool}"); fi
+  # Prefer tools installed inside the active Linux/proot distro over Termux
+  # wrappers inherited through PATH or *_BIN environment variables.
   case "$tool" in
-    CLANG_BIN) path_name=clang; candidates+=(/usr/local/swift/usr/bin/clang /usr/lib/llvm-*/bin/clang /usr/bin/clang-[0-9]* /usr/bin/clang) ;;
-    CLANGXX_BIN) path_name=clang++; candidates+=(/usr/local/swift/usr/bin/clang++ /usr/lib/llvm-*/bin/clang++ /usr/bin/clang++-[0-9]* /usr/bin/clang++) ;;
-    LLD_BIN) path_name=lld; candidates+=(/usr/local/swift/usr/bin/lld /usr/lib/llvm-*/bin/lld /usr/bin/lld-[0-9]* /usr/bin/lld) ;;
+    CLANG_BIN) path_name=clang; candidates+=(/usr/lib/llvm-*/bin/clang /usr/bin/clang-[0-9]* /usr/bin/clang /usr/local/swift/usr/bin/clang) ;;
+    CLANGXX_BIN) path_name=clang++; candidates+=(/usr/lib/llvm-*/bin/clang++ /usr/bin/clang++-[0-9]* /usr/bin/clang++ /usr/local/swift/usr/bin/clang++) ;;
+    LLD_BIN) path_name=lld; candidates+=(/usr/lib/llvm-*/bin/lld /usr/bin/lld-[0-9]* /usr/bin/lld /usr/local/swift/usr/bin/lld) ;;
   esac
   candidates+=("$(command -v "$path_name" 2>/dev/null || true)")
+  if [[ -n "${!tool:-}" ]]; then candidates+=("${!tool}"); fi
   for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" && -x "$candidate" ]] || continue
     resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
@@ -2368,8 +2370,8 @@ mkntfs -F -Q -L magic -s 512 -c 4096 -p "$NTFS_START" -H 255 -S 63 "$B/ntfs.tmp"
 NTFS_DIR_LIST="$B/ntfs-directories.list"
 NTFS_FILE_LIST="$B/ntfs-files.list"
 NTFS_MKDIR="$B/ntfs-mkdir"
-if ! gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
-  echo "error: failed to build the FUSE-free NTFS directory helper; install ntfs-3g-dev" >&2
+if [[ ! -x /usr/bin/gcc ]] || ! /usr/bin/gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
+  echo "error: failed to build the FUSE-free NTFS directory helper; install gcc and ntfs-3g-dev inside the Linux/proot distro" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi

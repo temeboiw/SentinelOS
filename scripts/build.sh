@@ -83,9 +83,7 @@ need() {
   }
 }
 
-# Resolve real LLVM compiler binaries. Some Android/proot environments expose
-# a wrapper named "clang" that forwards Clang's private -cc1 argument to proot,
-# which fails with: "proot error: unknown option '-cc1'".
+# Resolve real LLVM compiler binaries without invoking compiler internals directly.
 find_llvm_tool() {
   local tool="$1" candidate resolved description path_name
   local -a candidates=()
@@ -100,10 +98,9 @@ find_llvm_tool() {
     [[ -n "$candidate" && -x "$candidate" ]] || continue
     resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
     description="$(file -b "$resolved" 2>/dev/null || true)"
-    # Never run a shell wrapper or proot binary as if it were the compiler.
     [[ "$description" == *"script"* || "$description" == *"text executable"* ]] && continue
     [[ "$(basename "$resolved")" == "proot" ]] && continue
-    printf '%s\n' "$resolved"
+    printf '%s\\n' "$resolved"
     return 0
   done
   echo "error: could not find a real LLVM executable for $tool; set the corresponding *_BIN variable" >&2
@@ -113,33 +110,8 @@ find_llvm_tool() {
 CLANG_BIN="$(find_llvm_tool CLANG_BIN)"
 CLANGXX_BIN="$(find_llvm_tool CLANGXX_BIN)"
 LLD_BIN="$(find_llvm_tool LLD_BIN)"
-# Termux/proot workaround: ask the real Clang driver for its job plan,
-# then execute only the cc1 compile command. Do not use eval on arbitrary
-# driver output and never run the host linker from this workaround.
-run_cc() {
-  local drv="$1" arg compile_only=0
-  shift
-
-  for arg in "$@"; do
-    case "$arg" in
-      -c|-S|-E) compile_only=1 ;;
-    esac
-  done
-
-  if (( compile_only == 0 )); then
-    echo "error: internal PE Clang wrapper received a link action; use the host compiler for native executables" >&2
-    return 2
-  fi
-
-  # Termux exports this marker inside proot. Clang then mistakenly selects
-  # the proot executable as its cc1 frontend and fails with "unknown option -cc1".
-  # Remove it for the compiler process and its children so Clang launches its
-  # actual frontend instead. Keep the user's shell environment unchanged.
-  env -u TERMUX_EXEC__PROC_SELF_EXE "$drv" "$@"
-}
-
-clang()   { run_cc "$CLANG_BIN" "$@"; }
-clang++() { run_cc "$CLANGXX_BIN" "$@"; }
+clang()   { env -u TERMUX_EXEC__PROC_SELF_EXE "$CLANG_BIN" "$@"; }
+clang++() { env -u TERMUX_EXEC__PROC_SELF_EXE "$CLANGXX_BIN" "$@"; }
 # Git Bash/MSYS rewrites slash-prefixed PE linker switches (for example
 # /nodefaultlib) into paths before launching native Windows lld.exe. Exclude
 # those switches from automatic path conversion, while explicitly converting
@@ -197,7 +169,7 @@ if (( DO_NO_DISK_IMAGE == 0 )); then
   need mkntfs
   need ntfscp
   need ntfscat
-  need cc
+  need gcc
   need mmd
   need mcopy
   need dd
@@ -2396,7 +2368,7 @@ mkntfs -F -Q -L magic -s 512 -c 4096 "$B/ntfs.tmp" >/dev/null
 NTFS_DIR_LIST="$B/ntfs-directories.list"
 NTFS_FILE_LIST="$B/ntfs-files.list"
 NTFS_MKDIR="$B/ntfs-mkdir"
-if ! cc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
+if ! gcc "$ROOT/scripts/ntfs-mkdir.c" -O2 -Wall -Wextra -o "$NTFS_MKDIR" -lntfs-3g; then
   echo "error: failed to build the FUSE-free NTFS directory helper; install ntfs-3g-dev" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1

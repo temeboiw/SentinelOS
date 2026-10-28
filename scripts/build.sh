@@ -2373,12 +2373,23 @@ NTFS_MKDIR="$B/ntfs-mkdir"
 # Prefer a compiler installed inside the active Linux/proot distro, but do not
 # assume /usr/bin/gcc exists: Termux can expose a working gcc via PATH.
 NTFS_CC=""
-for candidate in /usr/bin/gcc /usr/local/bin/gcc "$(command -v gcc 2>/dev/null || true)" "$(command -v cc 2>/dev/null || true)"; do
-  if [[ -n "$candidate" && -x "$candidate" ]]; then
+# Prefer compilers inside the Linux/proot distro. PATH may put Termux's
+# Android-targeting gcc wrapper first, which cannot use the distro's glibc
+# headers or libntfs-3g development files.
+for candidate in /usr/bin/gcc /usr/local/bin/gcc /usr/bin/cc /usr/local/bin/cc /usr/bin/clang /usr/local/bin/clang /usr/lib/llvm-*/bin/clang; do
+  if [[ -n "$candidate" && -x "$candidate" && ! -d "$candidate" ]]; then
     NTFS_CC="$candidate"
     break
   fi
 done
+if [[ -z "$NTFS_CC" ]]; then
+  for candidate in "$(command -v gcc 2>/dev/null || true)" "$(command -v cc 2>/dev/null || true)" "$(command -v clang 2>/dev/null || true)"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      NTFS_CC="$candidate"
+      break
+    fi
+  done
+fi
 if [[ -z "$NTFS_CC" ]]; then
   echo "error: no executable gcc or cc found for the NTFS helper" >&2
   echo "diagnostic: PATH=$PATH" >&2
@@ -2392,20 +2403,27 @@ echo "  -> compiling NTFS helper with $NTFS_CC"
 # Use libntfs-3g's own pkg-config metadata for both include and linker paths.
 # This matters when the compiler is provided by Termux but development headers
 # and the library are installed under a distro/proot sysroot.
-if ! command -v pkg-config >/dev/null 2>&1; then
+NTFS_PKG_CONFIG=""
+for candidate in /usr/bin/pkg-config /usr/local/bin/pkg-config /bin/pkg-config "$(command -v pkg-config 2>/dev/null || true)"; do
+  if [[ -n "$candidate" && -x "$candidate" && ! -d "$candidate" ]]; then
+    NTFS_PKG_CONFIG="$candidate"
+    break
+  fi
+done
+if [[ -z "$NTFS_PKG_CONFIG" ]]; then
   echo "error: pkg-config is required to locate libntfs-3g headers and library" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi
-if ! NTFS_CFLAGS="$(pkg-config --cflags libntfs-3g 2>&1)"; then
+if ! NTFS_CFLAGS="$("$NTFS_PKG_CONFIG" --cflags libntfs-3g 2>&1)"; then
   echo "error: pkg-config could not locate libntfs-3g development files:" >&2
   printf '%s\\n' "$NTFS_CFLAGS" >&2
-  echo "diagnostic: pkg-config executable=$(command -v pkg-config)" >&2
+  echo "diagnostic: pkg-config executable=$NTFS_PKG_CONFIG" >&2
   echo "diagnostic: PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-<unset>}" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
   exit 1
 fi
-if ! NTFS_LIBS="$(pkg-config --libs libntfs-3g 2>&1)"; then
+if ! NTFS_LIBS="$("$NTFS_PKG_CONFIG" --libs libntfs-3g 2>&1)"; then
   echo "error: pkg-config could not locate libntfs-3g linker flags:" >&2
   printf '%s\\n' "$NTFS_LIBS" >&2
   rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"

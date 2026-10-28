@@ -15,6 +15,7 @@
 #include "vmm.h"
 #include "serial.h"
 #include "ext4k.h"
+#include "ntfsk.h"
 
 #define SENTINEL_DRIVER_IMAGE_MAX (32u * 1024u * 1024u)
 #define SENTINEL_DRIVER_PAGE_SIZE 4096u
@@ -326,8 +327,35 @@ static int SentinelDriverUnloadByName(const char *name) {
 
 /* Read a single module from /magic/System32/drivers on the mounted ext4
  * volume. The file is staged in kernel memory, validated, then released. */
+static uint64_t SentinelDriverNtfsDriverIndex(const char *name) {
+    if (!g_ntfsk_ok || !g_ntfsk_volume.mounted ||
+        !SentinelDriverHasSysSuffix(name)) return 0;
+    uint64_t magic = ntfsk_lookup(&g_ntfsk_volume, 5, "magic");
+    uint64_t system32 = magic ? ntfsk_lookup(&g_ntfsk_volume, magic, "System32") : 0;
+    uint64_t drivers = system32 ? ntfsk_lookup(&g_ntfsk_volume, system32, "drivers") : 0;
+    return drivers ? ntfsk_lookup(&g_ntfsk_volume, drivers, name) : 0;
+}
+
 static int SentinelDriverLoadFromDisk(const char *name) {
-    if (!g_ext4_ok || !SentinelDriverHasSysSuffix(name)) return -1;
+    if (!SentinelDriverHasSysSuffix(name)) return -1;
+
+    if (g_ntfsk_ok) {
+        uint64_t index = SentinelDriverNtfsDriverIndex(name);
+        if (!index || ntfsk_is_directory(&g_ntfsk_volume, index)) return -2;
+        void *file = 0;
+        uint64_t size = 0;
+        if (ntfsk_read_file(&g_ntfsk_volume, index, &file, &size) < 0)
+            return -3;
+        if (!size || size > SENTINEL_DRIVER_IMAGE_MAX) {
+            kfree(file);
+            return -4;
+        }
+        int result = SentinelDriverLoadImage(name, file, size);
+        kfree(file);
+        return result;
+    }
+
+    if (!g_ext4_ok) return -1;
     uint32_t magic = e4_lookup(&g_ext4, 2, "magic");
     uint32_t system32 = magic ? e4_lookup(&g_ext4, magic, "System32") : 0;
     uint32_t drivers = system32 ? e4_lookup(&g_ext4, system32, "drivers") : 0;
@@ -391,7 +419,7 @@ static int SentinelDriverReloadFromDisk(const char *name) {
     if (existing) {
         int unload_status = SentinelDriverUnloadByName(name);
         if (unload_status != 0) {
-            DbgPrint("driver: %s reload stopped; unload status=%d\\n",
+            DbgPrint("driver: %s reload stopped; unload status=%d\n",
                      name, unload_status);
             return -2;
         }
@@ -399,11 +427,11 @@ static int SentinelDriverReloadFromDisk(const char *name) {
 
     int load_status = SentinelDriverLoadFromDisk(name);
     if (load_status != 0) {
-        DbgPrint("driver: %s reload failed during load status=%d\\n",
+        DbgPrint("driver: %s reload failed during load status=%d\n",
                  name, load_status);
         return -3;
     }
-    DbgPrint("driver: %s reload complete\\n", name);
+    DbgPrint("driver: %s reload complete\n", name);
     return 0;
 }
 
@@ -415,6 +443,39 @@ static int SentinelDriverReloadFromDisk(const char *name) {
  * single-image loader rather than being called with an incomplete IAT.
  */
 static int SentinelDriverLoadAllFromDisk(void) {
+    if (g_ntfsk_ok && g_ntfsk_volume.mounted) {
+        uint64_t magic = ntfsk_lookup(&g_ntfsk_volume, 5, "magic");
+        uint64_t system32 = magic ? ntfsk_lookup(&g_ntfsk_volume, magic, "System32") : 0;
+        uint64_t drivers = system32 ? ntfsk_lookup(&g_ntfsk_volume, system32, "drivers") : 0;
+        if (!drivers || !ntfsk_is_directory(&g_ntfsk_volume, drivers)) return -2;
+
+        char name[SENTINEL_DRIVER_NAME_MAX];
+        int attempted = 0, loaded = 0;
+        for (uint32_t ordinal = 0; ordinal < 256; ++ordinal) {
+            uint64_t index = 0;
+            int kind = ntfsk_list_child(&g_ntfsk_volume, drivers, ordinal,
+                                        name, sizeof(name), &index);
+            if (!kind) break;
+            if (kind != 1 || !SentinelDriverHasSysSuffix(name)) continue;
+            if (SentinelDriverNameEqual(name, "ata.sys") &&
+                SentinelBlockFind("ata0")) {
+                DbgPrint("driver: %s skipped; ata0 is already registered\n", name);
+                continue;
+            }
+            ++attempted;
+            int status = SentinelDriverLoadFromDisk(name);
+            if (status == 0) {
+                ++loaded;
+                DbgPrint("driver: %s loaded from NTFS /magic/System32/drivers\n", name);
+            } else {
+                DbgPrint("driver: %s load failed status=%d\n", name, status);
+            }
+        }
+        DbgPrint("driver: NTFS .sys scan complete attempted=%d loaded=%d\n",
+                 attempted, loaded);
+        return loaded;
+    }
+
     if (!g_ext4_ok || !g_ext4.blksz || g_ext4.blksz > 4096) return -1;
 
     uint32_t magic = e4_lookup(&g_ext4, 2, "magic");

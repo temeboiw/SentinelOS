@@ -2414,7 +2414,9 @@ fi
 echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<none>}"
 echo "  -> libntfs-3g libs: $NTFS_LIBS"
 # shellcheck disable=SC2086
-if ! env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+if env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+  :
+else
   status=$?
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
   echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2

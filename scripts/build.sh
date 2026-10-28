@@ -2401,47 +2401,63 @@ if [[ -z "$NTFS_CC" ]]; then
 fi
 
 echo "  -> compiling NTFS helper with Linux/proot compiler $NTFS_CC"
-# Resolve pkg-config from the same Linux/proot environment as the compiler.
+# Resolve pkg-config/pkgconf from the same Linux/proot environment as GCC.
+# Some minimal proot installs have the libntfs-3g headers and library but omit
+# pkg-config entirely, so support a verified system-header/library fallback.
 NTFS_PKG_CONFIG=""
-for candidate in /usr/bin/pkg-config /usr/local/bin/pkg-config /bin/pkg-config; do
+for candidate in /usr/bin/pkg-config /usr/local/bin/pkg-config /bin/pkg-config /usr/bin/pkgconf /usr/local/bin/pkgconf /bin/pkgconf; do
   if [[ -x "$candidate" && ! -d "$candidate" ]]; then
     NTFS_PKG_CONFIG="$candidate"
     break
   fi
 done
 if [[ -z "$NTFS_PKG_CONFIG" ]]; then
-  candidate="$(command -v pkg-config 2>/dev/null || true)"
-  case "$candidate" in
-    /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) candidate="" ;;
-  esac
-  if [[ -n "$candidate" && -x "$candidate" ]]; then
-    NTFS_PKG_CONFIG="$candidate"
+  for tool in pkg-config pkgconf; do
+    candidate="$(command -v "$tool" 2>/dev/null || true)"
+    case "$candidate" in
+      /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) candidate="" ;;
+    esac
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      NTFS_PKG_CONFIG="$candidate"
+      break
+    fi
+  done
+fi
+
+NTFS_CFLAGS=""
+NTFS_LIBS=""
+if [[ -n "$NTFS_PKG_CONFIG" ]] && "$NTFS_PKG_CONFIG" --exists libntfs-3g; then
+  NTFS_CFLAGS="$("$NTFS_PKG_CONFIG" --cflags libntfs-3g)"
+  NTFS_LIBS="$("$NTFS_PKG_CONFIG" --libs libntfs-3g)"
+  echo "  -> libntfs-3g metadata: $NTFS_PKG_CONFIG"
+else
+  # GCC's normal system include search path covers /usr/include. Confirm both
+  # the public headers and a linkable library exist before using -lntfs-3g.
+  NTFS_HEADER=""
+  for candidate in /usr/include/ntfs-3g/dir.h /usr/local/include/ntfs-3g/dir.h; do
+    if [[ -s "$candidate" ]]; then NTFS_HEADER="$candidate"; break; fi
+  done
+  NTFS_LIBRARY=""
+  for candidate in /usr/lib/libntfs-3g.so /usr/lib64/libntfs-3g.so /usr/local/lib/libntfs-3g.so /usr/lib/*/libntfs-3g.so; do
+    if [[ -s "$candidate" ]]; then NTFS_LIBRARY="$candidate"; break; fi
+  done
+  if [[ -z "$NTFS_HEADER" || -z "$NTFS_LIBRARY" ]]; then
+    echo "error: cannot locate Linux/proot libntfs-3g development metadata or a usable header/library pair" >&2
+    echo "diagnostic: pkg-config/pkgconf=${NTFS_PKG_CONFIG:-unavailable}" >&2
+    echo "diagnostic: header=${NTFS_HEADER:-not found}; library=${NTFS_LIBRARY:-not found}" >&2
+    echo "diagnostic: expected ntfs-3g/dir.h and libntfs-3g.so inside the Linux/proot filesystem" >&2
+    rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
   fi
+  NTFS_LIBS="-lntfs-3g"
+  echo "  -> libntfs-3g metadata: verified system header/library fallback"
 fi
-if [[ -z "$NTFS_PKG_CONFIG" ]]; then
-  echo "error: no Linux/proot pkg-config found; refusing to use Termux's package metadata" >&2
-  echo "diagnostic: PATH=$PATH" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-if ! NTFS_CFLAGS="$("$NTFS_PKG_CONFIG" --cflags libntfs-3g 2>&1)"; then
-  echo "error: Linux/proot pkg-config could not locate libntfs-3g development files:" >&2
-  printf '%s\\n' "$NTFS_CFLAGS" >&2
-  echo "diagnostic: pkg-config executable=$NTFS_PKG_CONFIG" >&2
-  echo "diagnostic: PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-<unset>}" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-if ! NTFS_LIBS="$("$NTFS_PKG_CONFIG" --libs libntfs-3g 2>&1)"; then
-  echo "error: Linux/proot pkg-config could not locate libntfs-3g linker flags:" >&2
-  printf '%s\\n' "$NTFS_LIBS" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<none>}"
+echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<default system includes>}"
 echo "  -> libntfs-3g libs: $NTFS_LIBS"
 # shellcheck disable=SC2086
-if ! env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+if env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+  :
+else
   status=$?
   echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
   echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2

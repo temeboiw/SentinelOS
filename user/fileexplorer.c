@@ -4,7 +4,9 @@ typedef unsigned int DWORD;
 typedef int BOOL;
 typedef const char *LPCSTR;
 
-enum { SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12 };
+enum { SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12,
+       SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=22, SYS_QueryFileSize=25,
+       SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
@@ -66,19 +68,24 @@ static char g_address_edit[260];
 static int g_address_len;
 static int g_win_y = 40; /* live window origin */
 static int g_context_menu = 0;
+static long long g_clip_handle = -1;
+static char g_clip_name[64];
+static unsigned long long g_clip_size;
+static int g_clip_valid;
 static int g_context_row = -1;
 static int g_context_start_line = 2;
 /* Switch-based strings avoid absolute pointers in PE read-only data. */
-#define CONTEXT_ITEM_COUNT 7
+#define CONTEXT_ITEM_COUNT 8
 static const char *context_item(int i) {
     switch (i) {
         case 0: return "Open";
         case 1: return "Properties";
-        case 2: return "Copy (read-only)";
-        case 3: return "Cut (read-only)";
-        case 4: return "Delete (read-only)";
-        case 5: return "Refresh";
-        case 6: return "Close menu";
+        case 2: return "Copy file";
+        case 3: return "Cut (not supported)";
+        case 4: return "Delete (not supported)";
+        case 5: return "Paste file";
+        case 6: return "Refresh";
+        case 7: return "Close menu";
         default: return "";
     }
 }
@@ -382,6 +389,100 @@ static int fe_address_commit(SetCurrentDirectoryA_t pChdir) {
     g_address_mode=0;
     return 1;
 }
+static int fe_copy_to_clipboard(int row, MessageBoxA_t pMsgBox) {
+    if(row<0||row>=g_count||g_isdir[row]) {
+        if(pMsgBox)pMsgBox(g_window,"Copy currently supports files, not folders.","File operation",0x10);
+        return 0;
+    }
+    int n=0;while(g_names[row][n]&&n<63)n++;
+    if(!n||g_names[row][n]) {
+        if(pMsgBox)pMsgBox(g_window,"This filename is too long for the current file-operation API.","Copy failed",0x10);
+        return 0;
+    }
+    long long h=(long long)sy3(SYS_OpenFile,(u64)g_names[row],0,0);
+    if(h<0) {
+        if(pMsgBox)pMsgBox(g_window,"Could not open the selected file for reading.","Copy failed",0x10);
+        return 0;
+    }
+    unsigned long long size=sy3(SYS_QueryFileSize,(u64)h,0,0);
+    if(size==(u64)-1 || size>0xFFFFFFFFULL) {
+        sy3(SYS_CloseFile,(u64)h,0,0);
+        if(pMsgBox)pMsgBox(g_window,"This file size is not supported by the current copy API.","Copy failed",0x10);
+        return 0;
+    }
+    if(g_clip_valid&&g_clip_handle>=0)sy3(SYS_CloseFile,(u64)g_clip_handle,0,0);
+    g_clip_handle=h;g_clip_size=size;g_clip_valid=1;
+    for(int i=0;i<=n;i++)g_clip_name[i]=g_names[row][i];
+    return 1;
+}
+static int fe_new_file(MessageBoxA_t pMsgBox) {
+    if(g_home) { if(pMsgBox)pMsgBox(g_window,"Open a folder before creating a file.","New file",0x10);return 0; }
+    const char *names[]={"New File.txt","New File (2).txt","New File (3).txt","New File (4).txt","New File (5).txt"};
+    for(int i=0;i<5;i++) {
+        long long h=(long long)sy3(SYS_CreateOutputFile,(u64)names[i],0,0);
+        if(h>=0) {
+            sy3(SYS_CloseFile,(u64)h,0,0);
+            return 1;
+        }
+    }
+    if(pMsgBox)pMsgBox(g_window,"Could not create a new file. The volume may be read-only or the candidate names may already exist.","New file failed",0x10);
+    return 0;
+}
+static int fe_paste_file(MessageBoxA_t pMsgBox) {
+    if(!g_clip_valid||g_clip_handle<0) {
+        if(pMsgBox)pMsgBox(g_window,"Copy a file first, then open the destination folder and paste it.","Paste file",0x10);
+        return 0;
+    }
+    if(g_home) {
+        if(pMsgBox)pMsgBox(g_window,"Open a destination folder before pasting.","Paste file",0x10);
+        return 0;
+    }
+    char dest[64];
+    const char *prefix="Copy of ";
+    int p=0;while(prefix[p]&&p<63){dest[p]=prefix[p];p++;}
+    int n=0;while(g_clip_name[n]&&n<63)n++;
+    int room=63-p;if(n>room)n=room;
+    for(int i=0;i<n;i++)dest[p+i]=g_clip_name[i];
+    dest[p+n]=0;
+    long long out=-1;
+    for(int attempt=0;attempt<5;attempt++) {
+        out=(long long)sy3(SYS_CreateOutputFile,(u64)dest,0,0);
+        if(out>=0)break;
+        /* A collision is retried with a bounded numbered name. */
+        char suffix[8];int z=0;int v=attempt+2;
+        suffix[z++]=' ';suffix[z++]='(';char rev[4];int rn=0;
+        do{rev[rn++]=(char)('0'+v%10);v/=10;}while(v&&rn<3);
+        while(rn)suffix[z++]=rev[--rn];
+        suffix[z++]=')';suffix[z]=0;
+        int sl=0;while(suffix[sl])sl++;
+        int basecap=63-sl;if(basecap>n)basecap=n;
+        for(int j=0;j<basecap;j++)dest[j]=g_clip_name[j];
+        for(int j=0;j<sl;j++)dest[basecap+j]=suffix[j];
+        dest[basecap+sl]=0;
+    }
+    if(out<0) {
+        if(pMsgBox)pMsgBox(g_window,"Could not create the destination file. It may already exist, or the destination filesystem may not support writes.","Paste failed",0x10);
+        return 0;
+    }
+    unsigned char buf[4096];
+    unsigned long long done=0;
+    int ok=1;
+    while(done<g_clip_size) {
+        unsigned long long want=g_clip_size-done;
+        if(want>sizeof(buf))want=sizeof(buf);
+        long long got=(long long)sy3(SYS_ReadFile,(u64)g_clip_handle,(u64)buf,want);
+        if(got<=0 || (unsigned long long)got>want) {ok=0;break;}
+        long long put=(long long)sy3(SYS_WriteOutputFile,(u64)out,(u64)buf,(u64)got);
+        if(put!=got) {ok=0;break;}
+        done+=(unsigned long long)got;
+    }
+    sy3(SYS_CloseFile,(u64)out,0,0);
+    if(!ok || done!=g_clip_size) {
+        if(pMsgBox)pMsgBox(g_window,"Copy did not finish. A partial destination file may remain; inspect it before retrying.","Copy incomplete",0x10);
+        return 0;
+    }
+    return 1;
+}
 static int ends_with(const char *n, const char *ext) {
     int i = 0, j = 0;
     while (n[i]) i++;
@@ -610,6 +711,21 @@ void mainCRTStartup(void) {
             else if(ch=='s'||ch=='S') {g_sort_mode=(g_sort_mode+1)%3;if(!g_home)reload(pQuery,pText,pInv);}
         }
         if (msg.message == 0x0100 && !g_context_menu) {
+            if ((msg.lParam & (1LL<<29)) && msg.wParam==0x4E) {
+                if(fe_new_file(pMsgBox))reload(pQuery,pText,pInv);
+                continue;
+            }
+            if ((msg.lParam & (1LL<<29)) && msg.wParam==0x43) {
+                if(g_last_file_row>=0 && g_last_file_row<g_count &&
+                   fe_copy_to_clipboard(g_last_file_row,pMsgBox) && pMsgBox)
+                    pMsgBox(g_window,"File copied. Open the destination folder and press Ctrl+V.","Copy file",0);
+                continue;
+            }
+            if ((msg.lParam & (1LL<<29)) && msg.wParam==0x56) {
+                if(fe_paste_file(pMsgBox)) { reload(pQuery,pText,pInv); if(pMsgBox)pMsgBox(g_window,"File copy completed.","Paste file",0); }
+                else reload(pQuery,pText,pInv);
+                continue;
+            }
             if (msg.wParam==0x74) { g_address_mode=0; reload(pQuery,pText,pInv); continue; } /* F5 */
             if (msg.wParam==0x08 && !g_address_mode) {
                 if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv);
@@ -732,9 +848,20 @@ void mainCRTStartup(void) {
                 g_context_menu = 0;
                 draw_rows(pText, pInv);
                 if (item >= 0 && item < CONTEXT_ITEM_COUNT && selected >= 0 && selected < g_count) {
-                    if (item == 5) { reload(pQuery, pText, pInv); continue; }
-                    if (item == 6) continue;
-                    if (item == 2 || item == 3 || item == 4) {
+                    if (item == 6) { reload(pQuery, pText, pInv); continue; }
+                    if (item == 7) continue;
+                    if (item == 2) {
+                        if(fe_copy_to_clipboard(selected,pMsgBox)) {
+                            if(pMsgBox)pMsgBox(g_window,"File copied to the Explorer clipboard. Open the destination folder and choose Paste or press Ctrl+V.","Copy file",0);
+                        }
+                        continue;
+                    }
+                    if (item == 5) {
+                        if(fe_paste_file(pMsgBox)) { reload(pQuery,pText,pInv); if(pMsgBox)pMsgBox(g_window,"File copy completed.","Paste file",0); }
+                        else reload(pQuery,pText,pInv);
+                        continue;
+                    }
+                    if (item == 3 || item == 4) {
                         int protected_path = 0;
                         const char *prefix = "C:\\Windows\\System32";
                         int j=0, same=1;

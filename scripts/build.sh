@@ -143,33 +143,43 @@ clang++() { run_cc "$CLANGXX_BIN" "$@"; }
 # Git Bash/MSYS rewrites slash-prefixed PE linker switches (for example
 # /nodefaultlib) into paths before launching native Windows lld.exe. Exclude
 # those switches from automatic path conversion, while explicitly converting
-# linker output paths to native Windows paths below.
+# linker output paths to native Windows paths below. On Linux/proot, cygpath is
+# absent and paths must stay in the host's native format.
 lld() {
   local arg value
   local -a args=()
+  local is_msys=0
+  command -v cygpath >/dev/null 2>&1 && is_msys=1
   for arg in "$@"; do
     case "$arg" in
       /out:*)
         value="${arg#/out:}"
-        args+=("-out:$(cygpath -aw "$value")")
+        if (( is_msys )); then value="$(cygpath -aw "$value")"; fi
+        args+=("-out:$value")
         ;;
       /implib:*)
         value="${arg#/implib:}"
-        args+=("-implib:$(cygpath -aw "$value")")
+        if (( is_msys )); then value="$(cygpath -aw "$value")"; fi
+        args+=("-implib:$value")
         ;;
       /def:*)
         # MSYS path conversion treats /def:C:/... as a path-list fragment
         # and prepends the Git installation's /def directory. Convert the
-        # definition-file path explicitly, just like /out and /implib.
+        # definition-file path explicitly when running under MSYS.
         value="${arg#/def:}"
-        args+=("-def:$(cygpath -aw "$value")")
+        if (( is_msys )); then value="$(cygpath -aw "$value")"; fi
+        args+=("-def:$value")
         ;;
       *)
         args+=("$arg")
         ;;
     esac
   done
-  MSYS2_ARG_CONV_EXCL='/nodefaultlib;/dynamicbase;/subsystem;/entry;/base;/fixed;/dll;/noentry;/export;/def' "$LLD_BIN" "${args[@]}"
+  if (( is_msys )); then
+    MSYS2_ARG_CONV_EXCL='/nodefaultlib;/dynamicbase;/subsystem;/entry;/base;/fixed;/dll;/noentry;/export;/def' "$LLD_BIN" "${args[@]}"
+  else
+    "$LLD_BIN" "${args[@]}"
+  fi
 }
 
 # Catch broken compiler wrappers before starting parallel EFI builds.

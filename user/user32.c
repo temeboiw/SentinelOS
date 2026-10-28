@@ -1165,8 +1165,8 @@ static int u32_menu_text_is(const char *wanted) {
     return *a==0&&*b==0;
 }
 
-#define U32_START_APP_MAX 256
-#define U32_SCAN_DIR_MAX 1024
+#define U32_START_APP_MAX 1024
+#define U32_SCAN_DIR_MAX 4096
 typedef struct { char path[260]; char name[64]; } U32_START_APP;
 static U32_START_APP u32_start_apps[U32_START_APP_MAX];
 static unsigned int u32_start_app_count;

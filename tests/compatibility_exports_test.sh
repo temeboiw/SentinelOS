@@ -30,36 +30,31 @@ require_export() {
 
 # WinMM is intentionally only a small implemented subset today. Keep the
 # existing Geometry Dash timeGetTime dependency from silently regressing.
-for file in "$ROOT/winmm.dll" "$ROOT/Windows/System32/winmm.dll" "$ROOT/magic/System32/winmm.dll"; do
-  require_file "$file"
-  require_export "$file" timeGetTime
-done
+file="$ROOT/magic/System32/winmm.dll"
+require_file "$file"
+require_export "$file" timeGetTime
 
 # Winsock runtime package and key import names must remain available.
-for file in "$ROOT/ws2_32.dll" "$ROOT/Windows/System32/ws2_32.dll" "$ROOT/magic/System32/ws2_32.dll"; do
-  require_file "$file"
-  for symbol in WSAStartup WSACleanup WSAGetLastError WSASetLastError socket closesocket connect bind listen accept send recv sendto recvfrom shutdown select ioctlsocket setsockopt getsockopt inet_addr inet_ntoa inet_pton inet_ntop htons ntohs htonl ntohl getaddrinfo freeaddrinfo gethostname; do
-    require_export "$file" "$symbol"
-  done
+file="$ROOT/magic/System32/ws2_32.dll"
+require_file "$file"
+for symbol in WSAStartup WSACleanup WSAGetLastError WSASetLastError socket closesocket connect bind listen accept send recv sendto recvfrom shutdown select ioctlsocket setsockopt getsockopt inet_addr inet_ntoa inet_pton inet_ntop htons ntohs htonl ntohl getaddrinfo freeaddrinfo gethostname; do
+  require_export "$file" "$symbol"
 done
 
 # Ensure the shared CRT implementation and the VCRUNTIME compatibility module
 # remain packaged under both names searched by the current loader.
 for file in \
-  "$ROOT/ucrtbase.dll" \
-  "$ROOT/api-ms-win-crt-runtime-l1-1-0.dll" \
-  "$ROOT/Windows/System32/ucrtbase.dll" \
-  "$ROOT/Windows/System32/api-ms-win-crt-runtime-l1-1-0.dll" \
-  "$ROOT/Windows/System32/vcruntime140.dll" \
-  "$ROOT/vcruntime140.dll"; do
+  "$ROOT/magic/System32/ucrtbase.dll" \
+  "$ROOT/magic/System32/api-ms-win-crt-runtime-l1-1-0.dll" \
+  "$ROOT/magic/System32/vcruntime140.dll"; do
   require_file "$file"
 done
 
 for symbol in memcpy memmove memset memcmp strlen strcmp malloc free _beginthreadex strtol strtoul strtoll strtoull wcstombs mbstowcs; do
-  require_export "$ROOT/ucrtbase.dll" "$symbol"
+  require_export "$ROOT/magic/System32/ucrtbase.dll" "$symbol"
 done
 for symbol in memcpy memmove memset memcmp _purecall __std_terminate _invoke_watson; do
-  require_export "$ROOT/vcruntime140.dll" "$symbol"
+  require_export "$ROOT/magic/System32/vcruntime140.dll" "$symbol"
 done
 
 # These three kernel32 APIs were added to address concrete imports in the
@@ -71,11 +66,10 @@ done
 
 
 # OpenGL is a real bounded framebuffer renderer, not a full OpenGL driver.
-for file in "$ROOT/opengl32.dll" "$ROOT/Windows/System32/opengl32.dll" "$ROOT/magic/System32/opengl32.dll"; do
-  require_file "$file"
-  for symbol in glClearColor glClear glViewport glDrawArrays glDrawElements glGetString glGetError glGenTextures glBindTexture glDeleteTextures glTexImage2D glTexParameteri glTexCoordPointer glEnableClientState glBlendFunc glPixelStorei glColor4f glColor4ub wglCreateContext wglMakeCurrent wglGetCurrentDC wglGetCurrentContext wglGetProcAddress SwapBuffers; do
-    require_export "$file" "$symbol"
-  done
+file="$ROOT/magic/System32/opengl32.dll"
+require_file "$file"
+for symbol in glClearColor glClear glViewport glDrawArrays glDrawElements glGetString glGetError glGenTextures glBindTexture glDeleteTextures glTexImage2D glTexParameteri glTexCoordPointer glEnableClientState glBlendFunc glPixelStorei glColor4f glColor4ub wglCreateContext wglMakeCurrent wglGetCurrentDC wglGetCurrentContext wglGetProcAddress SwapBuffers; do
+  require_export "$file" "$symbol"
 done
 
 # The WGL proc-address resolver must return the real implementations for

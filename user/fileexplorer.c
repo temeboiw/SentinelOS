@@ -6,7 +6,7 @@ typedef const char *LPCSTR;
 
 enum { SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12,
        SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=22, SYS_QueryFileSize=25,
-       SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
+       SYS_SetFilePosition=26, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
@@ -462,6 +462,12 @@ static int fe_paste_file(MessageBoxA_t pMsgBox) {
     }
     if(out<0) {
         if(pMsgBox)pMsgBox(g_window,"Could not create the destination file. It may already exist, or the destination filesystem may not support writes.","Paste failed",0x10);
+        return 0;
+    }
+    /* Each paste starts from byte zero, so the clipboard remains reusable. */
+    if((long long)sy3(SYS_SetFilePosition,(u64)g_clip_handle,0,0)<0) {
+        sy3(SYS_CloseFile,(u64)out,0,0);
+        if(pMsgBox)pMsgBox(g_window,"Could not rewind the source file for copying.","Paste failed",0x10);
         return 0;
     }
     unsigned char buf[4096];

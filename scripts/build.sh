@@ -194,10 +194,19 @@ if (( DO_NO_DISK_IMAGE == 0 )); then
   need qemu-img
   need sfdisk
   need mkfs.vfat
-  need mke2fs
+  need mkntfs
+  need ntfs-3g
   need mmd
   need mcopy
   need dd
+  if command -v fusermount3 >/dev/null 2>&1; then
+    FUSERMOUNT="$(command -v fusermount3)"
+  elif command -v fusermount >/dev/null 2>&1; then
+    FUSERMOUNT="$(command -v fusermount)"
+  else
+    echo "error: NTFS image population requires fusermount3 or fusermount (FUSE support)" >&2
+    exit 1
+  fi
 fi
 
 for src in \
@@ -2328,21 +2337,21 @@ ROOTFS_BYTES=$(du -sb "$B/rootfs" | awk '{print $1}')
 ESP_MIB=$(((ESP_BYTES + 8 * MIB + MIB - 1) / MIB))
 (( ESP_MIB < 64 )) && ESP_MIB=64
 ESP_SECTORS=$((ESP_MIB * SECTORS_PER_MIB))
-EXT_START=$((2048 + ESP_SECTORS))
+NTFS_START=$((2048 + ESP_SECTORS))
 
-# Keep the ext4 partition MiB-aligned. The 10% + 16 MiB allowance is for
-# filesystem structures; the requested 100 MiB remains available beyond files.
-EXT_BYTES=$((ROOTFS_BYTES + ROOTFS_BYTES / 10 + 16 * MIB + 100 * MIB))
-EXT_BLOCKS=$(((EXT_BYTES + 4095) / 4096))
-EXT_SECTORS=$((EXT_BLOCKS * 8))
-EXT_OFF=$((EXT_START * SECTOR_SIZE))
-EXT_SZ=$((EXT_SECTORS * SECTOR_SIZE))
+# Keep the NTFS system volume MiB-aligned and reserve at least 100 MiB beyond
+# staged files for later Windows-compatible applications and filesystem growth.
+NTFS_BYTES=$((ROOTFS_BYTES + ROOTFS_BYTES / 10 + 16 * MIB + 100 * MIB))
+NTFS_MIB=$(((NTFS_BYTES + MIB - 1) / MIB))
+(( NTFS_MIB < 128 )) && NTFS_MIB=128
+NTFS_SECTORS=$((NTFS_MIB * SECTORS_PER_MIB))
+NTFS_OFF=$((NTFS_START * SECTOR_SIZE))
 
 # Round the whole disk up to a MiB and leave room for the backup GPT header.
-DISK_SECTORS=$((((EXT_START + EXT_SECTORS + 34 + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
+DISK_SECTORS=$((((NTFS_START + NTFS_SECTORS + 34 + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
 DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
 
-echo "  -> ESP: ${ESP_MIB} MiB; rootfs data: $((ROOTFS_BYTES / MIB)) MiB; disk: ${DISK_MIB} MiB"
+echo "  -> ESP: ${ESP_MIB} MiB; NTFS system volume: ${NTFS_MIB} MiB; staged files: $((ROOTFS_BYTES / MIB)) MiB; disk: ${DISK_MIB} MiB"
 
 rm -f "$DISKIMG"
 qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
@@ -2353,7 +2362,7 @@ unit: sectors
 first-lba: 2048
 
 start=2048, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
-start=$EXT_START, size=$EXT_SECTORS, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="magic"
+start=$NTFS_START, size=$NTFS_SECTORS, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="magic"
 SFDISK
 
 dd if=/dev/zero \
@@ -2380,27 +2389,41 @@ dd if="$B/esp.fat" \
 
 rm -f "$B/esp.fat"
 
-FEATS="^has_journal,^metadata_csum,^64bit,^resize_inode,^dir_index"
+# Build the system partition as NTFS. A temporary standalone image avoids
+# offset-sensitive filesystem creation; it is copied into the GPT partition
+# only after every staged file has been written successfully.
+rm -f "$B/ntfs.tmp"
+qemu-img create -f raw "$B/ntfs.tmp" "${NTFS_MIB}M" >/dev/null
+mkntfs -F -Q -L magic -s 512 -c 4096 "$B/ntfs.tmp" >/dev/null
 
-if ! mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
-  -d "$B/rootfs" \
-  -E "offset=$EXT_OFF" \
-  "$DISKIMG" "$EXT_BLOCKS" >/dev/null 2>&1
-then
-  echo "  (using temporary image for ext4)"
-
-  qemu-img create -f raw "$B/ext4.tmp" "$EXT_SZ" >/dev/null
-
-  mke2fs -t ext4 -b 4096 -m 0 -L magic -O "$FEATS" \
-    -d "$B/rootfs" \
-    "$B/ext4.tmp" "$EXT_BLOCKS" >/dev/null
-
-  dd if="$B/ext4.tmp" \
-    of="$DISKIMG" \
-    bs=512 seek="$EXT_START" conv=notrunc status=none
-
-  rm -f "$B/ext4.tmp"
+NTFS_MOUNT="$B/ntfs-mount"
+mkdir -p "$NTFS_MOUNT"
+if ! ntfs-3g "$B/ntfs.tmp" "$NTFS_MOUNT"; then
+  rmdir "$NTFS_MOUNT" 2>/dev/null || true
+  echo "error: could not mount the temporary NTFS image through FUSE." >&2
+  echo "       This build environment must expose /dev/fuse and permit FUSE mounts." >&2
+  rm -f "$B/ntfs.tmp"
+  exit 1
 fi
+
+if ! cp -a "$B/rootfs/." "$NTFS_MOUNT/"; then
+  "$FUSERMOUNT" -u "$NTFS_MOUNT" || true
+  rm -rf "$NTFS_MOUNT" "$B/ntfs.tmp"
+  echo "error: failed to populate the NTFS system volume" >&2
+  exit 1
+fi
+sync
+if ! "$FUSERMOUNT" -u "$NTFS_MOUNT"; then
+  echo "error: failed to unmount the populated NTFS system volume" >&2
+  exit 1
+fi
+rmdir "$NTFS_MOUNT"
+
+dd if="$B/ntfs.tmp" \
+  of="$DISKIMG" \
+  bs=512 seek="$NTFS_START" conv=notrunc status=none
+
+rm -f "$B/ntfs.tmp"
 
 echo "build ok -> $DISKIMG"
 

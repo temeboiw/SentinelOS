@@ -2,12 +2,13 @@
 #include "ata.h"
 #include "virtio_blk.h"
 #include "block.h"
+#include "partition.h"
 
 #define E16(p,o) (*(uint16_t *)((uint8_t *)(p) + (o)))
 #define E32(p,o) (*(uint32_t *)((uint8_t *)(p) + (o)))
 
 typedef struct {
-    uint64_t part_off;
+    uint64_t part_off, volume_bytes;
     SENTINEL_BLOCK_DEVICE *device;
     uint32_t blksz, ipg, isize, dsize, first_data, bpg;
     uint32_t feature_compat, feature_incompat, feature_ro_compat;
@@ -47,7 +48,9 @@ static int SentinelRegisterBuiltinBlockDevices(void) {
         d.size = sizeof(d); d.abi_version = SENTINEL_BLOCK_ABI_VERSION;
         const char *name = "virtio-blk0";
         for (uint32_t i = 0; i < SENTINEL_BLOCK_NAME_MAX && name[i]; ++i) d.name[i] = name[i];
-        d.sector_size = 512; d.sector_count = 0xFFFFFFFFULL;
+        const char *model = "VirtIO block device";
+        for (uint32_t i = 0; i < sizeof(d.model)-1 && model[i]; ++i) d.model[i] = model[i];
+        d.sector_size = 512; d.sector_count = vb_sectors;
         d.read = SentinelVirtioBlockRead; d.write = SentinelVirtioBlockWrite;
         if (SentinelBlockRegister(&d) == 0) ++registered;
     }
@@ -56,7 +59,8 @@ static int SentinelRegisterBuiltinBlockDevices(void) {
         d.size = sizeof(d); d.abi_version = SENTINEL_BLOCK_ABI_VERSION;
         const char *name = "ata0";
         for (uint32_t i = 0; i < SENTINEL_BLOCK_NAME_MAX && name[i]; ++i) d.name[i] = name[i];
-        d.sector_size = 512; d.sector_count = 0x10000000ULL;
+        for (uint32_t i = 0; i < sizeof(d.model)-1 && ata_model[i]; ++i) d.model[i] = ata_model[i];
+        d.sector_size = 512; d.sector_count = ata_sector_count;
         d.read = SentinelAtaBlockRead; d.write = SentinelAtaBlockWrite;
         if (SentinelBlockRegister(&d) == 0) ++registered;
     }
@@ -65,6 +69,8 @@ static int SentinelRegisterBuiltinBlockDevices(void) {
 }
 
 static int e4_read(Ext4k *fs, uint64_t off, void *dst, uint64_t len) {
+    if (!fs || off > fs->volume_bytes || len > fs->volume_bytes - off ||
+        fs->part_off > UINT64_MAX - off) return -1;
     if (fs->device)
         return SentinelBlockReadDevice(fs->device, fs->part_off + off, dst, len);
     return SentinelBlockRead(fs->part_off + off, dst, len);
@@ -173,26 +179,21 @@ static int e4_write_inode_at(Ext4k *fs, uint8_t *inode,
     return 0;
 }
 
-static int e4_mount(Ext4k *fs, uint64_t part_lba) {
+static int e4_mount_device(Ext4k *fs, SENTINEL_BLOCK_DEVICE *device,
+                           uint64_t part_lba, uint64_t part_sectors) {
     uint8_t sb[1024];
-    fs->part_off = part_lba * 512;
+    if (!fs || !device || !device->online || !device->sector_size ||
+        part_lba > UINT64_MAX / device->sector_size ||
+        part_sectors > UINT64_MAX / device->sector_size ||
+        part_lba > device->sector_count ||
+        part_sectors > device->sector_count - part_lba) return -1;
+    fs->part_off = part_lba * (uint64_t)device->sector_size;
+    fs->volume_bytes = part_sectors * (uint64_t)device->sector_size;
     fs->ok = 0;
-    fs->device = 0;
-
-    /* Probe every registered disk for this partition's ext4 superblock.
-     * The filesystem is then pinned to that device for all reads and writes;
-     * it never silently switches disks halfway through a mounted volume. */
-    for (uint32_t i = 0; i < SentinelBlockDeviceCount; ++i) {
-        SENTINEL_BLOCK_DEVICE *candidate = SentinelBlockGet(i);
-        if (!candidate || !candidate->online) continue;
-        if (SentinelBlockReadDevice(candidate, fs->part_off + 1024, sb, sizeof(sb)) < 0)
-            continue;
-        if (E16(sb, 56) == 0xEF53) {
-            fs->device = candidate;
-            break;
-        }
-    }
-    if (!fs->device) return -1;
+    fs->device = device;
+    if (fs->volume_bytes < 2048 ||
+        SentinelBlockReadDevice(device, fs->part_off + 1024, sb, sizeof(sb)) < 0 ||
+        E16(sb, 56) != 0xEF53) return -1;
     fs->blksz = 1024u << E32(sb, 24);
     fs->first_data = E32(sb, 20);
     fs->bpg = E32(sb, 32);
@@ -215,6 +216,7 @@ static int e4_mount(Ext4k *fs, uint64_t part_lba) {
         fs->isize < 128 || fs->isize > 256 ||
         fs->dsize < 32 || fs->dsize > 64 ||
         fs->total_blocks > (UINT64_MAX / fs->blksz) ||
+        fs->total_blocks > fs->volume_bytes / fs->blksz ||
         fs->part_off > UINT64_MAX - fs->total_blocks * fs->blksz)
         return -1;
     fs->write_faulted = 0;
@@ -1052,20 +1054,8 @@ static int vfs_listdir(uint32_t dir_ino) {
     return vfs_nent;
 }
 
-static uint64_t vfs_find_ext4_lba(void) {
-    uint8_t ent[512];
-    if ((vb_ok ? blk_read_lba(2, ent) : ata_read_lba(2, ent)) == 0) {
-        for (int i = 0; i < 4; i++) {
-            uint8_t *e = ent + i * 128;
-            uint64_t first = *(uint64_t *)(e + 32);
-            uint64_t last  = *(uint64_t *)(e + 40);
-            if (first && last > first) {
-                Ext4k t;
-                if (e4_mount(&t, first) == 0) return first;
-            }
-        }
-    }
-    return 264192;
+static int vfs_partition_read(void *context,uint64_t offset,void *dst,uint64_t len) {
+    return SentinelBlockReadDevice((SENTINEL_BLOCK_DEVICE *)context,offset,dst,len);
 }
 
 
@@ -1094,11 +1084,27 @@ static int vfs_chdir(const char *name) {
 }
 
 static int vfs_mount_c(void) {
-    uint64_t lba = vfs_find_ext4_lba();
-    if (e4_mount(&g_ext4, lba) < 0) {
-        DbgPrint("fs: ATA/ext4 mount failed");
-        return -1;
+    SENTINEL_PARTITION partitions[SENTINEL_PARTITION_MAX];
+    int mounted = 0;
+    for (uint32_t i=0;i<SentinelBlockDeviceCount&&!mounted;i++) {
+        SENTINEL_BLOCK_DEVICE *device=SentinelBlockGet(i);
+        if(!device||!device->sector_size||device->sector_count>UINT64_MAX/device->sector_size)continue;
+        int count=SentinelPartitionScan(vfs_partition_read,device,device->sector_count,
+                                        device->sector_size,partitions,SENTINEL_PARTITION_MAX);
+        if(count<0){DbgPrint("fs: %s partition scan failed (%d)\n",device->name,count);continue;}
+        for(int p=0;p<count;p++) {
+            Ext4k candidate={0};
+            if(e4_mount_device(&candidate,device,partitions[p].first_lba,
+                               partitions[p].sector_count)==0) {
+                g_ext4=candidate;
+                DbgPrint("fs: ext4 on %s partition %d at LBA %llu (%llu sectors)\n",
+                         device->name,p,(unsigned long long)partitions[p].first_lba,
+                         (unsigned long long)partitions[p].sector_count);
+                mounted=1;break;
+            }
+        }
     }
+    if(!mounted){DbgPrint("fs: no valid ext4 partition found\n");return -1;}
     vfs_cwd_ino = 2;
     vfs_parent_ino = 2;
     vfs_depth = 0;

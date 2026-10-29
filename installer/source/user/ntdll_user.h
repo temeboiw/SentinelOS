@@ -13,7 +13,7 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 40, SYS_InstallerDiskIo = 41, SYS_ReadInstallerPayload = 42, SYS_QueryInstallerPayload = 43, SYS_VerifyInstallerPayload = 44, SYS_InstallerInstallImage = 45, SYS_GetTickCount = 24
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37, SYS_QueryInstallerDisk = 60, SYS_InstallerDiskIo = 61, SYS_ReadInstallerPayload = 62, SYS_QueryInstallerPayload = 63, SYS_VerifyInstallerPayload = 64, SYS_InstallerInstallImage = 65, SYS_GetTickCount = 24
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -51,9 +51,13 @@ static inline u64 NtSyscall6(u64 service, u64 a1, u64 a2, u64 a3,
 }
 
 typedef struct { u64 va; u32 w, h, pitch; } FBInfo;
-typedef struct { u64 sectors; u32 sector_size, present; } InstallerDiskInfo;
-static inline u64 NtQueryInstallerDisk(InstallerDiskInfo *out) { return sy3(SYS_QueryInstallerDisk, (u64)out, 0, 0); }
-static inline i64 NtInstallerDiskIo(u64 write, u64 sector, void *buffer) { return (i64)sy3(SYS_InstallerDiskIo, write, sector, (u64)buffer); }
+typedef struct { u64 sectors; u32 sector_size, present, index; char name[32]; } InstallerDiskInfo;
+static inline u64 NtQueryInstallerDisk(u64 index, InstallerDiskInfo *out) {
+    return NtSyscall6(SYS_QueryInstallerDisk, (u64)out, index, 0, 0, 0, 0);
+}
+static inline i64 NtInstallerDiskIo(u64 write, u64 sector, void *buffer, u64 index) {
+    return (i64)NtSyscall6(SYS_InstallerDiskIo, write, sector, (u64)buffer, index, 0, 0);
+}
 typedef struct {
     u32 size, version, backend, capabilities;
     u32 width, height, pitch;
@@ -128,11 +132,11 @@ static inline i64 NtQueryInstallerPayload(u64 package, u64 *size_out) {
 static inline i64 NtVerifyInstallerPayload(u64 package) {
     return (i64)NtSyscall6(SYS_VerifyInstallerPayload, package, 0, 0, 0, 0, 0);
 }
-static inline i64 NtInstallerInstallImage(u64 image) {
-    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, 0, 4ULL * 1024ULL * 1024ULL, 0, 0, 0);
+static inline i64 NtInstallerInstallImage(u64 image, u64 index) {
+    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, 0, 4ULL * 1024ULL * 1024ULL, index, 0, 0);
 }
-static inline i64 NtInstallerInstallImageChunk(u64 image, u64 offset, u64 bytes) {
-    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, offset, bytes, 0, 0, 0);
+static inline i64 NtInstallerInstallImageChunk(u64 image, u64 offset, u64 bytes, u64 index) {
+    return (i64)NtSyscall6(SYS_InstallerInstallImage, image, offset, bytes, index, 0, 0);
 }
 static inline i64 NtReadInstallerPayload(u64 package, u64 offset, void *buffer, u32 size) {
     return (i64)NtSyscall6(SYS_ReadInstallerPayload, package, offset, (u64)buffer, size, 0, 0);

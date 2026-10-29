@@ -34,6 +34,69 @@ typedef struct { uint32_t r0; uint64_t rsp[3]; uint64_t r1; uint64_t ist[7]; uin
 #define TSS_SEL    0x28
 
 #define CPU_MAX 64
+
+/* CPUID feature bits are reported for diagnostics only.  SentinelOS currently
+ * uses the x86-64 baseline (including SSE2); it does not enable AVX/XSAVE
+ * until the scheduler has per-thread extended-state save/restore. */
+typedef struct {
+    char vendor[13];
+    char brand[49];
+    uint32_t family, model, stepping;
+    uint32_t max_basic, max_extended;
+    uint32_t leaf1_ecx, leaf1_edx, leaf7_ebx;
+    uint8_t sse2, apic, x2apic, xsave, osxsave, avx, avx2;
+} CpuIdentification;
+
+static void cpu_cpuid(uint32_t leaf, uint32_t subleaf,
+                      uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
+    uint32_t ra, rb, rc, rd;
+    __asm__ volatile("cpuid" : "=a"(ra), "=b"(rb), "=c"(rc), "=d"(rd)
+                     : "a"(leaf), "c"(subleaf) : "memory");
+    if (a) *a = ra; if (b) *b = rb; if (c) *c = rc; if (d) *d = rd;
+}
+
+static CpuIdentification cpu_identify(void) {
+    CpuIdentification id = {0};
+    uint32_t a, b, c, d;
+    cpu_cpuid(0, 0, &id.max_basic, &b, &c, &d);
+    id.vendor[0] = (char)b; id.vendor[1] = (char)(b >> 8);
+    id.vendor[2] = (char)(b >> 16); id.vendor[3] = (char)(b >> 24);
+    id.vendor[4] = (char)d; id.vendor[5] = (char)(d >> 8);
+    id.vendor[6] = (char)(d >> 16); id.vendor[7] = (char)(d >> 24);
+    id.vendor[8] = (char)c; id.vendor[9] = (char)(c >> 8);
+    id.vendor[10] = (char)(c >> 16); id.vendor[11] = (char)(c >> 24);
+    id.vendor[12] = 0;
+    cpu_cpuid(0x80000000u, 0, &id.max_extended, 0, 0, 0);
+    if (id.max_basic >= 1) {
+        cpu_cpuid(1, 0, &a, &b, &c, &d);
+        uint32_t base_family = (a >> 8) & 0xF, base_model = (a >> 4) & 0xF;
+        id.stepping = a & 0xF;
+        id.family = base_family == 0xF ? base_family + ((a >> 20) & 0xFF) : base_family;
+        id.model = (base_family == 6 || base_family == 0xF)
+                 ? base_model | (((a >> 16) & 0xF) << 4) : base_model;
+        id.leaf1_ecx = c; id.leaf1_edx = d;
+        id.sse2 = (uint8_t)((d >> 26) & 1);
+        id.apic = (uint8_t)((d >> 9) & 1);
+        id.x2apic = (uint8_t)((c >> 21) & 1);
+        id.xsave = (uint8_t)((c >> 26) & 1);
+        id.osxsave = (uint8_t)((c >> 27) & 1);
+        id.avx = (uint8_t)((c >> 28) & 1);
+    }
+    if (id.max_basic >= 7) {
+        cpu_cpuid(7, 0, &a, &id.leaf7_ebx, &c, &d);
+        id.avx2 = (uint8_t)((id.leaf7_ebx >> 5) & 1);
+    }
+    if (id.max_extended >= 0x80000004u) {
+        uint32_t *words = (uint32_t *)id.brand;
+        for (uint32_t i = 0; i < 3; i++)
+            cpu_cpuid(0x80000002u + i, 0, &words[i * 4], &words[i * 4 + 1],
+                      &words[i * 4 + 2], &words[i * 4 + 3]);
+        id.brand[48] = 0;
+        for (int i = 47; i >= 0 && id.brand[i] == ' '; i--) id.brand[i] = 0;
+    }
+    return id;
+}
+
 typedef struct {
     uint64_t gdt[7];
     Tss tss;
@@ -255,6 +318,13 @@ static void cpu_init_cpu(uint32_t cpu_index) {
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
     uint32_t mxcsr = 0x1F80;             // architectural default MXCSR
     __asm__ volatile("fninit; ldmxcsr %0" :: "m"(mxcsr) : "memory");
+
+    CpuIdentification id = cpu_identify();
+    DbgPrint("cpu%u: %s family=%u model=%u stepping=%u; SSE2=%u APIC=%u x2APIC=%u; "
+             "XSAVE=%u OSXSAVE=%u AVX=%u AVX2=%u (extended state disabled)\n",
+             cpu_index, id.brand[0] ? id.brand : id.vendor, id.family, id.model,
+             id.stepping, id.sse2, id.apic, id.x2apic,
+             id.xsave, id.osxsave, id.avx, id.avx2);
 
     if (cpu_index >= CPU_MAX) {
         DbgPrint("cpu: invalid CPU index %u\n", cpu_index);

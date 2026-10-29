@@ -86,6 +86,17 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
         line[p] = 0;
     }
     pText(g_window, 0, 2 + visible, line, -1);
+    {
+        int max_scroll = g_count > VISIBLE_ROWS ? g_count - VISIBLE_ROWS : 0;
+        int thumb_size = g_count > 0 ? (VISIBLE_ROWS * VISIBLE_ROWS) / g_count : VISIBLE_ROWS;
+        if (thumb_size < 1) thumb_size = 1;
+        if (thumb_size > VISIBLE_ROWS) thumb_size = VISIBLE_ROWS;
+        int thumb_start = max_scroll
+            ? (g_scroll * (VISIBLE_ROWS - thumb_size)) / max_scroll : 0;
+        pText(g_window, 76, 2 + visible,
+              (max_scroll && visible >= thumb_start && visible < thumb_start + thumb_size)
+                  ? "###" : " | ", -1);
+    }
     if (pInv) {
         FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
                           760, 44 + (3 + visible) * 16 };
@@ -272,6 +283,20 @@ void mainCRTStartup(void) {
              */
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
+            if (msg.x >= 608 && msg.x < 632 && line >= 2 && line < 2 + VISIBLE_ROWS) {
+                int max_scroll = g_count > VISIBLE_ROWS ? g_count - VISIBLE_ROWS : 0;
+                int thumb_size = g_count > 0 ? (VISIBLE_ROWS * VISIBLE_ROWS) / g_count : VISIBLE_ROWS;
+                if (thumb_size < 1) thumb_size = 1;
+                if (thumb_size > VISIBLE_ROWS) thumb_size = VISIBLE_ROWS;
+                int track_range = VISIBLE_ROWS - thumb_size;
+                int track_pos = line - 2 - thumb_size / 2;
+                if (track_pos < 0) track_pos = 0;
+                if (track_pos > track_range) track_pos = track_range;
+                g_scroll = track_range && max_scroll ? track_pos * max_scroll / track_range : 0;
+                g_hover_row = -1;
+                draw_rows(pText, pInv);
+                continue;
+            }
             if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < g_count) {
                 row += g_scroll;
                 print("fileexplorer: click ");

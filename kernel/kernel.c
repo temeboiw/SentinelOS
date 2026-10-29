@@ -8,6 +8,7 @@
 #include "ke.h"
 #include "bootcheck.h"
 #include "virtio_blk.h"
+#include "ahci.h"
 #include "hda.h"
 #include "smp.h"
 #include "pci_network.h"

@@ -4,7 +4,7 @@ typedef unsigned int DWORD;
 typedef int BOOL;
 typedef const char *LPCSTR;
 
-enum { SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12,
+enum { SYS_Exit=0, SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12,
        SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=22, SYS_QueryFileSize=25,
        SYS_SetFilePosition=26, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
 
@@ -181,10 +181,16 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
     {
         int count = g_home ? HOME_ITEM_COUNT : g_count;
         int max_scroll = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
-        int thumb_start = max_scroll ? (g_scroll * (VISIBLE_ROWS - 1)) / max_scroll : 0;
-        int thumb_end = max_scroll ? ((g_scroll + VISIBLE_ROWS - 1) * (VISIBLE_ROWS - 1)) / max_scroll : VISIBLE_ROWS - 1;
-        pText(g_window, 92, 2 + visible,
-              (visible >= thumb_start && visible <= thumb_end) ? "##" : "||", -1);
+        int thumb_size = count > 0 ? (VISIBLE_ROWS * VISIBLE_ROWS) / count : VISIBLE_ROWS;
+        if (thumb_size < 1) thumb_size = 1;
+        if (thumb_size > VISIBLE_ROWS) thumb_size = VISIBLE_ROWS;
+        int thumb_start = max_scroll
+            ? (g_scroll * (VISIBLE_ROWS - thumb_size)) / max_scroll : 0;
+        int thumb_end = thumb_start + thumb_size - 1;
+        /* TextOutA clips rows at 79 columns; keep the track inside that area. */
+        pText(g_window, 76, 2 + visible,
+              (max_scroll && visible >= thumb_start && visible <= thumb_end)
+                  ? "###" : " | ", -1);
     }
     if (pInv) {
         FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
@@ -679,9 +685,15 @@ void mainCRTStartup(void) {
 
     MSG msg;
     for (;;) {
-        if (!pGetMsg(&msg, 0, 0, 0)) continue;
+        /* GetMessageA returns false for WM_QUIT. Leaving this loop lets the
+         * process finish instead of keeping an invisible File Explorer alive. */
+        if (!pGetMsg(&msg, 0, 0, 0)) break;
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
+
+        /* USER32 dispatches WM_CLOSE through DefWindowProcA, which destroys
+         * the top-level window. Stop our app loop once that close is handled. */
+        if (msg.message == 0x0010) break;
 
         /* Mouse coordinates are screen-space. Never keep using the startup Y
          * after the user moves the window; ask USER32 for its live rectangle. */
@@ -930,10 +942,18 @@ void mainCRTStartup(void) {
                 int line=(msg.y-(g_win_y+44))/16;
                 int relx=msg.x-g_win_x;
                 /* Right gutter click jumps to the matching scrollbar position. */
-                if(relx>=736 && relx<760 && line>=2 && line<2+VISIBLE_ROWS) {
+                if(relx>=608 && relx<632 && line>=2 && line<2+VISIBLE_ROWS) {
                     int count=g_home?HOME_ITEM_COUNT:g_count;
                     int max_scroll=count>VISIBLE_ROWS?count-VISIBLE_ROWS:0;
-                    g_scroll=max_scroll?((line-2)*max_scroll)/(VISIBLE_ROWS-1):0;
+                    int thumb_size=count>0?(VISIBLE_ROWS*VISIBLE_ROWS)/count:VISIBLE_ROWS;
+                    if(thumb_size<1)thumb_size=1;
+                    if(thumb_size>VISIBLE_ROWS)thumb_size=VISIBLE_ROWS;
+                    int track_range=VISIBLE_ROWS-thumb_size;
+                    int track_pos=line-2-thumb_size/2;
+                    if(track_pos<0)track_pos=0;
+                    if(track_pos>track_range)track_pos=track_range;
+                    g_scroll=track_range&&max_scroll
+                        ?(track_pos*max_scroll)/track_range:0;
                     g_hover_row=-1;
                     draw_rows(pText,pInv);
                     continue;
@@ -1220,4 +1240,9 @@ void mainCRTStartup(void) {
             }
         }
     }
+
+    /* A closed main window ends this process; returning from the PE entry
+     * point is not guaranteed to perform process teardown on this OS. */
+    (void)sy3(SYS_Exit, 0, 0, 0);
+    for (;;) __asm__ volatile("pause");
 }

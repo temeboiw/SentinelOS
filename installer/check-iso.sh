@@ -10,6 +10,10 @@ need xorriso
 need sha256sum
 need mcopy
 need python3
+if [[ "${SECURE_BOOT:-0}" == "1" ]]; then
+  : "${SECURE_BOOT_CERT:?set SECURE_BOOT_CERT to the enrolled signing certificate when checking Secure Boot media}"
+  need sbverify
+fi
 [[ -s "$ISO" ]] || { echo "error: ISO not found or empty: $ISO" >&2; exit 3; }
 [[ -s "$SUM" ]] || { echo "error: ISO checksum file missing: $SUM" >&2; exit 3; }
 
@@ -46,9 +50,18 @@ fi
 }
 mcopy -i "$TMP/boot-esp.img" ::/EFI/BOOT/BOOTX64.EFI "$TMP/BOOTX64.EFI"
 [[ -s "$TMP/BOOTX64.EFI" ]] || { echo "error: boot image has no BOOTX64.EFI" >&2; exit 6; }
-mcopy -i "$TMP/boot-esp.img" ::/esp.img "$TMP/embedded-esp.img"
+if [[ "${SECURE_BOOT:-0}" == "1" ]]; then
+  mcopy -i "$TMP/boot-esp.img" ::/EFI/magic/bootuni.efi "$TMP/bootuni.efi"
+  mcopy -i "$TMP/boot-esp.img" ::/EFI/magic/loadufi.efi "$TMP/loadufi.efi"
+  for f in "$TMP/BOOTX64.EFI" "$TMP/bootuni.efi" "$TMP/loadufi.efi"; do
+    sbverify --cert "$SECURE_BOOT_CERT" "$f" >/dev/null || { echo "error: EFI signature verification failed: $f" >&2; exit 6; }
+  done
+fi
+mcopy -i "$TMP/boot-esp.img" ::/esp.img.zblk "$TMP/embedded-esp.zblk"
+python3 "$HERE/pack_image.py" unpack "$TMP/embedded-esp.zblk" "$TMP/embedded-esp.img"
 cmp -s "$TMP/target-esp.img" "$TMP/embedded-esp.img" || { echo "error: embedded EFI image mismatch" >&2; exit 6; }
-mcopy -i "$TMP/boot-esp.img" ::/system.img "$TMP/embedded-system.img"
+mcopy -i "$TMP/boot-esp.img" ::/system.img.zblk "$TMP/embedded-system.zblk"
+python3 "$HERE/pack_image.py" unpack "$TMP/embedded-system.zblk" "$TMP/embedded-system.img"
 cmp -s "$TMP/target-system.img" "$TMP/embedded-system.img" || { echo "error: embedded system image mismatch" >&2; exit 6; }
 mcopy -i "$TMP/boot-esp.img" ::/install.sha256 "$TMP/embedded-install.sha256"
 cmp -s "$TMP/install.sha256" "$TMP/embedded-install.sha256" || { echo "error: embedded install checksum manifest mismatch" >&2; exit 6; }
@@ -56,5 +69,5 @@ cmp -s "$TMP/install.sha256" "$TMP/embedded-install.sha256" || { echo "error: em
 [[ "$(sed -n "2p" "$TMP/install.sha256")" == "$(sha256sum "$TMP/target-system.img" | cut -d " " -f1)" ]] || { echo "error: system.img SHA-256 mismatch" >&2; exit 6; }
 python3 "$HERE/make_spf.py" verify "$TMP/esp.spf" --kind esp --require-boot-layout
 python3 "$HERE/make_spf.py" verify "$TMP/system.spf" --kind system --require-boot-layout
-echo "PASS: ISO checksum, UEFI boot entry, installer images, embedded image hashes, and SPF validation packages verified."
+echo "PASS: ISO checksum, UEFI boot entry, packed installer images, embedded image hashes, and SPF validation packages verified."
 echo "Note: this smoke test does not replace booting the ISO in a UEFI virtual machine."

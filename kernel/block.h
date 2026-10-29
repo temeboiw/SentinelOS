@@ -3,7 +3,7 @@
 
 #define SENTINEL_BLOCK_MAX_DEVICES 16u
 #define SENTINEL_BLOCK_NAME_MAX 32u
-#define SENTINEL_BLOCK_ABI_VERSION 1u
+#define SENTINEL_BLOCK_ABI_VERSION 2u
 
 typedef int (*SENTINEL_BLOCK_READ)(void *context, uint64_t offset,
                                    void *destination, uint64_t length);
@@ -14,6 +14,7 @@ typedef struct SENTINEL_BLOCK_DEVICE {
     uint32_t size;
     uint32_t abi_version;
     char name[SENTINEL_BLOCK_NAME_MAX];
+    char model[40];
     uint32_t sector_size;
     uint32_t flags;
     uint64_t sector_count;
@@ -62,6 +63,40 @@ static int SentinelBlockCapacity(const SENTINEL_BLOCK_DEVICE *device, uint64_t *
         device->sector_count > UINT64_MAX / device->sector_size) return 0;
     *capacity = device->sector_count * (uint64_t)device->sector_size;
     return 1;
+}
+
+/* Return a consistent copy for enumeration.  The registry keeps slot
+ * addresses stable, but callers that display disks should not retain those
+ * pointers while a driver may unregister the device. */
+static int SentinelBlockSnapshot(uint32_t index, SENTINEL_BLOCK_DEVICE *snapshot) {
+    if (!snapshot) return -1;
+    SentinelBlockLock();
+    if (index >= SentinelBlockDeviceCount || !SentinelBlockDevices[index].online) {
+        SentinelBlockUnlock();
+        return -1;
+    }
+    *snapshot = SentinelBlockDevices[index];
+    SentinelBlockUnlock();
+    return 0;
+}
+
+static uint32_t SentinelBlockCount(void) {
+    uint32_t count = 0;
+    SentinelBlockLock();
+    for (uint32_t i = 0; i < SentinelBlockDeviceCount; ++i)
+        if (SentinelBlockDevices[i].online) ++count;
+    SentinelBlockUnlock();
+    return count;
+}
+
+static int SentinelBlockByteCapacity(const SENTINEL_BLOCK_DEVICE *device,
+                                     uint64_t *capacity) {
+    if (!device || !capacity) return -1;
+    SentinelBlockLock();
+    int valid = SentinelBlockDeviceIndex(device) >= 0 && device->online &&
+                SentinelBlockCapacity(device, capacity);
+    SentinelBlockUnlock();
+    return valid ? 0 : -1;
 }
 static int SentinelBlockBeginIoLocked(SENTINEL_BLOCK_DEVICE *device,
                                       uint64_t offset, uint64_t length,

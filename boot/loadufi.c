@@ -115,6 +115,7 @@ typedef struct {
     UINT8 *base;          /* physical while loading */
     UINT64 phys, size, entry;
     EFI_IMAGE_NT_HEADERS64 *nt;
+    int raw;
 } Module;
 
 static Module mods[BOOT_MAX_MODULES];
@@ -123,6 +124,11 @@ static EFI_HANDLE boot_image;
 
 static void say_a(const char *s) {
     for (; *s; s++) { CHAR16 b[2] = { (CHAR16)(UINT8)*s, 0 }; say(b); }
+}
+static void say_u64(UINT64 n) {
+    CHAR16 digits[21]; UINTN count = 0;
+    do { digits[count++] = (CHAR16)(L'0' + n % 10); n /= 10; } while (n && count < 21);
+    while (count) { CHAR16 b[2] = { digits[--count], 0 }; say(b); }
 }
 static void die(const char *a, const char *b, const char *c) {
     say(L"loadufi: "); say_a(a); say_a(b); say_a(c); say(L"\r\n");
@@ -142,12 +148,14 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
     EFI_LOADED_IMAGE_PROTOCOL *loaded = NULL;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *sfs = NULL;
     EFI_FILE_PROTOCOL *root = NULL, *handle = NULL;
+    say(L"loadufi: locating boot ESP\r\n");
     EFI_STATUS status = bs->HandleProtocol(boot_image,
         &gEfiLoadedImageProtocolGuid, (VOID **)&loaded);
     if (EFI_ERROR(status) || !loaded || !loaded->DeviceHandle) return EFI_NOT_FOUND;
     status = bs->HandleProtocol(loaded->DeviceHandle,
         &gEfiSimpleFileSystemProtocolGuid, (VOID **)&sfs);
     if (EFI_ERROR(status) || !sfs) return EFI_NOT_FOUND;
+    say(L"loadufi: opening boot ESP volume\r\n");
     status = sfs->OpenVolume(sfs, &root);
     if (EFI_ERROR(status) || !root) return EFI_NOT_FOUND;
 
@@ -159,10 +167,12 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
         if (k + 1 < depth) path[p++] = L'\\';
     }
     path[p] = 0;
+    say(L"loadufi: opening boot image file\r\n");
     status = root->Open(root, &handle, path, EFI_FILE_MODE_READ, 0);
     root->Close(root);
     if (EFI_ERROR(status) || !handle) return EFI_NOT_FOUND;
 
+    say(L"loadufi: reading boot image metadata\r\n");
     UINTN info_size = 0;
     status = handle->GetInfo(handle, &gEfiFileInfoGuid, &info_size, NULL);
     if (status != EFI_BUFFER_TOO_SMALL || info_size < sizeof(EFI_FILE_INFO)) {
@@ -180,12 +190,14 @@ static EFI_STATUS esp_load_file(const char *const *parts, int depth,
     VOID *buffer = NULL;
     status = bs->AllocatePool(EfiLoaderData, bytes ? bytes : 1, &buffer);
     if (EFI_ERROR(status)) { handle->Close(handle); return status; }
+    say(L"loadufi: reading boot image data\r\n");
     UINTN got = bytes;
     status = handle->Read(handle, &got, buffer);
     handle->Close(handle);
     if (EFI_ERROR(status) || got != bytes) {
         bs->FreePool(buffer); return EFI_LOAD_ERROR;
     }
+    say(L"loadufi: boot image data read\r\n");
     *file = buffer; *size = bytes;
     return EFI_SUCCESS;
 }
@@ -252,17 +264,138 @@ static EFI_STATUS map_image(VOID *file, Module *m) {
     return EFI_SUCCESS;
 }
 
-static Module *load_module(const char *name) {
+static Module *load_module_internal(const char *name, int required) {
     const char *path[3] = { "magic", "System32", name };
     VOID *file; UINTN fsize;
-    if (EFI_ERROR(os_load_file(path, 3, &file, &fsize)))
+    if (EFI_ERROR(os_load_file(path, 3, &file, &fsize))) {
+        if (!required) {
+            say(L"loadufi: optional user image not found: ");
+            say_a(name);
+            say(L"\r\n");
+            return NULL;
+        }
         die("cannot read magic/System32/", name, "");
+    }
+    say(L"loadufi: mapping PE image\r\n");
     if (nmods >= BOOT_MAX_MODULES) die("too many modules", "", "");
     Module *m = &mods[nmods];
     int i = 0; for (; name[i] && i < 31; i++) m->name[i] = name[i];
     m->name[i] = 0;
     if (EFI_ERROR(map_image(file, m))) die("not a valid x64 PE image: ", name, "");
     nmods++;
+    return m;
+}
+
+static Module *load_module(const char *name) {
+    return load_module_internal(name, 1);
+}
+
+static Module *load_optional_module(const char *name) {
+    return load_module_internal(name, 0);
+}
+
+static UINT32 get_u32le(const UINT8 *p) {
+    return (UINT32)p[0] | ((UINT32)p[1] << 8) |
+           ((UINT32)p[2] << 16) | ((UINT32)p[3] << 24);
+}
+static UINT64 get_u64le(const UINT8 *p) {
+    return (UINT64)get_u32le(p) | ((UINT64)get_u32le(p + 4) << 32);
+}
+
+/* Decode the installer image's zero-block stream directly into its final
+ * physical pages. Blank FAT/ext4 space compresses to one-byte zero records, so
+ * startup no longer reads hundreds of MiB from the virtual DVD. */
+static EFI_STATUS unpack_raw_file(VOID *packed, UINTN packed_size,
+                                  VOID **file, UINTN *size) {
+    static const UINT8 magic[8] = { 'S','N','Z','B','L','K','1',0 };
+    const UINT8 *src = packed;
+    if (packed_size < 20) return EFI_LOAD_ERROR;
+    for (UINTN i = 0; i < sizeof(magic); i++)
+        if (src[i] != magic[i]) return EFI_LOAD_ERROR;
+    UINT64 raw64 = get_u64le(src + 8);
+    UINT32 block_size = get_u32le(src + 16);
+    if (!raw64 || raw64 > (1ULL << 30) || raw64 > (UINT64)(~(UINTN)0) ||
+        block_size != 65536) return EFI_LOAD_ERROR;
+    UINTN raw_size = (UINTN)raw64;
+    UINTN pages = EFI_SIZE_TO_PAGES(raw_size);
+    EFI_PHYSICAL_ADDRESS phys = 0;
+    EFI_STATUS status = bs->AllocatePages(AllocateAnyPages, EfiLoaderData, pages, &phys);
+    if (EFI_ERROR(status)) return status;
+    say(L"loadufi: expanding installer image\r\n");
+    memset((VOID *)(UINTN)phys, 0, pages * 4096);
+
+    UINTN in = 20, out = 0, next_report = 128 * 1024 * 1024;
+    while (out < raw_size) {
+        if (in >= packed_size) goto invalid;
+        UINT8 tag = src[in++];
+        UINTN count = raw_size - out;
+        if (count > block_size) count = block_size;
+        if (tag == 1) {
+            if (count > packed_size - in) goto invalid;
+            memcpy((UINT8 *)(UINTN)phys + out, src + in, count);
+            in += count;
+        } else if (tag != 0) {
+            goto invalid;
+        }
+        out += count;
+        if (out >= next_report || out == raw_size) {
+            say(L"loadufi: expanded installer image ");
+            say_u64((UINT64)out * 100 / raw_size); say(L"%\r\n");
+            next_report = out + 128 * 1024 * 1024;
+        }
+    }
+    if (in != packed_size) goto invalid;
+    *file = (VOID *)(UINTN)phys;
+    *size = raw_size;
+    return EFI_SUCCESS;
+
+invalid:
+    bs->FreePages(phys, pages);
+    return EFI_LOAD_ERROR;
+}
+
+/* Installer disk images are zero-block packed on the ESP and expanded into
+ * loader-owned pages as data modules for the trusted setup process. */
+static Module *load_raw_payload(const char *name) {
+    int packed_image = !streq(name, "install.sha256", 0);
+    char encoded_name[40];
+    if (packed_image) {
+        UINTN n = 0;
+        while (name[n] && n + 6 < sizeof(encoded_name)) { encoded_name[n] = name[n]; n++; }
+        memcpy(encoded_name + n, ".zblk", 6);
+    } else {
+        UINTN n = 0;
+        while (name[n] && n + 1 < sizeof(encoded_name)) { encoded_name[n] = name[n]; n++; }
+        encoded_name[n] = 0;
+    }
+    const char *path[1] = { encoded_name };
+    VOID *packed = NULL; UINTN packed_size = 0;
+    if (EFI_ERROR(esp_load_file(path, 1, &packed, &packed_size))) {
+        say(L"loadufi: installer payload missing: "); say_a(encoded_name); say(L"\r\n");
+        return NULL;
+    }
+    VOID *file = NULL; UINTN size = 0;
+    if (packed_image) {
+        EFI_STATUS unpack_status = unpack_raw_file(packed, packed_size, &file, &size);
+        bs->FreePool(packed);
+        if (EFI_ERROR(unpack_status) || !size) {
+            say(L"loadufi: invalid packed installer image: "); say_a(encoded_name); say(L"\r\n");
+            return NULL;
+        }
+    } else {
+        file = packed;
+        size = packed_size;
+    }
+    if (nmods >= BOOT_MAX_MODULES) {
+        if (packed_image)
+            bs->FreePages((EFI_PHYSICAL_ADDRESS)(UINTN)file, EFI_SIZE_TO_PAGES(size));
+        else
+            bs->FreePool(file);
+        return NULL;
+    }
+    Module *m = &mods[nmods++]; memset(m, 0, sizeof(*m));
+    for (UINTN i=0; i<31 && name[i]; ++i) m->name[i]=name[i];
+    m->base=(UINT8 *)file; m->phys=(UINT64)(UINTN)file; m->size=size; m->raw=1;
     return m;
 }
 
@@ -441,9 +574,21 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     say(L"loadufi: loading hal.dll and krnl.exe\r\n");
 
     load_module("hal.dll");
+    say(L"loadufi: HAL loaded\r\n");
     Module *krnl = load_module("krnl.exe");
+    say(L"loadufi: kernel image loaded\r\n");
 
-    /* User images are loaded by the kernel after mounting ext4. */
+    /*
+     * Installer media is self-contained on its FAT ESP: pass its session
+     * manager and setup UI directly to the kernel so they can start before
+     * any target disk has a filesystem. On a regular installed system these
+     * optional images may also be found on the system volume.
+     */
+    load_optional_module("smss.exe");
+    load_optional_module("instlr.exe");
+    load_raw_payload("esp.img");
+    load_raw_payload("system.img");
+    load_raw_payload("install.sha256");
 
     for (int i = 0; i < nmods; i++) {
         if (!streq(mods[i].name, "hal.dll", 1) &&
@@ -492,7 +637,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         UINT64 phys = mods[i].phys;
         UINT64 size = mods[i].size;
         int is_user = !streq(mods[i].name, "hal.dll", 1) && !streq(mods[i].name, "krnl.exe", 1);
-        UINT64 prefer = mods[i].nt->OptionalHeader.ImageBase;
+        UINT64 prefer = mods[i].raw ? 0 : mods[i].nt->OptionalHeader.ImageBase;
+
+        if (mods[i].raw) {
+            bi->modules[i].base = 0;
+            bi->modules[i].phys = phys;
+            bi->modules[i].entry = 0;
+            bi->modules[i].size = size;
+            for (int k = 0; k < 32; k++) bi->modules[i].name[k] = mods[i].name[k];
+            continue;
+        }
 
         if (is_user) {
             if (!prefer) prefer = 0x40000000ULL;

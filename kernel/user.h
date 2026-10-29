@@ -14,6 +14,7 @@
 #include "wm.h"
 #include "ntabi.h"
 #include "gfx.h"
+#include "sha256.h"
 
 #define SYS_NtTerminateProcess      0
 #define SYS_NtWriteFile             1
@@ -50,6 +51,12 @@
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35
 #define SYS_NtUploadVirGLBuffer            36
+#define SYS_NtQueryInstallerDisk            60
+#define SYS_NtInstallerDiskIo               61
+#define SYS_NtReadInstallerPayload          62
+#define SYS_NtQueryInstallerPayload         63
+#define SYS_NtVerifyInstallerPayload        64
+#define SYS_NtInstallerInstallImage         65
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
 #define SYS_NtLoadLibrary                    43
@@ -58,6 +65,7 @@
 #define SYS_NtCreateOutputFile 51
 #define SYS_NtWriteOutputFile 52
 typedef struct { uint32_t ip,mask,gateway,dns; uint32_t dhcp_state,link_up; uint8_t mac[6]; uint16_t reserved; } NT_NETWORK_INFO;
+typedef struct { uint64_t sectors; uint32_t sector_size,present,index; char name[32]; } InstallerDiskInfo;
 
 #define UP_MAX 8
 #define USER_IMAGE_MAX (UP_MAX * BOOT_MAX_MODULES)
@@ -420,6 +428,18 @@ static int PspIsProtectedLaunchName(const char *name) {
 static int PspIsSystemProcess(KPROCESS *proc) {
     int idx = up_find_proc(proc);
     return idx >= 0 && up_tab[idx].alive && up_tab[idx].system_app;
+}
+
+static int PspIsInstallerProcess(KPROCESS *proc) {
+    int idx=up_find_proc(proc);
+    if(idx<0||!up_tab[idx].alive||!up_tab[idx].system_app)return 0;
+    const char *name=PspImageBaseName(up_tab[idx].image_name);
+    static const char expected[]="instlr.exe";
+    for(unsigned i=0;i<sizeof(expected);i++) {
+        char c=name[i]; if(c>='A'&&c<='Z')c=(char)(c+('a'-'A'));
+        if(c!=expected[i])return 0;
+    }
+    return 1;
 }
 
 static int pe_is_image(const uint8_t *image, uint64_t size) {
@@ -3817,6 +3837,113 @@ static Frame *syscall_handler(Frame *f) {
         return f;
     }
 
+    /* Installer services are restricted to the protected native setup
+     * process. All disk access is routed through the common block registry. */
+    case SYS_NtQueryInstallerDisk: {
+        if (!PspIsInstallerProcess(MmCurrentProcess) || !f->rdi ||
+            !MmValidateUserRange(MmCurrentProcess,f->rdi,sizeof(InstallerDiskInfo),1)) {
+            f->rax=0; return f;
+        }
+        InstallerDiskInfo info={0};
+        SENTINEL_BLOCK_DEVICE snapshot={0};
+        if(f->rsi<SENTINEL_BLOCK_MAX_DEVICES &&
+           SentinelBlockSnapshot((uint32_t)f->rsi,&snapshot)==0) {
+            SENTINEL_BLOCK_DEVICE *d=&snapshot;
+            info.sectors=d->sector_count; info.sector_size=d->sector_size;
+            info.index=(uint32_t)f->rsi; info.present=1;
+            const char *display=d->model[0]?d->model:d->name;
+            for(unsigned i=0;i<sizeof(info.name)-1 && display[i];i++) info.name[i]=display[i];
+        }
+        *(InstallerDiskInfo *)(uintptr_t)f->rdi=info;
+        f->rax=info.present?1:0; return f;
+    }
+    case SYS_NtInstallerDiskIo: {
+        if(!PspIsInstallerProcess(MmCurrentProcess)||f->rcx>=SENTINEL_BLOCK_MAX_DEVICES||
+           f->rsi>UINT64_MAX/512ULL||!f->rdx||
+           !MmValidateUserRange(MmCurrentProcess,f->rdx,512,f->rdi==0)) {
+            f->rax=(uint64_t)-1LL; return f;
+        }
+        SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet((uint32_t)f->rcx);
+        uint64_t capacity=0,off=f->rsi*512ULL;
+        if(!d||d->sector_size!=512||f->rsi>=d->sector_count||
+           !SentinelBlockByteCapacity(d,&capacity)||off>capacity||512>capacity-off) {
+            f->rax=(uint64_t)-1LL; return f;
+        }
+        int rc=f->rdi==0?SentinelBlockReadDevice(d,off,(void *)(uintptr_t)f->rdx,512):
+               f->rdi==1?SentinelBlockWriteDevice(d,off,(const void *)(uintptr_t)f->rdx,512):-1;
+        f->rax=rc==0?0:(uint64_t)-1LL; return f;
+    }
+    case SYS_NtQueryInstallerPayload: {
+        if(!PspIsInstallerProcess(MmCurrentProcess)||f->rdi>1||!user_bootinfo||!f->rsi||
+           !MmValidateUserRange(MmCurrentProcess,f->rsi,sizeof(uint64_t),1)) {
+            f->rax=(uint64_t)-1LL; return f;
+        }
+        BootModule *m=PspFindModule(user_bootinfo,f->rdi?"system.img":"esp.img");
+        if(!m||!m->phys||!m->size){f->rax=(uint64_t)-1LL;return f;}
+        *(uint64_t *)(uintptr_t)f->rsi=m->size; f->rax=0; return f;
+    }
+    case SYS_NtVerifyInstallerPayload: {
+        if(!PspIsInstallerProcess(MmCurrentProcess)||f->rdi>1||!user_bootinfo) {
+            f->rax=(uint64_t)-1LL; return f;
+        }
+        BootModule *m=PspFindModule(user_bootinfo,f->rdi?"system.img":"esp.img");
+        BootModule *sum=PspFindModule(user_bootinfo,"install.sha256");
+        if(!m||!sum||!m->phys||!m->size||m->size>(1ULL<<30)||sum->size<130) {
+            f->rax=(uint64_t)-1LL;return f;
+        }
+        const uint8_t *manifest=(const uint8_t *)(uintptr_t)(HHDM_BASE+sum->phys);
+        const uint8_t *expected=manifest+(f->rdi?65:0);
+        if(manifest[64]!='\n'||manifest[129]!='\n'){f->rax=(uint64_t)-1LL;return f;}
+        for(unsigned i=0;i<64;i++) if(!((expected[i]>='0'&&expected[i]<='9')||(expected[i]>='a'&&expected[i]<='f'))){f->rax=(uint64_t)-1LL;return f;}
+        uint8_t digest[32]; sentinel_sha256((const uint8_t *)(uintptr_t)(HHDM_BASE+m->phys),m->size,digest);
+        static const char hex[]="0123456789abcdef";
+        for(unsigned i=0;i<32;i++) if(expected[i*2]!=(uint8_t)hex[digest[i]>>4]||expected[i*2+1]!=(uint8_t)hex[digest[i]&15]){f->rax=(uint64_t)-2LL;return f;}
+        f->rax=0;return f;
+    }
+    case SYS_NtReadInstallerPayload: {
+        if(!PspIsInstallerProcess(MmCurrentProcess)||f->rdi>1||!user_bootinfo||f->rcx>65536ULL||
+           (f->rcx&&(!f->rdx||!MmValidateUserRange(MmCurrentProcess,f->rdx,f->rcx,1)))) {
+            f->rax=(uint64_t)-1LL;return f;
+        }
+        BootModule *m=PspFindModule(user_bootinfo,f->rdi?"system.img":"esp.img");
+        if(!m||f->rsi>m->size||f->rcx>m->size-f->rsi){f->rax=(uint64_t)-1LL;return f;}
+        const uint8_t *src=(const uint8_t *)(uintptr_t)(HHDM_BASE+m->phys+f->rsi);
+        uint8_t *dst=(uint8_t *)(uintptr_t)f->rdx;
+        for(uint64_t i=0;i<f->rcx;i++)dst[i]=src[i];
+        f->rax=f->rcx;return f;
+    }
+    case SYS_NtInstallerInstallImage: {
+        if(!PspIsInstallerProcess(MmCurrentProcess)||!user_bootinfo||f->rdi>1||
+           f->rcx>=SENTINEL_BLOCK_MAX_DEVICES){f->rax=(uint64_t)-1LL;return f;}
+        BootModule *m=PspFindModule(user_bootinfo,f->rdi?"system.img":"esp.img");
+        SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet((uint32_t)f->rcx);
+        uint64_t capacity=0, dest=f->rdi?264192ULL:2048ULL;
+        uint64_t off=f->rsi,bytes=f->rdx;
+        if(!m||!m->phys||!m->size||m->size>(1ULL<<30)||(m->size&511ULL)||!d||d->sector_size!=512||
+           !SentinelBlockByteCapacity(d,&capacity)||dest>d->sector_count||m->size/512ULL>d->sector_count-dest||
+           (off&511ULL)||(bytes&511ULL)||!bytes||bytes>4ULL*1024*1024||off>m->size||bytes>m->size-off) {
+            f->rax=(uint64_t)-1LL;return f;
+        }
+        const uint8_t *src=(const uint8_t *)(uintptr_t)(HHDM_BASE+m->phys+off);
+        if(SentinelBlockWriteDevice(d,(dest*512ULL)+off,src,bytes)!=0){f->rax=(uint64_t)-2LL;return f;}
+        /* Verify every sector using bounded scratch space before advancing
+         * installer progress. This remains safe on fragmented low-memory VMs. */
+        uint8_t verify[512];
+        for(uint64_t pos=0;pos<bytes;pos+=sizeof(verify)) {
+            if(SentinelBlockReadDevice(d,(dest*512ULL)+off+pos,verify,sizeof(verify))!=0) {
+                DbgPrint("installer: image %llu read-back failed at byte %llu\n",
+                         (unsigned long long)f->rdi,(unsigned long long)(off+pos));
+                f->rax=(uint64_t)-3LL;return f;
+            }
+            for(unsigned i=0;i<sizeof(verify);i++)if(verify[i]!=src[pos+i]) {
+                DbgPrint("installer: image %llu mismatch at byte %llu\n",
+                         (unsigned long long)f->rdi,(unsigned long long)(off+pos+i));
+                f->rax=(uint64_t)-4LL;return f;
+            }
+        }
+        f->rax=0;return f;
+    }
+
     case SYS_NtShutdown:
         if (f->rdi == 0)
             HalReturnToFirmware(HalPowerDownRoutine);
@@ -3985,6 +4112,7 @@ static void user_enter(BootInfo *bi) {
     ps2_init();
     ata_init();
     virtio_blk_init();
+    ahci_init();
     virtio_input_init();
     SentinelRegisterBuiltinBlockDevices();
 
@@ -4036,8 +4164,14 @@ static void user_enter(BootInfo *bi) {
                  i, user_bootinfo->modules[i].name);
     }
 
-    UserDiskModule *smss_disk = PspLoadDiskModule("smss.exe", 0);
-    BootModule *smss = smss_disk ? &smss_disk->module : 0;
+    /* Installer media supplies SMSS on the boot ESP, so it can start even
+       when the attached target disk is blank and no system volume mounts. */
+    UserDiskModule *smss_disk = 0;
+    BootModule *smss = PspFindModule(user_bootinfo, "smss.exe");
+    if (!smss) {
+        smss_disk = PspLoadDiskModule("smss.exe", 0);
+        smss = smss_disk ? &smss_disk->module : 0;
+    }
 
     if (!smss) {
         DbgPrint("user: smss.exe disk load failed\n");
@@ -4059,7 +4193,7 @@ static void user_enter(BootInfo *bi) {
         return;
     }
 
-    smss_disk->owner = proc;
+    if (smss_disk) smss_disk->owner = proc;
     if (PspMapUserImage(proc, smss) != 0) {
         DbgPrint("user: map smss failed\n");
         MmSwitchToProcess(PspSystemProcess);

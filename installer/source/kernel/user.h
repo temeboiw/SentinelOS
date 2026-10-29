@@ -52,12 +52,12 @@
 #define SYS_NtUploadVirGLBuffer            36
 #define SYS_NtGetGameKeyState               38
 #define SYS_NtGetGameMouseDelta              39
-#define SYS_NtQueryInstallerDisk              40
-#define SYS_NtInstallerDiskIo                 41
-#define SYS_NtReadInstallerPayload              42
-#define SYS_NtQueryInstallerPayload              43
-#define SYS_NtVerifyInstallerPayload              44
-#define SYS_NtInstallerInstallImage                 45
+#define SYS_NtQueryInstallerDisk              60
+#define SYS_NtInstallerDiskIo                 61
+#define SYS_NtReadInstallerPayload            62
+#define SYS_NtQueryInstallerPayload           63
+#define SYS_NtVerifyInstallerPayload          64
+#define SYS_NtInstallerInstallImage           65
 
 typedef struct { uint64_t sectors; uint32_t sector_size; uint32_t present; } InstallerDiskInfo;
 

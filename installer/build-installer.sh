@@ -41,6 +41,7 @@ USER_CFLAGS=(
   -mgeneral-regs-only
   -O2
   -Wall
+  -I"$HERE/source/user"
   -I"$ROOT/user"
   -I"$ROOT/shared"
 )
@@ -89,6 +90,16 @@ rm -rf "$STAGE/system/UserTestApps" "$STAGE/system/games" "$STAGE/system/tests"
   echo "error: krnl.exe missing" >&2
   exit 4
 }
+
+if [[ "${SECURE_BOOT:-0}" == "1" ]]; then
+  : "${SECURE_BOOT_CERT:?set SECURE_BOOT_CERT to the enrolled signing certificate when packaging Secure Boot media}"
+  command -v sbverify >/dev/null 2>&1 || { echo "error: Secure Boot packaging requires sbverify (sbsigntool)" >&2; exit 2; }
+  for f in "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" \
+           "$STAGE/esp/EFI/magic/bootuni.efi" \
+           "$STAGE/esp/EFI/magic/loadufi.efi"; do
+    sbverify --cert "$SECURE_BOOT_CERT" "$f" >/dev/null || { echo "error: unsigned or invalid EFI stage: $f" >&2; exit 4; }
+  done
+fi
 
 python3 "$HERE/make_spf.py" build --esp-root "$STAGE/esp" --system-root "$STAGE/system" --output-dir "$OUT"
 python3 "$HERE/make_spf.py" verify "$OUT/esp.spf" --kind esp --require-boot-layout

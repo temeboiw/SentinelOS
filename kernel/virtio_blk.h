@@ -60,6 +60,7 @@ struct virtio_blk_req {
 static int vb_ok;
 static volatile uint8_t *vb_common;
 static volatile uint8_t *vb_notify;
+static volatile uint8_t *vb_device_cfg;
 static uint32_t vb_notify_mult;
 static uint16_t vb_qsize;
 
@@ -72,6 +73,13 @@ static uint8_t *vb_data;
 static volatile uint8_t *vb_status;
 static uint16_t vb_avail_idx;
 static uint16_t vb_last_used;
+static uint64_t vb_sectors;
+static volatile uint32_t vb_io_lock;
+static void virtio_blk_lock(void) {
+    while (__atomic_exchange_n(&vb_io_lock, 1u, __ATOMIC_ACQUIRE))
+        while (__atomic_load_n(&vb_io_lock, __ATOMIC_RELAXED)) __asm__ volatile("pause");
+}
+static void virtio_blk_unlock(void) { __atomic_store_n(&vb_io_lock, 0u, __ATOMIC_RELEASE); }
 
 static void *vb_map_bar(uint64_t pa, uint64_t len) {
     for (uint64_t o = 0; o < len; o += 0x1000)
@@ -102,9 +110,11 @@ static int virtio_blk_init(void) {
         pci_cfg_write(0, slot, 0, 0x04, cmd | 0x06);
 
         uint8_t cap = pci_cfg_read8(0, slot, 0, 0x34);
-        volatile uint8_t *common = 0, *notify = 0;
+        volatile uint8_t *common = 0, *notify = 0, *device_cfg = 0;
         uint32_t notify_mult = 0;
-        while (cap && cap != 0xFF) {
+        unsigned cap_hops = 0;
+        while (cap && cap != 0xFF && cap_hops++ < 48) {
+            if ((cap & 3u) || cap < 0x40) break;
             uint8_t cid = pci_cfg_read8(0, slot, 0, cap);
             uint8_t next = pci_cfg_read8(0, slot, 0, cap + 1);
             if (cid == 0x09) {
@@ -127,14 +137,20 @@ static int virtio_blk_init(void) {
                             ((uint32_t)pci_cfg_read8(0, slot, 0, cap + 17) << 8) |
                             ((uint32_t)pci_cfg_read8(0, slot, 0, cap + 18) << 16) |
                             ((uint32_t)pci_cfg_read8(0, slot, 0, cap + 19) << 24);
-                    }
+                    } else if (typ == VIRTIO_PCI_CAP_DEVICE_CFG) device_cfg = p;
                 }
             }
             cap = next;
         }
 
-        if (!common) {
-            DbgPrint("virtio-blk: no common cfg (slot %u)\n", slot);
+        if (!common || !device_cfg || cap_hops >= 48) {
+            DbgPrint("virtio-blk: incomplete PCI capabilities (slot %u)\n", slot);
+            continue;
+        }
+
+        uint64_t capacity = *(volatile uint64_t *)(device_cfg);
+        if (!capacity) {
+            DbgPrint("virtio-blk: device reports zero capacity (slot %u)\n", slot);
             continue;
         }
 
@@ -185,19 +201,21 @@ static int virtio_blk_init(void) {
 
         vb_common = common;
         vb_notify = notify;
+        vb_device_cfg = device_cfg;
         vb_notify_mult = notify_mult ? notify_mult : 1;
+        vb_sectors = capacity;
         vb_avail_idx = 0;
         vb_last_used = vb_used->idx;
         vb_ok = 1;
-        DbgPrint("virtio-blk: ready slot=%u qsz=%u\n", slot, qsz);
+        DbgPrint("virtio-blk: ready slot=%u qsz=%u capacity=%llu sectors\n", slot, qsz, (unsigned long long)vb_sectors);
         return 0;
     }
     DbgPrint("virtio-blk: no device\n");
     return -1;
 }
 
-static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
-    if (!vb_ok) return -1;
+static int virtio_blk_read_sector_locked(uint64_t sector, void *buf512) {
+    if (!vb_ok || !buf512 || sector >= vb_sectors) return -1;
     vb_req->type = VIRTIO_BLK_T_IN;
     vb_req->reserved = 0;
     vb_req->sector = sector;
@@ -240,24 +258,31 @@ static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
     return 0;
 }
 
+static int virtio_blk_read_sector(uint64_t sector, void *buf512) {
+    virtio_blk_lock(); int rc=virtio_blk_read_sector_locked(sector,buf512); virtio_blk_unlock(); return rc;
+}
+
 static int blk_read(uint64_t off, void *dst, uint64_t len) {
     uint8_t sec[512];
     uint8_t *out = (uint8_t *)dst;
+    if (!dst && len) return -1;
+    if (vb_sectors > UINT64_MAX / 512ULL || off > vb_sectors * 512ULL || len > vb_sectors * 512ULL - off) return -1;
+    virtio_blk_lock();
     while (len) {
         uint64_t lba = off / 512;
         uint32_t skip = (uint32_t)(off % 512);
         uint32_t n = 512 - skip;
         if (n > len) n = (uint32_t)len;
-        if (virtio_blk_read_sector(lba, sec) < 0) return -1;
+        if (virtio_blk_read_sector_locked(lba, sec) < 0) { virtio_blk_unlock(); return -1; }
         for (uint32_t i = 0; i < n; i++) out[i] = sec[skip + i];
         out += n; off += n; len -= n;
     }
-    return 0;
+    virtio_blk_unlock(); return 0;
 }
 
 /* Submit a single-sector write request. */
-static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
-    if (!vb_ok) return -1;
+static int virtio_blk_write_sector_locked(uint64_t sector, const void *buf512) {
+    if (!vb_ok || !buf512 || sector >= vb_sectors) return -1;
     vb_req->type = VIRTIO_BLK_T_OUT;
     vb_req->reserved = 0;
     vb_req->sector = sector;
@@ -300,24 +325,31 @@ static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
     return 0;
 }
 
+static int virtio_blk_write_sector(uint64_t sector, const void *buf512) {
+    virtio_blk_lock(); int rc=virtio_blk_write_sector_locked(sector,buf512); virtio_blk_unlock(); return rc;
+}
+
 /* Byte-range writes use read/modify/write so ext4 metadata can be updated
  * without requiring every caller to issue whole-sector writes. */
 static int blk_write(uint64_t off, const void *src, uint64_t len) {
     uint8_t sec[512];
     const uint8_t *in = (const uint8_t *)src;
+    if (!src && len) return -1;
+    if (vb_sectors > UINT64_MAX / 512ULL || off > vb_sectors * 512ULL || len > vb_sectors * 512ULL - off) return -1;
+    virtio_blk_lock();
     while (len) {
         uint64_t lba = off / 512;
         uint32_t skip = (uint32_t)(off % 512);
         uint32_t n = 512 - skip;
         if (n > len) n = (uint32_t)len;
         if (skip || n != 512) {
-            if (virtio_blk_read_sector(lba, sec) < 0) return -1;
+            if (virtio_blk_read_sector_locked(lba, sec) < 0) { virtio_blk_unlock(); return -1; }
         }
         for (uint32_t i = 0; i < n; i++) sec[skip + i] = in[i];
-        if (virtio_blk_write_sector(lba, sec) < 0) return -1;
+        if (virtio_blk_write_sector_locked(lba, sec) < 0) { virtio_blk_unlock(); return -1; }
         in += n; off += n; len -= n;
     }
-    return 0;
+    virtio_blk_unlock(); return 0;
 }
 
 

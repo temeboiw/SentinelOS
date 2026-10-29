@@ -153,7 +153,8 @@ static uint64_t gfx_bar_addr(uint8_t b, uint8_t d, uint8_t f, uint8_t bar) {
    give each MMIO range its own 4 KiB virtual alias with uncached attributes. */
 static uint64_t gfx_mmio_next_va = 0xFFFFC10000000000ULL;
 static void *gfx_map_mmio(uint64_t pa, uint64_t bytes) {
-    if (!pa || !bytes || bytes > 0x100000ULL || pa > UINT64_MAX - bytes)
+    if (!pa || !bytes || bytes > 0x100000ULL || pa > UINT64_MAX - bytes ||
+        pa + bytes > UINT64_MAX - 0xFFFULL)
         return 0;
     uint64_t first = pa & ~0xFFFULL;
     uint64_t last = (pa + bytes + 0xFFFULL) & ~0xFFFULL;
@@ -228,23 +229,54 @@ static int gfx_find_caps(void) {
     gfx_cfg_write(b,d,f,4,(command&0xFFFFu)|0x0006u); /* memory decode + bus master */
     uint8_t cap=gfx_cfg_read8(b,d,f,0x34);
     for(unsigned int guard=0;cap && cap!=0xFF && guard<48;guard++) {
+        /* Conventional PCI capability pointers are DWORD aligned and limited
+           to 0x40..0xfc. Reject malformed links before their offsets wrap. */
+        if(cap<0x40u || cap>0xFCu || (cap&3u)) {
+            SENTINEL_GFX_LOG("gfx: malformed PCI capability pointer %02x\n",cap);
+            return 0;
+        }
         uint8_t id=gfx_cfg_read8(b,d,f,cap);
         uint8_t next=gfx_cfg_read8(b,d,f,(uint8_t)(cap+1));
         if(id==GFX_PCI_CAP_VENDOR) {
+            if(cap>0xF4u) {
+                SENTINEL_GFX_LOG("gfx: truncated VirtIO PCI capability at %02x\n",cap);
+                return 0;
+            }
+            uint8_t len=gfx_cfg_read8(b,d,f,(uint8_t)(cap+2));
             uint8_t typ=gfx_cfg_read8(b,d,f,(uint8_t)(cap+3));
             uint8_t bar=gfx_cfg_read8(b,d,f,(uint8_t)(cap+4));
             uint32_t off=gfx_cfg_read(b,d,f,(uint8_t)(cap+8));
-            uint64_t base=gfx_bar_addr(b,d,f,bar);
-            if(base) {
-                volatile uint8_t *p=(volatile uint8_t*)gfx_map_mmio(base+(off&~0xFFFu),0x1000);
-                /* Capability offset may be unaligned within the mapped page. */
-                p=(volatile uint8_t*)((uint64_t)p+(off&0xFFFu));
+            uint32_t min_len=typ==GFX_CAP_COMMON?56u:typ==GFX_CAP_NOTIFY?20u:0u;
+            if(min_len && (len<min_len || len>0x100u-cap || bar>=6u ||
+                           off>UINT32_MAX-len)) {
+                SENTINEL_GFX_LOG("gfx: invalid VirtIO capability type=%u len=%u bar=%u off=%x\n",
+                    typ,len,bar,off);
+                return 0;
+            }
+            if(min_len) {
+                uint32_t barlo=gfx_cfg_read(b,d,f,(uint8_t)(0x10u+bar*4u));
+                if((barlo&1u) || (barlo&6u)==6u ||
+                   ((barlo&6u)==4u && bar>=5u)) {
+                    SENTINEL_GFX_LOG("gfx: VirtIO capability references non-MMIO BAR %u\n",bar);
+                    return 0;
+                }
+                uint64_t base=gfx_bar_addr(b,d,f,bar);
+                if(!base || base>UINT64_MAX-off) return 0;
+                volatile uint8_t *p=(volatile uint8_t*)gfx_map_mmio(base+off,len);
+                if(!p) {
+                    SENTINEL_GFX_LOG("gfx: unable to map VirtIO capability type=%u\n",typ);
+                    return 0;
+                }
                 if(typ==GFX_CAP_COMMON) gfx_common=p;
                 else if(typ==GFX_CAP_NOTIFY) {
                     gfx_notify=p;
                     gfx_notify_mult=gfx_cfg_read(b,d,f,(uint8_t)(cap+16));
                 }
             }
+        }
+        if(next && next!=0xFFu && (next<0x40u || next>0xFCu || (next&3u))) {
+            SENTINEL_GFX_LOG("gfx: malformed PCI capability link %02x -> %02x\n",cap,next);
+            return 0;
         }
         cap=next;
     }

@@ -12,6 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 LOADER = (ROOT / "source/boot/loadufi.c").read_text()
 KERNEL = (ROOT / "source/kernel/user.h").read_text()
+MAIN_KERNEL = (ROOT.parent / "kernel/user.h").read_text()
+MAIN_LOADER = (ROOT.parent / "boot/loadufi.c").read_text()
 UI = (ROOT / "user/instlr.c").read_text()
 NTDLL = (ROOT / "source/user/ntdll_user.h").read_text()
 ISO = (ROOT / "make-iso.sh").read_text()
@@ -57,16 +59,28 @@ class NativeInstallerContractTests(unittest.TestCase):
         self.assertIn("total>=512ULL*1024*1024", UI)
 
     def test_user_wrapper_exports_the_installer_image_syscall(self):
-        self.assertIn("SYS_InstallerInstallImage = 45", NTDLL)
-        self.assertIn("NtInstallerInstallImage(u64 image)", NTDLL)
+        self.assertIn("SYS_InstallerInstallImage = 65", NTDLL)
+        self.assertIn("NtInstallerInstallImage(u64 image, u64 index)", NTDLL)
         self.assertIn("NtSyscall6(SYS_InstallerInstallImage, image", NTDLL)
+
+    def test_main_os_installer_services_use_shared_block_devices(self):
+        self.assertRegex(MAIN_KERNEL, r"SYS_NtQueryInstallerDisk\s+60")
+        self.assertRegex(MAIN_KERNEL, r"SYS_NtInstallerDiskIo\s+61")
+        self.assertRegex(MAIN_KERNEL, r"SYS_NtInstallerInstallImage\s+65")
+        self.assertIn("SentinelBlockSnapshot", MAIN_KERNEL)
+        self.assertIn("SentinelBlockReadDevice", MAIN_KERNEL)
+        self.assertIn("SentinelBlockWriteDevice", MAIN_KERNEL)
+        self.assertIn("for(uint64_t pos=0;pos<bytes;pos+=sizeof(verify))", MAIN_KERNEL)
+        self.assertIn("PspIsInstallerProcess(MmCurrentProcess)", MAIN_KERNEL)
+        self.assertIn("load_raw_payload(\"esp.img\")", MAIN_LOADER)
+        self.assertIn("load_raw_payload(\"system.img\")", MAIN_LOADER)
 
     def test_ui_verifies_before_install_and_deploys_both_images(self):
         ready = UI[UI.index("installer_payloads_ready=esp_query"):]
         self.assertIn("NtVerifyInstallerPayload(0)==0", ready)
         self.assertIn("NtVerifyInstallerPayload(1)==0", ready)
-        self.assertIn("NtInstallerInstallImage(0)", ready)
-        self.assertIn("NtInstallerInstallImage(1)", ready)
+        self.assertIn("NtInstallerInstallImage(image,installer_target_index)", ready)
+        self.assertIn("install_state=4", ready)
 
     def test_iso_builder_and_smoke_check_include_raw_images(self):
         for path in ("magic/System32/hal.dll", "magic/System32/krnl.exe",

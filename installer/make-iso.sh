@@ -17,6 +17,16 @@ need mcopy
 need mmd
 need sha256sum
 
+if [[ "${SECURE_BOOT:-0}" == "1" ]]; then
+  : "${SECURE_BOOT_CERT:?set SECURE_BOOT_CERT to the enrolled signing certificate when making Secure Boot media}"
+  need sbverify
+  for f in "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" \
+           "$STAGE/esp/EFI/magic/bootuni.efi" \
+           "$STAGE/esp/EFI/magic/loadufi.efi"; do
+    sbverify --cert "$SECURE_BOOT_CERT" "$f" >/dev/null || { echo "error: unsigned or invalid EFI stage: $f" >&2; exit 4; }
+  done
+fi
+
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: staged EFI/BOOT/BOOTX64.EFI missing; run build-installer.sh first" >&2; exit 3; }
 [[ -s "$OUT/esp.spf" && -s "$OUT/system.spf" ]] || { echo "error: SPF packages missing; run build-installer.sh first" >&2; exit 3; }
 # Build the actual installable partition images on the build host. The native
@@ -29,6 +39,8 @@ need mcopy
 need mmd
 TARGET_ESP_IMG="$OUT/esp.img"
 TARGET_SYSTEM_IMG="$OUT/system.img"
+PACKED_ESP_IMG="$OUT/esp.img.zblk"
+PACKED_SYSTEM_IMG="$OUT/system.img.zblk"
 INSTALL_SUMS="$OUT/install.sha256"
 ESP_IMAGE_SIZE_MIB="${INSTALL_ESP_SIZE_MIB:-128}"
 SYSTEM_IMAGE_SIZE_MIB="${INSTALL_SYSTEM_SIZE_MIB:-512}"
@@ -52,14 +64,16 @@ for f in magic/System32/hal.dll magic/System32/krnl.exe magic/System32/smss.exe 
   debugfs -R "stat /$f" "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:' || { echo "error: system image is missing /$f" >&2; exit 4; }
 done
 printf '%s\n%s\n' "$(sha256sum "$TARGET_ESP_IMG" | cut -d ' ' -f1)" "$(sha256sum "$TARGET_SYSTEM_IMG" | cut -d ' ' -f1)" > "$INSTALL_SUMS"
+python3 "$HERE/pack_image.py" pack "$TARGET_ESP_IMG" "$PACKED_ESP_IMG"
+python3 "$HERE/pack_image.py" pack "$TARGET_SYSTEM_IMG" "$PACKED_SYSTEM_IMG"
 # Store package hashes separately so the kernel can verify exact staged bytes before formatting any disk.
 printf '%s\n%s\n' "$(sha256sum "$OUT/esp.spf" | cut -d ' ' -f1)" "$(sha256sum "$OUT/system.spf" | cut -d ' ' -f1)" > "$OUT/packages.sha256"
 if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
-  # Raw install images are embedded on the FAT ESP so UEFI can preload them.
-  # Size for every staged file plus both packages, with 25% headroom and
+  # Zero-block packed install images are embedded on the FAT ESP and expanded
+  # by the UEFI loader. Leave space for these plus staged files and metadata.
   # 16 MiB for FAT metadata/cluster slack. Do not silently truncate the image.
   required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
-  required_bytes=$((required_bytes + $(stat -c %s "$TARGET_ESP_IMG") + $(stat -c %s "$TARGET_SYSTEM_IMG") + $(stat -c %s "$INSTALL_SUMS")))
+  required_bytes=$((required_bytes + $(stat -c %s "$PACKED_ESP_IMG") + $(stat -c %s "$PACKED_SYSTEM_IMG") + $(stat -c %s "$INSTALL_SUMS")))
   ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))
   (( ESP_SIZE_MIB < 128 )) && ESP_SIZE_MIB=128
   echo "Auto-sized installer ESP: ${ESP_SIZE_MIB} MiB (staged files and both filesystem images)"
@@ -83,11 +97,11 @@ for entry in "$STAGE/esp"/*; do
 done
 shopt -u nullglob dotglob
 
-# The UEFI loader can only read files on its own FAT ESP. Embed both verified
-# filesystem images there as boot modules for the trusted native installer.
+# The UEFI loader can only read files on its own FAT ESP. Embed both packed
+# filesystem images there for fast boot-time expansion into installer modules.
 # The ISO-level SPF copies remain for build validation and diagnostics.
-mcopy -i "$ESP_IMG" "$TARGET_ESP_IMG" ::/esp.img
-mcopy -i "$ESP_IMG" "$TARGET_SYSTEM_IMG" ::/system.img
+mcopy -i "$ESP_IMG" "$PACKED_ESP_IMG" ::/esp.img.zblk
+mcopy -i "$ESP_IMG" "$PACKED_SYSTEM_IMG" ::/system.img.zblk
 mcopy -i "$ESP_IMG" "$INSTALL_SUMS" ::/install.sha256
 
 # Fail early if the fallback loader and both install images made it into the FAT image.
@@ -95,10 +109,10 @@ TMP_CHECK="$(mktemp)"
 trap 'rm -f "$TMP_CHECK"' EXIT
 mcopy -i "$ESP_IMG" ::/EFI/BOOT/BOOTX64.EFI "$TMP_CHECK"
 [[ -s "$TMP_CHECK" ]] || { echo "error: EFI image does not contain BOOTX64.EFI" >&2; exit 4; }
-mcopy -i "$ESP_IMG" ::/esp.img "$TMP_CHECK"
-cmp -s "$TMP_CHECK" "$TARGET_ESP_IMG" || { echo "error: EFI image payload mismatch" >&2; exit 4; }
-mcopy -i "$ESP_IMG" ::/system.img "$TMP_CHECK"
-cmp -s "$TMP_CHECK" "$TARGET_SYSTEM_IMG" || { echo "error: system image payload mismatch" >&2; exit 4; }
+mcopy -i "$ESP_IMG" ::/esp.img.zblk "$TMP_CHECK"
+cmp -s "$TMP_CHECK" "$PACKED_ESP_IMG" || { echo "error: packed EFI image payload mismatch" >&2; exit 4; }
+mcopy -i "$ESP_IMG" ::/system.img.zblk "$TMP_CHECK"
+cmp -s "$TMP_CHECK" "$PACKED_SYSTEM_IMG" || { echo "error: packed system image payload mismatch" >&2; exit 4; }
 mcopy -i "$ESP_IMG" ::/install.sha256 "$TMP_CHECK"
 cmp -s "$TMP_CHECK" "$INSTALL_SUMS" || { echo "error: install checksum manifest mismatch" >&2; exit 4; }
 rm -f "$TMP_CHECK"

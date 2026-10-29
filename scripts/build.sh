@@ -6,6 +6,7 @@
 #   ./scripts/build.sh --reset-nvram
 #   ./scripts/build.sh --clean
 #   ./scripts/build.sh --no-disk-image (compile/stage outputs using host-native tooling)
+#   ./scripts/build.sh --secure-boot (requires SECURE_BOOT_KEY and SECURE_BOOT_CERT)
 
 set -euo pipefail
 
@@ -46,6 +47,7 @@ RESET_NVRAM=0
 DO_RUN=0
 DO_CLEAN=0
 DO_NO_DISK_IMAGE=0
+SECURE_BOOT_MODE="${SECURE_BOOT:-0}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -54,8 +56,9 @@ for arg in "$@"; do
     --reset-nvram)       RESET_NVRAM=1 ;;
     --clean|-c)          DO_CLEAN=1 ;;
     --no-disk-image)     DO_NO_DISK_IMAGE=1 ;;
+    --secure-boot)       SECURE_BOOT_MODE=1 ;;
     -h|--help)
-      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image]"
+      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image] [--secure-boot]"
       exit 0
       ;;
     *)
@@ -64,6 +67,17 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [[ "$SECURE_BOOT_MODE" == "1" ]]; then
+  : "${SECURE_BOOT_KEY:?set SECURE_BOOT_KEY to the PEM signing private key}"
+  : "${SECURE_BOOT_CERT:?set SECURE_BOOT_CERT to the matching PEM X.509 certificate}"
+  [[ -s "$SECURE_BOOT_KEY" && -s "$SECURE_BOOT_CERT" ]] || { echo "error: Secure Boot key/certificate must be readable nonempty files" >&2; exit 2; }
+  command -v sbsign >/dev/null 2>&1 || { echo "error: Secure Boot mode requires sbsign (sbsigntool)" >&2; exit 2; }
+  command -v sbverify >/dev/null 2>&1 || { echo "error: Secure Boot mode requires sbverify (sbsigntool)" >&2; exit 2; }
+elif [[ "$SECURE_BOOT_MODE" != "0" ]]; then
+  echo "error: SECURE_BOOT must be 0 or 1" >&2
+  exit 2
+fi
 
 if [[ $DO_CLEAN -eq 1 ]]; then
   rm -rf "$B"
@@ -335,6 +349,20 @@ run_parallel \
   'build_efi bootx64 "$B/esp/EFI/BOOT/BOOTX64.EFI"' \
   'build_efi bootuni "$B/esp/EFI/magic/bootuni.efi" "${EXTRA[@]}"' \
   'build_efi loadufi "$B/esp/EFI/magic/loadufi.efi"'
+
+# UEFI Secure Boot checks every EFI image passed to LoadImage. Sign all three
+# stages with the same enrolled key after linking and before installer staging.
+if [[ "$SECURE_BOOT_MODE" == "1" ]]; then
+  for image in "$B/esp/EFI/BOOT/BOOTX64.EFI" \
+               "$B/esp/EFI/magic/bootuni.efi" \
+               "$B/esp/EFI/magic/loadufi.efi"; do
+    tmp="$image.signed"
+    sbsign --key "$SECURE_BOOT_KEY" --cert "$SECURE_BOOT_CERT" --output "$tmp" "$image" >/dev/null
+    sbverify --cert "$SECURE_BOOT_CERT" "$tmp" >/dev/null
+    mv "$tmp" "$image"
+  done
+  echo "==> Signed all UEFI stages for Secure Boot"
+fi
 
 echo "==> HAL + kernel"
 

@@ -29,7 +29,7 @@ bash installer/make-iso.sh
 bash installer/check-iso.sh
 ```
 
-ISO mastering requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). The EFI image auto-sizes to the staged ESP files plus both embedded SPF packages, with additional free-space headroom (supported range 128–1024 MiB by default). Set `ESP_SIZE_MIB=256` before running `make-iso.sh` to override the automatic size; values must be 32–1024 MiB. Set `JOBS=2` to limit build parallelism on low-memory hosts.
+ISO mastering requires `xorriso`, `dosfstools` (`mkfs.vfat`), and `mtools` (`mcopy`, `mmd`). The EFI image auto-sizes to the staged ESP files and zero-block packed installer images, with additional free-space headroom (minimum 128 MiB). Set `ESP_SIZE_MIB=256` before running `make-iso.sh` to override the automatic size; values must be 32–1024 MiB. Set `JOBS=2` to limit build parallelism on low-memory hosts.
 
 ## Official pre-release test procedure
 
@@ -67,14 +67,14 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 - Builds from the isolated `installer/source/` snapshot and leaves root-level project sources untouched.
 - Includes an installer session manager, framebuffer terms/target UI, and progress-style screen binary.
 - Packages staged EFI and system filesystem trees into separate SPF archives. SPF is a custom zlib-compressed tar format, not WIM.
-- Creates a FAT32 EFI boot image and copies the staged EFI tree plus `magic/System32` boot modules onto the ESP. This lets `loadufi.efi` load the HAL, kernel, and setup session from the ISO itself; installed-system boots still fall back to the ext4 reader when those files are not on the ESP.
+- Creates a FAT32 EFI boot image and copies the staged EFI tree plus `magic/System32` boot modules onto the ESP. The installer partition images use a zero-block encoding on the ESP; `loadufi.efi` expands them into their normal raw bytes while booting, so the virtual DVD does not have to read hundreds of MiB of empty filesystem space.
 - Adds both SPF packages to the ISO.
 - Emits `SHA256SUMS` for the embedded boot image, packages, and media README.
 - Validates the ISO checksum, El Torito UEFI entry, fallback `EFI/BOOT/BOOTX64.EFI`, the embedded filesystem images, their SHA-256 manifest, and the SPF build-validation packages.
 
 ## Installation status
 
-The graphical installer is designed to install without a shell. The ISO builder creates a 128 MiB FAT32 EFI image and a pre-populated ext4 system image (512 MiB by default), hashes both images, and embeds them on the boot ESP. UEFI stages esp.img, system.img, and install.sha256 as immutable boot modules. Before any disk writes, the trusted kernel checks both SHA-256 digests.
+The graphical installer is designed to install without a shell. The ISO builder creates a 128 MiB FAT32 EFI image and a pre-populated ext4 system image (512 MiB by default), hashes both raw images, and embeds zero-block packed versions on the boot ESP. UEFI expands them into immutable `esp.img` and `system.img` boot modules and stages `install.sha256`. Before any disk writes, the trusted kernel checks both SHA-256 digests.
 
 When the user clicks **Install OS**, the in-OS setup app writes GPT metadata and asks the trusted kernel to copy the verified images to the fixed partition offsets. The kernel bounds-checks image sizes against the VirtIO disk capacity and reads back the first and last sectors after copying. The target disk must be at least the combined partition-image size plus GPT metadata (about 640 MiB at defaults). The installed ext4 filesystem initially retains the image size even if its partition is larger.
 

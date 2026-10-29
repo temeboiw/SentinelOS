@@ -541,7 +541,7 @@ static int u32_isqrt(u64 n) {
     while(y<x){x=y;y=(x+n/x)/2u;}
     return (int)x;
 }
-static void u32_ellipse_fill(int cx,int cy,int rx,int ry,u32 color) {
+static __attribute__((unused)) void u32_ellipse_fill(int cx,int cy,int rx,int ry,u32 color) {
     if(rx<=0||ry<=0)return;
     u64 rx2=(u64)rx*(u64)rx, ry2=(u64)ry*(u64)ry;
     for(int dy=-ry;dy<=ry;dy++) {
@@ -1154,7 +1154,7 @@ static int u32_start_hover_at(int x, int y) {
     return -1;
 }
 
-static int u32_menu_text_is(const char *wanted) {
+static __attribute__((unused)) int u32_menu_text_is(const char *wanted) {
     const char *a=g_search_text,*b=wanted;
     while(*a&&*b) {
         char ca=*a++,cb=*b++;

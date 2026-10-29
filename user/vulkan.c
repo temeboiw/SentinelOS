@@ -348,7 +348,7 @@ static size_t vk_spirv_find_label(const uint32_t *w,size_t n,uint32_t entry,uint
 /* Bounded control-flow-aware SPIR-V scalar interpreter. Branches stay within
  * the selected entry function, Phi selects by predecessor, and an instruction
  * budget prevents malformed loops from hanging the OS. */
-static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
+static __attribute__((unused)) int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
                                 uint32_t output_id,uint32_t *out_bits) {
  uint32_t *ids=g_spirv_ids; uint8_t *defined=g_spirv_defined;
  size_t i=5; uint32_t active=0, found=0, steps=0, current_label=0, predecessor=0;
@@ -982,7 +982,9 @@ static int vk_spirv_execute_pipeline_u32(const uint32_t *w,size_t n,uint32_t ent
   }
   i+=wc;
  }
- if(!done||!def[output])return 0;*out=ids[output];return 1;
+ if(!done||!def[output]) return 0;
+ *out=ids[output];
+ return 1;
 }
 static int vk_spirv_has_implicit_texture_sample(const uint32_t *w,size_t n,uint32_t entry) {
  size_t i=5;uint32_t active=0;while(i<n){uint32_t wc=w[i]>>16,op=w[i]&0xffffu;if(!wc||wc>n-i)return 0;if(op==54u&&wc>=5u)active=(w[i+2]==entry);else if(op==56u)active=0;else if(active&&op>=87u&&op<=97u&&wc>=5u)return 1;i+=wc;}return 0;
@@ -1199,14 +1201,19 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     if(projected){if(g_frag_components[coord]<3)return 0;uint32_t q=g_frag_values[coord][2];if(vksoft_float_is_zero(q))return 0;ubits=vksoft_fdiv_bits(ubits,q);vbits=vksoft_fdiv_bits(vbits,q);}
     if(op==95u){int32_t x=(int32_t)g_frag_values[coord][0],y=(int32_t)g_frag_values[coord][1];ubits=vksoft_texel_center_bits(x,ctx->texture->width);vbits=vksoft_texel_center_bits(y,ctx->texture->height);}
     if(op==89u||op==90u||op==93u||op==94u){
-     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],p=vksoft_sample_texture_bits(ctx->texture,ubits,vbits);
+     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!ctx->texture->compare_enable) return 0;
+     uint32_t ref=g_frag_values[w[i+5]][0],p=vksoft_sample_texture_bits(ctx->texture,ubits,vbits);
      g_frag_values[rid][0]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,0),ctx->texture->compare_op)?0x3f800000u:0u);g_frag_components[rid]=1;g_frag_defined[rid]=1;
     }else if(op==97u){ VkSoftTexture gatherTexture=*ctx->texture;gatherTexture.linear_filter=0;
-     if(wc<7u||w[i+5]>=VK_SPIRV_MAX_IDS||w[i+6]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!g_frag_defined[w[i+6]]||!ctx->texture->compare_enable)return 0;uint32_t ref=g_frag_values[w[i+5]][0],comp=g_frag_values[w[i+6]][0];if(comp>3u)return 0;
+     if(wc<7u||w[i+5]>=VK_SPIRV_MAX_IDS||w[i+6]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]||!g_frag_defined[w[i+6]]||!ctx->texture->compare_enable) return 0;
+     uint32_t ref=g_frag_values[w[i+5]][0],comp=g_frag_values[w[i+6]][0];
+     if(comp>3u) return 0;
      uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
      for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(&gatherTexture,pu,pv);g_frag_values[rid][k]=(vksoft_float_compare_bits(ref,vk_frag_tex_channel_bits(p,comp),ctx->texture->compare_op)?0x3f800000u:0u);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else if(op==96u){ VkSoftTexture gatherTexture=*ctx->texture;gatherTexture.linear_filter=0;
-     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]])return 0;uint32_t comp=g_frag_values[w[i+5]][0];if(comp>3u)return 0;uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
+     if(wc<6u||w[i+5]>=VK_SPIRV_MAX_IDS||!g_frag_defined[w[i+5]]) return 0;
+     uint32_t comp=g_frag_values[w[i+5]][0];
+     if(comp>3u) return 0;uint32_t du=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->width)),dv=vksoft_fdiv_bits(0x3f000000u,vksoft_uint_to_float_bits(ctx->texture->height));const uint32_t ou[4]={0xbf800000u,0x3f800000u,0x3f800000u,0xbf800000u},ov[4]={0xbf800000u,0xbf800000u,0x3f800000u,0x3f800000u};
      for(unsigned k=0;k<4;k++){uint32_t pu=vksoft_fadd_bits(ubits,vksoft_fmul_bits(ou[k],du)),pv=vksoft_fadd_bits(vbits,vksoft_fmul_bits(ov[k],dv)),p=vksoft_sample_texture_bits(&gatherTexture,pu,pv);g_frag_values[rid][k]=vk_frag_tex_channel_bits(p,comp);}g_frag_components[rid]=4;g_frag_defined[rid]=1;
     }else{
      VkSoftTexture fetchTexture=*ctx->texture;if(op==95u)fetchTexture.linear_filter=0;uint32_t p=vksoft_sample_texture_bits(&fetchTexture,ubits,vbits);g_frag_values[rid][0]=vk_frag_tex_channel_bits(p,0);g_frag_values[rid][1]=vk_frag_tex_channel_bits(p,1);g_frag_values[rid][2]=vk_frag_tex_channel_bits(p,2);g_frag_values[rid][3]=vk_frag_tex_channel_bits(p,3);g_frag_components[rid]=4;g_frag_defined[rid]=1;
@@ -1227,13 +1234,17 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     else if(inst==67u){if(wc<7u)return 0;uint32_t b=w[i+6];if(b>=VK_SPIRV_MAX_IDS||!g_frag_defined[b])return 0;uint32_t bc=g_frag_components[b],vc=count;if(!bc||!vc||bc>4u||vc>4u||bc!=vc)return 0;uint32_t sum=0;for(uint32_t k=0;k<vc;k++){uint32_t d=vksoft_fsub_bits(g_frag_values[a][k],g_frag_values[b][k]),sq=vksoft_fmul_bits(d,d);sum=k?vksoft_fadd_bits(sum,sq):sq;}g_frag_values[rid][0]=vk_frag_sqrt_bits(sum);count=1;}
     else if(inst==68u){if(wc<7u||count!=3u||g_frag_components[a]!=3u)return 0;uint32_t b=w[i+6];if(b>=VK_SPIRV_MAX_IDS||!g_frag_defined[b]||g_frag_components[b]!=3u)return 0;uint32_t ax=g_frag_values[a][0],ay=g_frag_values[a][1],az=g_frag_values[a][2],bx=g_frag_values[b][0],by=g_frag_values[b][1],bz=g_frag_values[b][2];g_frag_values[rid][0]=vksoft_fsub_bits(vksoft_fmul_bits(ay,bz),vksoft_fmul_bits(az,by));g_frag_values[rid][1]=vksoft_fsub_bits(vksoft_fmul_bits(az,bx),vksoft_fmul_bits(ax,bz));g_frag_values[rid][2]=vksoft_fsub_bits(vksoft_fmul_bits(ax,by),vksoft_fmul_bits(ay,bx));count=3u;}
     else if(inst==70u){ /* GLSL.std.450 FaceForward(N, I, Nref) */
-     if(wc<8u)return 0;uint32_t incident=w[i+6],reference=w[i+7];if(incident>=VK_SPIRV_MAX_IDS||reference>=VK_SPIRV_MAX_IDS||!g_frag_defined[incident]||!g_frag_defined[reference])return 0;
+     if(wc<8u) return 0;
+     uint32_t incident=w[i+6],reference=w[i+7];
+     if(incident>=VK_SPIRV_MAX_IDS||reference>=VK_SPIRV_MAX_IDS||!g_frag_defined[incident]||!g_frag_defined[reference]) return 0;
      uint32_t nc=g_frag_components[a],ic=g_frag_components[incident],rc=g_frag_components[reference];if(nc<2u||nc>4u||ic!=nc||rc!=nc)return 0;
      uint32_t dot=0;for(uint32_t k=0;k<nc;k++){uint32_t p=vksoft_fmul_bits(g_frag_values[reference][k],g_frag_values[incident][k]);dot=k?vksoft_fadd_bits(dot,p):p;}
      int flip=vksoft_float_compare_bits(dot,0u,1u);for(uint32_t k=0;k<nc;k++)g_frag_values[rid][k]=flip?g_frag_values[a][k]:(g_frag_values[a][k]^0x80000000u);count=nc;
     }
     else if(inst==72u){ /* GLSL.std.450 Refract(I, N, eta) */
-     if(wc<8u)return 0;uint32_t normal=w[i+6],etaId=w[i+7];if(normal>=VK_SPIRV_MAX_IDS||etaId>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal]||!g_frag_defined[etaId])return 0;
+     if(wc<8u) return 0;
+     uint32_t normal=w[i+6],etaId=w[i+7];
+     if(normal>=VK_SPIRV_MAX_IDS||etaId>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal]||!g_frag_defined[etaId]) return 0;
      uint32_t nc=g_frag_components[normal];if(count<2u||count>4u||nc!=count||g_frag_components[etaId]!=1u)return 0;
      uint32_t dot=0;for(uint32_t k=0;k<count;k++){uint32_t p=vksoft_fmul_bits(g_frag_values[normal][k],g_frag_values[a][k]);dot=k?vksoft_fadd_bits(dot,p):p;}
      uint32_t eta=g_frag_values[etaId][0],eta2=vksoft_fmul_bits(eta,eta),dot2=vksoft_fmul_bits(dot,dot);
@@ -1243,7 +1254,9 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
       for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=vksoft_fsub_bits(vksoft_fmul_bits(eta,g_frag_values[a][k]),vksoft_fmul_bits(factor,g_frag_values[normal][k]));}
     }
     else if(inst==71u){ /* GLSL.std.450 Reflect(I, N) = I - 2*dot(N,I)*N */
-     if(wc<7u)return 0;uint32_t normal=w[i+6];if(normal>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal])return 0;
+     if(wc<7u) return 0;
+     uint32_t normal=w[i+6];
+     if(normal>=VK_SPIRV_MAX_IDS||!g_frag_defined[normal]) return 0;
      uint32_t nc=g_frag_components[normal];if(count<2u||count>4u||nc!=count)return 0;
      uint32_t dot=0;for(uint32_t k=0;k<count;k++){uint32_t p=vksoft_fmul_bits(g_frag_values[normal][k],g_frag_values[a][k]);dot=k?vksoft_fadd_bits(dot,p):p;}
      uint32_t scale=vksoft_fmul_bits(0x40000000u,dot);
@@ -1255,7 +1268,10 @@ static int vk_fragment_execute(void *opaque,float in_u,float in_v,uint32_t *out_
     else if(inst==48u){if(wc<7u)return 0;uint32_t x=w[i+6];if(x>=VK_SPIRV_MAX_IDS||!g_frag_defined[x])return 0;for(uint32_t k=0;k<count;k++)g_frag_values[rid][k]=vksoft_float_compare_bits(g_frag_values[x][g_frag_components[x]==1?0:k],g_frag_values[a][k],1u)?0u:0x3f800000u;}
     else if(inst==49u){if(wc<8u)return 0;uint32_t edge1=w[i+6],value=w[i+7];if(edge1>=VK_SPIRV_MAX_IDS||value>=VK_SPIRV_MAX_IDS||!g_frag_defined[edge1]||!g_frag_defined[value])return 0;count=g_frag_components[value];if(!count||count>4u)return 0;for(uint32_t k=0;k<count;k++){uint32_t e0=g_frag_values[a][g_frag_components[a]==1?0:k],e1=g_frag_values[edge1][g_frag_components[edge1]==1?0:k],x=g_frag_values[value][g_frag_components[value]==1?0:k];if(!vksoft_float_compare_bits(e0,e1,1u))return 0;uint32_t t=vksoft_fdiv_bits(vksoft_fsub_bits(x,e0),vksoft_fsub_bits(e1,e0));if(vksoft_float_compare_bits(t,0u,1u))t=0u;if(vksoft_float_compare_bits(t,0x3f800000u,4u))t=0x3f800000u;uint32_t t2=vksoft_fmul_bits(t,t),twoT=vksoft_fmul_bits(0x40000000u,t),threeMinus=vksoft_fsub_bits(0x40400000u,twoT);g_frag_values[rid][k]=vksoft_fmul_bits(t2,threeMinus);}}
     else if(inst==50u){if(wc<8u)return 0;uint32_t b=w[i+6],c=w[i+7];if(b>=VK_SPIRV_MAX_IDS||c>=VK_SPIRV_MAX_IDS||!g_frag_defined[b]||!g_frag_defined[c])return 0;for(uint32_t k=0;k<count;k++){uint32_t x=g_frag_values[a][g_frag_components[a]==1?0:k],y=g_frag_values[b][g_frag_components[b]==1?0:k],z=g_frag_values[c][g_frag_components[c]==1?0:k];g_frag_values[rid][k]=vksoft_fadd_bits(vksoft_fmul_bits(x,y),z);}}
-    else return 0;g_frag_components[rid]=(uint8_t)count;g_frag_defined[rid]=1;}
+    else { return 0; }
+    g_frag_components[rid]=(uint8_t)count;
+    g_frag_defined[rid]=1;
+   }
    else if(op==148u&&wc==5u&&rid<VK_SPIRV_MAX_IDS){uint32_t a=w[i+3],b=w[i+4];if(a>=VK_SPIRV_MAX_IDS||b>=VK_SPIRV_MAX_IDS||!g_frag_defined[a]||!g_frag_defined[b])return 0;uint32_t count=g_frag_components[a];if(count<2u||count>4u||g_frag_components[b]!=count)return 0;uint32_t sum=0;for(uint32_t k=0;k<count;k++){uint32_t product=vksoft_fmul_bits(g_frag_values[a][k],g_frag_values[b][k]);sum=k?vksoft_fadd_bits(sum,product):product;}g_frag_values[rid][0]=sum;g_frag_components[rid]=1;g_frag_defined[rid]=1;}
    else if(op==83u&&wc==4u&&rid<VK_SPIRV_MAX_IDS){uint32_t src=w[i+3];if(src>=VK_SPIRV_MAX_IDS||!g_frag_defined[src])return 0;for(unsigned k=0;k<4;k++)g_frag_values[rid][k]=g_frag_values[src][k];g_frag_components[rid]=g_frag_components[src];g_frag_defined[rid]=1;g_frag_kind[rid]=g_frag_kind[src];}
    else if(op==253u&&wc==1u)break;
@@ -1381,10 +1397,22 @@ VKAPI_EXPORT void VKAPI_CALL vkDestroyDescriptorSetLayout(VkDevice d,VkDescripto
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreatePipelineLayout(VkDevice d,const VkPipelineLayoutCreateInfo *ci,const void *alloc,VkPipelineLayout *out) {
  if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO||ci->pNext||ci->flags||alloc||ci->setLayoutCount>4||(ci->setLayoutCount&&!ci->pSetLayouts)||ci->pushConstantRangeCount||ci->pPushConstantRanges)return VK_ERROR_FEATURE_NOT_PRESENT;
  *out=0;for(uint32_t i=0;i<ci->setLayoutCount;i++)if(!dsl_ok(ci->pSetLayouts[i])||ci->pSetLayouts[i]->device!=d)return VK_ERROR_INITIALIZATION_FAILED;
- for(unsigned i=0;i<VK_MAX_PIPELINE_LAYOUTS;i++)if(!g_pipeline_layouts[i].magic){VkPipelineLayoutObj *l=&g_pipeline_layouts[i];vk_zero(l,sizeof(*l));l->magic=VK_OBJECT_MAGIC;l->device=d;l->setLayoutCount=ci->setLayoutCount;for(uint32_t j=0;j<ci->setLayoutCount;j++)l->setLayouts[j]=ci->pSetLayouts[j];*out=l;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
+ for(unsigned i=0;i<VK_MAX_PIPELINE_LAYOUTS;i++) {
+  if(!g_pipeline_layouts[i].magic) {
+   VkPipelineLayoutObj *l=&g_pipeline_layouts[i];
+   vk_zero(l,sizeof(*l));l->magic=VK_OBJECT_MAGIC;l->device=d;l->setLayoutCount=ci->setLayoutCount;
+   for(uint32_t j=0;j<ci->setLayoutCount;j++) l->setLayouts[j]=ci->pSetLayouts[j];
+   *out=l;
+   return VK_SUCCESS;
+  }
+ }
+ return VK_ERROR_TOO_MANY_OBJECTS;
 }
 VKAPI_EXPORT void VKAPI_CALL vkDestroyPipelineLayout(VkDevice d,VkPipelineLayout l,const void *alloc) {
- if(alloc||!dev_ok(d)||!playout_ok(l)||l->device!=d)return;for(unsigned i=0;i<VK_MAX_PIPELINES;i++)if(g_pipelines[i].magic==VK_OBJECT_MAGIC&&g_pipelines[i].layout==l)return;l->magic=0;
+ if(alloc||!dev_ok(d)||!playout_ok(l)||l->device!=d) return;
+ for(unsigned i=0;i<VK_MAX_PIPELINES;i++)
+  if(g_pipelines[i].magic==VK_OBJECT_MAGIC&&g_pipelines[i].layout==l) return;
+ l->magic=0;
 }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateDescriptorPool(VkDevice d,const VkDescriptorPoolCreateInfo *ci,const void *alloc,VkDescriptorPool *out) {
  if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO||ci->pNext||ci->flags&~1u||alloc||!ci->maxSets||ci->maxSets>VK_MAX_DESCRIPTOR_SETS||(ci->poolSizeCount&&!ci->pPoolSizes))return VK_ERROR_INITIALIZATION_FAILED;
@@ -1392,16 +1420,25 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkCreateDescriptorPool(VkDevice d,const VkDescr
  *out=0;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_POOLS;i++)if(!g_descriptor_pools[i].magic){VkDescriptorPoolObj *p=&g_descriptor_pools[i];vk_zero(p,sizeof(*p));p->magic=VK_OBJECT_MAGIC;p->device=d;p->maxSets=ci->maxSets;p->uniformCapacity=u;p->storageCapacity=st;*out=p;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
 }
 VKAPI_EXPORT void VKAPI_CALL vkDestroyDescriptorPool(VkDevice d,VkDescriptorPool p,const void *alloc) {
- if(alloc||!dev_ok(d)||!dpool_ok(p)||p->device!=d)return;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p)g_descriptor_sets[i].magic=0;p->magic=0;
+ if(alloc||!dev_ok(d)||!dpool_ok(p)||p->device!=d) return;
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)
+  if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p) g_descriptor_sets[i].magic=0;
+ p->magic=0;
 }
 VKAPI_EXPORT VkResult VKAPI_CALL vkResetDescriptorPool(VkDevice d,VkDescriptorPool p,VkFlags flags) {
- if(!dev_ok(d)||!dpool_ok(p)||p->device!=d||flags)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p)g_descriptor_sets[i].magic=0;p->allocatedSets=p->uniformUsed=p->storageUsed=0;return VK_SUCCESS;
+ if(!dev_ok(d)||!dpool_ok(p)||p->device!=d||flags) return VK_ERROR_INITIALIZATION_FAILED;
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)
+  if(g_descriptor_sets[i].magic==VK_OBJECT_MAGIC&&g_descriptor_sets[i].pool==p) g_descriptor_sets[i].magic=0;
+ p->allocatedSets=p->uniformUsed=p->storageUsed=0;
+ return VK_SUCCESS;
 }
 VKAPI_EXPORT VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice d,const VkDescriptorSetAllocateInfo *ai,VkDescriptorSet *out) {
  if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO||ai->pNext||!dpool_ok(ai->descriptorPool)||ai->descriptorPool->device!=d||!ai->descriptorSetCount||!ai->pSetLayouts||ai->descriptorSetCount>VK_MAX_DESCRIPTOR_SETS-ai->descriptorPool->allocatedSets)return VK_ERROR_INITIALIZATION_FAILED;
  VkDescriptorPool p=ai->descriptorPool;uint32_t needU=0,needS=0,freeN=0;for(uint32_t i=0;i<ai->descriptorSetCount;i++){if(!dsl_ok(ai->pSetLayouts[i])||ai->pSetLayouts[i]->device!=d)return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t j=0;j<ai->pSetLayouts[i]->bindingCount;j++){VkDescriptorSetLayoutBinding *b=&ai->pSetLayouts[i]->bindings[j];if(b->descriptorType==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)needU+=b->descriptorCount;else needS+=b->descriptorCount;}}
  if(needU>p->uniformCapacity-p->uniformUsed||needS>p->storageCapacity-p->storageUsed)return VK_ERROR_OUT_OF_POOL_MEMORY;
- for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)if(!g_descriptor_sets[i].magic)freeN++;if(freeN<ai->descriptorSetCount)return VK_ERROR_TOO_MANY_OBJECTS;
+ for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS;i++)
+  if(!g_descriptor_sets[i].magic) freeN++;
+ if(freeN<ai->descriptorSetCount) return VK_ERROR_TOO_MANY_OBJECTS;
  uint32_t made=0;for(unsigned i=0;i<VK_MAX_DESCRIPTOR_SETS&&made<ai->descriptorSetCount;i++)if(!g_descriptor_sets[i].magic){VkDescriptorSetObj *set=&g_descriptor_sets[i];vk_zero(set,sizeof(*set));set->magic=VK_OBJECT_MAGIC;set->device=d;set->pool=p;set->layout=ai->pSetLayouts[made];out[made++]=set;}
  p->allocatedSets+=ai->descriptorSetCount;p->uniformUsed+=needU;p->storageUsed+=needS;return VK_SUCCESS;
 }
@@ -1418,7 +1455,8 @@ VKAPI_EXPORT void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer c,uint32_t 
  if(!cmd_ok(c)||c->state!=1||point!=VK_PIPELINE_BIND_POINT_GRAPHICS||!playout_ok(layout)||layout->device!=c->device||first>4||count>4-first||(count&&!sets)||dynCount||dynOffsets||c->count>=128)return;
  if(c->bound_pipeline&&c->bound_pipeline->layout!=layout)return;
  for(uint32_t i=0;i<count;i++)if(!dset_ok(sets[i])||sets[i]->device!=c->device||first+i>=layout->setLayoutCount||sets[i]->layout!=layout->setLayouts[first+i])return;
- for(uint32_t i=0;i<count;i++)c->bound_sets[first+i]=sets[i];if(c->bound_set_count<first+count)c->bound_set_count=first+count;
+ for(uint32_t i=0;i<count;i++) c->bound_sets[first+i]=sets[i];
+ if(c->bound_set_count<first+count) c->bound_set_count=first+count;
  unsigned op=c->count++;c->ops[op].op=16;c->ops[op].value=first;c->ops[op].size=count;c->ops[op].offset2=(uintptr_t)layout;
 }
 

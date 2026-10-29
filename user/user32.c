@@ -2763,29 +2763,23 @@ BOOL DestroyWindow(void *hwnd) {
     }
     if(hwnd!=(void *)1 && hwnd) return 0;
 
-    /* Save the old frame before hiding it so every pixel it covered is
-     * repainted from the desktop layers, including the title bar and shadow. */
-    int had_window = g_wnd.visible && g_wnd.w > 2 && g_wnd.h > 2;
+    /*
+     * The kernel unregister syscall removes this process's shared window
+     * surface and recomposes the damaged screen rectangle from the persistent
+     * desktop and remaining Z-ordered windows. Only the desktop owner may
+     * compose again afterward: an ordinary app's private framebuffer is not
+     * the shared scene, and presenting it here would put the just-closed
+     * window's stale pixels straight back onto scanout.
+     */
+    int desktop_owner = u32_is_desktop_window();
     sy3(SYS_WmUnreg, 0, 0, 0);
     g_wnd.visible = 0;
     g_wnd.minimized = 0;
 
-    if (had_window) {
-        /*
-         * Window teardown is the one transition where the cursor can move
-         * from a window's pixels onto the desktop while its saved-under
-         * buffer still refers to the old scanout. A clipped repaint can
-         * refresh the window rectangle but leave the cursor underlay stale;
-         * the next mouse move then restores those stale pixels as a trail.
-         * Recompose the full scene on close so all Z-ordered layers and the
-         * cursor underlay are rebuilt from the same frame. Keep the desktop
-         * welcome card suppressed, as before, while the application closes.
-         */
+    if (desktop_owner) {
         u32_suppress_desktop_card = 1;
         compose();
         u32_suppress_desktop_card = 0;
-    } else {
-        compose();
     }
 
     return 1;

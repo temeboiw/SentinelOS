@@ -206,6 +206,18 @@ typedef struct {
     char cls[24], text[96];
 } U32_CHILDWND;
 static U32_CHILDWND u32_child_windows[64];
+/* Retained window decoration: pills, bars, scrollbar parts. Coordinates are
+ * window-relative so they follow the window and clip with it. */
+#define U32_DECOR_MAX 32
+typedef struct { int used,x,y,w,h,r,flags; u32 fill,border; char label[64]; } U32_DECOR;
+static U32_DECOR u32_decor[U32_DECOR_MAX];
+static int u32_caption_hover;   /* 0 none, 1 minimize, 2 close */
+static int u32_press_inside;    /* button press began inside this window */
+static int u32_closing;
+static int u32_point_in_window(int px,int py) {
+    if(!g_wnd.visible||g_wnd.minimized)return 0;
+    return px>=g_wnd.x&&py>=g_wnd.y&&px<g_wnd.x+g_wnd.w&&py<g_wnd.y+g_wnd.h;
+}
 static int u32_class_name_equal(const char *a,const char *b);
 static U32_CHILDWND *u32_child_from_hwnd(void *hwnd) {
     unsigned long long v=(unsigned long long)hwnd;
@@ -1205,56 +1217,93 @@ static int u32_path_append(char *out,unsigned int cap,const char *base,const cha
     unsigned int j=0;while(leaf[j]&&n+1<cap)out[n++]=leaf[j++];
     out[n]=0;return leaf[j]==0;
 }
-/* SYS_QueryDir enumerates the current working directory. Walk real directories,
-   restoring the parent after every recursive descent; never invent a list of apps. */
-static void u32_scan_apps_dir(const char *path,unsigned int depth) {
-    if(!path||depth>U32_SCAN_DEPTH_MAX||u32_scan_dir_count>=U32_SCAN_DIR_MAX)return;
-    if(sy3(SYS_SetCurrentDirectory,(u64)path,0,0)!=0)return;
+/* SYS_QueryDir lists the kernel's current directory, which is shared state.
+ * Never rely on absolute-path chdir (ext4 only accepts single components) and
+ * never walk the whole disk (every chdir re-reads the volume index). Navigate
+ * with single components from the root, only through the usual application
+ * folders, and always come back to the root afterwards. */
+static void u32_go_root(void) {
+    for(int i=0;i<40;i++)(void)sy3(SYS_SetCurrentDirectory,(u64)"..",0,0);
+}
+static int u32_scan_allowed_top(const char *name) {
+    static const char *const ok[]={"magic","Windows","Program Files","Program Files (x86)","Apps","System32"};
+    for(unsigned int i=0;i<sizeof(ok)/sizeof(ok[0]);i++)if(u32_text_equal_ci(name,ok[i]))return 1;
+    return 0;
+}
+static void u32_scan_rel(const char *prefix,unsigned int depth) {
+    if(depth>3||u32_scan_dir_count>=160)return;
     u32_scan_dir_count++;
-    for(u64 index=0;index<4096&&u32_start_app_count<U32_START_APP_MAX;index++) {
+    char names[16][64];unsigned int nn=0;
+    for(u64 index=0;index<2048&&u32_start_app_count<U32_START_APP_MAX;index++) {
         char entry[256]={0};
-        u64 type=sy3(SYS_QueryDir,index,(u64)entry,0);
+        u64 type=sy3(SYS_QueryDir,index,(u64)entry,sizeof(entry));
         if(!type)break;
-        if(!entry[0]||u32_text_equal_ci(entry,".")||u32_text_equal_ci(entry,".."))continue;
-        char child[512];
-        if(!u32_path_append(child,sizeof(child),path,entry))continue;
+        if(!entry[0]||(entry[0]=='.'&&(!entry[1]||(entry[1]=='.'&&!entry[2]))))continue;
         if(type==2) {
-            if(depth<U32_SCAN_DEPTH_MAX&&u32_scan_dir_count<U32_SCAN_DIR_MAX) {
-                u32_scan_apps_dir(child,depth+1);
-                /* Recursive enumeration changes the process working directory;
-                   return to this parent before requesting its next entry. */
-                (void)sy3(SYS_SetCurrentDirectory,(u64)path,0,0);
+            unsigned int len=0;while(entry[len])len++;
+            if(len<sizeof(names[0])&&nn<16&&(depth>0||u32_scan_allowed_top(entry))) {
+                for(unsigned int k=0;k<=len;k++)names[nn][k]=entry[k];
+                nn++;
             }
         } else if(u32_has_exe_extension(entry)) {
-            u32_start_add_app(child,entry);
+            char full[512];
+            if(u32_path_append(full,sizeof(full),prefix,entry))u32_start_add_app(full,entry);
         }
     }
-    (void)sy3(SYS_SetCurrentDirectory,(u64)path,0,0);
+    for(unsigned int i=0;i<nn;i++) {
+        if(sy3(SYS_SetCurrentDirectory,(u64)names[i],0,0)!=0)continue;
+        char child[512];
+        if(u32_path_append(child,sizeof(child),prefix,names[i]))u32_scan_rel(child,depth+1);
+        (void)sy3(SYS_SetCurrentDirectory,(u64)"..",0,0);
+    }
 }
+static int u32_scan_tries;
 static void u32_scan_start_apps(void) {
-    if(u32_apps_scanned)return;
+    if(u32_apps_scanned&&u32_start_app_count)return;
+    if(u32_scan_tries>=4)return;
+    u32_scan_tries++;
     u32_apps_scanned=1;
     u32_start_app_count=0;u32_scan_dir_count=0;
-    u32_scan_apps_dir("C:\\",0);
-    /* An empty index stays empty: don't report made-up paths as installed apps. */
-    (void)sy3(SYS_SetCurrentDirectory,(u64)"C:\\",0,0);
+    u32_go_root();
+    u32_scan_rel("C:",0);
+    u32_go_root();
 }
-static int u32_app_matches(const U32_START_APP *app,const char *query) {
-    if(!app||!query||!*query)return 0;
-    /* Ignore spaces in either side so "file explorer" can find fileexplorer.exe. */
-    for(unsigned int start=0;app->name[start];start++) {
+static const char *u32_app_alias(const char *name) {
+    if(u32_text_equal_ci(name,"fileexplorer.exe"))return "File Explorer Files Explorer Folders";
+    if(u32_text_equal_ci(name,"taskmgr.exe"))return "Task Manager Processes";
+    if(u32_text_equal_ci(name,"cmd.exe"))return "Command Prompt Terminal Console";
+    if(u32_text_equal_ci(name,"settings.exe"))return "Settings Control Panel Help";
+    if(u32_text_equal_ci(name,"msiexec.exe"))return "Installer MSI";
+    return 0;
+}
+static const char *u32_app_title(const char *name) {
+    if(u32_text_equal_ci(name,"fileexplorer.exe"))return "File Explorer";
+    if(u32_text_equal_ci(name,"taskmgr.exe"))return "Task Manager";
+    if(u32_text_equal_ci(name,"cmd.exe"))return "Command Prompt";
+    if(u32_text_equal_ci(name,"settings.exe"))return "Settings";
+    return name;
+}
+static int u32_text_contains(const char *hay,const char *query) {
+    if(!hay||!query)return 0;
+    for(unsigned int start=0;hay[start];start++) {
         unsigned int i=start,j=0;
         while(query[j]) {
             while(query[j]==' ')j++;
             if(!query[j])break;
-            while(app->name[i]==' ')i++;
-            if(!app->name[i]||u32_char_lower((unsigned char)app->name[i])!=u32_char_lower((unsigned char)query[j]))break;
+            while(hay[i]==' ')i++;
+            if(!hay[i]||u32_char_lower((unsigned char)hay[i])!=u32_char_lower((unsigned char)query[j]))break;
             i++;j++;
         }
         while(query[j]==' ')j++;
         if(!query[j])return 1;
     }
     return 0;
+}
+static int u32_app_matches(const U32_START_APP *app,const char *query) {
+    if(!app||!query||!*query)return 0;
+    if(u32_text_contains(app->name,query))return 1;
+    const char *alias=u32_app_alias(app->name);
+    return alias&&u32_text_contains(alias,query);
 }
 static int u32_search_result_count(void) {
     if(g_search_len>0)u32_scan_start_apps();
@@ -1454,7 +1503,7 @@ static void draw_taskbar(void) {
                     round_fill(mx+12,ry,mw-24,26,6,hover?0xFF422326:0xFF292E37);
                     if(hover)fill(mx+12,ry,mw-24,2,0xFFFF3B30);
                     round_fill(mx+19,ry+6,14,14,4,0xFF3D5668);
-                    draw_text(mx+40,ry+10,u32_start_apps[ai].name,0xFFF1F3F6);
+                    draw_text(mx+40,ry+10,u32_app_title(u32_start_apps[ai].name),0xFFF1F3F6);
                 }
                 shown++;total++;
             }
@@ -1769,12 +1818,12 @@ static void compose(void) {
              * window frame, independent of child-HWND clipping or app menus. */
             if(w>=112) {
                 int bx=x+w-56, by=y+5;
-                round_fill(bx,by,23,23,8,0xFF303641);
-                gradient_v(bx+1,by+1,21,10,0xFF515966,0xFF303641);
+                round_fill(bx,by,23,23,8,u32_caption_hover==1?0xFF454B56:0xFF303641);
+                gradient_v(bx+1,by+1,21,10,u32_caption_hover==1?0xFF6B7482:0xFF515966,u32_caption_hover==1?0xFF454B56:0xFF303641);
                 fill(bx+6,by+15,11,2,0xFFE9ECF2);
                 bx=x+w-29;
-                round_fill(bx,by,23,23,8,0xFFFF3B30);
-                gradient_v(bx+1,by+1,21,10,0xFFFF766E,0xFFDB3028);
+                round_fill(bx,by,23,23,8,u32_caption_hover==2?0xFFFF6A60:0xFFFF3B30);
+                gradient_v(bx+1,by+1,21,10,u32_caption_hover==2?0xFFFFA39C:0xFFFF766E,u32_caption_hover==2?0xFFFF4A40:0xFFDB3028);
                 fill(bx+6,by+6,2,11,0xFFE9ECF2);
                 fill(bx+15,by+6,2,11,0xFFE9ECF2);
                 fill(bx+6,by+6,11,2,0xFFE9ECF2);
@@ -1788,6 +1837,24 @@ static void compose(void) {
         }
 
         if (!u32_borderless) u32_draw_child_windows();
+        if (!u32_borderless) {
+            for (int di = 0; di < U32_DECOR_MAX; di++) {
+                U32_DECOR *d = &u32_decor[di];
+                if (!d->used) continue;
+                int dx = x + d->x, dy = y + d->y;
+                if (!u32_damage_intersects(dx - 1, dy - 1, dx + d->w + 1, dy + d->h + 1)) continue;
+                if (d->border) round_fill(dx, dy, d->w, d->h, d->r, d->border);
+                int bw = d->border ? 1 : 0;
+                round_fill(dx + bw, dy + bw, d->w - 2 * bw, d->h - 2 * bw, d->r > 0 ? d->r - bw : 0, d->fill);
+                if (d->flags & 4) fill(dx + 6, dy + 1, d->w - 12, 2, 0xFFFF3B30);
+                if (d->label[0]) {
+                    int len = 0; while (d->label[len]) len++;
+                    int tx = (d->flags & 1) ? dx + (d->w - len * 7) / 2 : dx + 10;
+                    if (tx < dx + 4) tx = dx + 4;
+                    draw_text(tx, dy + (d->h - 14) / 2, d->label, (d->flags & 2) ? 0xFF9AA3B1 : 0xFFF1F3F6);
+                }
+            }
+        }
 
         for (int i = 0; i < g_nlines; i++) {
             const char *s = g_lines[i];
@@ -1801,6 +1868,24 @@ static void compose(void) {
                 (ty + 12 <= u32_clip_y0 || ty >= u32_clip_y1))
                 continue;
 
+            if (i >= 2 && w >= 500) {
+                const char *p = s; int hov = 0;
+                if (*p == '>') { hov = 1; p++; } else if (*p == ' ') p++;
+                if (p != s && p[0] == '[' && p[1] && p[2] && p[3] && p[4] == ']' && p[5] == ' ') {
+                    int rx = x + 10, rw = w - 46;
+                    if (hov) { round_fill(rx, ty - 2, rw, 17, 5, 0xFF422326); fill(rx, ty - 1, 3, 15, 0xFFFF3B30); }
+                    else if (i & 1) fill(rx, ty - 2, rw, 17, 0xFF1F252E);
+                    u32 rc = (p[1]=='D'&&p[2]=='I') ? 0xFFFFB454 :
+                             (p[1]=='E') ? 0xFFFF3B30 :
+                             (p[1]=='D'&&p[2]=='L') ? 0xFF7D8796 :
+                             (p[1]=='M') ? 0xFF3DDC84 :
+                             (p[1]=='P') ? 0xFFFF766E : 0xFF9AA3B1;
+                    round_fill(x + 18, ty, 14, 13, 3, rc);
+                    fill(x + 20, ty + 2, 10, 2, 0xFFE9ECF2);
+                    draw_text(x + 40, ty + 2, p + 6, hov ? 0xFFFFFFFF : COL_TEXT);
+                    continue;
+                }
+            }
             if (s[0] == '[' && s[1] == 'D' && s[2] == 'I')
                 ic = COL_WARN;
             else if (s[0] == '[' && s[1] == 'E')
@@ -1983,6 +2068,24 @@ static void show_shutdown_screen(int reboot) {
     }
 }
 
+static void u32_close_window_now(void) {
+    if (u32_closing) return;
+    u32_closing = 1;
+    int desktop_owner = u32_is_desktop_window();
+    /* Give the application its WM_CLOSE, then always enforce teardown so the
+     * window can never survive its X button. */
+    SendMessageA((void *)1, 0x0010u, 0, 0);
+    DestroyWindow((void *)1);
+    g_wnd.visible = 0;
+    g_wnd.minimized = 0;
+    u32_press_inside = 0;
+    u32_caption_hover = 0;
+    if (!desktop_owner) {
+        (void)sy3(SYS_Exit, 0, 0, 0);
+    }
+    u32_closing = 0;
+}
+
 static void on_click(int x, int y) {
     int h = (int)g_fh;
     int ty = h - 44;
@@ -1991,21 +2094,12 @@ static void on_click(int x, int y) {
         int wx = g_wnd.x, wy = g_wnd.y;
         int ww = g_wnd.w;
         if(!(u32_wnd_style&0x80000000u) && ww>=112 &&
-           y>=wy+5 && y<wy+28) {
-            if(x>=wx+ww-29 && x<wx+ww-5) {
-                SendMessageA((void *)1,0x0010u,0,0); /* WM_CLOSE */
-                int desktop_owner = u32_is_desktop_window();
-                DestroyWindow((void *)1);
-                /* This title-bar hit-test runs before the child-button close
-                 * path below. Ordinary apps must exit here too, otherwise
-                 * their event loop survives after its window was unregistered. */
-                if (!desktop_owner) {
-                    (void)sy3(SYS_Exit, 0, 0, 0);
-                    return;
-                }
+           y>=wy+2 && y<wy+32) {
+            if(x>=wx+ww-32 && x<wx+ww-2) {
+                u32_close_window_now();
                 return;
             }
-            if(x>=wx+ww-56 && x<wx+ww-32) {
+            if(x>=wx+ww-60 && x<wx+ww-33) {
                 g_wnd.minimized=1;
                 (void)sy3(SYS_WmMin,1,0,0);
                 compose();
@@ -2027,35 +2121,7 @@ static void on_click(int x, int y) {
              * This makes the title-bar X work for every USER32 window and
              * avoids killing the scheduler's current process from input code.
              */
-            sy3(SYS_Print, (u64)"DEBUG: X button pressed, sending WM_CLOSE\n", 0, 0);
-            SendMessageA((void *)1, 0x0010u, 0, 0); /* WM_CLOSE */
-
-            /*
-             * A window procedure may handle WM_CLOSE without calling
-             * DefWindowProc, or may mark the window hidden without removing
-             * its registered window. Always run USER32's final teardown
-             * after the notification so the X button cannot leave a stale
-             * window in the system window list.
-             */
-            sy3(SYS_Print, (u64)"DEBUG: Enforcing DestroyWindow\n", 0, 0);
-            if (!DestroyWindow((void *)1)) {
-                sy3(SYS_Print, (u64)"DEBUG: DestroyWindow FAILED\n", 0, 0);
-            } else {
-                sy3(SYS_Print, (u64)"DEBUG: DestroyWindow succeeded\n", 0, 0);
-            }
-
-            /*
-             * Closing an ordinary application's main window should end that
-             * application, not leave its event loop running invisibly. The
-             * desktop shell is the exception: closing its window hides it but
-             * must not tear down the interactive session.
-             */
-            if (!u32_is_desktop_window()) {
-                sy3(SYS_Print, (u64)"DEBUG: App is not desktop, calling SYS_Exit\n", 0, 0);
-                (void)sy3(SYS_Exit, 0, 0, 0);
-                return; /* SYS_Exit normally switches away from this process. */
-            }
-            sy3(SYS_Print, (u64)"DEBUG: Window was desktop, skipping SYS_Exit\n", 0, 0);
+            u32_close_window_now();
             return;
         }
 
@@ -2111,7 +2177,7 @@ static void on_click(int x, int y) {
             U32_START_LAYOUT menu_layout=u32_start_layout();
             int damage_y=g_menu?menu_layout.y:(ty-368);
             u32_taskbar_dirty=1;
-            g_menu=!g_menu;g_search_focus=0;g_start_hover=-1;
+            g_menu=!g_menu;g_search_focus=g_menu;g_start_hover=-1;
             if(g_menu) {
                 g_search_len=0;g_search_text[0]=0;
                 g_start_hover=-1;
@@ -2181,8 +2247,10 @@ static void on_click(int x, int y) {
         }
         if(hit(x,y,mx+12,my+310,mx+288,my+356)) {
             g_search_focus=0;g_search_len=0;g_search_text[0]=0;
-            static const char info[]="SentinelOS Settings: environment and display controls are being added.\n";
-            sy3(SYS_Write,1,(u64)info,sizeof(info)-1);return;
+            static char settings_name[]="settings.exe";
+            g_menu=0;g_start_hover=-1;u32_taskbar_dirty=1;
+            compose_region(0,my,(int)g_fw,(int)g_fh);
+            u32_menu_launch(settings_name);return;
         }
         g_menu=0;g_search_focus=0;g_start_hover=-1;u32_taskbar_dirty=1;
         compose_region(0,my,(int)g_fw,(int)g_fh);return;
@@ -2543,6 +2611,16 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 (void)u32_msg_push(msg);continue;
             }
 
+            if (ev.type == 4) {
+                /* Wheel notch: only the window under the pointer receives it. */
+                if (!u32_is_desktop_window() && !u32_point_in_window(ev.x, ev.y)) continue;
+                msg->hwnd=g_wnd.visible?1u:0u;msg->message=0x020Au;
+                msg->wParam=((u64)(unsigned short)(short)ev.btn)<<16;
+                msg->lParam=(((i64)(unsigned short)ev.y)<<16)|(i64)(unsigned short)ev.x;
+                msg->time=(u32)u32_tick_now();msg->pt_x=ev.x;msg->pt_y=ev.y;
+                (void)u32_msg_push(msg);
+                continue;
+            }
             if (ev.type == 2 || ev.type == 3) {
                 /* Preserve the old cursor rectangle even if this event
                  * closes a window or triggers composition before repaint. */
@@ -2559,6 +2637,31 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     }
                 }
                 u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
+
+                /* Window-scoped input: an application only sees the pointer
+                 * while it is inside its window, or while a press that began
+                 * inside is still held. Everything else is shell business. */
+                int u32_is_desk = u32_is_desktop_window();
+                int u32_inside = u32_is_desk || u32_point_in_window(ev.x, ev.y);
+                int u32_deliver = u32_inside;
+                if (ev.type == 3) u32_press_inside = u32_inside;
+                else if (u32_press_inside) u32_deliver = 1;
+                if (ev.type == 2 && !(ev.btn & 1)) u32_press_inside = 0;
+
+                /* Caption button hover highlight, repainted only on change. */
+                {
+                    int hv = 0;
+                    if (!u32_is_desk && g_wnd.visible && !g_wnd.minimized && u32_inside &&
+                        !(u32_wnd_style & 0x80000000u) && g_wnd.w >= 112 &&
+                        ev.y >= g_wnd.y + 2 && ev.y < g_wnd.y + 32) {
+                        if (ev.x >= g_wnd.x + g_wnd.w - 32 && ev.x < g_wnd.x + g_wnd.w - 2) hv = 2;
+                        else if (ev.x >= g_wnd.x + g_wnd.w - 60 && ev.x < g_wnd.x + g_wnd.w - 33) hv = 1;
+                    }
+                    if (hv != u32_caption_hover) {
+                        u32_caption_hover = hv;
+                        compose_region(g_wnd.x + g_wnd.w - 70, g_wnd.y, g_wnd.x + g_wnd.w + 2, g_wnd.y + 36);
+                    }
+                }
 
                 msg->hwnd=g_wnd.visible?1u:0u;msg->message=(ev.type==3)?0x0201u:0x0200u;
                 msg->wParam=(u64)(unsigned int)ev.btn;msg->lParam=0;msg->time=(u32)u32_tick_now();
@@ -2644,7 +2747,7 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 /* Clear the old cursor footprint after click handlers and drag
                  * composition finish, then draw it at the new position. */
                 cursor_repaint_transition(old_mx,old_my,g_mx,g_my);
-                (void)u32_msg_push(msg);
+                if (u32_deliver) (void)u32_msg_push(msg);
                 continue;
             }
         }
@@ -2869,6 +2972,21 @@ void DrawTaskbar(void) {
     u32_render_clip=old_clip;
     u32_clip_x0=old_x0; u32_clip_y0=old_y0;
     u32_clip_x1=old_x1; u32_clip_y1=old_y1;
+}
+
+/* Retained, window-relative decoration (pills, bars, scrollbar parts) that
+ * applications place with plain values and USER32 repaints with the frame.
+ * flags: 1 = centered label, 2 = muted label, 4 = red top accent. w<=0 removes. */
+__attribute__((dllexport)) BOOL SetWindowDecorA(void *hwnd,int id,int x,int y,int w,int h,int radius,
+                                                unsigned int fill_col,unsigned int border_col,int flags,const char *label) {
+    if(hwnd!=(void *)1||id<0||id>=U32_DECOR_MAX)return 0;
+    U32_DECOR *d=&u32_decor[id];
+    if(w<=0||h<=0){d->used=0;return 1;}
+    d->used=1;d->x=x;d->y=y;d->w=w;d->h=h;d->r=radius;d->flags=flags;
+    d->fill=fill_col;d->border=border_col;
+    int i=0;while(label&&label[i]&&i<(int)sizeof(d->label)-1){d->label[i]=label[i];i++;}
+    d->label[i]=0;
+    return 1;
 }
 
 /* Batch startup UI mutations into one final framebuffer composition. */
@@ -3840,9 +3958,9 @@ __attribute__((dllexport)) BOOL InvertRect(void *dc,const U32_RECT *r){(void)dc;
 
 __attribute__((dllexport)) BOOL DrawFocusRect(void *dc,const U32_RECT *r){(void)dc;if(!r)return 0;for(int x=r->left;x<r->right;x+=2){putpx(x,r->top,COL_TEXT);putpx(x,r->bottom-1,COL_TEXT);}for(int y=r->top;y<r->bottom;y+=2){putpx(r->left,y,COL_TEXT);putpx(r->right-1,y,COL_TEXT);}return 1;}
 
-__attribute__((dllexport)) BOOL OpenIcon(void *hwnd){if(!IsWindow(hwnd))return 0;g_wnd.minimized=0;return 1;}
+__attribute__((dllexport)) BOOL OpenIcon(void *hwnd){if(hwnd!=(void*)1||!IsWindow(hwnd))return 0;(void)ShowWindow(hwnd,9);return 1;}
 
-__attribute__((dllexport)) BOOL CloseWindow(void *hwnd){if(!IsWindow(hwnd))return 0;g_wnd.minimized=1;return 1;}
+__attribute__((dllexport)) BOOL CloseWindow(void *hwnd){if(hwnd!=(void*)1||!IsWindow(hwnd))return 0;(void)ShowWindow(hwnd,6);return 1;}
 
 __attribute__((dllexport)) BOOL ShowOwnedPopups(void *hwnd,BOOL show){(void)show;return IsWindow(hwnd);}
 

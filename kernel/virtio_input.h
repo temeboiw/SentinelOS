@@ -3,6 +3,8 @@
 
 #define VI_EV_KEY 1
 #define VI_EV_ABS 3
+#define VI_EV_REL 2
+#define VI_REL_WHEEL 8
 #define VI_ABS_X  0
 #define VI_ABS_Y  1
 #define VI_BTN_LEFT 0x110
@@ -13,7 +15,7 @@ struct vi_avail { uint16_t flags, idx; uint16_t ring[64]; };
 struct vi_used_elem { uint32_t id, len; };
 struct vi_used { uint16_t flags, idx; struct vi_used_elem ring[64]; };
 
-static int vi_ok, vi_x = 640, vi_y = 400, vi_btn, vi_moved, vi_clicked, vi_evt_count;
+static int vi_ok, vi_x = 640, vi_y = 400, vi_btn, vi_moved, vi_clicked, vi_evt_count, vi_wheel;
 static volatile uint8_t *vi_common, *vi_notify;
 static uint32_t vi_notify_mult;
 static uint16_t vi_qsize, vi_notify_off, vi_last_used;
@@ -167,7 +169,10 @@ static void virtio_input_poll(void) {
         uint32_t id = vi_used->ring[s].id;
         if (id < vi_qsize) {
             struct vi_event ev = vi_ev[id];
-            if (ev.type == VI_EV_ABS) {
+            if (ev.type == VI_EV_REL && ev.code == VI_REL_WHEEL) {
+                /* Positive REL_WHEEL means scroll up, away from the user. */
+                vi_wheel += (int)ev.value;
+            } else if (ev.type == VI_EV_ABS) {
                 int v = ev.value;
                 if (v < 0) v = 0;
                 if (v > 32767) v = 32767;

@@ -16,8 +16,11 @@ static uint8_t  kbd_buf[64];
 static unsigned kbd_r, kbd_w;
 static int mouse_x = 640, mouse_y = 400;
 static int mouse_btn;
-static uint8_t mouse_pkt[3];
+static uint8_t mouse_pkt[4];
 static int mouse_idx;
+/* IntelliMouse (device ID 3) adds a signed wheel byte to every packet. */
+static int mouse_pkt_len = 3;
+static int mouse_wheel_accum;
 static int ps2_ready;
 static int mouse_pkt_count;
 static volatile int32_t game_mouse_dx, game_mouse_dy;
@@ -57,7 +60,7 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
             return;
         }
         mouse_pkt[mouse_idx++] = b;
-        if (mouse_idx < 3) return;
+        if (mouse_idx < mouse_pkt_len) return;
         mouse_idx = 0;
 
         int dx = (int8_t)mouse_pkt[1];
@@ -77,6 +80,13 @@ static void ps2_handle_byte(uint8_t b, int is_mouse) {
         if (mouse_x > 1279) mouse_x = 1279;
         if (mouse_y > 799) mouse_y = 799;
         mouse_btn = mouse_pkt[0] & 0x07;
+        if (mouse_pkt_len == 4) {
+            /* Low nibble is the signed wheel delta; PS/2 reports positive toward
+             * the user. Store it Windows-style: positive means scroll up. */
+            int wheel = mouse_pkt[3] & 0x0F;
+            if (wheel & 0x08) wheel -= 16;
+            mouse_wheel_accum -= wheel;
+        }
 
         mouse_pkt_count++;
         if (mouse_pkt_count == 1 || (mouse_pkt_count % 50) == 0)
@@ -123,6 +133,20 @@ static int ps2_init(void) {
     ps2_cmd(0xA8);
     /* defaults */
     ps2_cmd(0xD4); ps2_data(0xF6); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+    /* IntelliMouse wheel probe: sample rates 200, 100, 80, then read the ID.
+     * ID 3 means every packet carries a fourth wheel byte. */
+    {
+        static const uint8_t magic[3] = { 200, 100, 80 };
+        for (int m = 0; m < 3; m++) {
+            ps2_cmd(0xD4); ps2_data(0xF3); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+            ps2_cmd(0xD4); ps2_data(magic[m]); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+        }
+        ps2_cmd(0xD4); ps2_data(0xF2); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
+        ps2_wait_read();
+        uint8_t id = ps2_inb(PS2_DATA);
+        mouse_pkt_len = (id == 3 || id == 4) ? 4 : 3;
+        DbgPrint("ps2: mouse id=%d packet=%d bytes\n", (int)id, mouse_pkt_len);
+    }
     /* sample rate 100 */
     ps2_cmd(0xD4); ps2_data(0xF3); ps2_wait_read(); (void)ps2_inb(PS2_DATA);
     ps2_cmd(0xD4); ps2_data(100);  ps2_wait_read(); (void)ps2_inb(PS2_DATA);

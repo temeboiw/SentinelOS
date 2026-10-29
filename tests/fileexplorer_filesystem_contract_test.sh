@@ -35,7 +35,8 @@ function_body() {
   ' "$file"
 }
 
-require "$NTFS" "does not implement writes" "NTFS driver declares read-only contract"
+require "$NTFS" "Writes are limited to overwriting existing unnamed \$DATA streams." "NTFS write contract remains limited to existing unnamed data streams"
+require "$NTFS" "static int ntfsk_write_file_at(" "NTFS write path requires an existing file and offset"
 require "$EXT4" "static int e4_write_supported(Ext4k *fs)" "ext4 write capability gate exists"
 require "$EXT4" "fs->blksz != 4096" "ext4 writer rejects unsupported block size"
 require "$EXT4" "fs->feature_compat & (0x0004u | 0x0020u)" "ext4 writer rejects journal and directory-index layouts"

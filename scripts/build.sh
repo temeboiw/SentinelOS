@@ -2122,6 +2122,29 @@ lld -flavor link \
   "/out:$SYS32/taskmgr.exe" \
   "$B/obj/taskmgr.o"
 
+echo "  -> settings.exe (native SentinelOS Settings)"
+
+clang "${USER_CFLAGS[@]}" \
+  -c "$ROOT/user/settings.c" \
+  -o "$B/obj/settings.o"
+
+lld -flavor link \
+  /subsystem:windows /entry:mainCRTStartup /nodefaultlib \
+  /fixed:no /base:0x40700000 \
+  "/out:$SYS32/settings.exe" \
+  "$B/obj/settings.o"
+
+if [[ ! -s "$SYS32/settings.exe" ]]; then
+  echo "FATAL: settings.exe was not produced"
+  exit 1
+fi
+SETTINGS_FORMAT="$(file -b "$SYS32/settings.exe")"
+echo "  -> settings.exe format: $SETTINGS_FORMAT"
+if [[ "$SETTINGS_FORMAT" != *"PE32+"* || "$SETTINGS_FORMAT" != *"x86-64"* ]]; then
+  echo "FATAL: settings.exe is not a PE32+ x86-64 executable"
+  exit 1
+fi
+
 echo "  -> msiexec.exe"
 
 clang "${USER_CFLAGS[@]}" \
@@ -2262,6 +2285,7 @@ for image in \
   vulkan.dll \
   cmd.exe \
   taskmgr.exe \
+  settings.exe \
   msiexec.exe
 do
   if [[ ! -s "$SYS32/$image" ]]; then
@@ -2288,6 +2312,7 @@ ls -lh \
   "$SYS32/vulkan.dll" \
   "$SYS32/cmd.exe" \
   "$SYS32/taskmgr.exe" \
+  "$SYS32/settings.exe" \
   "$SYS32/msiexec.exe"
 
 # Reject accidental files at the filesystem root; only /magic is permitted.
@@ -2534,6 +2559,7 @@ for required in \
   magic/System32/smss.exe \
   magic/System32/bootvid.exe \
   magic/System32/sentlogon.exe \
+  magic/System32/settings.exe \
   magic/System32/drivers/ata.sys
 do
   if ! ntfscat "$B/ntfs.tmp" "/$required" >/dev/null; then

@@ -135,8 +135,16 @@ static void KeYield(void) {
 
 static NTSTATUS KeDelayExecutionThread(CHAR WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Interval) {
     (void)WaitMode; (void)Alertable;
-    ULONGLONG ms = Interval->QuadPart < 0 ? (ULONGLONG)(-Interval->QuadPart) / 10000 : 0;   // negative = relative, 100 ns units
-    ULONGLONG ticks = (ms + 9) / 10;
+    /* Convert a negative relative interval without negating INT64_MIN in the
+     * signed domain (which is undefined behavior in C). Positive absolute
+     * deadlines are not supported by this minimal scheduler and remain an
+     * immediate delay, matching the existing behavior. */
+    LONGLONG interval = Interval->QuadPart;
+    ULONGLONG delay_100ns = interval < 0
+        ? (ULONGLONG)(-(interval + 1)) + 1ULL
+        : 0;
+    ULONGLONG ms = delay_100ns / 10000ULL;
+    ULONGLONG ticks = ms / 10ULL + (ms % 10ULL != 0);
     if (!ticks) ticks = 1;
     uint64_t fl = KeDisableInterrupts();
     KiSchedulerLock();

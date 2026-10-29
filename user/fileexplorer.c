@@ -92,6 +92,8 @@ static const char *context_item(int i) {
 static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
+static int g_scroll_drag = 0;
+static int g_scroll_drag_grab = 0;
 static int g_home = 0;
 static int g_home_selected = 0;
 static int g_sort_mode = 0;
@@ -146,6 +148,7 @@ static const char *home_item(int i) {
 }
 
 /* Draw one visible row and invalidate only that row. */
+static void fe_chrome(void);
 static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visible) {
     if (visible < 0 || visible >= VISIBLE_ROWS) return;
     int i = g_scroll + visible;
@@ -177,21 +180,7 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
         line[p] = 0;
     }
     pText(g_window, 0, 2 + visible, line, -1);
-    /* Visible right-gutter scrollbar; its thumb tracks the first visible item. */
-    {
-        int count = g_home ? HOME_ITEM_COUNT : g_count;
-        int max_scroll = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
-        int thumb_size = count > 0 ? (VISIBLE_ROWS * VISIBLE_ROWS) / count : VISIBLE_ROWS;
-        if (thumb_size < 1) thumb_size = 1;
-        if (thumb_size > VISIBLE_ROWS) thumb_size = VISIBLE_ROWS;
-        int thumb_start = max_scroll
-            ? (g_scroll * (VISIBLE_ROWS - thumb_size)) / max_scroll : 0;
-        int thumb_end = thumb_start + thumb_size - 1;
-        /* TextOutA clips rows at 79 columns; keep the track inside that area. */
-        pText(g_window, 76, 2 + visible,
-              (max_scroll && visible >= thumb_start && visible <= thumb_end)
-                  ? "###" : " | ", -1);
-    }
+    fe_chrome();
     if (pInv) {
         FE_RECT dirty = { 0, 44 + (2 + visible) * 16,
                           760, 44 + (3 + visible) * 16 };
@@ -199,32 +188,79 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
     }
 }
 
+/* Pixel scrollbar (window-relative). USER32 retains and draws the pieces. */
+#define SB_X 726
+#define SB_Y 78
+#define SB_W 14
+#define SB_H 424
+typedef BOOL (*SetWindowDecor_t)(void *, int, int, int, int, int, int, unsigned int, unsigned int, int, const char *);
+static SetWindowDecor_t g_pDecor;
+static int sb_thumb_h(int count) {
+    int h = count > 0 ? (SB_H * VISIBLE_ROWS) / count : SB_H;
+    if (h < 28) h = 28;
+    if (h > SB_H) h = SB_H;
+    return h;
+}
+static int sb_thumb_y(int count) {
+    int mx = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
+    int th = sb_thumb_h(count);
+    return mx ? (g_scroll * (SB_H - th)) / mx : 0;
+}
+static void sb_set_from_pixel(int track_y, int grab, int count) {
+    int mx = count > VISIBLE_ROWS ? count - VISIBLE_ROWS : 0;
+    int range = SB_H - sb_thumb_h(count);
+    int pos = track_y - grab;
+    if (pos < 0) pos = 0;
+    if (pos > range) pos = range;
+    g_scroll = (range && mx) ? (pos * mx) / range : 0;
+}
+static void fe_chrome(void) {
+    if (!g_pDecor) return;
+    int count = g_home ? HOME_ITEM_COUNT : g_count;
+    int scrollable = count > VISIBLE_ROWS;
+    /* Toolbar buttons and address bar: charcoal pills with the signal-red accent. */
+    g_pDecor(g_window, 0, 14, 50, 48, 24, 8, 0xFF252A33, 0xFF454B56, 1, "Back");
+    g_pDecor(g_window, 1, 66, 50, 70, 24, 8, 0xFF252A33, 0xFF454B56, 1, "Forward");
+    g_pDecor(g_window, 2, 140, 50, 40, 24, 8, 0xFF252A33, 0xFF454B56, 1, "Up");
+    g_pDecor(g_window, 3, 184, 50, 72, 24, 8, 0xFF252A33, 0xFF454B56, 1, "Refresh");
+    char addr[270]; int q = 0;
+    const char *address = g_address_mode ? g_address_edit : (g_home ? "Quick access" : g_path);
+    for (int j = 0; address[j] && q < 38; j++) addr[q++] = address[j];
+    if (g_address_mode && q < 268) addr[q++] = '_';
+    addr[q] = 0;
+    /* Keep the tail of long paths visible. */
+    const char *shown = addr;
+    if (q > 38) shown = addr + (q - 38);
+    g_pDecor(g_window, 4, 264, 50, 300, 24, 8, 0xFF1B2028, g_address_mode ? 0xFFFF3B30 : 0xFF414854, 0, shown);
+    char side[72]; int n = 0;
+    const char *label = g_sort_mode == 0 ? "Sort: Native" : g_sort_mode == 1 ? "Sort: Folders" : "Sort: A-Z";
+    if (g_search_mode || g_filter_len) {
+        const char *pre = "Search: ";
+        for (int j = 0; pre[j]; j++) side[n++] = pre[j];
+        for (int j = 0; g_filter[j] && n < 60; j++) side[n++] = g_filter[j];
+        if (g_search_mode && n < 61) side[n++] = '_';
+    } else {
+        for (int j = 0; label[j]; j++) side[n++] = label[j];
+    }
+    side[n] = 0;
+    g_pDecor(g_window, 5, 572, 50, 146, 24, 8, 0xFF252A33, (g_search_mode || g_filter_len) ? 0xFFFF3B30 : 0xFF454B56, 0, side);
+    /* Scrollbar track and thumb. */
+    if (scrollable) {
+        g_pDecor(g_window, 8, SB_X, SB_Y, SB_W, SB_H, 6, 0xFF171B21, 0xFF363C46, 0, "");
+        g_pDecor(g_window, 9, SB_X + 1, SB_Y + 1 + sb_thumb_y(count), SB_W - 2, sb_thumb_h(count) - 2, 5,
+                 g_scroll_drag ? 0xFFFF3B30 : 0xFF5A626F, g_scroll_drag ? 0xFFFF766E : 0xFF7D8796, 0, "");
+    } else {
+        g_pDecor(g_window, 8, SB_X, SB_Y, SB_W, SB_H, 6, 0xFF171B21, 0xFF2A3038, 0, "");
+        g_pDecor(g_window, 9, 0, 0, 0, 0, 0, 0, 0, 0, "");
+    }
+}
+
 static void draw_rows(TextOutA_t pText, InvalidateRect_t pInv) {
     if (!pText) { print("fileexplorer: draw_rows missing TextOutA\n"); return; }
     print("fileexplorer: draw_rows stage=title-before\n");
     pText(g_window, 0, 0, g_home ? "File Explorer  >  Home" : "File Explorer", -1);
-    {
-        char toolbar[80]; int q=0;
-        const char *prefix="Back  Forward  Up  Refresh  |  Address: ";
-        while(prefix[q] && q<78) { toolbar[q]=prefix[q]; q++; }
-        const char *address=g_address_mode ? g_address_edit : (g_home ? "Quick access" : g_path);
-        for(int j=0;address[j] && q<78;j++) toolbar[q++]=address[j];
-        if(g_address_mode && q<78) toolbar[q++]='_';
-        if(q<78) {
-            const char *sort_label = g_sort_mode==0 ? " | Sort: Native" :
-                                     g_sort_mode==1 ? " | Sort: Folders" :
-                                                      " | Sort: A-Z";
-            for(int j=0;sort_label[j] && q<78;j++) toolbar[q++]=sort_label[j];
-        }
-        if((g_filter_len || g_search_mode) && q<68) {
-            const char *search=" | Search: ";
-            for(int j=0;search[j] && q<78;j++) toolbar[q++]=search[j];
-            if(!g_filter_len && g_search_mode && q<78) toolbar[q++]='_';
-            for(int j=0;g_filter[j] && q<78;j++) toolbar[q++]=g_filter[j];
-        }
-        toolbar[q]=0;
-        pText(g_window,0,1,toolbar,-1);
-    }
+    pText(g_window,0,1," ",-1);
+    fe_chrome();
     for (int visible = 0; visible < VISIBLE_ROWS; visible++) {
         if (visible == 0) print("fileexplorer: draw_rows stage=first-row-before\n");
         draw_visible_row(pText, 0, visible);
@@ -650,6 +686,7 @@ void mainCRTStartup(void) {
     MessageBoxA_t pMsgBox = (MessageBoxA_t)gpa(u32, "MessageBoxA");
     InvalidateRect_t pInv = (InvalidateRect_t)gpa(u32, "InvalidateRect");
     GetWindowRect_t pGetWindowRect = (GetWindowRect_t)gpa(u32, "GetWindowRect");
+    g_pDecor = (SetWindowDecor_t)gpa(u32, "SetWindowDecorA");
     BeginRedrawBatch_t pBeginBatch = (BeginRedrawBatch_t)gpa(u32, "BeginRedrawBatch");
     EndRedrawBatch_t pEndBatch = (EndRedrawBatch_t)gpa(u32, "EndRedrawBatch");
 
@@ -706,6 +743,15 @@ void mainCRTStartup(void) {
          * Mouse move: update a fixed-width hover marker. The marker occupies
          * a reserved character, so row text and controls never jump sideways.
          */
+        if (msg.message == 0x0200 && g_scroll_drag && !g_context_menu) {
+            int count = g_home ? HOME_ITEM_COUNT : g_count;
+            if (!(msg.wParam & 1)) { g_scroll_drag = 0; draw_rows(pText, pInv); continue; }
+            sb_set_from_pixel((msg.y - g_win_y) - SB_Y, g_scroll_drag_grab, count);
+            g_hover_row = -1;
+            draw_rows(pText, pInv);
+            continue;
+        }
+        if (msg.message == 0x0200 && g_scroll_drag && !(msg.wParam & 1)) g_scroll_drag = 0;
         if (msg.message == 0x0200 && !g_context_menu) {
             int line = (msg.y - (g_win_y + 44)) / 16;
             int row = line - 2;
@@ -941,37 +987,35 @@ void mainCRTStartup(void) {
             if (!g_context_menu) {
                 int line=(msg.y-(g_win_y+44))/16;
                 int relx=msg.x-g_win_x;
-                /* Right gutter click jumps to the matching scrollbar position. */
-                if(relx>=608 && relx<632 && line>=2 && line<2+VISIBLE_ROWS) {
+                {
+                    int rely=msg.y-g_win_y;
                     int count=g_home?HOME_ITEM_COUNT:g_count;
-                    int max_scroll=count>VISIBLE_ROWS?count-VISIBLE_ROWS:0;
-                    int thumb_size=count>0?(VISIBLE_ROWS*VISIBLE_ROWS)/count:VISIBLE_ROWS;
-                    if(thumb_size<1)thumb_size=1;
-                    if(thumb_size>VISIBLE_ROWS)thumb_size=VISIBLE_ROWS;
-                    int track_range=VISIBLE_ROWS-thumb_size;
-                    int track_pos=line-2-thumb_size/2;
-                    if(track_pos<0)track_pos=0;
-                    if(track_pos>track_range)track_pos=track_range;
-                    g_scroll=track_range&&max_scroll
-                        ?(track_pos*max_scroll)/track_range:0;
-                    g_hover_row=-1;
-                    draw_rows(pText,pInv);
-                    continue;
+                    if(relx>=SB_X-4 && relx<SB_X+SB_W+4 && rely>=SB_Y && rely<SB_Y+SB_H) {
+                        int th=sb_thumb_h(count), ty=sb_thumb_y(count);
+                        g_scroll_drag=1;
+                        if(rely-SB_Y>=ty && rely-SB_Y<ty+th) g_scroll_drag_grab=rely-SB_Y-ty;
+                        else { g_scroll_drag_grab=th/2; sb_set_from_pixel(rely-SB_Y,g_scroll_drag_grab,count); }
+                        g_hover_row=-1;
+                        draw_rows(pText,pInv);
+                        continue;
+                    }
                 }
-                if(line==1) {
+                if(msg.y-g_win_y>=50 && msg.y-g_win_y<74) {
                     int relx=msg.x-g_win_x;
-                    if(relx>=0&&relx<40) { if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv); continue; }
-                    if(relx>=40&&relx<100) { if(fe_history_move(pChdir,1)) reload(pQuery,pText,pInv); continue; }
-                    if(relx>=100&&relx<130) {
+                    if(relx>=14&&relx<62) { if(fe_history_move(pChdir,-1)) reload(pQuery,pText,pInv); continue; }
+                    if(relx>=66&&relx<136) { if(fe_history_move(pChdir,1)) reload(pQuery,pText,pInv); continue; }
+                    if(relx>=140&&relx<180) {
                         if(!g_home) { char parent[260];int n=0;while(g_path[n]&&n<259){parent[n]=g_path[n];n++;}parent[n]=0;if(n>3){n--;while(n>3&&parent[n-1]!='\\')n--;if(n<3)n=3;parent[n]=0;}if(fe_set_path(pChdir,parent)){fe_history_visit(g_path);reload(pQuery,pText,pInv);} }
                         continue;
                     }
-                    if(relx>=130&&relx<190) { reload(pQuery,pText,pInv); continue; }
-                    if(relx>=240) {
+                    if(relx>=184&&relx<256) { reload(pQuery,pText,pInv); continue; }
+                    if(relx>=264&&relx<564) {
                         g_address_mode=1;g_address_len=0;
                         while(g_path[g_address_len]&&g_address_len<258){g_address_edit[g_address_len]=g_path[g_address_len];g_address_len++;}
                         g_address_edit[g_address_len]=0;draw_rows(pText,pInv);continue;
                     }
+                    if(relx>=572&&relx<718) { g_sort_mode=(g_sort_mode+1)%3; if(!g_home)reload(pQuery,pText,pInv); else draw_rows(pText,pInv); continue; }
+                    continue;
                 }
             }
             if (g_context_menu) {
@@ -1238,6 +1282,10 @@ void mainCRTStartup(void) {
                     }
                 }
             }
+        }
+
+        if (msg.message == 0x0202) {
+            g_scroll_drag=0;
         }
     }
 

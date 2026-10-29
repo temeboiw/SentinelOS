@@ -125,6 +125,14 @@ static int SentinelPartitionScan(SENTINEL_PARTITION_READ read, void *context,
     if (array_bytes > disk_bytes || entries_lba > UINT64_MAX / sector_size ||
         entries_lba * sector_size > disk_bytes ||
         array_bytes > disk_bytes - entries_lba * sector_size) return -1;
+    /* The primary GPT entry array must live in the reserved GPT area before
+     * the first usable LBA. Accepting it inside the usable range lets a
+     * checksummed, malformed table describe a partition over its own
+     * metadata. The byte-capacity check above also bounds this addition. */
+    uint64_t array_sectors = array_bytes / sector_size +
+        (array_bytes % sector_size != 0);
+    if (entries_lba > UINT64_MAX - array_sectors ||
+        entries_lba + array_sectors > first_usable) return -1;
     /* Validate the whole entry-array CRC in bounded chunks. */
     uint8_t chunk[4096]; uint32_t crc = 0xffffffffu;
     uint64_t pos = 0;

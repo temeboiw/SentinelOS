@@ -279,7 +279,10 @@ static uint64_t MmLookupUserPte(KPROCESS *proc, uint64_t va, int write) {
     if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) return 0;
     uint64_t *root = PHYS_TO_VIRT(proc->DirectoryTableBase & PTE_ADDR);
     uint64_t e = root[(va >> 39) & 511];
-    if (!(e & PTE_P) || !(e & PTE_U)) return 0;
+    /* x86 applies write permission at every paging level. A writable leaf
+       under a read-only PML4 entry is still effectively read-only, so kernel
+       syscalls must not accept it as a writable user buffer. */
+    if (!(e & PTE_P) || !(e & PTE_U) || (write && !(e & PTE_RW))) return 0;
     uint64_t *pdpt = PHYS_TO_VIRT(e & PTE_ADDR);
     e = pdpt[(va >> 30) & 511];
     if (!(e & PTE_P) || !(e & PTE_U) || (write && !(e & PTE_RW))) return 0;

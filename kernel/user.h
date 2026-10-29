@@ -516,50 +516,59 @@ static void PspForgetUserImages(KPROCESS *proc) {
  * Apply PE base relocations to the private copy only.
  * The source BootModule bytes are never changed.
  */
-static void pe_apply_relocs(uint8_t *image, uint64_t size, int64_t delta) {
-    if (!pe_is_image(image, size) || !delta) return;
+static int pe_apply_relocs(uint8_t *image, uint64_t size, int64_t delta) {
+    if (!delta) return 1;
+    if (!pe_is_image(image, size)) return 0;
 
     int32_t lfanew = *(int32_t *)(image + 0x3C);
-    uint8_t *opt = image + lfanew + 4 + 20;
-
+    uint8_t *nt = image + lfanew;
+    uint16_t opt_size = *(uint16_t *)(nt + 20);
+    uint64_t opt_off = (uint64_t)lfanew + 24;
+    if (opt_size < 112 + 6 * 8 || opt_off > size || opt_size > size - opt_off)
+        return 0;
+    uint8_t *opt = image + opt_off;
     uint32_t reloc_rva = *(uint32_t *)(opt + 112 + 5 * 8);
     uint32_t reloc_sz  = *(uint32_t *)(opt + 112 + 5 * 8 + 4);
+    if (!reloc_rva || !reloc_sz || reloc_rva >= size || reloc_sz > size - reloc_rva)
+        return 0;
 
-    if (!reloc_rva || !reloc_sz ||
-        reloc_rva >= size || reloc_sz > size - reloc_rva) {
-        return;
+    /* Validate the entire directory before changing any image bytes. PE32+
+       AMD64 images use DIR64 relocations; silently skipping other types can
+       leave a partially relocated executable that appears loadable. */
+    uint64_t pos = reloc_rva, end = (uint64_t)reloc_rva + reloc_sz;
+    while (pos < end) {
+        if (end - pos < 8) return 0;
+        uint32_t page_rva = *(uint32_t *)(image + pos);
+        uint32_t block_sz = *(uint32_t *)(image + pos + 4);
+        if ((page_rva & 0xFFF) || page_rva >= size || block_sz < 8 ||
+            (block_sz & 1) || block_sz > end - pos) return 0;
+        uint32_t count = (block_sz - 8) / 2;
+        uint16_t *entries = (uint16_t *)(image + pos + 8);
+        for (uint32_t i = 0; i < count; i++) {
+            uint16_t type = entries[i] >> 12;
+            uint64_t target = (uint64_t)page_rva + (entries[i] & 0xFFF);
+            if (type == 0) continue;
+            if (type != 10 || target > size || sizeof(uint64_t) > size - target)
+                return 0;
+        }
+        pos += block_sz;
     }
 
-    uint8_t *rel = image + reloc_rva;
-    uint8_t *end = rel + reloc_sz;
-
-    while (rel + 8 <= end) {
-        uint32_t page_rva = *(uint32_t *)rel;
-        uint32_t block_sz = *(uint32_t *)(rel + 4);
-
-        if (block_sz < 8 || block_sz > (uint64_t)(end - rel))
-            break;
-
+    pos = reloc_rva;
+    while (pos < end) {
+        uint32_t block_sz = *(uint32_t *)(image + pos + 4);
         uint32_t count = (block_sz - 8) / 2;
-        uint16_t *entries = (uint16_t *)(rel + 8);
-
+        uint32_t page_rva = *(uint32_t *)(image + pos);
+        uint16_t *entries = (uint16_t *)(image + pos + 8);
         for (uint32_t i = 0; i < count; i++) {
-            uint16_t e = entries[i];
-            uint16_t type = e >> 12;
-            uint16_t off = e & 0xFFF;
-            uint64_t target = (uint64_t)page_rva + off;
-
-            if (type == 10) {
-                if (target <= size && sizeof(uint64_t) <= size - target)
-                    *(uint64_t *)(image + target) += (uint64_t)delta;
-            } else if (type == 3) {
-                if (target <= size && sizeof(uint32_t) <= size - target)
-                    *(uint32_t *)(image + target) += (uint32_t)delta;
+            if ((entries[i] >> 12) == 10) {
+                uint64_t target = (uint64_t)page_rva + (entries[i] & 0xFFF);
+                *(uint64_t *)(image + target) += (uint64_t)delta;
             }
         }
-
-        rel += block_sz;
+        pos += block_sz;
     }
+    return 1;
 }
 
 static BootModule *PspFindModule(BootInfo *bi, const char *name) {
@@ -726,8 +735,18 @@ static int PspMapUserImage(KPROCESS *proc, BootModule *mod) {
         uint64_t preferred_base = *(uint64_t *)(opt + 24);
         int64_t delta = (int64_t)base - (int64_t)preferred_base;
 
-        if (delta)
-            pe_apply_relocs(dst, size, delta);
+        if (delta && !pe_apply_relocs(dst, size, delta)) {
+            DbgPrint("user: invalid or unsupported PE relocations in %s\n", mod->name);
+            for (uint64_t off = 0; off < rounded; off += USER_IMAGE_PAGE)
+                MmUnmapAllocatedUserPage(proc, base + off);
+            image->proc = 0;
+            image->source = 0;
+            image->phys = 0;
+            image->base = 0;
+            image->entry = 0;
+            image->size = 0;
+            return -1;
+        }
 
         uint32_t ep_rva = *(uint32_t *)(opt + 16);
 
@@ -1201,6 +1220,12 @@ static int vfs_ntfsk_refresh(void) {
         DbgPrint("fs: NTFS directory listing reached %u-entry limit",(unsigned)VFS_MAX_ENT);
     return vfs_nent;
 }
+static int vfs_refresh_current_directory(void) {
+    if (g_ntfsk_ok) return vfs_ntfsk_refresh();
+    if (g_ext4_ok && g_ext4.blksz) return vfs_listdir(vfs_cwd_ino);
+    vfs_nent = 0;
+    return -1;
+}
 static uint64_t vfs_ntfsk_resolve_from(const char *name,uint64_t start_ino) {
     if(!g_ntfsk_ok||!name||!name[0])return 0;
     char path[256];unsigned int n=0;
@@ -1349,7 +1374,7 @@ static int64_t vfs_create_user_output_file(const char *name) {
     vh->used = 1;
     vh->writable = 1;
     ObDereferenceObject((OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT, body)));
-    (void)vfs_listdir(vfs_cwd_ino);
+    (void)vfs_refresh_current_directory();
     return (int64_t)handle;
 }
 
@@ -1464,7 +1489,7 @@ static int vfs_close_user_file(uint64_t handle) {
     int closed = ObCloseHandle((uintptr_t)proc->Pid, (OB_HANDLE)handle);
     if (closed) h->used = 0;
     ObDereferenceObject(obj);
-    if (closed && writable) (void)vfs_listdir(vfs_cwd_ino);
+    if (closed && writable) (void)vfs_refresh_current_directory();
     return closed;
 }
 
@@ -2730,7 +2755,14 @@ socket_close_done:
             /* If the process already unregistered its window, there is no
              * stale window rectangle to repaint. Avoid a needless full-screen
              * compose on the exit path; it can stall interactive input/rendering. */
-            if(dead_slot>=0&&dw>0&&dh>0)
+            /* A closed window must never leave pixels behind: always rebuild the
+             * whole scanout from the remaining live layers, forced, whether or
+             * not the process unregistered its window before exiting. */
+            if(wm_shared_width&&wm_shared_height) {
+                wm_shared_force_compose=1;
+                wm_shared_compose(0,0,wm_shared_width,wm_shared_height);
+                wm_shared_force_compose=0;
+            } else if(dead_slot>=0&&dw>0&&dh>0)
                 wm_shared_compose((uint32_t)dx,(uint32_t)dy,(uint32_t)dw,(uint32_t)dh);
 
             for (int i = 0; i < UP_MAX; i++) {
@@ -3635,6 +3667,39 @@ socket_close_done:
         if (vi_ok)
             virtio_input_poll();
 
+        /* Mouse wheel: route notches to the window under the pointer, queue
+         * them for that process, and deliver as input type 4 (btn = delta*120,
+         * positive = scroll up). Only the target process consumes them. */
+        {
+            static int pending_wheel, pending_wheel_pid;
+            if (vi_ok) { mouse_wheel_accum += vi_wheel; vi_wheel = 0; }
+            if (mouse_wheel_accum) {
+                int wx = vi_ok ? vi_x : mouse_x;
+                int wy = vi_ok ? vi_y : mouse_y;
+                int wtarget = wm_hit_test(wx, wy);
+                if (wtarget <= 0) wtarget = wm_get_active_pid();
+                if (wtarget <= 0) wtarget = mepid;
+                if (pending_wheel && pending_wheel_pid != wtarget)
+                    pending_wheel = 0;
+                pending_wheel += mouse_wheel_accum;
+                pending_wheel_pid = wtarget;
+                mouse_wheel_accum = 0;
+            }
+            if (pending_wheel && pending_wheel_pid == mepid) {
+                int notches = pending_wheel;
+                if (notches > 8) notches = 8;
+                if (notches < -8) notches = -8;
+                pending_wheel = 0;
+                out->type = 4;
+                out->x = vi_ok ? vi_x : mouse_x;
+                out->y = vi_ok ? vi_y : mouse_y;
+                out->btn = notches * 120;
+                out->key = 0;
+                f->rax = 1;
+                return f;
+            }
+        }
+
         /* Tablet owns absolute position when present. Route ordinary pointer
          * motion only to the active window so a background process cannot
          * repaint a game-hidden cursor over the foreground scene. Clicks are
@@ -3914,6 +3979,8 @@ socket_close_done:
         if(rect[1]>y_limit)rect[1]=y_limit;
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
         wm_set_rect(pid, rect[0], rect[1], rect[2], rect[3]);
+        f->rax = 1;
+        return f;
     }
     case SYS_WmGetDirty: {
         f->rax = (uint64_t)wm_scene_dirty;

@@ -8,6 +8,6 @@ The supported build entry point is:
 bash scripts/build.sh
 ```
 
-The root build compiles the OS once. The installer then stages the artifacts from `build/esp` and `build/rootfs`, adds its installer-only session applications to a staging copy, and creates `installer/artifacts/SentinelOS-V4-BETA.iso`. It does not compile or use this duplicate source snapshot.
+The root build compiles the OS once. `installer/build-installer.sh` stages `build/rootfs` and `build/esp` unchanged as the deployable system and target ESP, then creates a separate `staging/installer-esp` for installer-only `smss.exe`, `instlr.exe`, and `screen.exe`. `installer/make-iso.sh` builds the installed partition images only from the main OS staging trees and boots the ISO from the dedicated installer ESP. It does not compile or use this duplicate source snapshot.
 
 Do not add new features here. Active OS changes belong in the repository's root source directories; installer-specific UI, tests, and ISO packaging remain under `installer/`.

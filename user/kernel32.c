@@ -32,7 +32,7 @@ static DWORD k32_error_mode;
 static int k32_eqi(const char *a, const char *b);
 static DWORD k32_shutdown_level=0x280, k32_shutdown_flags=0;
 static char k32_console_title[128]="SentinelOS";
-static DWORD k32_priority_class=0x20u; static int k32_thread_priority=0; static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0; static BOOL k32_process_boost_disabled,k32_thread_boost_disabled; static unsigned long long k32_working_set_min,k32_working_set_max;
+static DWORD k32_thread_memory_priority=5; static DWORD k32_thread_power_control=1,k32_thread_power_state=0; static BOOL k32_process_boost_disabled,k32_thread_boost_disabled; static unsigned long long k32_working_set_min,k32_working_set_max;
 typedef struct { HANDLE handle; DWORD flags; } K32_HANDLE_FLAGS; static K32_HANDLE_FLAGS k32_handle_flags[32];
 typedef struct {
     unsigned char data[4096];
@@ -909,10 +909,10 @@ __attribute__((dllexport)) LPSTR GetEnvironmentStringsA(void){k32_build_env_bloc
 __attribute__((dllexport)) BOOL FreeEnvironmentStringsA(LPCSTR p){if(p!=k32_env_block_a){k32_last_error=87;return 0;}return 1;}
 __attribute__((dllexport)) BOOL GetProcessTimes(HANDLE process,K32_FILETIME *created,K32_FILETIME *exitTime,K32_FILETIME *kernel,K32_FILETIME *user) { (void)created;(void)exitTime;(void)kernel;(void)user;if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
 __attribute__((dllexport)) BOOL GetThreadTimes(HANDLE thread,K32_FILETIME *created,K32_FILETIME *exitTime,K32_FILETIME *kernel,K32_FILETIME *user) { (void)created;(void)exitTime;(void)kernel;(void)user;if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0;}k32_last_error=50;return 0; }
-__attribute__((dllexport)) DWORD GetPriorityClass(HANDLE process){if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}return k32_priority_class;}
-__attribute__((dllexport)) BOOL SetPriorityClass(HANDLE process,DWORD priority){if((process!=GetCurrentProcess()&&process!=(HANDLE)1)||(priority!=0x40u&&priority!=0x4000u&&priority!=0x8000u&&priority!=0x80u&&priority!=0x20u&&priority!=0x100u)){k32_last_error=87;return 0;}k32_priority_class=priority;return 1;}
-__attribute__((dllexport)) int GetThreadPriority(HANDLE thread){if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0x7FFFFFFF;}return k32_thread_priority;}
-__attribute__((dllexport)) BOOL SetThreadPriority(HANDLE thread,int priority){if((thread!=GetCurrentThread()&&thread!=(HANDLE)1)||priority< -15||priority>15){k32_last_error=87;return 0;}k32_thread_priority=priority;return 1;}
+__attribute__((dllexport)) DWORD GetPriorityClass(HANDLE process){if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=87;return 0;}k32_last_error=0;return 0x20u;}
+__attribute__((dllexport)) BOOL SetPriorityClass(HANDLE process,DWORD priority){if((process!=GetCurrentProcess()&&process!=(HANDLE)1)||(priority!=0x40u&&priority!=0x4000u&&priority!=0x8000u&&priority!=0x80u&&priority!=0x20u&&priority!=0x100u)){k32_last_error=87;return 0;}k32_last_error=50;return 0;}
+__attribute__((dllexport)) int GetThreadPriority(HANDLE thread){if(thread!=GetCurrentThread()&&thread!=(HANDLE)1){k32_last_error=87;return 0x7FFFFFFF;}k32_last_error=0;return 0;}
+__attribute__((dllexport)) BOOL SetThreadPriority(HANDLE thread,int priority){if((thread!=GetCurrentThread()&&thread!=(HANDLE)1)||priority< -15||priority>15){k32_last_error=87;return 0;}k32_last_error=50;return 0;}
 __attribute__((dllexport)) DWORD GetCurrentProcessorNumber(void){return 0;}
 __attribute__((dllexport)) void GetNativeSystemInfo(K32_SYSTEM_INFO *info){GetSystemInfo(info);}
 __attribute__((dllexport)) BOOL IsProcessorFeaturePresent(DWORD feature){switch(feature){case 0:return 1;case 1:return 1;case 2:return 1;case 3:return 1;case 10:return 1;case 23:return 1;default:return 0;}}

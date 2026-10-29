@@ -57,6 +57,13 @@ int main(void) {
     put32(disk+512+88,sentinel_part_crc32(disk+2*512,4*128));
     put32(disk+512+16,0);put32(disk+512+16,sentinel_part_crc32(disk+512,92));
     if(SentinelPartitionScan(disk_read,0,DISK_SECTORS,512,parts,SENTINEL_PARTITION_MAX)>=0)return fail("GPT partition outside usable range rejected");
+    make_gpt();
+    memcpy(disk+30*512,disk+2*512,4*128);
+    put64(disk+30*512+32,30);put64(disk+30*512+40,31);
+    put64(disk+512+72,30);
+    put32(disk+512+88,sentinel_part_crc32(disk+30*512,4*128));
+    put32(disk+512+16,0);put32(disk+512+16,sentinel_part_crc32(disk+512,92));
+    if(SentinelPartitionScan(disk_read,0,DISK_SECTORS,512,parts,SENTINEL_PARTITION_MAX)>=0)return fail("GPT entry array inside usable LBAs rejected");
     if(SentinelPartitionScan(disk_read,0,UINT64_MAX,4096,parts,SENTINEL_PARTITION_MAX)>=0)return fail("capacity overflow rejected");
     puts("MBR/GPT parser tests: PASS");
     return 0;

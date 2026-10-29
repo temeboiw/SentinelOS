@@ -1010,6 +1010,11 @@ static uint32_t vfs_cwd_ino = 2;
 static int vfs_listdir(uint32_t dir_ino) {
     uint8_t inode[256];
     vfs_nent = 0;
+    /* The NTFS path can reach this legacy ext4 cache through file-close and
+       output-file syscall paths. Never use the unmounted ext4 volume's zero
+       block size as a divisor. */
+    if (!g_ext4_ok || !g_ext4.blksz || g_ext4.blksz > sizeof(g_ext4.blk))
+        return -1;
     if (e4_inode(&g_ext4, dir_ino, inode) < 0) return -1;
     uint64_t size = e4_size(inode);
     static uint8_t buf[4096];

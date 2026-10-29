@@ -3645,8 +3645,6 @@ static Frame *syscall_handler(Frame *f) {
         if(wm_dbg_sample(dbg_n))
             DbgPrint("[wm] unregister #%llu pid=%d slot=%d\n",
                      (unsigned long long)dbg_n,pid,slot);
-        int x=0,y=0,w=(int)wm_shared_width,h=(int)wm_shared_height;
-        if(slot>=0) { x=wm_tab[slot].x-12; y=wm_tab[slot].y-12; w=wm_tab[slot].w+24; h=wm_tab[slot].h+28; }
         KPROCESS *caller=MmCurrentProcess;
         if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
         if(slot>=0&&wm_shared_windows[slot]) {
@@ -3657,12 +3655,16 @@ static Frame *syscall_handler(Frame *f) {
             wm_shared_local_width[slot]=wm_shared_local_height[slot]=0;
         }
         wm_unregister(pid);
-        if(x<0){w+=x;x=0;}if(y<0){h+=y;y=0;}
-        /* Duplicate unregisters are expected during process teardown.
-         * If the window slot is already gone, do not turn the default full
-         * screen rectangle into an expensive repaint of the entire desktop. */
-        if(slot>=0&&w>0&&h>0)
-            wm_shared_compose((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h);
+        /*
+         * Rebuild the whole scanout after removing a window. The previous
+         * rectangle-only repaint could leave old window pixels visible when
+         * its cached layer had been presented outside the registered frame.
+         * wm_shared_compose now sees the updated Z-order and redraws only the
+         * remaining live windows over the persistent desktop layers. A second
+         * unregister has slot == -1 and deliberately does not repaint again.
+         */
+        if(slot>=0&&wm_shared_width&&wm_shared_height)
+            wm_shared_compose(0,0,wm_shared_width,wm_shared_height);
         if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
         f->rax = 0;
         return f;

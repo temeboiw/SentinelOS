@@ -375,7 +375,7 @@ static int PspIsExplicitSystemPath(const char *name) {
 
 static int PspIsSystemAppName(const char *name) {
     static const char *const names[] = {
-        "smss.exe", "bootvid.exe", "sentlogon.exe", "explorer.exe",
+        "smss.exe", "bootvid.exe", "sentlogon.exe",
         "instlr.exe", "screen.exe"
     };
     name = PspImageBaseName(name);
@@ -396,6 +396,22 @@ static int PspIsSystemAppName(const char *name) {
             if (*b) b++;
         }
         if (equal) return 1;
+    }
+    return 0;
+}
+
+/* Protected launch targets include native boot components and the
+ * Win32 desktop shell. Keep this separate from PspIsSystemAppName: the latter
+ * also determines PE subsystem policy, and explorer.exe is a Win32 image. */
+static int PspIsProtectedLaunchName(const char *name) {
+    if (PspIsSystemAppName(name)) return 1;
+    name = PspImageBaseName(name);
+    static const char target[] = "explorer.exe";
+    for (size_t i = 0; i < sizeof(target); i++) {
+        char a = name[i], b = target[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
+        if (a != b) return 0;
+        if (!b) return 1;
     }
     return 0;
 }
@@ -2749,7 +2765,7 @@ static Frame *syscall_handler(Frame *f) {
          * may launch ordinary applications, but only a system application may
          * launch smss.exe, bootvid.exe, or sentlogon.exe.
          */
-        if (PspIsSystemAppName(name) && !PspIsSystemProcess(caller)) {
+        if (PspIsProtectedLaunchName(name) && !PspIsSystemProcess(caller)) {
             DbgPrint("user: denied system-app launch: target=%s\n", name);
             /* Win32 callers get the subsystem-incompatibility dialog. */
             f->rax = (uint64_t)-2LL;

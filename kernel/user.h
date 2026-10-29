@@ -1837,6 +1837,9 @@ typedef struct {
     uint32_t x, y, w, h, width, height;
 } WmPresentWindowSurfaceArgs;
 static uint32_t *wm_shared_background;
+/* Set only while tearing down a window: the old fullscreen owner must not
+ * suppress the repaint that removes its former foreground window. */
+static int wm_shared_force_compose;
 static uint32_t *wm_shared_desktop;
 static uint32_t *wm_shared_taskbar;
 /* Legacy USER32 layers remain screen-sized; newer applications may submit
@@ -1949,7 +1952,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                 break;
             }
         }
-        if(!covered_by_newer)return;
+        if(!covered_by_newer&&!wm_shared_force_compose)return;
     }
     if(w>width-x)w=width-x;if(h>height-y)h=height-y;
     KPROCESS *old=MmCurrentProcess;
@@ -1983,7 +1986,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                 covered=1;break;
             }
         }
-        if(!covered) {
+        if(!covered&&!wm_shared_force_compose) {
             uint32_t *src=wm_shared_local_windows[local_fullscreen];
             uint32_t sw=wm_shared_local_width[local_fullscreen];
             for(uint32_t yy=y;yy<y+h;yy++) {
@@ -3663,8 +3666,11 @@ static Frame *syscall_handler(Frame *f) {
          * remaining live windows over the persistent desktop layers. A second
          * unregister has slot == -1 and deliberately does not repaint again.
          */
-        if(slot>=0&&wm_shared_width&&wm_shared_height)
+        if(slot>=0&&wm_shared_width&&wm_shared_height) {
+            wm_shared_force_compose=1;
             wm_shared_compose(0,0,wm_shared_width,wm_shared_height);
+            wm_shared_force_compose=0;
+        }
         if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
         f->rax = 0;
         return f;

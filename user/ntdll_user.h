@@ -13,7 +13,8 @@ enum {
     SYS_GetInput = 10, SYS_Shutdown = 11, SYS_SetCurrentDirectory = 12,
     SYS_CreateThread = 13, SYS_Wait = 14, SYS_NtQueryProcessList = 41, SYS_NtGetApplicationError = 42, SYS_WmRegister = 15,
     SYS_WmSetMin = 16, SYS_WmUnregister = 17, SYS_WmQuery = 18,
-    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37
+    SYS_WmRestore = 19, SYS_WmSetRect = 20, SYS_Yield = 21, SYS_InitializeGraphics = 32, SYS_FlushGraphics = 33, SYS_PresentLayer = 37,
+    SYS_NtCreateOutputFile = 51, SYS_NtWriteOutputFile = 52
 };
 
 /* Legacy three-argument transport. Do not change: existing user images use it. */
@@ -95,6 +96,12 @@ static inline NTSTATUS NtCreateProcess(const char *name) {
 }
 static inline NTSTATUS NtQueryDirectory(u64 index, char *name_out) {
     return (NTSTATUS)sy3(SYS_QueryDir, index, (u64)name_out, 0);
+}
+static inline i64 NtCreateOutputFile(const char *name) {
+    return (i64)sy3(SYS_NtCreateOutputFile,(u64)name,0,0);
+}
+static inline i64 NtWriteOutputFile(u64 handle,const void *data,u64 bytes) {
+    return (i64)sy3(SYS_NtWriteOutputFile,handle,(u64)data,bytes);
 }
 static inline u64 NtInitializeGraphics(GfxBootInfo *out) {
     if (!out) return 0;

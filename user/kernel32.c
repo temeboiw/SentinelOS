@@ -77,7 +77,7 @@ static void k32_untrack_path(HANDLE h) {
 
 enum {
     SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_CreateProcess=4, SYS_OpenFile=5, SYS_ReadFile=6,
-    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29, SYS_QueryFileMetadata=30, SYS_QueryVolumeMetadata=31, SYS_LoadLibrary=43
+    SYS_QueryDir=7, SYS_GetProcAddress=9, SYS_GetInput=10, SYS_CreateThread=13, SYS_Wait=14, SYS_CloseFile=22, SYS_GetSystemTime=23, SYS_GetTickCount=24, SYS_QueryFileSize=25, SYS_SetFilePosition=26, SYS_FreeVirtualMemory=27, SYS_ProtectVirtualMemory=28, SYS_QueryVirtualMemory=29, SYS_QueryFileMetadata=30, SYS_QueryVolumeMetadata=31, SYS_LoadLibrary=43, SYS_NtWriteOutputFile=52
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -129,10 +129,18 @@ __attribute__((dllexport)) BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, DWOR
         k32_last_error=(n==len)?0: 232;
         return n!=0 || len==0;
     }
-    if((h!=(HANDLE)1 && h!=(HANDLE)2) || (!buf&&len)) { if(w)*w=0; k32_last_error=6; return 0; }
-    u64 n = sy3(SYS_Write, 1, (u64)buf, len);
-    if (w) *w = (DWORD)n;
-    if(n==(u64)-1){k32_last_error=5;return 0;}
+    if(h==(HANDLE)1||h==(HANDLE)2){
+        if(!buf&&len){if(w)*w=0;k32_last_error=87;return 0;}
+        u64 n=sy3(SYS_Write,1,(u64)buf,len);
+        if(w)*w=(DWORD)n;
+        if(n==(u64)-1){k32_last_error=5;return 0;}
+        k32_last_error=0;return 1;
+    }
+    if(len==0){if(w)*w=0;k32_last_error=0;return 1;}
+    if(!h||h==INVALID_HANDLE_VALUE||(!buf&&len)){if(w)*w=0;k32_last_error=6;return 0;}
+    i64 n=(i64)sy3(SYS_NtWriteOutputFile,(u64)h,(u64)buf,len);
+    if(w)*w=n<0?0:(DWORD)n;
+    if(n<0){k32_last_error=5;return 0;}
     k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) LPVOID VirtualAlloc(LPVOID a,u64 sz,DWORD t,DWORD p) {
@@ -718,8 +726,34 @@ __attribute__((dllexport)) DWORD GetFullPathNameW(K32_LPCWSTR path, DWORD cap, K
 __attribute__((dllexport)) DWORD GetTempPathW(DWORD cap, K32_LPWSTR out) {
     return K32GetTempPathW(cap, (uint16_t *)out, &k32_last_error);
 }
-__attribute__((dllexport)) DWORD GetEnvironmentVariableW(K32_LPCWSTR name,K32_LPWSTR out,DWORD cap){char n[128],v[256];k32_wide_to_ansi(n,sizeof(n),name);DWORD z=GetEnvironmentVariableA(n,v,sizeof(v));if(!z){if(out&&cap)out[0]=0;return 0;}DWORD len=0;while(v[len])len++;if(!out||!cap)return len;if(cap<=len){k32_ansi_to_wide(out,cap,v);k32_last_error=122;return len+1;}k32_ansi_to_wide(out,cap,v);return len;}
-__attribute__((dllexport)) BOOL SetEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR value){char n[128],v[256];if(!name)return 0;k32_wide_to_ansi(n,sizeof(n),name);if(!value)return SetEnvironmentVariableA(n,0);k32_wide_to_ansi(v,sizeof(v),value);return SetEnvironmentVariableA(n,v);}
+static int k32_wide_ascii(const K32_WCHAR *src,char *dst,DWORD cap){
+ if(!src||!dst||!cap)return 0;
+ DWORD i=0;
+ while(src[i]){
+  if(i+1>=cap||src[i]>0x7Fu)return 0;
+  dst[i]=(char)src[i];i++;
+ }
+ dst[i]=0;return 1;
+}
+__attribute__((dllexport)) DWORD GetEnvironmentVariableW(K32_LPCWSTR name,K32_LPWSTR out,DWORD cap){
+ k32_env_boot();char key[32];
+ if(!name||!k32_wide_ascii(name,key,sizeof(key))||!key[0]){if(out&&cap)out[0]=0;k32_last_error=87;return 0;}
+ for(int i=0;i<16;i++)if(k32_env[i].used&&k32_eqi(k32_env[i].name,key)){
+  DWORD n=0;while(k32_env[i].value[n])n++;
+  if(!out||!cap){k32_last_error=0;return n;}
+  if(cap<=n){out[0]=0;k32_last_error=122;return n+1;}
+  for(DWORD j=0;j<n;j++)out[j]=(unsigned char)k32_env[i].value[j];
+  out[n]=0;k32_last_error=0;return n;
+ }
+ if(out&&cap)out[0]=0;k32_last_error=203;return 0;
+}
+__attribute__((dllexport)) BOOL SetEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR value){
+ char key[32],text[128];
+ if(!name||!k32_wide_ascii(name,key,sizeof(key))||!key[0]||key[0]=='='){k32_last_error=87;return 0;}
+ if(!value)return SetEnvironmentVariableA(key,0);
+ if(!k32_wide_ascii(value,text,sizeof(text))){k32_last_error=87;return 0;}
+ return SetEnvironmentVariableA(key,text);
+}
 __attribute__((dllexport)) DWORD GetFileAttributesW(K32_LPCWSTR path){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return GetFileAttributesA(p);}
 __attribute__((dllexport)) BOOL SetFileAttributesW(K32_LPCWSTR path,DWORD attrs){char p[512];k32_wide_to_ansi(p,sizeof(p),path);return SetFileAttributesA(p,attrs);}
 __attribute__((dllexport)) DWORD GetTempFileNameA(LPCSTR path,LPCSTR prefix,UINT unique,LPSTR out) {
@@ -2206,9 +2240,38 @@ __attribute__((dllexport)) LONG RtlStringCchCopyNA(char*d,u64 cap,const char*s,u
    caller-owned Windows-compatible storage as their lock state. */
 typedef struct { void *debug_info; volatile int lock_count; int recursion; void *owner; void *semaphore; unsigned long long spin_count; } K32_CRIT_PREFIX;
 typedef struct { volatile unsigned int state; } K32_SRW_PREFIX;
-static void *k32_tls_values[1088];
-static unsigned char k32_tls_used[1088];
+#define K32_TLS_SLOTS 1088u
+#define K32_TLS_THREADS 17u /* main TEB plus the kernel's 16 user-thread TEB slots */
+#define K32_TLS_TEB_BASE 0x000000007FFF0000ULL
+#define K32_TLS_CHILD_TEB_BASE 0x000000007F000000ULL
+#define K32_TLS_TEB_STRIDE 0x2000ULL
+#define K32_TLS_VECTOR_OFFSET 0x58u
+static void *k32_tls_values[K32_TLS_THREADS][K32_TLS_SLOTS];
+static unsigned char k32_tls_used[K32_TLS_SLOTS];
 static unsigned int k32_tls_hint;
+static volatile unsigned int k32_tls_lock_word;
+static u64 k32_tls_teb_for_row[K32_TLS_THREADS];
+static void k32_tls_lock(void){while(__atomic_exchange_n(&k32_tls_lock_word,1u,__ATOMIC_ACQUIRE))while(__atomic_load_n(&k32_tls_lock_word,__ATOMIC_RELAXED))__asm__ volatile("pause");}
+static void k32_tls_unlock(void){__atomic_store_n(&k32_tls_lock_word,0u,__ATOMIC_RELEASE);}
+static int k32_tls_current_row(void){
+ u64 teb=0;__asm__ volatile("movq %%gs:48,%0":"=r"(teb));
+ unsigned int row;
+ if(teb==K32_TLS_TEB_BASE)row=0;
+ else if(teb>=K32_TLS_CHILD_TEB_BASE&&teb<K32_TLS_CHILD_TEB_BASE+16ULL*K32_TLS_TEB_STRIDE&&
+         ((teb-K32_TLS_CHILD_TEB_BASE)%K32_TLS_TEB_STRIDE)==0)
+  row=1u+(unsigned int)((teb-K32_TLS_CHILD_TEB_BASE)/K32_TLS_TEB_STRIDE);
+ else {k32_last_error=50;return -1;}
+ volatile u64 *vector=(volatile u64 *)(teb+K32_TLS_VECTOR_OFFSET);
+ u64 expected=(u64)&k32_tls_values[row][0];
+ if(*vector==0){
+  for(unsigned int i=0;i<K32_TLS_SLOTS;i++)k32_tls_values[row][i]=0;
+  k32_tls_teb_for_row[row]=teb;*vector=expected;
+ }else if(*vector!=expected||k32_tls_teb_for_row[row]!=teb){
+  /* Preserve any TLS vector installed by a different runtime or loader. */
+  k32_last_error=50;return -1;
+ }
+ return (int)row;
+}
 
 __attribute__((dllexport)) void InitializeCriticalSection(void *section) {
     if (!section) { k32_last_error=87; return; }
@@ -2280,20 +2343,26 @@ __attribute__((dllexport)) BOOL SleepConditionVariableSRW(void *cv,void *lock,DW
     AcquireSRWLockExclusive(lock); return 1;
 }
 __attribute__((dllexport)) DWORD TlsAlloc(void) {
-    for(unsigned int n=0;n<1088;n++){unsigned int i=(k32_tls_hint+n)%1088;if(!k32_tls_used[i]){k32_tls_used[i]=1;k32_tls_values[i]=0;k32_tls_hint=(i+1)%1088;return i;}}
-    k32_last_error=8;return 0xFFFFFFFFu;
+    k32_tls_lock();
+    for(unsigned int n=0;n<K32_TLS_SLOTS;n++){unsigned int i=(k32_tls_hint+n)%K32_TLS_SLOTS;if(!k32_tls_used[i]){k32_tls_used[i]=1;for(unsigned int r=0;r<K32_TLS_THREADS;r++)k32_tls_values[r][i]=0;k32_tls_hint=(i+1)%K32_TLS_SLOTS;k32_tls_unlock();k32_last_error=0;return i;}}
+    k32_tls_unlock();k32_last_error=8;return 0xFFFFFFFFu;
 }
 __attribute__((dllexport)) BOOL TlsFree(DWORD index) {
-    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
-    k32_tls_used[index]=0;k32_tls_values[index]=0;k32_last_error=0;return 1;
+    if(index>=K32_TLS_SLOTS){k32_last_error=87;return 0;}
+    k32_tls_lock();if(!k32_tls_used[index]){k32_tls_unlock();k32_last_error=87;return 0;}
+    k32_tls_used[index]=0;for(unsigned int r=0;r<K32_TLS_THREADS;r++)k32_tls_values[r][index]=0;k32_tls_unlock();k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) LPVOID TlsGetValue(DWORD index) {
-    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
-    k32_last_error=0;return k32_tls_values[index];
+    if(index>=K32_TLS_SLOTS){k32_last_error=87;return 0;}
+    int row=k32_tls_current_row();if(row<0)return 0;
+    k32_tls_lock();if(!k32_tls_used[index]){k32_tls_unlock();k32_last_error=87;return 0;}
+    LPVOID value=k32_tls_values[row][index];k32_tls_unlock();k32_last_error=0;return value;
 }
 __attribute__((dllexport)) BOOL TlsSetValue(DWORD index,LPVOID value) {
-    if(index>=1088||!k32_tls_used[index]){k32_last_error=87;return 0;}
-    k32_tls_values[index]=value;k32_last_error=0;return 1;
+    if(index>=K32_TLS_SLOTS){k32_last_error=87;return 0;}
+    int row=k32_tls_current_row();if(row<0)return 0;
+    k32_tls_lock();if(!k32_tls_used[index]){k32_tls_unlock();k32_last_error=87;return 0;}
+    k32_tls_values[row][index]=value;k32_tls_unlock();k32_last_error=0;return 1;
 }
 __attribute__((dllexport)) void InitializeSListHead(void *head) { if(head){volatile unsigned long long *p=(volatile unsigned long long *)head;*p=0;} }
 __attribute__((dllexport)) BOOL DisableThreadLibraryCalls(HANDLE module) { if(!module){k32_last_error=87;return 0;}k32_last_error=0;return 1; }

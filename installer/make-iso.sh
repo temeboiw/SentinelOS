@@ -2,7 +2,9 @@
 # Master a UEFI-bootable hybrid ISO from built installer staging data.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
 STAGE="$HERE/staging"
+INSTALLER_ESP="$STAGE/installer-esp"
 OUT="$HERE/artifacts"
 ISO_ROOT="$HERE/iso-root"
 ISO="$OUT/SentinelOS-V4-BETA.iso"
@@ -20,15 +22,24 @@ need sha256sum
 if [[ "${SECURE_BOOT:-0}" == "1" ]]; then
   : "${SECURE_BOOT_CERT:?set SECURE_BOOT_CERT to the enrolled signing certificate when making Secure Boot media}"
   need sbverify
-  for f in "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" \
-           "$STAGE/esp/EFI/magic/bootuni.efi" \
-           "$STAGE/esp/EFI/magic/loadufi.efi"; do
+  for f in "$INSTALLER_ESP/EFI/BOOT/BOOTX64.EFI" \
+           "$INSTALLER_ESP/EFI/magic/bootuni.efi" \
+           "$INSTALLER_ESP/EFI/magic/loadufi.efi"; do
     sbverify --cert "$SECURE_BOOT_CERT" "$f" >/dev/null || { echo "error: unsigned or invalid EFI stage: $f" >&2; exit 4; }
   done
 fi
 
 [[ -s "$STAGE/esp/EFI/BOOT/BOOTX64.EFI" ]] || { echo "error: staged EFI/BOOT/BOOTX64.EFI missing; run build-installer.sh first" >&2; exit 3; }
+[[ -s "$INSTALLER_ESP/magic/System32/instlr.exe" && -s "$INSTALLER_ESP/magic/System32/smss.exe" ]] || { echo "error: installer startup files missing from dedicated installer ESP" >&2; exit 3; }
 [[ -s "$OUT/esp.spf" && -s "$OUT/system.spf" ]] || { echo "error: SPF packages missing; run build-installer.sh first" >&2; exit 3; }
+if [[ "$(realpath -e "$STAGE/system")" == "$(realpath -e "$INSTALLER_ESP")" || -e "$STAGE/system/magic/System32/instlr.exe" || -e "$STAGE/system/magic/System32/screen.exe" ]]; then
+  echo "error: installer staging cannot be used as the deployable OS payload" >&2
+  exit 4
+fi
+if find "$STAGE/system" -type f \( -iname instlr.exe -o -iname screen.exe \) -print -quit | grep -q .; then
+  echo "error: installer-only executable found in the deployable OS tree" >&2
+  exit 4
+fi
 # Build the actual installable partition images on the build host. The native
 # installer only writes these verified raw images; it does not need zlib/tar
 # support or a host shell at install time.
@@ -60,9 +71,24 @@ shopt -u nullglob dotglob
 truncate -s "$((SYSTEM_IMAGE_SIZE_MIB * 1024 * 1024))" "$TARGET_SYSTEM_IMG"
 mkfs.ext4 -F -q -L SENTINELOS -O extents,^64bit,^metadata_csum,^dir_index,^has_journal -E lazy_itable_init=0 -d "$STAGE/system" "$TARGET_SYSTEM_IMG"
 # Verify critical files directly from the image before it can be embedded.
-for f in magic/System32/hal.dll magic/System32/krnl.exe magic/System32/smss.exe magic/System32/instlr.exe; do
+for f in magic/System32/hal.dll magic/System32/krnl.exe magic/System32/smss.exe magic/System32/bootvid.exe magic/System32/sentlogon.exe; do
   debugfs -R "stat /$f" "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:' || { echo "error: system image is missing /$f" >&2; exit 4; }
 done
+if debugfs -R 'stat /magic/System32/instlr.exe' "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:'; then
+  echo "error: installer executable is present in the installed system image" >&2
+  exit 4
+fi
+if debugfs -R 'stat /magic/System32/screen.exe' "$TARGET_SYSTEM_IMG" 2>/dev/null | grep -q 'Type:'; then
+  echo "error: installer-only screen executable is present in the installed system image" >&2
+  exit 4
+fi
+debugfs -R "dump /magic/System32/smss.exe $OUT/installed-smss.check" "$TARGET_SYSTEM_IMG" >/dev/null 2>&1
+if ! cmp -s "$OUT/installed-smss.check" "$ROOT/build/rootfs/magic/System32/smss.exe"; then
+  rm -f "$OUT/installed-smss.check"
+  echo "error: installed system image does not contain the main OS session manager" >&2
+  exit 4
+fi
+rm -f "$OUT/installed-smss.check"
 printf '%s\n%s\n' "$(sha256sum "$TARGET_ESP_IMG" | cut -d ' ' -f1)" "$(sha256sum "$TARGET_SYSTEM_IMG" | cut -d ' ' -f1)" > "$INSTALL_SUMS"
 python3 "$HERE/pack_image.py" pack "$TARGET_ESP_IMG" "$PACKED_ESP_IMG"
 python3 "$HERE/pack_image.py" pack "$TARGET_SYSTEM_IMG" "$PACKED_SYSTEM_IMG"
@@ -72,7 +98,7 @@ if [[ "$ESP_SIZE_MIB" == "auto" ]]; then
   # Zero-block packed install images are embedded on the FAT ESP and expanded
   # by the UEFI loader. Leave space for these plus staged files and metadata.
   # 16 MiB for FAT metadata/cluster slack. Do not silently truncate the image.
-  required_bytes="$(du -sb "$STAGE/esp" | awk '{print $1}')"
+  required_bytes="$(du -sb "$INSTALLER_ESP" | awk '{print $1}')"
   required_bytes=$((required_bytes + $(stat -c %s "$PACKED_ESP_IMG") + $(stat -c %s "$PACKED_SYSTEM_IMG") + $(stat -c %s "$INSTALL_SUMS")))
   ESP_SIZE_MIB=$(((required_bytes * 125 / 100 + 16 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))
   (( ESP_SIZE_MIB < 128 )) && ESP_SIZE_MIB=128
@@ -88,10 +114,10 @@ mmd -i "$ESP_IMG" ::/EFI
 
 # Copy every staged EFI vendor directory and any additional ESP-root files.
 shopt -s nullglob dotglob
-for entry in "$STAGE/esp/EFI"/*; do
+for entry in "$INSTALLER_ESP/EFI"/*; do
   mcopy -s -i "$ESP_IMG" "$entry" ::/EFI/
 done
-for entry in "$STAGE/esp"/*; do
+for entry in "$INSTALLER_ESP"/*; do
   [[ "${entry##*/}" == "EFI" ]] && continue
   mcopy -s -i "$ESP_IMG" "$entry" ::/
 done

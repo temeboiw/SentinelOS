@@ -1,4 +1,9 @@
 build/
+installer/artifacts/
+installer/staging/
+installer/iso-root/
+__pycache__/
+*.iso
 *.bak
 *.before-*
 *-backup

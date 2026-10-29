@@ -176,6 +176,94 @@ __attribute__((dllexport)) void *realloc(void *p, ucrt_size_t size) {
     free(p); return n;
 }
 
+/* MSVC's aligned allocation family is used by many C and C++ runtimes for
+   SIMD objects. Keep the allocator's original pointer and requested extent
+   in metadata immediately before the aligned result so _aligned_free can
+   release the exact mapping returned by this module's malloc. */
+typedef struct {
+    void *base;
+    ucrt_size_t size;
+    ucrt_size_t alignment;
+    ucrt_size_t offset;
+    ucrt_size_t tag;
+} UCRT_ALIGNED_HEADER;
+#define UCRT_ALIGNED_TAG 0x53454E54414C4947ULL
+static int ucrt_alignment_valid(ucrt_size_t alignment) {
+    return alignment >= sizeof(void *) && !(alignment & (alignment - 1)) &&
+           alignment <= 0x100000ULL;
+}
+static UCRT_ALIGNED_HEADER *ucrt_aligned_header(const void *p) {
+    if (!p || ((ucrt_size_t)p & (sizeof(void *) - 1))) return 0;
+    UCRT_ALIGNED_HEADER *h=(UCRT_ALIGNED_HEADER *)((ucrt_size_t)p-sizeof(UCRT_ALIGNED_HEADER));
+    return h->tag==UCRT_ALIGNED_TAG && h->base && h->alignment ? h : 0;
+}
+__attribute__((dllexport)) void *_aligned_offset_malloc(ucrt_size_t size,
+    ucrt_size_t alignment,ucrt_size_t offset) {
+    if (!ucrt_alignment_valid(alignment) || offset>=alignment) {
+        ucrt_errno_value=22;return 0;
+    }
+    if (!size) size=1;
+    ucrt_size_t overhead=sizeof(UCRT_ALIGNED_HEADER)+alignment-1;
+    if (size>0xFFFFFFFFFFFFFFFFULL-overhead) {ucrt_errno_value=12;return 0;}
+    ucrt_size_t total=size+overhead;
+    unsigned char *base=(unsigned char *)malloc(total);
+    if (!base) return 0;
+    ucrt_size_t candidate=(ucrt_size_t)(base+sizeof(UCRT_ALIGNED_HEADER));
+    if (candidate>0xFFFFFFFFFFFFFFFFULL-offset-(alignment-1)) {free(base);ucrt_errno_value=12;return 0;}
+    ucrt_size_t aligned=((candidate+offset+alignment-1)&~(alignment-1))-offset;
+    UCRT_ALIGNED_HEADER *h=(UCRT_ALIGNED_HEADER *)(aligned-sizeof(UCRT_ALIGNED_HEADER));
+    h->base=base;h->size=size;h->alignment=alignment;h->offset=offset;h->tag=UCRT_ALIGNED_TAG;
+    ucrt_errno_value=0;return (void *)aligned;
+}
+__attribute__((dllexport)) void *_aligned_malloc(ucrt_size_t size,ucrt_size_t alignment) {
+    return _aligned_offset_malloc(size,alignment,0);
+}
+__attribute__((dllexport)) void _aligned_free(void *p) {
+    if (!p) return;
+    UCRT_ALIGNED_HEADER *h=ucrt_aligned_header(p);
+    if (!h) {ucrt_errno_value=22;return;}
+    void *base=h->base;h->tag=0;h->base=0;free(base);
+}
+__attribute__((dllexport)) ucrt_size_t _aligned_msize(void *p,
+    ucrt_size_t alignment,ucrt_size_t offset) {
+    UCRT_ALIGNED_HEADER *h=ucrt_aligned_header(p);
+    if (!h || h->alignment!=alignment || h->offset!=offset) {
+        ucrt_errno_value=22;return (ucrt_size_t)-1;
+    }
+    ucrt_errno_value=0;return h->size;
+}
+__attribute__((dllexport)) void *_aligned_offset_realloc(void *p,
+    ucrt_size_t size,ucrt_size_t alignment,ucrt_size_t offset) {
+    if (!p) return _aligned_offset_malloc(size,alignment,offset);
+    if (!size) {_aligned_free(p);return 0;}
+    UCRT_ALIGNED_HEADER *h=ucrt_aligned_header(p);
+    if (!h) {ucrt_errno_value=22;return 0;}
+    ucrt_size_t old_size=h->size;
+    void *next=_aligned_offset_malloc(size,alignment,offset);
+    if (!next) return 0;
+    ucrt_size_t copy=old_size<size?old_size:size;
+    unsigned char *d=(unsigned char *)next;const unsigned char *s=(const unsigned char *)p;
+    for(ucrt_size_t i=0;i<copy;i++)d[i]=s[i];
+    _aligned_free(p);return next;
+}
+__attribute__((dllexport)) void *_aligned_realloc(void *p,ucrt_size_t size,
+    ucrt_size_t alignment) {
+    return _aligned_offset_realloc(p,size,alignment,0);
+}
+__attribute__((dllexport)) void *aligned_alloc(ucrt_size_t alignment,
+    ucrt_size_t size) {
+    if (!alignment || (size%alignment)) {ucrt_errno_value=22;return 0;}
+    return _aligned_malloc(size,alignment);
+}
+__attribute__((dllexport)) int posix_memalign(void **out,
+    ucrt_size_t alignment,ucrt_size_t size) {
+    if (!out || alignment<sizeof(void *) || (alignment&(alignment-1)) ||
+        alignment%sizeof(void *)) return 22;
+    void *p=_aligned_malloc(size,alignment);
+    if (!p) return ucrt_errno_value==12?12:22;
+    *out=p;return 0;
+}
+
 
 
 /*

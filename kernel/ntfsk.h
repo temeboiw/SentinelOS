@@ -1,13 +1,14 @@
 #pragma once
 /*
- * SentinelOS read-only NTFS core.
+ * SentinelOS bounded NTFS core.
  *
  * This is deliberately a block-device/partition-offset driver, independent of
  * the boot-services NTFS reader. It supports ordinary uncompressed NTFS files
  * whose MFT and unnamed $DATA streams fit in a single runlist attribute.
- * It does not implement writes, compression, encryption, ATTRIBUTE_LIST
- * continuation, or directory-index lookup. Callers must keep the block device
- * alive for the lifetime of the mounted volume.
+ * Writes are limited to overwriting existing unnamed $DATA streams. File
+ * creation and growth, compression, encryption, ATTRIBUTE_LIST continuation,
+ * and directory-index lookup are unsupported. Callers must keep the block
+ * device alive for the lifetime of the mounted volume.
  */
 #include <stdint.h>
 #include <stddef.h>
@@ -34,6 +35,7 @@ typedef struct {
     uint32_t cluster_size;
     uint32_t record_size;
     int mounted;
+    volatile uint32_t write_lock;
 } NTFSK_VOLUME;
 
 /* Shared mounted system volume state; this header is included once per kernel TU. */
@@ -50,11 +52,20 @@ static uint32_t ntfsk_u32(const void *p) {
 static uint64_t ntfsk_u64(const void *p) {
     return (uint64_t)ntfsk_u32(p)|((uint64_t)ntfsk_u32((const uint8_t *)p+4)<<32);
 }
+static void ntfsk_put_u16(void *p,uint16_t v) {
+    uint8_t *b=(uint8_t *)p;b[0]=(uint8_t)v;b[1]=(uint8_t)(v>>8);
+}
 static int ntfsk_read(NTFSK_VOLUME *v,uint64_t off,void *dst,uint64_t len) {
     if(!v||!v->device||!v->device->online||!v->device->read||(!dst&&len))return -1;
     if(off>v->volume_bytes||len>v->volume_bytes-off)return -1;
     if(v->partition_offset>UINT64_MAX-off)return -1;
     return v->device->read(v->device->context,v->partition_offset+off,dst,len);
+}
+static int ntfsk_write(NTFSK_VOLUME *v,uint64_t off,const void *src,uint64_t len) {
+    if(!v||!v->device||!v->device->online||!v->device->write||(!src&&len))return -1;
+    if(off>v->volume_bytes||len>v->volume_bytes-off)return -1;
+    if(v->partition_offset>UINT64_MAX-off)return -1;
+    return SentinelBlockWriteDevice(v->device,v->partition_offset+off,src,len);
 }
 static int ntfsk_fixup(uint8_t *r,uint32_t n,uint32_t sector) {
     if(!r||n<512||!sector||n%sector||ntfsk_u32(r)!=0x454c4946u)return -1;
@@ -115,12 +126,74 @@ static int ntfsk_runs_read(NTFSK_VOLUME *v,const uint8_t *runs,uint32_t rn,
     }
     return covered==end?0:-1;
 }
+/* Write only fully allocated mapping-pairs ranges. Sparse runs fail closed. */
+static int ntfsk_runs_write(NTFSK_VOLUME *v,const uint8_t *runs,uint32_t rn,
+                            uint64_t off,const void *src,uint64_t len) {
+    if(!v||!runs||!rn||(!src&&len)||off>UINT64_MAX-len)return -1;
+    if(!len)return 0;
+    uint64_t end=off+len,covered=off,vcn=0;int64_t lcn=0;uint32_t p=0;
+    while(p<rn&&runs[p]) {
+        uint8_t h=runs[p++],nb=h&15,ob=h>>4;
+        if(!nb||nb>8||ob>8||p+nb+ob>rn)return -1;
+        uint64_t count=0;for(uint8_t i=0;i<nb;i++)count|=(uint64_t)runs[p+i]<<(8*i);
+        p+=nb;if(!count||count>UINT64_MAX/v->cluster_size)return -1;
+        if(vcn>UINT64_MAX/v->cluster_size)return -1;
+        if(ob) {
+            uint64_t raw=0;for(uint8_t i=0;i<ob;i++)raw|=(uint64_t)runs[p+i]<<(8*i);
+            if(ob<8&&(runs[p+ob-1]&0x80))raw|=(~0ULL)<<(ob*8);
+            int64_t delta=(int64_t)raw;
+            if((delta>0&&lcn>INT64_MAX-delta)||(delta<0&&lcn<INT64_MIN-delta))return -1;
+            lcn+=delta;if(lcn<0)return -1;
+        } else if(off<end) {
+            /* Writing a sparse range requires allocating and publishing clusters. */
+            uint64_t sparse_start=vcn*v->cluster_size;
+            uint64_t sparse_bytes=count*v->cluster_size;
+            if(sparse_start>UINT64_MAX-sparse_bytes)return -1;
+            if(off<sparse_start+sparse_bytes&&end>sparse_start)return -1;
+        }
+        p+=ob;
+        uint64_t start=vcn*v->cluster_size,bytes=count*v->cluster_size;
+        if(start>UINT64_MAX-bytes)return -1;
+        uint64_t finish=start+bytes;
+        if(off<finish&&end>start) {
+            uint64_t a=off>start?off:start,b=end<finish?end:finish;
+            if(a>covered||!ob)return -1;
+            if((uint64_t)lcn>UINT64_MAX/v->cluster_size)return -1;
+            uint64_t disk=(uint64_t)lcn*v->cluster_size;
+            if(disk>UINT64_MAX-(a-start))return -1;
+            disk+=a-start;
+            if(ntfsk_write(v,disk,(const uint8_t *)src+(a-off),b-a)<0)return -1;
+            if(b>covered)covered=b;
+        }
+        if(vcn>UINT64_MAX-count)return -1;
+        vcn+=count;
+    }
+    return covered==end?0:-1;
+}
 static int ntfsk_record(NTFSK_VOLUME *v,uint64_t index,uint8_t *out) {
     if(!v||!v->mounted||index>=v->mft_bytes/v->record_size)return -1;
     if(index>UINT64_MAX/v->record_size)return -1;
     if(ntfsk_runs_read(v,v->mft_runs,v->mft_runs_bytes,index*v->record_size,
                        out,v->record_size)<0)return -1;
     return ntfsk_fixup(out,v->record_size,v->sector_size);
+}
+/* Publish an updated FILE record with a fresh update-sequence array. */
+static int ntfsk_record_write(NTFSK_VOLUME *v,uint64_t index,uint8_t *record) {
+    if(!v||!v->mounted||!record||index>=v->mft_bytes/v->record_size||
+       ntfsk_u32(record)!=0x454c4946u)return -1;
+    uint16_t usa=ntfsk_u16(record+4),count=ntfsk_u16(record+6);
+    if(count<2||(uint32_t)usa+(uint32_t)count*2>v->record_size||
+       (uint32_t)(count-1)*v->sector_size!=v->record_size)return -1;
+    uint16_t seq=(uint16_t)(ntfsk_u16(record+usa)+1u);if(!seq)seq=1;
+    ntfsk_put_u16(record+usa,seq);
+    for(uint16_t i=1;i<count;i++) {
+        uint32_t trailer=(uint32_t)i*v->sector_size-2;
+        ntfsk_put_u16(record+usa+(uint32_t)i*2,ntfsk_u16(record+trailer));
+        ntfsk_put_u16(record+trailer,seq);
+    }
+    if(index>UINT64_MAX/v->record_size)return -1;
+    return ntfsk_runs_write(v,v->mft_runs,v->mft_runs_bytes,
+                            index*v->record_size,record,v->record_size);
 }
 static void ntfsk_unmount(NTFSK_VOLUME *v) {
     if(!v)return;
@@ -335,6 +408,48 @@ static int ntfsk_read_file(NTFSK_VOLUME *v,uint64_t index,void **out,uint64_t *o
         p+=al;
     }
     kfree(r);return result;
+}
+
+/* Overwrite bytes in an existing unnamed stream without changing its size.
+ * Resident streams update their FILE record; non-resident streams use their
+ * existing allocated mapping pairs. No allocation, resize, or namespace
+ * mutation is attempted. */
+static int ntfsk_write_file_at(NTFSK_VOLUME *v,uint64_t index,uint64_t off,
+                               const void *src,uint64_t len) {
+    if(!v||!v->mounted||!src||!len||len>1024ULL*1024ULL||index<16||
+       !v->device||!v->device->write||index>=v->mft_bytes/v->record_size)return -1;
+    /* Refuse re-entry instead of allowing update-sequence or data writes to race. */
+    if(__atomic_exchange_n(&v->write_lock,1u,__ATOMIC_ACQUIRE))return -1;
+    uint8_t *r=kmalloc(v->record_size);if(!r){__atomic_store_n(&v->write_lock,0u,__ATOMIC_RELEASE);return -1;}
+    int result=-1;
+    if(ntfsk_record(v,index,r)<0||!(ntfsk_u16(r+22)&NTFSK_FILE_IN_USE)||
+       (ntfsk_u16(r+22)&NTFSK_FILE_DIRECTORY))goto done;
+    uint16_t ao=ntfsk_u16(r+20);
+    for(uint32_t p=ao;p+16<v->record_size;) {
+        uint32_t type=ntfsk_u32(r+p);if(type==NTFSK_ATTR_END)break;
+        uint32_t al=ntfsk_u32(r+p+4);if(al<16||p+al>v->record_size)break;
+        if(type==NTFSK_ATTR_DATA&&!r[p+9]) {
+            uint16_t attr_flags=ntfsk_u16(r+p+12);
+            if(attr_flags)break; /* compression, encryption, or sparse stream */
+            if(!r[p+8]) {
+                uint32_t value_len=ntfsk_u32(r+p+16);uint16_t value_off=ntfsk_u16(r+p+20);
+                if(value_off>al||value_len>al-value_off||off>value_len||len>value_len-off)break;
+                memcpy(r+p+value_off+off,src,(size_t)len);
+                result=ntfsk_record_write(v,index,r)==0?(int)len:-1;
+            } else {
+                uint16_t run_off=ntfsk_u16(r+p+32);uint64_t data_size=ntfsk_u64(r+p+48);
+                if(run_off>=al||off>data_size||len>data_size-off)break;
+                uint32_t run_bytes=al-run_off;
+                result=ntfsk_runs_write(v,r+p+run_off,run_bytes,off,src,len)==0?(int)len:-1;
+            }
+            break;
+        }
+        p+=al;
+    }
+done:
+    kfree(r);
+    __atomic_store_n(&v->write_lock,0u,__ATOMIC_RELEASE);
+    return result;
 }
 
 

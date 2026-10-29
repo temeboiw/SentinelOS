@@ -31,6 +31,7 @@ CHUNK = 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_COMPRESSED_BYTES = 1024 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+INSTALLER_ONLY_NAMES = {"instlr.exe", "screen.exe"}
 
 
 def sha256_file(path: Path) -> str:
@@ -66,6 +67,16 @@ def collect(root: Path):
 
 def build(root: Path, output: Path, kind: str) -> None:
     root, files = collect(root)
+    if kind == "system":
+        included = sorted(
+            row["path"] for row in files
+            if PurePosixPath(row["path"]).name.lower() in INSTALLER_ONLY_NAMES
+        )
+        if included:
+            raise ValueError(
+                "installer-only executable(s) cannot enter the deployable system package: "
+                + ", ".join(included)
+            )
     output.parent.mkdir(parents=True, exist_ok=True)
     tarbuf = io.BytesIO()
     with tarfile.open(fileobj=tarbuf, mode="w", format=tarfile.PAX_FORMAT) as tf:
@@ -178,6 +189,16 @@ def verify(path: Path, expected_kind: str | None = None, require_boot_layout: bo
     if expected_kind is not None and meta.get("kind") != expected_kind:
         raise ValueError(f"SPF kind mismatch: expected {expected_kind!r}, got {meta.get('kind')!r}")
     expected = {safe_rel(x["path"]): x for x in meta.get("files", [])}
+    if meta.get("kind") == "system":
+        included = sorted(
+            name for name in expected
+            if PurePosixPath(name).name.lower() in INSTALLER_ONLY_NAMES
+        )
+        if included:
+            raise ValueError(
+                "installer-only executable(s) found in deployable system package: "
+                + ", ".join(included)
+            )
     if require_boot_layout:
         required_by_kind = {
             "esp": ("EFI/BOOT/BOOTX64.EFI", "magic/System32/hal.dll", "magic/System32/krnl.exe"),

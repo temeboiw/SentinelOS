@@ -1,100 +1,13 @@
-# magic OS
+# Legacy installer source snapshot (not used by the build)
 
-magic OS is an experimental x86-64 operating system project. It boots through UEFI from a single GPT disk with a FAT32 EFI System Partition and an ext4 system partition, and runs in QEMU for development and testing.
+This directory is a historical duplicate of SentinelOS sources and is **not part of the active installer pipeline**.
 
-## Current features
+The supported build entry point is:
 
-- Three-stage UEFI boot chain with a firmware fallback loader and NVRAM boot entry.
-- UEFI loader for x64 PE images, including base relocations and imports between loaded modules.
-- Kernel and `hal.dll` loaded from `magic/System32` on ext4.
-- Kernel initialization for CPU tables and exceptions, physical and virtual memory, and the kernel heap.
-- HAL and kernel-thread scheduler self-tests, with serial diagnostics.
-- Single-disk GPT image with a FAT32 EFI System Partition and ext4 system partition.
-- QEMU run configuration with persistent UEFI variables under `build/`.
-
-This is an early development project, not a general-purpose operating system. The kernel currently runs its tests, paints the framebuffer, and halts.
-
-## Build prerequisites
-
-The build scripts target Windows and expect:
-
-- Administrator PowerShell for `scripts/build.ps1` (`diskpart` creates the GPT disk and FAT32 EFI System Partition).
-- `clang`, `lld-link`, `qemu-img`, and `qemu-system-x86_64` available on `PATH`.
-- EDK II headers in `C:\edk2`, or set the `EDK2` environment variable to their location.
-- `mke2fs.exe` at `C:\msys64\usr\bin\mke2fs.exe`, or WSL with `mke2fs` installed.
-- QEMU UEFI firmware under `C:\Program Files\qemu\share` for `scripts/run.ps1`.
-
-## Build and run
-
-From the repository root in an Administrator PowerShell:
-
-```powershell
-.\scripts\build.ps1
+```sh
+bash scripts/build.sh
 ```
 
-Build and launch the result in QEMU:
+The root build compiles the OS once. `installer/build-installer.sh` stages `build/rootfs` and `build/esp` unchanged as the deployable system and target ESP, then creates a separate `staging/installer-esp` for installer-only `smss.exe`, `instlr.exe`, and `screen.exe`. `installer/make-iso.sh` builds the installed partition images only from the main OS staging trees and boots the ISO from the dedicated installer ESP. It does not compile or use this duplicate source snapshot.
 
-```powershell
-.\scripts\build.ps1 -Run
-```
-
-To launch an already-built image without rebuilding:
-
-```powershell
-.\scripts\run.ps1
-```
-
-QEMU connects the guest serial port to the PowerShell terminal. Kernel diagnostics and self-test results appear there. On a normal run, the framebuffer is painted and the kernel halts.
-
-## Build options
-
-- `-Run`: launch QEMU after a successful build.
-- `-KeepFallback`: do not remove `EFI\BOOT\BOOTX64.EFI` after registering the UEFI boot entry.
-- `-ResetNvram`: remove the saved `build\vars.fd` before rebuilding, resetting QEMU's UEFI boot variables.
-- `-Clean`: detach the generated virtual disk if needed and remove `build\`.
-
-## Building on Linux
-
-`scripts/build.sh` and `scripts/run.sh` do the same job on Linux. Required tools: `clang`, `lld`, `qemu-img`, `qemu-system-x86_64`, `sfdisk`, `mkfs.vfat`, `mke2fs`, and `mtools` (`mmd`, `mcopy`). EDK II headers are found via the `EDK2` environment variable (needs `MdePkg/Include`), falling back to `/usr/include/efi`.
-
-```bash
-./scripts/build.sh
-./scripts/build.sh --run
-./scripts/run.sh
-```
-
-Linux options:
-
-- `--run`: launch QEMU after a successful build.
-- `--keep-fallback`: keep `EFI/BOOT/BOOTX64.EFI`.
-- `--reset-nvram`: remove the saved `build/vars.fd`.
-- `--clean`: remove `build/`.
-
-For example, rebuild with the fallback loader retained:
-
-```powershell
-.\scripts\build.ps1 -KeepFallback -Run
-```
-
-## Boot flow
-
-1. Firmware starts `EFI\BOOT\BOOTX64.EFI` from the FAT EFI System Partition.
-2. `bootx64.efi` starts `EFI\magic\bootuni.efi`.
-3. `bootuni.efi` registers the `magic OS` UEFI boot entry and starts `EFI\magic\loadufi.efi`.
-4. `loadufi.efi` scans UEFI block devices for the ext4 partition, reads `magic/System32/hal.dll` and `krnl.exe`, exits UEFI boot services, and transfers control to the kernel.
-
-## Generated files
-
-Build artifacts are written under `build/`:
-
-- `magic-disk.img`: GPT disk image with the FAT32 EFI System Partition and ext4 system partition.
-- `vars.fd`: persistent QEMU UEFI variables.
-- `esp/`, `rootfs/`, and `obj/`: staged files and intermediate objects.
-
-## Source layout
-
-- `boot/`: UEFI boot stages, ext4 reader, and PE loader.
-- `kernel/`: kernel entry point, CPU setup, memory managers, heap, and executive routines.
-- `hal/`: hardware abstraction layer.
-- `shared/`: boot information and shared type definitions.
-- `scripts/`: Windows (`.ps1`) and Linux (`.sh`) build and QEMU launch scripts.
+Do not add new features here. Active OS changes belong in the repository's root source directories; installer-specific UI, tests, and ISO packaging remain under `installer/`.

@@ -64,7 +64,9 @@ The VM stage runs QEMU/OVMF for 45 seconds and saves `installer/artifacts/qemu-u
 
 ## Included media
 
-- Builds from the isolated `installer/source/` snapshot and leaves root-level project sources untouched.
+- Builds installer applications against the root SentinelOS artifacts; `installer/source/` is a legacy snapshot and is not compiled.
+- Keeps deployable trees separate: `staging/system` and `staging/esp` are copied from the main OS build; `staging/installer-esp` alone receives installer SMSS and setup programs.
+- Creates `system.img` from the main OS rootfs and target `esp.img` from the main OS EFI tree. Installer-only files are rejected from the system package, and the image builder compares the packaged `smss.exe` with the main OS build output.
 - Includes an installer session manager, framebuffer terms/target UI, and progress-style screen binary.
 - Packages staged EFI and system filesystem trees into separate SPF archives. SPF is a custom zlib-compressed tar format, not WIM.
 - Creates a FAT32 EFI boot image and copies the staged EFI tree plus `magic/System32` boot modules onto the ESP. The installer partition images use a zero-block encoding on the ESP; `loadufi.efi` expands them into their normal raw bytes while booting, so the virtual DVD does not have to read hundreds of MiB of empty filesystem space.
@@ -78,7 +80,7 @@ The graphical installer is designed to install without a shell. The ISO builder 
 
 When the user clicks **Install OS**, the in-OS setup app writes GPT metadata and asks the trusted kernel to copy the verified images to the fixed partition offsets. The kernel bounds-checks image sizes against the VirtIO disk capacity and reads back the first and last sectors after copying. The target disk must be at least the combined partition-image size plus GPT metadata (about 640 MiB at defaults). The installed ext4 filesystem initially retains the image size even if its partition is larger.
 
-The only supported installation path is the native in-OS graphical installer. Host-side install/extraction entry points are intentionally not provided. **The code path has been connected, but this session has not run the installer build, ISO checks, or a real UEFI install-and-reboot test. Do not treat the installer as release-ready until those checks pass.** Installing erases the selected disk. Use only a disposable virtual disk during testing.
+The supported installation path is the native in-OS graphical installer. Host-side install/extraction entry points are intentionally not provided. The package and ISO checks prove the images contain the expected main OS files and exclude installer startup binaries. Release validation also requires a disposable virtual disk installation and a UEFI boot of that disk through the normal login and desktop sequence. Installing erases the selected disk; use only a disposable virtual disk during testing.
 
 ## Regression tests
 

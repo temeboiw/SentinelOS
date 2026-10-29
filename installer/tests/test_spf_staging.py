@@ -148,6 +148,16 @@ class SpfStagingAndIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing boot-critical path"):
             make_spf.verify(self.package, expected_kind="esp", require_boot_layout=True)
 
+    def test_system_package_rejects_installer_only_executables(self):
+        system = self.root / "system"
+        sys32 = system / "magic" / "System32"
+        sys32.mkdir(parents=True)
+        for name, data in (("hal.dll", b"hal"), ("krnl.exe", b"kernel"),
+                           ("smss.exe", b"main-session-manager"), ("instlr.exe", b"installer")):
+            (sys32 / name).write_bytes(data)
+        with self.assertRaisesRegex(ValueError, "installer-only executable"):
+            make_spf.build(system, self.root / "system.spf", "system")
+
     def test_expected_package_kind_is_enforced(self):
         self.build_package()
         make_spf.verify(self.package, expected_kind="esp")

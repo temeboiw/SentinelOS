@@ -84,11 +84,25 @@ class NativeInstallerContractTests(unittest.TestCase):
 
     def test_iso_builder_and_smoke_check_include_raw_images(self):
         for path in ("magic/System32/hal.dll", "magic/System32/krnl.exe",
-                     "magic/System32/smss.exe", "magic/System32/instlr.exe"):
+                     "magic/System32/smss.exe", "magic/System32/bootvid.exe",
+                     "magic/System32/sentlogon.exe"):
             self.assertIn(path, ISO)
+        self.assertIn('INSTALLER_ESP="$STAGE/installer-esp"', ISO)
+        self.assertIn('"$INSTALLER_ESP/magic/System32/instlr.exe"', ISO)
+        self.assertIn("installer executable is present in the installed system image", ISO)
+        self.assertIn("installer-only executable found in the deployable OS tree", ISO)
+        self.assertIn('"$OBJ/smss.exe"', (ROOT / "build-installer.sh").read_text())
+        self.assertIn("cmp -s \"$INSTALLER_ESP/magic/System32/smss.exe\" \"$SYS32/smss.exe\"", (ROOT / "build-installer.sh").read_text())
         for name in ("esp.img", "system.img", "install.sha256"):
             self.assertIn(name, ISO)
             self.assertIn(name, CHECK)
+
+    def test_deployable_system_image_cannot_package_installer_apps(self):
+        packer = (ROOT / "make_spf.py").read_text()
+        builder = (ROOT / "build-installer.sh").read_text()
+        self.assertIn('if kind == "system":', packer)
+        self.assertIn("installer-only executable(s) cannot enter", packer)
+        self.assertIn('[[ -e "$SYS32/instlr.exe" || -e "$SYS32/screen.exe" ]] || ! cmp -s', builder)
 
     def test_native_install_path_does_not_call_host_shell_or_spf_extractor(self):
         self.assertNotIn("install-disk.sh", UI)

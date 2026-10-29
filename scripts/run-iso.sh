@@ -3,10 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ISO="${SENTINELOS_ISO:-$ROOT/Sentinel-v5-x86-64.iso}"
-DISK="${SENTINELOS_TEST_DISK:-$ROOT/test.img}"
+DISK="${SENTINELOS_TEST_DISK:-$ROOT/installer-test-3gb.img}"
 
-[[ -s "$ISO" ]] || { echo "error: installer ISO is missing or empty: $ISO" >&2; exit 1; }
 [[ -s "$DISK" ]] || { echo "error: test disk is missing or empty: $DISK" >&2; exit 1; }
 
 QEMU="${QEMU:-$(command -v qemu-system-x86_64 || true)}"
@@ -31,8 +29,7 @@ fi
 RAM="${SENTINELOS_RAM_MB:-2048}"
 [[ "$RAM" =~ ^[1-9][0-9]*$ ]] || { echo "error: SENTINELOS_RAM_MB must be a positive integer (MiB)." >&2; exit 1; }
 
-echo "Booting installer ISO: $ISO"
-echo "Writable test disk: $DISK"
+echo "Writable test disk (installer erases it): $DISK"
 echo "UEFI firmware: $FIRMWARE"
 echo "The installer may erase the selected disk; use only this disposable test image."
 
@@ -40,7 +37,6 @@ exec "$QEMU" \
   -machine q35,accel=tcg -cpu max -m "${RAM}M" \
   -display vnc=:0 \
   -drive "if=pflash,format=raw,readonly=on,file=$FIRMWARE" \
-  -cdrom "$ISO" -boot order=d \
   -drive "if=none,id=test-disk,format=raw,file=$DISK" \
   -device virtio-blk-pci,drive=test-disk \
   -serial stdio -monitor none -no-reboot -no-shutdown

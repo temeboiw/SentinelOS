@@ -1304,12 +1304,12 @@ static int64_t vfs_open_user_file(const char *name) {
         if(vfs_ntfsk_open_path(name,&ntfs_index,&ntfs_size)==0 && ntfs_index<=UINT32_MAX) {
             OB_HANDLE handle;
             void *body;
-            if (!ObCreateObject(ObTypeFile, NULL, sizeof(VfsUserHandle), (uintptr_t)MmCurrentProcess->Pid, OB_ACCESS_READ, &handle, &body)) return -1;
+            if (!ObCreateObject(ObTypeFile, NULL, sizeof(VfsUserHandle), (uintptr_t)MmCurrentProcess->Pid, OB_ACCESS_READ|OB_ACCESS_WRITE, &handle, &body)) return -1;
             VfsUserHandle *vh = (VfsUserHandle *)body;
             vh->ino=(uint32_t)ntfs_index;
             vh->pos=0;
             vh->size=ntfs_size;
-            vh->used=1; vh->writable=0;
+            vh->used=1; vh->writable=1;
             vh->ntfs=1;
             ObDereferenceObject((OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT, body)));
             return (int64_t)handle;
@@ -1333,6 +1333,7 @@ static int64_t vfs_open_user_file(const char *name) {
     return (int64_t)handle;
 }
 
+static void vfs_ntfsk_invalidate_cached_file(uint32_t ino);
 static int64_t vfs_create_user_output_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
     uint32_t ino = 0;
@@ -1360,9 +1361,20 @@ static int vfs_write_user_output_file(uint64_t handle, uint64_t src, uint64_t le
     }
     VfsUserHandle *h = (VfsUserHandle *)obj->body;
     KPROCESS *proc = MmCurrentProcess;
-    if (!h->used || !h->writable || !proc ||
-        h->pos != h->size || h->size > UINT32_MAX || len > UINT32_MAX - h->size ||
+    if (!h->used || !h->writable || !proc || h->size > UINT32_MAX ||
         !MmValidateUserRange(proc, src, len, 0)) {
+        ObDereferenceObject(obj);
+        return -1;
+    }
+    if(h->ntfs) {
+        if(h->pos>h->size||len>h->size-h->pos) { ObDereferenceObject(obj); return -1; }
+        int rc=ntfsk_write_file_at(&g_ntfsk_volume,h->ino,h->pos,
+                                  (const void *)(uintptr_t)src,len);
+        if(rc>0){h->pos+=(uint64_t)rc;vfs_ntfsk_invalidate_cached_file(h->ino);}
+        ObDereferenceObject(obj);
+        return rc;
+    }
+    if (h->pos != h->size || len > UINT32_MAX - h->size) {
         ObDereferenceObject(obj);
         return -1;
     }
@@ -1526,6 +1538,9 @@ static uint64_t g_psp_ntfs_size, g_psp_ntfs_idx;
 static void vfs_release_ntfs_image_cache(void) {
     if (g_psp_ntfs_buf) kfree(g_psp_ntfs_buf);
     g_psp_ntfs_buf = 0; g_psp_ntfs_size = 0; g_psp_ntfs_idx = 0;
+}
+static void vfs_ntfsk_invalidate_cached_file(uint32_t ino) {
+    if(g_psp_ntfs_buf&&g_psp_ntfs_idx==ino)vfs_release_ntfs_image_cache();
 }
 static int vfs_find_image_file(const char *name, uint32_t *ino_out,
                                uint64_t *size_out) {
@@ -2159,9 +2174,24 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
 #define SYS_NtSocketBind   46
 #define SYS_NtSocketSendTo 47
 #define SYS_NtSocketRecvFrom 48
+#define SYS_NtSocketConnect 56
+#define SYS_NtSocketSend 57
+#define SYS_NtSocketRecv 58
 #define NT_SOCKET_BASE 0x534F0000ULL
+#define NT_SOCKET_STATUS_INVALID_HANDLE (-1LL)
+#define NT_SOCKET_STATUS_INVALID_PARAMETER (-2LL)
+#define NT_SOCKET_STATUS_WOULD_BLOCK (-3LL)
+#define NT_SOCKET_STATUS_ADDRESS_IN_USE (-4LL)
+#define NT_SOCKET_STATUS_NETWORK_UNREACHABLE (-5LL)
+#define NT_SOCKET_STATUS_MESSAGE_TOO_LARGE (-6LL)
+#define NT_SOCKET_STATUS_NO_BUFFERS (-7LL)
+#define NT_SOCKET_STATUS_TIMED_OUT (-8LL)
+#define NT_SOCKET_STATUS_CONNECTION_RESET (-9LL)
+#define NT_SOCKET_STATUS_NOT_CONNECTED (-10LL)
+#define NT_SOCKET_STATUS_ALREADY_CONNECTED (-11LL)
 typedef struct { int used; int owner_pid; int type; uint16_t local_port; uint32_t peer_addr; uint16_t peer_port; } NT_SOCKET_SLOT;
 static NT_SOCKET_SLOT nt_socket_slots[32];
+static uint16_t nt_socket_ephemeral_next=49152;
 
 static int NtSocketDecode(uint64_t h) {
     if(h<=NT_SOCKET_BASE || h>NT_SOCKET_BASE+32) return -1;
@@ -2169,6 +2199,20 @@ static int NtSocketDecode(uint64_t h) {
     if(!nt_socket_slots[i].used || !MmCurrentProcess ||
        nt_socket_slots[i].owner_pid!=(int)MmCurrentProcess->Pid) return -1;
     return i;
+}
+static int NtSocketAllocatePort(int socket_index,uint16_t *out_port) {
+    if(!out_port)return -1;
+    const uint32_t first=49152u,last=65535u,count=last-first+1u;
+    for(uint32_t n=0;n<count;n++) {
+        uint16_t candidate=nt_socket_ephemeral_next;
+        nt_socket_ephemeral_next=(uint16_t)(candidate==65535u?first:(uint32_t)candidate+1u);
+        int busy=0;
+        for(int j=0;j<32;j++)if(j!=socket_index&&nt_socket_slots[j].used&&nt_socket_slots[j].local_port==candidate){busy=1;break;}
+        if(busy)continue;
+        if(nt_socket_slots[socket_index].type==2&&NetUdpBindExclusive(candidate)<0)continue;
+        nt_socket_slots[socket_index].local_port=candidate;*out_port=candidate;return 0;
+    }
+    return -1;
 }
 
 static Frame *syscall_handler(Frame *f) {
@@ -2191,7 +2235,6 @@ static Frame *syscall_handler(Frame *f) {
     case SYS_NtSocketCreate: {
         int af=(int)f->rdi, type=(int)f->rsi, proto=(int)f->rdx;
         if(af!=2 || (type!=1 && type!=2) || (proto && proto!=(type==2?17:6))) { f->rax=(uint64_t)-1LL; return f; }
-        if(type==1) { f->rax=(uint64_t)-1LL; return f; } /* TCP waits for the TCP state machine. */
         for(int i=0;i<32;i++) if(!nt_socket_slots[i].used) {
             nt_socket_slots[i]=(NT_SOCKET_SLOT){.used=1,.owner_pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:-1,.type=type};
             f->rax=NT_SOCKET_BASE+(uint64_t)i+1; return f;
@@ -2200,49 +2243,123 @@ static Frame *syscall_handler(Frame *f) {
     }
     case SYS_NtSocketClose: {
         int i=NtSocketDecode(f->rdi);
-        if(i<0) { f->rax=(uint64_t)-1LL; return f; }
-        nt_socket_slots[i].used=0; f->rax=0; return f;
+        if(i<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE; return f; }
+        if(nt_socket_slots[i].type==1){int rc=NetTcpClose((unsigned)i);if(rc==-8){f->rax=(uint64_t)NT_SOCKET_STATUS_TIMED_OUT;goto socket_close_done;}if(rc==-9){f->rax=(uint64_t)NT_SOCKET_STATUS_CONNECTION_RESET;goto socket_close_done;}}
+        uint16_t port=nt_socket_slots[i].local_port;
+        nt_socket_slots[i].used=0;
+        if(port&&nt_socket_slots[i].type==2){int shared=0;for(int j=0;j<32;j++)if(nt_socket_slots[j].used&&nt_socket_slots[j].local_port==port)shared=1;if(!shared)NetUdpUnbind(port);}
+socket_close_done:
+        if(f->rax==(uint64_t)NT_SOCKET_STATUS_TIMED_OUT||f->rax==(uint64_t)NT_SOCKET_STATUS_CONNECTION_RESET){uint16_t close_port=nt_socket_slots[i].local_port;int close_type=nt_socket_slots[i].type;nt_socket_slots[i].used=0;if(close_type==2&&close_port)NetUdpUnbind(close_port);return f;}
+        f->rax=0; return f;
     }
     case SYS_NtSocketBind: {
         int i=NtSocketDecode(f->rdi);
-        if(i<0 || !f->rsi || f->rdx<16 ||
-           !MmValidateUserRange(MmCurrentProcess,f->rsi,16,0)) { f->rax=(uint64_t)-1LL; return f; }
+        if(i<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE; return f; }
+        if((nt_socket_slots[i].type!=1&&nt_socket_slots[i].type!=2)||nt_socket_slots[i].local_port||!f->rsi||f->rdx<16||
+           !MmValidateUserRange(MmCurrentProcess,f->rsi,16,0)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
         const uint8_t *sa=(const uint8_t *)(uint64_t)f->rsi;
         uint16_t family=*(const uint16_t *)sa;
         uint16_t port=(uint16_t)(((uint16_t)sa[2]<<8)|sa[3]);
-        if(family!=2 || !port) { f->rax=(uint64_t)-1LL; return f; }
-        int slot=NetUdpBind(port);
-        if(slot<0) { f->rax=(uint64_t)-1LL; return f; }
+        uint32_t local_addr=*(const uint32_t *)(sa+4);
+        if(family!=2||!port||(local_addr&&local_addr!=net_ipv4_addr)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        for(int j=0;j<32;j++)if(j!=i&&nt_socket_slots[j].used&&nt_socket_slots[j].local_port==port){f->rax=(uint64_t)NT_SOCKET_STATUS_ADDRESS_IN_USE;return f;}
+        if(nt_socket_slots[i].type==2&&NetUdpBindExclusive(port)<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_ADDRESS_IN_USE; return f; }
         nt_socket_slots[i].local_port=port; f->rax=0; return f;
+    }
+    case SYS_NtSocketConnect: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE; return f; }
+        if(nt_socket_slots[i].type!=1||nt_socket_slots[i].peer_addr||!f->rsi||f->rdx<16||
+           !MmValidateUserRange(MmCurrentProcess,f->rsi,16,0)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        const uint8_t *sa=(const uint8_t *)(uint64_t)f->rsi;
+        uint16_t family=*(const uint16_t *)sa,port=(uint16_t)(((uint16_t)sa[2]<<8)|sa[3]);
+        uint32_t ip=*(const uint32_t *)(sa+4);
+        if(family!=2||!port||!ip) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        uint16_t local=nt_socket_slots[i].local_port;
+        if(!local&&NtSocketAllocatePort(i,&local)<0){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        int rc=NetTcpConnect((unsigned)i,local,ip,port);
+        if(rc==-8){f->rax=(uint64_t)NT_SOCKET_STATUS_TIMED_OUT;return f;}
+        if(rc==-9){f->rax=(uint64_t)NT_SOCKET_STATUS_CONNECTION_RESET;return f;}
+        if(rc==-7){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        if(rc==-5){f->rax=(uint64_t)NT_SOCKET_STATUS_NETWORK_UNREACHABLE;return f;}
+        if(rc<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER;return f;}
+        nt_socket_slots[i].peer_addr=ip;nt_socket_slots[i].peer_port=port;
+        f->rax=0;return f;
+    }
+    case SYS_NtSocketSend: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE;return f;}
+        if(f->rdx>65535u){f->rax=(uint64_t)NT_SOCKET_STATUS_MESSAGE_TOO_LARGE;return f;}
+        if(nt_socket_slots[i].type!=1||!nt_socket_slots[i].peer_addr) { f->rax=(uint64_t)NT_SOCKET_STATUS_NOT_CONNECTED; return f; }
+        if((!f->rsi&&f->rdx)||(f->rdx&&!MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,0))) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        int rc=NetTcpSend((unsigned)i,(const void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        if(rc==-8){f->rax=(uint64_t)NT_SOCKET_STATUS_TIMED_OUT;return f;}
+        if(rc==-9){f->rax=(uint64_t)NT_SOCKET_STATUS_CONNECTION_RESET;return f;}
+        if(rc==-10){f->rax=(uint64_t)NT_SOCKET_STATUS_NOT_CONNECTED;return f;}
+        if(rc==-7){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        if(rc<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER;return f;}
+        f->rax=(uint64_t)(int64_t)rc;return f;
+    }
+    case SYS_NtSocketRecv: {
+        int i=NtSocketDecode(f->rdi);
+        if(i<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE;return f;}
+        if(f->rdx>65535u){f->rax=(uint64_t)NT_SOCKET_STATUS_MESSAGE_TOO_LARGE;return f;}
+        if(nt_socket_slots[i].type!=1||!nt_socket_slots[i].peer_addr) { f->rax=(uint64_t)NT_SOCKET_STATUS_NOT_CONNECTED; return f; }
+        if((!f->rsi&&f->rdx)||(f->rdx&&!MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,1))) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        int rc=NetTcpReceive((unsigned)i,(void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        if(rc==-8){f->rax=(uint64_t)NT_SOCKET_STATUS_TIMED_OUT;return f;}
+        if(rc==-9){f->rax=(uint64_t)NT_SOCKET_STATUS_CONNECTION_RESET;return f;}
+        if(rc==-10){f->rax=(uint64_t)NT_SOCKET_STATUS_NOT_CONNECTED;return f;}
+        if(rc==-7){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        if(rc<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER;return f;}
+        f->rax=(uint64_t)(int64_t)rc;return f;
     }
     case SYS_NtSocketSendTo: {
         int i=NtSocketDecode(f->rdi);
-        if(i<0 || nt_socket_slots[i].type!=2 || !f->rsi || f->rdx>1472 ||
-           !MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,0) ||
-           !f->r8 || f->r9<16 || !MmValidateUserRange(MmCurrentProcess,f->r8,16,0)) { f->rax=(uint64_t)-1LL; return f; }
+        if(i<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE; return f; }
+        if(f->rdx>NET_UDP_DATA_MAX) { f->rax=(uint64_t)NT_SOCKET_STATUS_MESSAGE_TOO_LARGE; return f; }
+        if(nt_socket_slots[i].type!=2||(!f->rsi&&f->rdx)||
+           (f->rdx&&!MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,0))||
+           !f->r8||f->r9<16||!MmValidateUserRange(MmCurrentProcess,f->r8,16,0)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
         const uint8_t *sa=(const uint8_t *)(uint64_t)f->r8;
-        if(*(const uint16_t *)sa!=2) { f->rax=(uint64_t)-1LL; return f; }
+        if(*(const uint16_t *)sa!=2) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
         uint16_t port=(uint16_t)(((uint16_t)sa[2]<<8)|sa[3]);
         uint32_t ip=*(const uint32_t *)(sa+4);
+        if(!port||!ip) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
         uint16_t local=nt_socket_slots[i].local_port;
-        if(!local) { local=(uint16_t)(49152+(i*37)%16000); if(NetUdpBind(local)<0){f->rax=(uint64_t)-1LL;return f;} nt_socket_slots[i].local_port=local; }
+        if(!local&&NtSocketAllocatePort(i,&local)<0){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        if(!nt_socket_slots[i].local_port)nt_socket_slots[i].local_port=local;
         int sent=NetUdpSend(ip,local,port,(const void *)(uint64_t)f->rsi,(unsigned)f->rdx);
+        if(sent==-3){f->rax=(uint64_t)NT_SOCKET_STATUS_WOULD_BLOCK;return f;}
+        if(sent==-4){f->rax=(uint64_t)NT_SOCKET_STATUS_NO_BUFFERS;return f;}
+        if(sent<0){f->rax=(uint64_t)NT_SOCKET_STATUS_NETWORK_UNREACHABLE;return f;}
         f->rax=(uint64_t)(int64_t)sent; return f;
     }
     case SYS_NtSocketRecvFrom: {
         int i=NtSocketDecode(f->rdi);
-        if(i<0 || nt_socket_slots[i].type!=2 || !nt_socket_slots[i].local_port ||
-           !f->rsi || f->rdx>1472 || !MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,1)) { f->rax=(uint64_t)-1LL; return f; }
+        if(i<0) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_HANDLE; return f; }
+        if(nt_socket_slots[i].type!=2||!nt_socket_slots[i].local_port||(!f->rsi&&f->rdx)||f->rdx>65535||
+           (f->rdx&&!MmValidateUserRange(MmCurrentProcess,f->rsi,f->rdx,1))||
+           (!!f->r8!=!!f->r9)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+        int *addrlen=0;
+        if(f->r8){
+            if(f->r9<sizeof(int)||!MmValidateUserRange(MmCurrentProcess,f->r8,16,1)||
+               !MmValidateUserRange(MmCurrentProcess,f->r9,sizeof(int),1)) { f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER; return f; }
+            addrlen=(int *)(uint64_t)f->r9;
+            if(*addrlen<16){*addrlen=16;f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER;return f;}
+        }
         NetPoll();
         uint32_t source_ip=0; uint16_t source_port=0;
         int got=NetUdpReceiveFrom(nt_socket_slots[i].local_port,(void *)(uint64_t)f->rsi,(unsigned)f->rdx,&source_ip,&source_port);
-        if(got>0 && f->r8 && f->r9 &&
-           MmValidateUserRange(MmCurrentProcess,f->r8,16,1) &&
-           MmValidateUserRange(MmCurrentProcess,f->r9,sizeof(int),1)) {
+        if(got==-2){f->rax=(uint64_t)NT_SOCKET_STATUS_WOULD_BLOCK;return f;}
+        if(got==-6){f->rax=(uint64_t)NT_SOCKET_STATUS_MESSAGE_TOO_LARGE;return f;}
+        if(got<0){f->rax=(uint64_t)NT_SOCKET_STATUS_INVALID_PARAMETER;return f;}
+        if(f->r8 && addrlen) {
             uint8_t *sa=(uint8_t *)(uint64_t)f->r8;
+            for(unsigned j=0;j<16;j++)sa[j]=0;
             *(uint16_t *)sa=2; sa[2]=(uint8_t)(source_port>>8); sa[3]=(uint8_t)source_port;
             *(uint32_t *)(sa+4)=source_ip;
-            *(int *)(uint64_t)f->r9=16;
+            *addrlen=16;
         }
         f->rax=(uint64_t)(int64_t)got; return f;
     }
@@ -4116,8 +4233,7 @@ static void user_enter(BootInfo *bi) {
     virtio_input_init();
     SentinelRegisterBuiltinBlockDevices();
 
-    /* NTFS is the preferred system filesystem. Keep ext4 as a temporary
-       fallback until NTFS read/write and boot-path coverage is complete. */
+    /* NTFS is preferred when present; ext4 remains the legacy fallback. */
     for(uint32_t i=0;i<SentinelBlockDeviceCount;i++) {
         SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet(i);
         if(d && ntfsk_find_and_mount(&g_ntfsk_volume,d)==0) {
@@ -4125,7 +4241,7 @@ static void user_enter(BootInfo *bi) {
             vfs_ntfsk_cwd_storage=5;
             if(vfs_ntfsk_refresh()<0)
                 DbgPrint("fs: NTFS root directory enumeration failed\n");
-            DbgPrint("fs: NTFS read-only system volume mounted\n");
+            DbgPrint("fs: NTFS system volume mounted (bounded in-place writes)\n");
             break;
         }
     }

@@ -11,6 +11,7 @@ static u32 installer_sector_size;
 static char installer_target_name[32] = "disk";
 static char installer_partition_summary[32] = "Unreadable";
 static unsigned char installer_partition_entries[16384];
+static u32 cursor_background[16 * 16];
 static void rect(u32*f,u32 p,u32 w,u32 h,int x,int y,int rw,int rh,u32 c){int x2=x+rw,y2=y+rh;if(x<0)x=0;if(y<0)y=0;if(x2>(int)w)x2=w;if(y2>(int)h)y2=h;if(x>=x2||y>=y2)return;for(int yy=y;yy<y2;yy++)for(int xx=x;xx<x2;xx++)f[(u64)yy*p+xx]=c;}
 static void text(u32*f,u32 p,u32 w,u32 h,int x,int y,const char*s,u32 c,int z){for(;*s;s++,x+=8*z){unsigned char ch=(unsigned char)*s;if(ch>=128)ch='?';const unsigned char*g=font8x8_basic[ch];for(int j=0;j<8;j++)for(int i=0;i<8;i++)if(g[j]&(1u<<i))rect(f,p,w,h,x+i*z,y+j*z,z,z,c);}}
 static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
@@ -27,6 +28,21 @@ static void draw_cursor(u32 *f, const IFB *b, int mx, int my) {
   if(ch=='*') f[(u64)py*b->pitch+px]=0xFF10212A;
   else if(ch=='+') f[(u64)py*b->pitch+px]=0xFFFFFFFF;
  }
+}
+static void restore_cursor(u32 *f, const IFB *b, int mx, int my) {
+ for(int y=0;y<16;y++)for(int x=0;x<16;x++){
+  int px=mx+x,py=my+y;
+  if(px>=0&&py>=0&&px<(int)b->w&&py<(int)b->h)
+   f[(u64)py*b->pitch+px]=cursor_background[y*16+x];
+ }
+}
+static void save_draw_cursor(u32 *f, const IFB *b, int mx, int my) {
+ for(int y=0;y<16;y++)for(int x=0;x<16;x++){
+  int px=mx+x,py=my+y;
+  cursor_background[y*16+x]=(px>=0&&py>=0&&px<(int)b->w&&py<(int)b->h)
+      ?f[(u64)py*b->pitch+px]:0;
+ }
+ draw_cursor(f,b,mx,my);
 }
 static int payload_image_valid(u64 image,u64 total){
  if((total&511ULL)!=0)return 0;
@@ -229,10 +245,22 @@ void instlr_main(void){
      NtVerifyInstallerPayload(0)==0&&NtVerifyInstallerPayload(1)==0;
  NtWriteConsole(installer_payloads_ready?"instlr: filesystem images and SHA-256 verified\n":"instlr: image integrity check failed; disk writes disabled\n");
  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);
- draw_cursor(fb,&b,mouse_x,mouse_y);
+ save_draw_cursor(fb,&b,mouse_x,mouse_y);
  (void)NtFlushGraphics(0,0,f.w,f.h);
  for(;;){InputEvent ev={0};if(sy3(SYS_GetInput,(u64)&ev,0,0)){
-  if(ev.type==2||ev.type==3){mouse_x=ev.x;mouse_y=ev.y;}
+  if(ev.type==2){
+   int old_x=mouse_x,old_y=mouse_y;
+   restore_cursor(fb,&b,old_x,old_y);
+   mouse_x=ev.x;mouse_y=ev.y;
+   save_draw_cursor(fb,&b,mouse_x,mouse_y);
+   int x0=old_x<mouse_x?old_x:mouse_x,y0=old_y<mouse_y?old_y:mouse_y;
+   int x1=(old_x>mouse_x?old_x:mouse_x)+16,y1=(old_y>mouse_y?old_y:mouse_y)+16;
+   if(x0<0)x0=0;if(y0<0)y0=0;if(x1>(int)f.w)x1=(int)f.w;if(y1>(int)f.h)y1=(int)f.h;
+   if(x1>x0&&y1>y0)(void)NtFlushGraphics((u32)x0,(u32)y0,(u32)(x1-x0),(u32)(y1-y0));
+   (void)sy3(SYS_Yield,0,0,0);
+   continue;
+  }
+  if(ev.type==3){mouse_x=ev.x;mouse_y=ev.y;}
   if(ev.type==1&&(ev.key=='\r'||ev.key=='\n')){if(page==0&&checked){page=1;NtWriteConsole("instlr: terms accepted; disk query completed\n");}}
   if(ev.type==3){int pw=(int)f.w-64;if(pw>900)pw=900;if(pw<250)pw=(int)f.w-24;int ph=(int)f.h-112;if(ph>600)ph=600;if(ph<120)ph=(int)f.h-70;int x=((int)f.w-pw)/2,y=((int)f.h-ph)/2+14;
    if(page==0){if(ev.x>=x+24&&ev.x<x+300&&ev.y>=y+ph-100&&ev.y<y+ph-64){checked=!checked;accepted=checked;}if(checked&&ev.x>=x+pw-150&&ev.x<x+pw-18&&ev.y>=y+ph-62&&ev.y<y+ph-18){page=1;}}
@@ -282,6 +310,6 @@ void instlr_main(void){
      }}
     }else if(install_state<0){NtWriteConsole("instlr: retry requested; review target and confirm erase again\n");install_state=0;}else{install_state=4;NtWriteConsole("instlr: target selected; explicit erase confirmation required\n");}}
   }
-  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);if(install_state!=3)draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
+  paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);if(install_state!=3)save_draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);
  }(void)sy3(SYS_Yield,0,0,0);}
 }

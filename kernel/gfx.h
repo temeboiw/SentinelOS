@@ -189,11 +189,11 @@ static void gfx_log_display_adapters(void) {
                 (void)sub;
                 if(base!=0x03u)continue;
                 const char *name="other";
-                (void)name;
                 if(vendor==0x8086u)name="Intel";
                 else if(vendor==0x10DEu)name="NVIDIA";
                 else if(vendor==0x1002u || vendor==0x1022u)name="AMD";
                 else if(vendor==GFX_VIRTIO_VENDOR)name="VirtIO";
+                (void)name; /* Used by the debug-only inventory log. */
                 SENTINEL_GFX_LOG("gfx: PCI display #%u %s %04x:%04x at %02x:%02x.%u class=%02x/%02x (PCI inventory; active graphics backend reported separately)\n",
                     found,name,vendor,device,b,d,fn,base,sub);
                 found++;

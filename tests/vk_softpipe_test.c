@@ -14,7 +14,19 @@ static int check(int ok, const char *name) {
 int main(void) {
     VkSoftTarget target;
     VkSoftVertex a, b, c;
+    const uint32_t wrap_pixels[4] = {
+        0xff112233u, 0xff445566u, 0xff778899u, 0xffaabbccu
+    };
+    VkSoftTexture wrap_texture = {
+        wrap_pixels, 2, 2, 2, 0, 1, 1, 0, 0
+    };
     int fails = 0;
+    fails += check(vksoft_sample_texture_bits(&wrap_texture, 0x7fc00000u,
+                                               0x7f800000u) == wrap_pixels[0],
+                   "repeating sampler safely handles NaN and infinity");
+    fails += check(vksoft_sample_texture_bits(&wrap_texture, 0x4f000000u,
+                                               0xff000000u) == wrap_pixels[0],
+                   "repeating sampler safely handles out-of-range coordinates");
     memset(&target, 0, sizeof(target));
     target.color = color;
     target.depth = depth;

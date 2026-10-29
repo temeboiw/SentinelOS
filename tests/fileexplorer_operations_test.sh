@@ -18,5 +18,5 @@ require "$EXPLORER" 'Cut (not supported)' "cut is clearly disabled rather than f
 require "$EXPLORER" 'Delete (not supported)' "delete remains disabled until VFS deletion is implemented"
 require "$EXPLORER" 'static int fe_protected_destination(void)' "file creation and paste guard the System32 destination"
 require "$EXPLORER" 'Access denied: System32 is protected. No files were changed.' "protected destination operations fail closed"
-require "$USER" 'static int vfs_create_user_output_file(const char *name)' "kernel limits output creation to a basename in the current directory"
+require "$USER" 'static int64_t vfs_create_user_output_file(const char *name)' "kernel limits output creation to a basename in the current directory"
 echo "File Explorer file-operation source-contract checks passed."

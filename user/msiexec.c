@@ -110,7 +110,7 @@ static void show_and_exit(const char *title, const char *message, u64 code) {
         (u64)"user32.dll",(u64)"MessageBoxA",0);
     if (box) (void)box(0,message,title,0);
     (void)sy3(SYS_Exit,code,0,0);
-    for (;;) __asm__ volatile("pause");
+    for (;;) (void)sy3(SYS_NtYield,0,0,0);
 }
 static void out_u32(u32 v) {
     char b[12]; int n=0;
@@ -894,7 +894,7 @@ static void show_installer_window(const char *name) {
              * Kernel exit cleanup remains a defensive second line of cleanup. */
             (void)sy3(SYS_WmUnregister,0,0,0);
             (void)sy3(SYS_Exit,0,0,0);
-            for (;;) __asm__ volatile("pause");
+            for (;;) (void)sy3(SYS_NtYield,0,0,0);
         }
     }
 }
@@ -903,7 +903,7 @@ void mainCRTStartup(void) {
     const char *name=ARG_VA;
     if (!name[0]) {
         out("Usage: double-click an .msi in File Explorer.\n");
-        for (;;) __asm__ volatile("pause");
+        for (;;) (void)sy3(SYS_NtYield,0,0,0);
     }
     out("msiexec: inspecting "); out(name); out("\n");
     if (!init_msi_workspace()) {
@@ -914,7 +914,7 @@ void mainCRTStartup(void) {
     u64 h=sy3(SYS_OpenFile,(u64)name,0,0);
     if ((long long)h<0) {
         out("msiexec: cannot open package in the current directory\n");
-        for (;;) __asm__ volatile("pause");
+        for (;;) (void)sy3(SYS_NtYield,0,0,0);
     }
     /*
      * Grow the total MSI buffer as needed. 16 MiB is only the maximum size
@@ -1009,7 +1009,7 @@ void mainCRTStartup(void) {
         }
         show_installer_window(name);
         (void)sy3(SYS_Exit,0,0,0);
-        for (;;) __asm__ volatile("pause");
+        for (;;) (void)sy3(SYS_NtYield,0,0,0);
     }
     show_and_exit("MSI Reader",
         "This file is not a supported MSI compound database. No files were changed.",1);

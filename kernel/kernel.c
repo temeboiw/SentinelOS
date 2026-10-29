@@ -17,6 +17,7 @@
 #include "iomgr.h"
 #include "driver_loader.h"
 #include "user.h"
+#include "sync.h"
 
 /* MSVC/clang stack probe ºw^~)Þw we are freestanding */
 __attribute__((naked)) void __chkstk(void) {

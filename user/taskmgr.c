@@ -33,6 +33,12 @@ static void draw_processes(void) {
     pText(g_window,0,0,"Task Manager - Processes", -1);
     pText(g_window,0,2,"PID     PARENT  STATE     IMAGE", -1);
     pText(g_window,0,3,"-----------------------------------------------", -1);
+    /* Process rows are retained by USER32. Clear the full list region before
+       writing a shorter snapshot so exited processes do not remain visible. */
+    char blank[80];
+    for (int i=0;i<(int)sizeof(blank)-1;i++) blank[i]=' ';
+    blank[sizeof(blank)-1]=0;
+    for (int i=0;i<8;i++) pText(g_window,0,4+i,blank,-1);
     NT_PROCESS_SNAPSHOT rows[8];
     u64 count=NtQueryProcessList(rows,8);
     if ((i64)count < 0) {

@@ -42,7 +42,7 @@ require "$EXT4" "fs->feature_compat & (0x0004u | 0x0020u)" "ext4 writer rejects 
 require "$EXT4" "fs->feature_ro_compat & (0x0010u | 0x0200u | 0x0400u)" "ext4 writer rejects unsupported read-only-compatible features"
 require "$EXT4" "if (name[nl] == '/' || name[nl] == '\\\\') return -1;" "ext4 create rejects path separators in a basename"
 
-create_body="$(sed -n '/^static int vfs_create_user_output_file(/,/^}/p' "$KUSER")"
+create_body="$(sed -n '/^static int\(64_t\)\? vfs_create_user_output_file(/,/^}/p' "$KUSER")"
 [[ -n "$create_body" ]] || fail "VFS output-file creation function is missing"
 grep -Fq 'if (!g_ext4_ok || !name || !name[0]) return -1;' <<<"$create_body" || fail "output-file creation must require ext4 and a nonempty name"
 grep -Fq 'e4_create_empty_file(&g_ext4, vfs_cwd_ino, name, &ino)' <<<"$create_body" || fail "output-file creation must remain relative to the current directory"
@@ -56,7 +56,15 @@ for function in CreateDirectoryA RemoveDirectoryA DeleteFileA MoveFileA CopyFile
 done
 
 require "$KUSER" "if(!g_ext4_ok||!g_ext4.blksz||length<sizeof(UserVolumeMetadata)" "volume metadata syscall does not claim unsupported NTFS metadata"
-require "$KUSER" "if(!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0)" "file metadata syscall does not claim unsupported NTFS metadata"
+require "$KUSER" "if(!vh->used||!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0)" "file metadata syscall does not claim unsupported NTFS metadata"
+require "$KUSER" "#define SYS_NtCloseFile 22" "file close syscall retains its legacy dispatch number"
+require "$KUSER" "#define SYS_NtYield                  21" "yield syscall retains its legacy dispatch number"
+require "$KUSER" "ObCreateObject(ObTypeFile" "VFS file handles are created by the Object Manager"
+require "$KUSER" "ObReferenceObjectByHandle((uintptr_t)proc->Pid" "VFS file operations validate process-owned handles"
+if grep -Eq '^[[:space:]]*[^/].*vfs_user_handles\[' "$KUSER"; then
+  fail "VFS file operations must not use the removed fixed handle array"
+fi
+pass "VFS file operations use Object Manager handles instead of fixed slots"
 require "$EXPLORER" "Access denied: System32 is protected." "Explorer retains its existing System32 protection warning"
 require "$EXPLORER" "This filesystem is currently read-only." "Explorer reports unavailable mutations instead of claiming success"
 

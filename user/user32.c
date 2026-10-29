@@ -39,8 +39,9 @@ enum {
     SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_CreateProcess=4, SYS_QueryDir=7, SYS_SetCurrentDirectory=12,
-    SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42
+    SYS_WmRect=20, SYS_WmGetDirty=53, SYS_CreateProcess=4, SYS_QueryDir=7, SYS_SetCurrentDirectory=12,
+    SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42,
+    SYS_Print=1
 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
@@ -1536,6 +1537,11 @@ static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
     if (!g_front) return;
+
+    if (sy3(SYS_WmGetDirty, 0, 0, 0) != 0) {
+        u32_force_full_compose = 1;
+    }
+
     u64 compose_start_cycles=u32_rdtsc();
     u32_render_stats.compose_calls++;
     if (u32_render_clip) u32_render_stats.clipped_composes++;
@@ -2021,6 +2027,7 @@ static void on_click(int x, int y) {
              * This makes the title-bar X work for every USER32 window and
              * avoids killing the scheduler's current process from input code.
              */
+            sy3(SYS_Print, (u64)"DEBUG: X button pressed, sending WM_CLOSE\n", 0, 0);
             SendMessageA((void *)1, 0x0010u, 0, 0); /* WM_CLOSE */
 
             /*
@@ -2030,7 +2037,12 @@ static void on_click(int x, int y) {
              * after the notification so the X button cannot leave a stale
              * window in the system window list.
              */
-            DestroyWindow((void *)1);
+            sy3(SYS_Print, (u64)"DEBUG: Enforcing DestroyWindow\n", 0, 0);
+            if (!DestroyWindow((void *)1)) {
+                sy3(SYS_Print, (u64)"DEBUG: DestroyWindow FAILED\n", 0, 0);
+            } else {
+                sy3(SYS_Print, (u64)"DEBUG: DestroyWindow succeeded\n", 0, 0);
+            }
 
             /*
              * Closing an ordinary application's main window should end that
@@ -2039,9 +2051,11 @@ static void on_click(int x, int y) {
              * must not tear down the interactive session.
              */
             if (!u32_is_desktop_window()) {
+                sy3(SYS_Print, (u64)"DEBUG: App is not desktop, calling SYS_Exit\n", 0, 0);
                 (void)sy3(SYS_Exit, 0, 0, 0);
                 return; /* SYS_Exit normally switches away from this process. */
             }
+            sy3(SYS_Print, (u64)"DEBUG: Window was desktop, skipping SYS_Exit\n", 0, 0);
             return;
         }
 
@@ -2052,7 +2066,17 @@ static void on_click(int x, int y) {
             return;
         }
 
-        if(clicked_child) {
+        if (clicked_child) {
+            sy3(SYS_Print, (u64)"DEBUG: clicked_child id=0x", 0, 0);
+            // Since we can't easily print hex in sy3 without a formatter,
+            // we'll just print the ID as an integer for now.
+            // Note: SentinelOS's SYS_Print might not support %d, so we just log that a child was clicked.
+            sy3(SYS_Print, (u64)"DEBUG: Child clicked\n", 0, 0);
+
+            if (clicked_child->id == 0xF060u) {
+                sy3(SYS_Print, (u64)"DEBUG: X button hit!\n", 0, 0);
+            }
+
             SendMessageA((void *)1,0x0111u,clicked_child->id,
                 (i64)(unsigned long long)(0x1000u+(unsigned int)(clicked_child-u32_child_windows)));
             return;
@@ -2764,31 +2788,33 @@ int MessageBoxA(void *hwnd, LPCSTR text, LPCSTR caption, u32 type) {
 
 __attribute__((dllexport))
 BOOL DestroyWindow(void *hwnd) {
+    sy3(SYS_Print, (u64)"DEBUG: DestroyWindow called\n", 0, 0);
     if(u32_child_from_hwnd(hwnd)) {
         u32_child_from_hwnd(hwnd)->used=0;
         compose();
+        sy3(SYS_Print, (u64)"DEBUG: DestroyWindow child cleaned\n", 0, 0);
         return 1;
     }
     if(hwnd!=(void *)1 && hwnd) return 0;
 
-    /*
-     * The kernel unregister syscall removes this process's shared window
-     * surface and recomposes the damaged screen rectangle from the persistent
-     * desktop and remaining Z-ordered windows. Only the desktop owner may
-     * compose again afterward: an ordinary app's private framebuffer is not
-     * the shared scene, and presenting it here would put the just-closed
-     * window's stale pixels straight back onto scanout.
-     */
+    sy3(SYS_Print, (u64)"DEBUG: DestroyWindow main window teardown start\n", 0, 0);
     int desktop_owner = u32_is_desktop_window();
     sy3(SYS_WmUnreg, 0, 0, 0);
     g_wnd.visible = 0;
     g_wnd.minimized = 0;
 
+    compose();
+    sy3(SYS_Print, (u64)"DEBUG: DestroyWindow compose 1\n", 0, 0);
+
     if (desktop_owner) {
         u32_suppress_desktop_card = 1;
         compose();
         u32_suppress_desktop_card = 0;
+        sy3(SYS_Print, (u64)"DEBUG: DestroyWindow desktop compose\n", 0, 0);
     }
+
+    compose();
+    sy3(SYS_Print, (u64)"DEBUG: DestroyWindow compose 2\n", 0, 0);
 
     return 1;
 }
@@ -3057,7 +3083,13 @@ __attribute__((dllexport)) U32_LRESULT SendMessageA(void *hwnd, U32_UINT msg, U3
     }
     if (msg==0x000Cu) return SetWindowTextA(hwnd,(LPCSTR)lp);
     if (msg==0x000Du) return GetWindowTextA(hwnd,(LPSTR)lp,(int)wp);
-    if (msg==0x0010u) { g_wnd.visible=0; sy3(SYS_WmUnreg,0,0,0); compose(); return 1; }
+    if (msg==0x0010u) {
+        sy3(SYS_Print, (u64)"DEBUG: WM_CLOSE received in SendMessageA\n", 0, 0);
+        g_wnd.visible=0;
+        sy3(SYS_WmUnreg,0,0,0);
+        DestroyWindow((void *)1);
+        return 1;
+    }
     if (msg==0x000Fu) { compose(); return 1; }
     return DefWindowProcA(hwnd,msg,wp,lp);
 }

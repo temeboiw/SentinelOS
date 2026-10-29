@@ -195,13 +195,17 @@ void explorer_main(void) {
     pBeginBatch = (BeginRedrawBatch_t)NtGetProcAddress(u32n, "BeginRedrawBatch");
     pEndBatch = (EndRedrawBatch_t)NtGetProcAddress(u32n, "EndRedrawBatch");
 
-    if (!pGet) {
-        NtWriteConsole("explorer: no user32 keyboard API\n");
+    if (!pCreate || !pShow || !pGet || !pText) {
+        NtWriteConsole("explorer: required USER32 window or keyboard API is unavailable\n");
         for (;;) __asm__ volatile("pause");
     }
 
     void *hwnd = 0;
     redraw_desktop(&hwnd);
+    if (!hwnd) {
+        NtWriteConsole("explorer: could not create the desktop window\n");
+        for (;;) __asm__ volatile("pause");
+    }
     /* Refresh the RTC-backed taskbar clock once per minute without repainting
        the wallpaper or spinning a permanent polling loop. */
     if (pSetTimer && hwnd) (void)pSetTimer(hwnd, 1, 60000, 0);

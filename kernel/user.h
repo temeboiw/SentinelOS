@@ -37,6 +37,7 @@
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
 #define SYS_NtYield                  21
+#define SYS_WmGetDirty               53
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
@@ -1053,6 +1054,7 @@ static uint64_t NtStatusResult(NTSTATUS status) {
 
 /* Read-only VFS file handles used by the initial Win32 file APIs. */
 #define VFS_USER_HANDLES 32
+/* VFS handles are now managed by the Object Manager. This constant is kept for compatibility. */
 #define SYS_NtCloseFile 22
 #define SYS_NtQueryFileSize 25
 #define SYS_NtQueryProcessList 41
@@ -1063,6 +1065,7 @@ typedef struct {
     uint64_t pos, size;
     int used, writable, ntfs;
 } VfsUserHandle;
+/* VfsUserHandle is now stored within OB_OBJECT.body. */
 typedef struct {
     uint64_t creation_time,access_time,write_time,change_time,size;
     uint32_t inode,mode,volume_serial;
@@ -1073,7 +1076,7 @@ typedef struct {
     uint32_t block_size,volume_serial,total_inodes,free_inodes;
     char volume_label[17];
 } UserVolumeMetadata;
-static VfsUserHandle vfs_user_handles[VFS_USER_HANDLES];
+/* vfs_user_handles array is replaced by the Object Manager. */
 static uint64_t user_filetime_from_unix(uint32_t seconds) {
     return ((uint64_t)seconds+11644473600ULL)*10000000ULL;
 }
@@ -1242,7 +1245,7 @@ static int vfs_ntfsk_open_path(const char *name, uint64_t *index_out,
     return 0;
 }
 
-static int vfs_open_user_file(const char *name) {
+static int64_t vfs_open_user_file(const char *name) {
     if ((!g_ext4_ok && !g_ntfsk_ok) || !name || !name[0]) return -1;
     uint32_t ino = 0;
     for (int i = 0; i < vfs_nent; i++) {
@@ -1279,95 +1282,114 @@ static int vfs_open_user_file(const char *name) {
     if (!ino && g_ntfsk_ok) {
         uint64_t ntfs_index=0, ntfs_size=0;
         if(vfs_ntfsk_open_path(name,&ntfs_index,&ntfs_size)==0 && ntfs_index<=UINT32_MAX) {
-            for(int i=0;i<VFS_USER_HANDLES;i++) if(!vfs_user_handles[i].used) {
-                vfs_user_handles[i].ino=(uint32_t)ntfs_index;
-                vfs_user_handles[i].pos=0; vfs_user_handles[i].size=ntfs_size;
-                vfs_user_handles[i].used=1; vfs_user_handles[i].writable=0;
-                vfs_user_handles[i].ntfs=1; return 0x100+i;
-            }
+            OB_HANDLE handle;
+            void *body;
+            if (!ObCreateObject(ObTypeFile, NULL, sizeof(VfsUserHandle), (uintptr_t)MmCurrentProcess->Pid, OB_ACCESS_READ, &handle, &body)) return -1;
+            VfsUserHandle *vh = (VfsUserHandle *)body;
+            vh->ino=(uint32_t)ntfs_index;
+            vh->pos=0;
+            vh->size=ntfs_size;
+            vh->used=1; vh->writable=0;
+            vh->ntfs=1;
+            ObDereferenceObject((OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT, body)));
+            return (int64_t)handle;
         }
     }
     if (!ino || !g_ext4_ok) return -1;
     uint8_t inode[256];
     if (e4_inode(&g_ext4, ino, inode) < 0 ||
         (E16(inode, 0) & 0xF000) != 0x8000) return -1;
-    for (int i = 0; i < VFS_USER_HANDLES; i++) {
-        if (!vfs_user_handles[i].used) {
-            vfs_user_handles[i].ino = ino;
-            vfs_user_handles[i].pos = 0;
-            vfs_user_handles[i].size = e4_size(inode);
-            vfs_user_handles[i].used = 1;
-            vfs_user_handles[i].writable = 0;
-            vfs_user_handles[i].ntfs = 0;
-            return 0x100 + i;
-        }
-    }
-    return -1;
+    OB_HANDLE handle;
+    void *body;
+    if (!ObCreateObject(ObTypeFile, NULL, sizeof(VfsUserHandle), (uintptr_t)MmCurrentProcess->Pid, OB_ACCESS_READ, &handle, &body)) return -1;
+    VfsUserHandle *vh = (VfsUserHandle *)body;
+    vh->ino = ino;
+    vh->pos = 0;
+    vh->size = e4_size(inode);
+    vh->used = 1;
+    vh->writable = 0;
+    vh->ntfs = 0;
+    ObDereferenceObject((OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT, body)));
+    return (int64_t)handle;
 }
 
-static int vfs_create_user_output_file(const char *name) {
+static int64_t vfs_create_user_output_file(const char *name) {
     if (!g_ext4_ok || !name || !name[0]) return -1;
-    int slot = -1;
-    for (int i = 0; i < VFS_USER_HANDLES; i++)
-        if (!vfs_user_handles[i].used) { slot = i; break; }
-    if (slot < 0) return -1;
-    /* Output creation is deliberately limited to one basename in the current
-       directory; callers cannot use this syscall to traverse arbitrary paths. */
     uint32_t ino = 0;
     if (e4_create_empty_file(&g_ext4, vfs_cwd_ino, name, &ino) < 0)
         return -1;
-    vfs_user_handles[slot].ino = ino;
-    vfs_user_handles[slot].pos = 0;
-    vfs_user_handles[slot].size = 0;
-    vfs_user_handles[slot].used = 1;
-    vfs_user_handles[slot].writable = 1;
+    OB_HANDLE handle;
+    void *body;
+    if (!ObCreateObject(ObTypeFile, NULL, sizeof(VfsUserHandle), (uintptr_t)MmCurrentProcess->Pid, OB_ACCESS_READ|OB_ACCESS_WRITE, &handle, &body)) return -1;
+    VfsUserHandle *vh = (VfsUserHandle *)body;
+    vh->ino = ino;
+    vh->pos = 0;
+    vh->size = 0;
+    vh->used = 1;
+    vh->writable = 1;
+    ObDereferenceObject((OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT, body)));
     (void)vfs_listdir(vfs_cwd_ino);
-    return 0x100 + slot;
+    return (int64_t)handle;
 }
 
 static int vfs_write_user_output_file(uint64_t handle, uint64_t src, uint64_t len) {
-    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
-        !len || len > 1024 * 1024) return -1;
-    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
+    OB_OBJECT *obj = ObReferenceObjectByHandle((uintptr_t)MmCurrentProcess->Pid, (OB_HANDLE)handle, ObTypeFile, OB_ACCESS_WRITE);
+    if (!obj || !len || len > 1024 * 1024) {
+        if (obj) ObDereferenceObject(obj);
+        return -1;
+    }
+    VfsUserHandle *h = (VfsUserHandle *)obj->body;
     KPROCESS *proc = MmCurrentProcess;
     if (!h->used || !h->writable || !proc ||
-        h->pos != h->size || len > UINT32_MAX - h->size ||
-        !MmValidateUserRange(proc, src, len, 0)) return -1;
+        h->pos != h->size || h->size > UINT32_MAX || len > UINT32_MAX - h->size ||
+        !MmValidateUserRange(proc, src, len, 0)) {
+        ObDereferenceObject(obj);
+        return -1;
+    }
     uint8_t inode[256];
     if (e4_inode(&g_ext4, h->ino, inode) < 0 ||
         e4_size(inode) != h->size ||
         e4_write_inode_grow(&g_ext4, h->ino, h->pos,
-                            (const void *)(uintptr_t)src, len) < 0)
+                            (const void *)(uintptr_t)src, len) < 0) {
+        ObDereferenceObject(obj);
         return -1;
+    }
     h->pos += len;
     h->size += len;
+    ObDereferenceObject(obj);
     return (int)len;
 }
 
 static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
-    if (handle < 0x100 || handle >= 0x100 + VFS_USER_HANDLES ||
-        len > 1024 * 1024) return -1;
-    if (!len) return 0;
-    VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
     KPROCESS *proc = MmCurrentProcess;
-    if (!h->used || !proc ||
-        !MmValidateUserRange(proc, dst, len, 1)) return -1;
-    if (h->pos >= h->size) return 0;
+    OB_OBJECT *obj = proc ? ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+        (OB_HANDLE)handle, ObTypeFile, OB_ACCESS_READ) : NULL;
+    if (!obj || len > 1024 * 1024) {
+        if (obj) ObDereferenceObject(obj);
+        return -1;
+    }
+    VfsUserHandle *h = (VfsUserHandle *)obj->body;
+    int result = -1;
+    if (!h->used || !proc) goto done;
+    if (!len) { result = 0; goto done; }
+    if (
+        !MmValidateUserRange(proc, dst, len, 1)) goto done;
+    if (h->pos >= h->size) { result = 0; goto done; }
     if (h->ntfs) {
-        if(!g_ntfsk_ok) return -1;
+        if(!g_ntfsk_ok) goto done;
         if(len>h->size-h->pos) len=h->size-h->pos;
         void *whole=0; uint64_t actual=0;
-        if(ntfsk_read_file(&g_ntfsk_volume,h->ino,&whole,&actual)<0) return -1;
+        if(ntfsk_read_file(&g_ntfsk_volume,h->ino,&whole,&actual)<0) goto done;
         if(actual!=h->size || h->pos>actual || len>actual-h->pos) {
-            kfree(whole); return -1;
+            kfree(whole); goto done;
         }
         memcpy((void *)(uintptr_t)dst,(const uint8_t *)whole+h->pos,(size_t)len);
-        kfree(whole); h->pos+=len; return (int)len;
+        kfree(whole); h->pos+=len; result = (int)len; goto done;
     }
     if (len > h->size - h->pos) len = h->size - h->pos;
 
     uint8_t inode[256];
-    if (e4_inode(&g_ext4, h->ino, inode) < 0) return -1;
+    if (e4_inode(&g_ext4, h->ino, inode) < 0) goto done;
     uint64_t done = 0;
     while (done < len) {
         uint64_t pos = h->pos + done;
@@ -1382,7 +1404,7 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
             if (chunk > len - done) chunk = len - done;
             if (e4_read(&g_ext4, phys_block * g_ext4.blksz + block_off,
                         (void *)(dst + done), chunk) < 0)
-                return done ? (int)done : -1;
+                { result = done ? (int)done : -1; goto done; }
         } else {
             /* Sparse/unmapped block: preserve the previous zero-fill behavior. */
             chunk = g_ext4.blksz - block_off;
@@ -1393,17 +1415,25 @@ static int vfs_read_user_file(uint64_t handle, uint64_t dst, uint64_t len) {
         done += chunk;
     }
     h->pos += done;
-    return (int)done;
+    result = (int)done;
+done:
+    ObDereferenceObject(obj);
+    return result;
 }
 
-static void vfs_close_user_file(uint64_t handle) {
-    if (handle >= 0x100 && handle < 0x100 + VFS_USER_HANDLES) {
-        VfsUserHandle *h = &vfs_user_handles[handle - 0x100];
-        if (h->used && h->writable) (void)vfs_listdir(vfs_cwd_ino);
-        h->used = 0;
-        h->writable = 0;
-        h->ntfs = 0;
-    }
+static int vfs_close_user_file(uint64_t handle) {
+    KPROCESS *proc = MmCurrentProcess;
+    if (!proc) return 0;
+    OB_OBJECT *obj = ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+        (OB_HANDLE)handle, ObTypeFile, OB_ACCESS_READ);
+    if (!obj) return 0;
+    VfsUserHandle *h = (VfsUserHandle *)obj->body;
+    int writable = h->used && h->writable;
+    int closed = ObCloseHandle((uintptr_t)proc->Pid, (OB_HANDLE)handle);
+    if (closed) h->used = 0;
+    ObDereferenceObject(obj);
+    if (closed && writable) (void)vfs_listdir(vfs_cwd_ino);
+    return closed;
 }
 
 
@@ -3051,30 +3081,36 @@ static Frame *syscall_handler(Frame *f) {
         return f;
 
     case SYS_NtCloseFile:
-        vfs_close_user_file(f->rdi);
-        f->rax = 1;
+        f->rax = vfs_close_user_file(f->rdi);
         return f;
 
     case SYS_NtQueryFileSize: {
-        uint64_t h=f->rdi;
-        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used){f->rax=(uint64_t)-1LL;return f;}
-        f->rax=vfs_user_handles[h-0x100].size;
+        KPROCESS *proc=MmCurrentProcess;
+        OB_OBJECT *obj=proc?ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+            (OB_HANDLE)f->rdi,ObTypeFile,OB_ACCESS_READ):NULL;
+        if(!obj){f->rax=(uint64_t)-1LL;return f;}
+        VfsUserHandle *vh=(VfsUserHandle *)obj->body;
+        f->rax=vh->used?vh->size:(uint64_t)-1LL;
+        ObDereferenceObject(obj);
         return f;
     }
 
     case SYS_NtSetFilePosition: {
-        uint64_t h=f->rdi;
-        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used){f->rax=(uint64_t)-1LL;return f;}
-        VfsUserHandle *vh=&vfs_user_handles[h-0x100];
+        KPROCESS *proc=MmCurrentProcess;
+        OB_OBJECT *obj=proc?ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+            (OB_HANDLE)f->rdi,ObTypeFile,OB_ACCESS_READ):NULL;
+        if(!obj){f->rax=(uint64_t)-1LL;return f;}
+        VfsUserHandle *vh=(VfsUserHandle *)obj->body;
+        if(!vh->used){ObDereferenceObject(obj);f->rax=(uint64_t)-1LL;return f;}
         int64_t offset=(int64_t)f->rsi;
         uint64_t base=0;
         if(f->rdx==1)base=vh->pos;
         else if(f->rdx==2)base=vh->size;
-        else if(f->rdx!=0){f->rax=(uint64_t)-1LL;return f;}
+        else if(f->rdx!=0){ObDereferenceObject(obj);f->rax=(uint64_t)-1LL;return f;}
         uint64_t target;
-        if(offset<0){uint64_t mag=(uint64_t)(-(offset+1))+1;if(mag>base){f->rax=(uint64_t)-1LL;return f;}target=base-mag;}
-        else {uint64_t mag=(uint64_t)offset;if(mag>0x7FFFFFFFFFFFFFFFULL-base){f->rax=(uint64_t)-1LL;return f;}target=base+mag;}
-        vh->pos=target;f->rax=vh->pos;return f;
+        if(offset<0){uint64_t mag=(uint64_t)(-(offset+1))+1;if(mag>base){ObDereferenceObject(obj);f->rax=(uint64_t)-1LL;return f;}target=base-mag;}
+        else {uint64_t mag=(uint64_t)offset;if(mag>0x7FFFFFFFFFFFFFFFULL-base){ObDereferenceObject(obj);f->rax=(uint64_t)-1LL;return f;}target=base+mag;}
+        vh->pos=target;f->rax=vh->pos;ObDereferenceObject(obj);return f;
     }
 
     case SYS_NtFreeVirtualMemory: {
@@ -3190,19 +3226,22 @@ static Frame *syscall_handler(Frame *f) {
 
     case SYS_NtQueryFileMetadata: {
         uint64_t h=f->rdi,out=f->rsi,length=f->rdx;
-        if(h<0x100||h>=0x100+VFS_USER_HANDLES||!vfs_user_handles[h-0x100].used||
-           length<sizeof(UserFileMetadata)||!MmValidateUserRange(MmCurrentProcess,out,sizeof(UserFileMetadata),1)) {
+        KPROCESS *proc=MmCurrentProcess;
+        OB_OBJECT *obj=proc?ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+            (OB_HANDLE)h,ObTypeFile,OB_ACCESS_READ):NULL;
+        if(!obj||length<sizeof(UserFileMetadata)||!MmValidateUserRange(proc,out,sizeof(UserFileMetadata),1)) {
+            if(obj)ObDereferenceObject(obj);
             f->rax=0;return f;
         }
-        VfsUserHandle *vh=&vfs_user_handles[h-0x100];uint8_t inode[256];
-        if(!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0){f->rax=0;return f;}
+        VfsUserHandle *vh=(VfsUserHandle *)obj->body;uint8_t inode[256];
+        if(!vh->used||!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0){ObDereferenceObject(obj);f->rax=0;return f;}
         UserFileMetadata meta={0};
         meta.creation_time=0; /* legacy ext4 inode has no birth-time field */
         meta.access_time=user_filetime_from_unix(E32(inode,8));
         meta.write_time=user_filetime_from_unix(E32(inode,16));
         meta.change_time=user_filetime_from_unix(E32(inode,12));
         meta.size=e4_size(inode);meta.inode=vh->ino;meta.mode=E16(inode,0);meta.volume_serial=g_ext4.volume_serial;meta.links=E16(inode,26);
-        *(UserFileMetadata*)out=meta;f->rax=1;return f;
+        *(UserFileMetadata*)out=meta;f->rax=1;ObDereferenceObject(obj);return f;
     }
 
     case SYS_NtQueryDirectoryFile: {
@@ -3668,6 +3707,7 @@ static Frame *syscall_handler(Frame *f) {
          */
         if(slot>=0&&wm_shared_width&&wm_shared_height) {
             wm_shared_force_compose=1;
+            DbgPrint("[wm] force-composing scanout after unreg pid=%d slot=%d\n", pid, slot);
             wm_shared_compose(0,0,wm_shared_width,wm_shared_height);
             wm_shared_force_compose=0;
         }
@@ -3736,53 +3776,24 @@ static Frame *syscall_handler(Frame *f) {
         if(rect[1]<-y_limit)rect[1]=-y_limit;
         if(rect[1]>y_limit)rect[1]=y_limit;
         int pid=MmCurrentProcess?(int)MmCurrentProcess->Pid:0;
-        int slot=wm_shared_window_slot(pid);
-        int ox=0,oy=0,ow=0,oh=0;
-        if(slot>=0){ox=wm_tab[slot].x-12;oy=wm_tab[slot].y-12;ow=wm_tab[slot].w+24;oh=wm_tab[slot].h+28;}
-        KPROCESS *caller=MmCurrentProcess;
-        if(caller!=PspSystemProcess)MmSwitchToProcess(PspSystemProcess);
-        if(slot>=0&&wm_shared_windows[slot]&&wm_shared_width&&wm_shared_height) {
-            int x=wm_tab[slot].x-12,y=wm_tab[slot].y-12;
-            int x1=wm_tab[slot].x+wm_tab[slot].w+12,y1=wm_tab[slot].y+wm_tab[slot].h+16;
-            if(x<0)x=0;if(y<0)y=0;if(x1>(int)wm_shared_width)x1=(int)wm_shared_width;if(y1>(int)wm_shared_height)y1=(int)wm_shared_height;
-            for(int yy=y;yy<y1;yy++)for(int xx=x;xx<x1;xx++)wm_shared_windows[slot][(uint32_t)yy*wm_shared_width+(uint32_t)xx]=0;
-        }
-        wm_set_rect(pid,rect[0],rect[1],rect[2],rect[3]);
-        uint64_t dbg_n=++wm_dbg_window_moves;
-        if(wm_dbg_sample(dbg_n))
-            DbgPrint("[wm] rect #%llu pid=%d old=(%d,%d %dx%d) new=(%d,%d %dx%d)\n",
-                     (unsigned long long)dbg_n,pid,ox+12,oy+12,ow-24,oh-28,
-                     rect[0],rect[1],rect[2],rect[3]);
-        int nx=rect[0]-12,ny=rect[1]-12,nw=rect[2]+24,nh=rect[3]+28;
-        int x0=ox<nx?ox:nx,y0=oy<ny?oy:ny,x1=ox+ow>nx+nw?ox+ow:nx+nw,y1=oy+oh>ny+nh?oy+oh:ny+nh;
-        if(x0<0)x0=0;if(y0<0)y0=0;
-        if(wm_shared_width&&x1>(int)wm_shared_width)x1=(int)wm_shared_width;
-        if(wm_shared_height&&y1>(int)wm_shared_height)y1=(int)wm_shared_height;
-        if(x1>x0&&y1>y0)wm_shared_compose((uint32_t)x0,(uint32_t)y0,(uint32_t)(x1-x0),(uint32_t)(y1-y0));
-        if(caller&&caller!=PspSystemProcess)MmSwitchToProcess(caller);
-        f->rax=0;return f;
+        wm_set_rect(pid, rect[0], rect[1], rect[2], rect[3]);
     }
-
-    case SYS_WmRestore:
-        wm_restore_pid((int)f->rdi);
-        f->rax = 0;
+    case SYS_WmGetDirty: {
+        f->rax = (uint64_t)wm_scene_dirty;
+        wm_scene_dirty = 0;
         return f;
-
+    }
     case SYS_NtYield: {
         int me = up_find_proc(MmCurrentProcess);
-
         if (me >= 0) {
             up_save(f, me);
             up_tab[me].rax = 0;
         }
-
         int nxt = up_pick_next();
-
         if (nxt >= 0 && nxt != me) {
             up_load(f, nxt);
             return f;
         }
-
         f->rax = 0;
         return f;
     }

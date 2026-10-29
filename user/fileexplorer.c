@@ -93,11 +93,13 @@ static int g_last_file_row = -1;
 static int g_hover_row = -1;
 static int g_scroll = 0;
 static int g_home = 0;
+static int g_home_selected = 0;
 static int g_sort_mode = 0;
 static char g_filter[64];
 static int g_filter_len = 0;
 static int g_search_mode = 0;
 static void *g_window;
+static void fe_history_visit(const char *path);
 
 static int ends_with(const char *n, const char *ext);
 static int name_contains_ci(const char *name, const char *needle) {
@@ -153,7 +155,7 @@ static void draw_visible_row(TextOutA_t pText, InvalidateRect_t pInv, int visibl
     if (i >= item_count) {
         line[0]=' '; line[1]=0;
     } else if (g_home) {
-        line[p++] = (i == g_hover_row) ? '>' : ' ';
+        line[p++] = (i == g_hover_row || (g_home && i == g_home_selected)) ? '>' : ' ';
         const char *hn=home_item(i);
         line[p++]='[';line[p++]='P';line[p++]='I';line[p++]='N';line[p++]=']';line[p++]=' ';
         for(int j=0;hn[j]&&p<78;j++)line[p++]=hn[j];
@@ -335,6 +337,22 @@ static int fe_open_pin(int row, SetCurrentDirectoryA_t pChdir) {
         return 1;
     }
     return 0;
+}
+static int fe_activate_home_selection(SetCurrentDirectoryA_t pChdir) {
+    if (g_home_selected == 0) {
+        g_home = 0;
+        g_last_file_row = -1;
+        g_scroll = 0;
+        return 1;
+    }
+    if (!fe_open_pin(g_home_selected, pChdir)) return 0;
+    fe_history_visit(g_path);
+    g_home = 0;
+    g_filter_len = 0;
+    g_filter[0] = 0;
+    g_scroll = 0;
+    g_last_file_row = -1;
+    return 1;
 }
 /* Directory navigation uses the existing relative-chdir syscall. */
 static void fe_history_visit(const char *path) {
@@ -684,6 +702,7 @@ void mainCRTStartup(void) {
             if (row != g_hover_row) {
                 int old_row = g_hover_row;
                 g_hover_row = row;
+                if (g_home && row >= 0) g_home_selected = row;
 
                 /* Update both backing text lines first, then repaint once.
                  * Two immediate invalidations made the intermediate state
@@ -798,6 +817,13 @@ void mainCRTStartup(void) {
         }
         if (msg.message == 0x0100 && msg.wParam == 0x0D && !g_context_menu) {
             /* Enter activates the current keyboard/mouse selection. */
+            if (g_home) {
+                if (fe_activate_home_selection(pChdir)) reload(pQuery,pText,pInv);
+                else if (pMsgBox) pMsgBox(g_window,
+                    "This pinned location does not exist on this volume yet.",
+                    "Quick access",0);
+                continue;
+            }
             int selected = g_last_file_row;
             if(selected>=0 && selected<g_count && g_isdir[selected]) {
                 int ok=pChdir?pChdir(g_names[selected]):0;
@@ -861,21 +887,24 @@ void mainCRTStartup(void) {
             continue;
         }
 
-        if (msg.message == 0x0100 && !g_context_menu && !g_home &&
+        if (msg.message == 0x0100 && !g_context_menu &&
             (msg.wParam==0x26 || msg.wParam==0x28 ||
              msg.wParam==0x21 || msg.wParam==0x22)) {
             int step=(msg.wParam==0x21 || msg.wParam==0x22)?VISIBLE_ROWS:1;
             int direction=(msg.wParam==0x26 || msg.wParam==0x21)?-1:1;
-            if(g_last_file_row<0 || g_last_file_row>=g_count)
-                g_last_file_row=(direction<0)?g_count-1:0;
+            int count=g_home?HOME_ITEM_COUNT:g_count;
+            int *selection=g_home?&g_home_selected:&g_last_file_row;
+            if(count<=0) continue;
+            if(*selection<0 || *selection>=count)
+                *selection=(direction<0)?count-1:0;
             else
-                g_last_file_row+=direction*step;
-            if(g_last_file_row<0)g_last_file_row=0;
-            if(g_last_file_row>=g_count)g_last_file_row=g_count-1;
-            if(g_last_file_row<g_scroll)g_scroll=g_last_file_row;
-            if(g_last_file_row>=g_scroll+VISIBLE_ROWS)
-                g_scroll=g_last_file_row-VISIBLE_ROWS+1;
-            g_hover_row=g_last_file_row;
+                *selection+=direction*step;
+            if(*selection<0)*selection=0;
+            if(*selection>=count)*selection=count-1;
+            if(*selection<g_scroll)g_scroll=*selection;
+            if(*selection>=g_scroll+VISIBLE_ROWS)
+                g_scroll=*selection-VISIBLE_ROWS+1;
+            g_hover_row=*selection;
             draw_rows(pText,pInv);
             continue;
         }
@@ -1073,6 +1102,7 @@ void mainCRTStartup(void) {
             if (row >= 0 && row < VISIBLE_ROWS && g_scroll + row < row_limit) {
                 row += g_scroll;
                 if(g_home) {
+                    g_home_selected=row;
                     const char *target=0;
                     if(row==1)target="C:\\Users\\Desktop";
                     else if(row==2)target="C:\\Users\\Documents";

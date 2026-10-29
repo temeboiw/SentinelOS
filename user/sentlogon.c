@@ -252,6 +252,8 @@ void sentlogon_main(void) {
     }
     NtWriteConsole("sentlogon: interactive session accepted\n");
     char name[]={'e','x','p','l','o','r','e','r','.','e','x','e',0};
-    if((u64)NtCreateProcess(name)==0)NtWriteConsole("sentlogon: explorer launch failed\n");
+    u64 explorer_pid=(u64)NtCreateProcess(name);
+    if(explorer_pid==0 || explorer_pid==(u64)-1)
+        NtWriteConsole("sentlogon: explorer launch failed\n");
     for(;;)(void)sy3(SYS_Yield,0,0,0);
 }

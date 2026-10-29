@@ -75,6 +75,8 @@ struct _IO_DEVICE_OBJECT {
 struct _IO_IRP {
     uint32_t signature;
     uint8_t major_function, stack_count, current_location, completed;
+    uint8_t in_flight, pending, completion_active, dispatch_depth;
+    const void *dispatch_owner;
     IO_STATUS status;
     uint64_t information;
     void *system_buffer;
@@ -88,6 +90,21 @@ struct _IO_IRP {
 #define IO_DEVICE_SIGNATURE 0x44455649u
 #define IO_IRP_SIGNATURE    0x49525053u
 
+#ifndef IO_SPIN_WAIT
+#define IO_SPIN_WAIT() __asm__ volatile("pause")
+#endif
+#ifndef IO_CURRENT_THREAD_TOKEN
+#include "cpu.h"
+#define IO_CURRENT_THREAD_TOKEN() (cpu_local_current()->scheduler_current)
+#define IO_CURRENT_CPU_TOKEN() ((const void *)cpu_local_current())
+#elif !defined(IO_CURRENT_CPU_TOKEN)
+#define IO_CURRENT_CPU_TOKEN() ((const void *)0)
+#endif
+static const void *IoDispatchOwnerToken(void) {
+    const void *owner=IO_CURRENT_THREAD_TOKEN();
+    return owner?owner:IO_CURRENT_CPU_TOKEN();
+}
+
 static IO_DRIVER_OBJECT IoDrivers[IO_MAX_DEVICES];
 static IO_DEVICE_OBJECT IoDevices[IO_MAX_DEVICES];
 static IO_IRP IoIrpPool[IO_MAX_DEVICES];
@@ -97,16 +114,42 @@ static uint32_t IoDeviceCount,IoDriverCount,IoIrpCount;
 
 static void IoLock(void) {
     while(__atomic_exchange_n(&IoLockWord,1u,__ATOMIC_ACQUIRE))
-        while(__atomic_load_n(&IoLockWord,__ATOMIC_RELAXED))__asm__ volatile("pause");
+        while(__atomic_load_n(&IoLockWord,__ATOMIC_RELAXED))IO_SPIN_WAIT();
 }
 static void IoUnlock(void){__atomic_store_n(&IoLockWord,0u,__ATOMIC_RELEASE);}
-static void IoCopyName(char *dst,const char *src,size_t cap) {
-    size_t i=0;if(!cap)return;
-    if(src)while(src[i]&&i+1<cap){dst[i]=src[i];i++;}
-    dst[i]=0;
+static int IoNameLength(const char *src,size_t cap,size_t *length) {
+    if(!src||!length)return 0;
+    size_t i=0;while(i<cap&&src[i])i++;
+    if(i==cap)return 0;
+    *length=i;return 1;
+}
+static void IoCopyName(char *dst,const char *src,size_t length) {
+    for(size_t i=0;i<length;i++)dst[i]=src[i];
+    dst[length]=0;
 }
 static int IoNameEqual(const char *a,const char *b) {
-    if(!a||!b)return 0;while(*a&&*b&&*a==*b){a++;b++;}return *a==*b;
+    if(!a||!b)return 0;
+    while(*a&&*b&&*a==*b){a++;b++;}
+    return *a==*b;
+}
+static int IoPoolContains(const void *pointer,const void *base,size_t count,size_t stride) {
+    uintptr_t p=(uintptr_t)pointer,b=(uintptr_t)base;
+    if(p<b)return 0;
+    uintptr_t delta=p-b;
+    return delta<(uintptr_t)(count*stride)&&delta%stride==0;
+}
+static int IoDriverValidLocked(const IO_DRIVER_OBJECT *driver) {
+    return IoPoolContains(driver,IoDrivers,IO_MAX_DEVICES,sizeof(IoDrivers[0]))&&
+        driver->used&&driver->signature==IO_DRIVER_SIGNATURE;
+}
+static int IoDeviceValidLocked(const IO_DEVICE_OBJECT *device) {
+    return IoPoolContains(device,IoDevices,IO_MAX_DEVICES,sizeof(IoDevices[0]))&&
+        device->used&&device->signature==IO_DEVICE_SIGNATURE;
+}
+static int IoIrpValidLocked(const IO_IRP *irp) {
+    if(!IoPoolContains(irp,IoIrpPool,IO_MAX_DEVICES,sizeof(IoIrpPool[0])))return 0;
+    size_t index=((uintptr_t)irp-(uintptr_t)IoIrpPool)/sizeof(IoIrpPool[0]);
+    return IoIrpUsed[index]&&irp->signature==IO_IRP_SIGNATURE;
 }
 static void IoInitialize(void) {
     IoLock();
@@ -121,87 +164,157 @@ static void IoInitialize(void) {
     IoUnlock();
 }
 static IO_DRIVER_OBJECT *IoCreateDriverObject(const char *name) {
-    if(!name||!name[0])return NULL;
+    size_t name_length;
+    if(!IoNameLength(name,IO_DEVICE_NAME_MAX,&name_length)||!name_length)return NULL;
     IoLock();
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(IoDrivers[i].used&&IoNameEqual(IoDrivers[i].name,name)){IoUnlock();return NULL;}
     IO_DRIVER_OBJECT *d=NULL;
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(!IoDrivers[i].used){d=&IoDrivers[i];break;}
-    if(d){d->signature=IO_DRIVER_SIGNATURE;IoCopyName(d->name,name,sizeof d->name);d->used=1;IoDriverCount++;}
+    if(d){d->signature=IO_DRIVER_SIGNATURE;IoCopyName(d->name,name,name_length);d->used=1;IoDriverCount++;}
     IoUnlock();return d;
 }
 static int IoSetMajorFunction(IO_DRIVER_OBJECT *driver,uint8_t major,IO_DISPATCH_ROUTINE dispatch) {
-    if(!driver||driver->signature!=IO_DRIVER_SIGNATURE||!driver->used||major>IRP_MJ_MAXIMUM_FUNCTION)return 0;
-    IoLock();driver->MajorFunction[major]=dispatch;IoUnlock();return 1;
+    if(!driver||major>IRP_MJ_MAXIMUM_FUNCTION)return 0;
+    IoLock();
+    if(!IoDriverValidLocked(driver)){IoUnlock();return 0;}
+    driver->MajorFunction[major]=dispatch;
+    IoUnlock();return 1;
 }
 static IO_STATUS IoCreateDevice(IO_DRIVER_OBJECT *driver,const char *name,uint32_t type,
                                 uint32_t characteristics,uint16_t extension_size,
                                 IO_DEVICE_OBJECT **out_device) {
-    if(!driver||driver->signature!=IO_DRIVER_SIGNATURE||!driver->used||!name||!name[0]||
+    size_t name_length;
+    if(!driver||!IoNameLength(name,IO_DEVICE_NAME_MAX,&name_length)||!name_length||
        !out_device||extension_size>IO_DEVICE_EXTENSION_MAX)return IO_STATUS_INVALID_PARAMETER;
+    *out_device=NULL;
     IoLock();
+    if(!IoDriverValidLocked(driver)){IoUnlock();return IO_STATUS_NO_SUCH_DEVICE;}
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(IoDevices[i].used&&IoNameEqual(IoDevices[i].name,name)){IoUnlock();return IO_STATUS_ACCESS_DENIED;}
     IO_DEVICE_OBJECT *d=NULL;
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(!IoDevices[i].used){d=&IoDevices[i];break;}
     if(!d){IoUnlock();return IO_STATUS_INSUFFICIENT_RESOURCES;}
-    d->signature=IO_DEVICE_SIGNATURE;IoCopyName(d->name,name,sizeof d->name);
+    d->signature=IO_DEVICE_SIGNATURE;IoCopyName(d->name,name,name_length);
     d->device_type=type;d->characteristics=characteristics;d->flags=0;d->driver=driver;
     d->attached_device=NULL;d->lower_device=NULL;d->extension_size=extension_size;d->used=1;
     for(unsigned i=0;i<IO_DEVICE_EXTENSION_MAX;i++)d->extension[i]=0;
     IoDeviceCount++;*out_device=d;IoUnlock();return IO_STATUS_SUCCESS;
 }
 static IO_DEVICE_OBJECT *IoGetDeviceByName(const char *name) {
-    if(!name)return NULL;IoLock();IO_DEVICE_OBJECT *found=NULL;
+    size_t name_length;
+    if(!IoNameLength(name,IO_DEVICE_NAME_MAX,&name_length)||!name_length)return NULL;
+    IoLock();IO_DEVICE_OBJECT *found=NULL;
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(IoDevices[i].used&&IoNameEqual(IoDevices[i].name,name)){found=&IoDevices[i];break;}
     IoUnlock();return found;
 }
 static IO_DEVICE_OBJECT *IoAttachDeviceToDeviceStack(IO_DEVICE_OBJECT *source,IO_DEVICE_OBJECT *target) {
-    if(!source||!target||source==target||source->signature!=IO_DEVICE_SIGNATURE||target->signature!=IO_DEVICE_SIGNATURE)return NULL;
+    if(!source||!target||source==target)return NULL;
     IoLock();
-    if(!source->used||!target->used||source->lower_device){IoUnlock();return NULL;}
+    if(!IoDeviceValidLocked(source)||!IoDeviceValidLocked(target)||source->lower_device){IoUnlock();return NULL;}
+    IO_DEVICE_OBJECT *lower=target;
+    unsigned lower_depth=0;
+    while(lower){
+        if(!IoDeviceValidLocked(lower)||lower==source||lower_depth++>=IO_MAX_STACK_DEPTH){IoUnlock();return NULL;}
+        lower=lower->lower_device;
+    }
     IO_DEVICE_OBJECT *top=target;
-    unsigned depth=0;
-    while(top->attached_device&&depth++<IO_MAX_STACK_DEPTH)top=top->attached_device;
-    if(depth>=IO_MAX_STACK_DEPTH){IoUnlock();return NULL;}
+    unsigned depth=1;
+    while(top->attached_device) {
+        if(top==source||depth>=IO_MAX_STACK_DEPTH||
+           !IoDeviceValidLocked(top->attached_device)){IoUnlock();return NULL;}
+        top=top->attached_device;
+        ++depth;
+    }
+    if(top==source){IoUnlock();return NULL;}
     source->lower_device=top;top->attached_device=source;
     IoUnlock();return top;
 }
 static IO_IRP *IoAllocateIrp(uint8_t major,void *buffer,uint32_t input_length,uint32_t output_length) {
-    if(major>IRP_MJ_MAXIMUM_FUNCTION||input_length>IO_IRP_BUFFER_MAX||output_length>IO_IRP_BUFFER_MAX||
+    if(major>IRP_MJ_MAXIMUM_FUNCTION||input_length>IO_IRP_BUFFER_MAX||
+       output_length>IO_IRP_BUFFER_MAX-input_length||
        (input_length&&!buffer)||(output_length&&!buffer))return NULL;
     IoLock();IO_IRP *irp=NULL;
     for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(!IoIrpUsed[i]){IoIrpUsed[i]=1;irp=&IoIrpPool[i];break;}
     if(irp){irp->signature=IO_IRP_SIGNATURE;irp->major_function=major;irp->stack_count=1;
-        irp->current_location=0;irp->completed=0;irp->status=IO_STATUS_PENDING;irp->information=0;
+        irp->current_location=0;irp->completed=0;irp->in_flight=0;irp->pending=0;irp->completion_active=0;
+        irp->dispatch_depth=0;irp->dispatch_owner=NULL;
+        irp->status=IO_STATUS_PENDING;irp->information=0;
         irp->system_buffer=buffer;irp->input_length=input_length;irp->output_length=output_length;
         irp->completion=NULL;irp->completion_context=NULL;
         for(unsigned i=0;i<IO_MAX_STACK_DEPTH;i++){irp->stack[i].major_function=major;irp->stack[i].device=NULL;irp->stack[i].argument1=0;irp->stack[i].argument2=0;}
         IoIrpCount++;}
     IoUnlock();return irp;
 }
-static void IoCompleteRequest(IO_IRP *irp,IO_STATUS status,uint64_t information) {
-    if(!irp||irp->signature!=IO_IRP_SIGNATURE||irp->completed)return;
-    irp->status=status;irp->information=information;irp->completed=1;
-    if(irp->completion)irp->completion(irp,irp->completion_context);
+static int IoCompleteRequest(IO_IRP *irp,IO_STATUS status,uint64_t information) {
+    IO_COMPLETION_ROUTINE completion=NULL;void *context=NULL;int took_flight=0;
+    if(!irp)return 0;
+    IoLock();
+    if(!IoIrpValidLocked(irp)||irp->completed){IoUnlock();return 0;}
+    uint32_t information_limit =
+        (irp->major_function==IRP_MJ_WRITE||irp->major_function==IRP_MJ_SET_INFORMATION)
+            ? irp->input_length : irp->output_length;
+    if(information>information_limit){status=IO_STATUS_INVALID_PARAMETER;information=0;}
+    irp->status=status;irp->information=information;irp->completed=1;irp->pending=0;
+    completion=irp->completion;context=irp->completion_context;
+    if(completion){
+        if(!irp->in_flight){irp->in_flight=1;took_flight=1;}
+        irp->completion_active=1;
+    }
+    IoUnlock();
+    if(completion)completion(irp,context);
+    if(completion){
+        IoLock();
+        if(IoIrpValidLocked(irp)){
+            irp->completion_active=0;
+            if(took_flight)irp->in_flight=0;
+        }
+        IoUnlock();
+    }
+    return 1;
 }
 static IO_STATUS IoCallDriver(IO_DEVICE_OBJECT *device,IO_IRP *irp) {
-    if(!device||device->signature!=IO_DEVICE_SIGNATURE||!device->used||!irp||
-       irp->signature!=IO_IRP_SIGNATURE||irp->completed)return IO_STATUS_INVALID_PARAMETER;
+    if(!device||!irp)return IO_STATUS_INVALID_PARAMETER;
+    const void *owner=IoDispatchOwnerToken();
+    if(!owner)return IO_STATUS_INVALID_PARAMETER;
+    IoLock();
+    if(!IoDeviceValidLocked(device)||!IoIrpValidLocked(irp)||irp->completed||
+       (irp->in_flight&&irp->dispatch_owner!=owner)||irp->dispatch_depth>=IO_MAX_STACK_DEPTH){
+        IoUnlock();return IO_STATUS_INVALID_PARAMETER;
+    }
     /* Dispatch to exactly the device supplied by the caller. A filter driver
        explicitly forwards to its lower_device by calling IoCallDriver again. */
     IO_DEVICE_OBJECT *target=device;
-    if(!target->driver||target->driver->signature!=IO_DRIVER_SIGNATURE)return IO_STATUS_NO_SUCH_DEVICE;
+    if(!IoDriverValidLocked(target->driver)){IoUnlock();return IO_STATUS_NO_SUCH_DEVICE;}
     IO_DISPATCH_ROUTINE dispatch=target->driver->MajorFunction[irp->major_function];
-    if(!dispatch)return IO_STATUS_NOT_SUPPORTED;
-    irp->stack[0].device=target;irp->stack[0].major_function=irp->major_function;
+    if(!dispatch){IoUnlock();return IO_STATUS_NOT_SUPPORTED;}
+    if(!irp->in_flight){irp->in_flight=1;irp->dispatch_owner=owner;}
+    unsigned frame=irp->dispatch_depth++;
+    irp->stack[frame].device=target;irp->stack[frame].major_function=irp->major_function;
+    IoUnlock();
     IO_STATUS status=dispatch(target,irp);
-    if(!irp->completed&&status!=IO_STATUS_PENDING)IoCompleteRequest(irp,status,irp->information);
+    int should_complete=0;
+    IoLock();
+    if(IoIrpValidLocked(irp)&&!irp->completed&&!irp->pending&&status!=IO_STATUS_PENDING)
+        should_complete=1;
+    IoUnlock();
+    if(should_complete)IoCompleteRequest(irp,status,irp->information);
+    IoLock();
+    if(IoIrpValidLocked(irp)){
+        if(irp->dispatch_depth)irp->dispatch_depth--;
+        if(status==IO_STATUS_PENDING&&!irp->completed)irp->pending=1;
+        if(!irp->dispatch_depth){
+            if(irp->pending&&!irp->completed)status=IO_STATUS_PENDING;
+            irp->dispatch_owner=NULL;irp->in_flight=0;
+        }
+    }
+    IoUnlock();
     return status;
 }
 static int IoFreeIrp(IO_IRP *irp) {
-    if(!irp||irp->signature!=IO_IRP_SIGNATURE)return 0;
+    if(!irp)return 0;
     IoLock();
     int found=0;
-    for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(irp==&IoIrpPool[i]&&IoIrpUsed[i]) {
+    for(unsigned i=0;i<IO_MAX_DEVICES;i++)if(irp==&IoIrpPool[i]&&IoIrpUsed[i]&&
+        irp->signature==IO_IRP_SIGNATURE&&!irp->in_flight&&!irp->pending&&!irp->completion_active) {
         IoIrpUsed[i]=0;irp->signature=0;found=1;if(IoIrpCount)IoIrpCount--;break;
     }
     IoUnlock();return found;

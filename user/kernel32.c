@@ -1,3 +1,5 @@
+#include "temp_path.h"
+
 typedef unsigned long long u64;
 typedef long long i64;
 typedef unsigned int DWORD;
@@ -482,8 +484,7 @@ __attribute__((dllexport)) DWORD SetFilePointer(HANDLE file, LONG distance, LONG
 }
 __attribute__((dllexport)) BOOL FlushFileBuffers(HANDLE file) { if(!file||file==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) DWORD GetTempPathA(DWORD cap, LPSTR out) {
-    const char *s="C:\\TEMP\\"; DWORD i=0; if (!out || !cap) return 0;
-    while (s[i] && i+1<cap) { out[i]=s[i]; i++; } out[i]=0; return i+1;
+    return K32GetTempPathA(cap, out, &k32_last_error);
 }
 __attribute__((dllexport)) DWORD GetFullPathNameA(LPCSTR path, DWORD cap, LPSTR out, LPSTR *part) {
     char input[512], full[768]; DWORD n=0,f=0,pos=0; DWORD starts[128],depth=0;
@@ -715,10 +716,7 @@ __attribute__((dllexport)) DWORD GetFullPathNameW(K32_LPCWSTR path, DWORD cap, K
     return n;
 }
 __attribute__((dllexport)) DWORD GetTempPathW(DWORD cap, K32_LPWSTR out) {
-    char narrow[260]; DWORD n=GetTempPathA(sizeof(narrow),narrow);
-    if (!out || !cap) return n;
-    if (n>cap) { k32_ansi_to_wide(out,cap,narrow); return n; }
-    k32_ansi_to_wide(out,cap,narrow); return n;
+    return K32GetTempPathW(cap, (uint16_t *)out, &k32_last_error);
 }
 __attribute__((dllexport)) DWORD GetEnvironmentVariableW(K32_LPCWSTR name,K32_LPWSTR out,DWORD cap){char n[128],v[256];k32_wide_to_ansi(n,sizeof(n),name);DWORD z=GetEnvironmentVariableA(n,v,sizeof(v));if(!z){if(out&&cap)out[0]=0;return 0;}DWORD len=0;while(v[len])len++;if(!out||!cap)return len;if(cap<=len){k32_ansi_to_wide(out,cap,v);k32_last_error=122;return len+1;}k32_ansi_to_wide(out,cap,v);return len;}
 __attribute__((dllexport)) BOOL SetEnvironmentVariableW(K32_LPCWSTR name,K32_LPCWSTR value){char n[128],v[256];if(!name)return 0;k32_wide_to_ansi(n,sizeof(n),name);if(!value)return SetEnvironmentVariableA(n,0);k32_wide_to_ansi(v,sizeof(v),value);return SetEnvironmentVariableA(n,v);}

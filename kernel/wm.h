@@ -12,6 +12,7 @@ typedef struct {
 
 static WmEntry wm_tab[WM_MAX];
 static unsigned long long wm_zseq;
+static int wm_scene_dirty;
 static int wm_active_pid;
 
 static int wm_find_pid(int pid) {
@@ -63,6 +64,7 @@ static void wm_register(int pid, const char *title) {
     wm_tab[i].minimized = 0;
     wm_tab[i].z = ++wm_zseq;
     wm_active_pid = pid;
+    wm_scene_dirty = 1;
     int k = 0;
     if (title)
         for (; title[k] && k < 39; k++) wm_tab[i].title[k] = title[k];
@@ -79,6 +81,7 @@ static void wm_set_rect(int pid, int x, int y, int w, int h) {
     wm_tab[i].y = y;
     wm_tab[i].w = w;
     wm_tab[i].h = h;
+    wm_scene_dirty = 1;
 }
 
 static void wm_set_min(int pid, int min) {
@@ -97,6 +100,7 @@ static void wm_unregister(int pid) {
     int i = wm_find_pid(pid);
     if (i >= 0) {
         wm_tab[i].alive = 0;
+        wm_scene_dirty = 1;
         if (wm_active_pid == pid) wm_choose_active();
     }
 }

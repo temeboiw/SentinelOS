@@ -49,6 +49,10 @@ typedef struct {
 #define OB_SIGNATURE 0x4F424A53u /* SJBO */
 #define OB_HANDLE_INDEX_MASK 0xFFFFu
 
+#ifndef OB_SPIN_WAIT
+#define OB_SPIN_WAIT() __asm__ volatile("pause")
+#endif
+
 static OB_OBJECT ObObjects[OB_MAX_OBJECTS];
 static OB_HANDLE_ENTRY ObHandles[OB_MAX_HANDLES];
 static volatile uint32_t ObLockWord;
@@ -57,7 +61,7 @@ static uint32_t ObObjectCount, ObHandleCount;
 
 static void ObLock(void) {
     while (__atomic_exchange_n(&ObLockWord, 1u, __ATOMIC_ACQUIRE))
-        while (__atomic_load_n(&ObLockWord, __ATOMIC_RELAXED)) __asm__ volatile("pause");
+        while (__atomic_load_n(&ObLockWord, __ATOMIC_RELAXED)) OB_SPIN_WAIT();
 }
 static void ObUnlock(void) { __atomic_store_n(&ObLockWord, 0u, __ATOMIC_RELEASE); }
 static size_t ObStringLength(const char *s) { size_t n=0; if(!s)return 0; while(s[n])n++; return n; }
@@ -77,15 +81,16 @@ static void ObReferenceObject(OB_OBJECT *object) {
         __atomic_add_fetch(&object->references,1u,__ATOMIC_RELAXED);
 }
 static void ObDereferenceObject(OB_OBJECT *object) {
-    if(!object||!object->used||object->signature!=OB_SIGNATURE)return;
-    if(__atomic_sub_fetch(&object->references,1u,__ATOMIC_ACQ_REL)==0) {
-        ObLock();
-        if(object->used&&object->references==0) {
+    if(!object)return;
+    ObLock();
+    if(object->used&&object->signature==OB_SIGNATURE&&object->references) {
+        object->references--;
+        if(object->references==0) {
             object->used=0; object->signature=0; object->name[0]=0;
             if(ObObjectCount)ObObjectCount--;
         }
-        ObUnlock();
     }
+    ObUnlock();
 }
 static OB_OBJECT *ObFindObjectLocked(const char *name,OB_TYPE type) {
     for(unsigned i=0;i<OB_MAX_OBJECTS;i++)
@@ -114,6 +119,9 @@ static OB_HANDLE_ENTRY *ObFindHandleLocked(uintptr_t owner,OB_HANDLE handle) {
     OB_HANDLE_ENTRY *e=&ObHandles[slot-1u];
     return e->used&&e->owner==owner&&e->generation==generation?e:NULL;
 }
+static OB_OBJECT *ObObjectFromBody(void *body) {
+    return body ? (OB_OBJECT *)((uint8_t *)body - offsetof(OB_OBJECT,body)) : NULL;
+}
 static void ObInitialize(void) {
     ObLock();
     for(unsigned i=0;i<OB_MAX_OBJECTS;i++) {
@@ -124,8 +132,9 @@ static void ObInitialize(void) {
     ObObjectCount=0; ObHandleCount=0; ObNextGeneration=1;
     ObUnlock();
 }
-/* Create returns one caller reference and one handle reference. Named objects
- * also hold a namespace reference until ObDeleteNamedObject is called. */
+/* Create returns a caller reference when body_out is requested, plus a handle
+ * reference when handle is requested. Named objects also hold a namespace
+ * reference until ObDeleteNamedObject is called. */
 static int ObCreateObject(OB_TYPE type,const char *name,size_t body_size,
                           uintptr_t owner,uint32_t access,OB_HANDLE *handle,void **body_out) {
     if(type==ObTypeNone||body_size>OB_BODY_MAX||(!handle&&!body_out))return 0;
@@ -137,7 +146,9 @@ static int ObCreateObject(OB_TYPE type,const char *name,size_t body_size,
     for(unsigned i=0;i<OB_MAX_OBJECTS;i++)if(!ObObjects[i].used){o=&ObObjects[i];break;}
     if(!o){ObUnlock();return 0;}
     o->signature=OB_SIGNATURE; o->type=(uint16_t)type; o->flags=0;
-    o->references=1; o->granted_access=access; o->used=1; o->named=(name&&name[0])?1:0;
+    /* A handle-only caller owns no hidden creator reference. When body_out is
+       requested, the returned body is the caller's explicit creator reference. */
+    o->references=body_out?1u:0u; o->granted_access=access; o->used=1; o->named=(name&&name[0])?1:0;
     ObStringCopy(o->name,name,OB_NAME_MAX);
     for(unsigned i=0;i<OB_BODY_MAX;i++)o->body[i]=0;
     ObObjectCount++;
@@ -147,7 +158,7 @@ static int ObCreateObject(OB_TYPE type,const char *name,size_t body_size,
     if(body_out)*body_out=o->body;
     if(!ok) {
         if(o->named){o->named=0;__atomic_sub_fetch(&o->references,1u,__ATOMIC_RELAXED);}
-        __atomic_sub_fetch(&o->references,1u,__ATOMIC_RELAXED);
+        if(body_out)__atomic_sub_fetch(&o->references,1u,__ATOMIC_RELAXED);
         if(o->references==0){o->used=0;o->signature=0;ObObjectCount--;}
         if(body_out)*body_out=NULL;
     }
@@ -191,27 +202,57 @@ static int ObDeleteNamedObject(const char *name,OB_TYPE type) {
     o->named=0;o->name[0]=0;
     ObUnlock(); ObDereferenceObject(o); return 1;
 }
-static uint32_t ObGetObjectCount(void){return ObObjectCount;}
-static uint32_t ObGetHandleCount(void){return ObHandleCount;}
+static uint32_t ObGetObjectCount(void){ObLock();uint32_t count=ObObjectCount;ObUnlock();return count;}
+static uint32_t ObGetHandleCount(void){ObLock();uint32_t count=ObHandleCount;ObUnlock();return count;}
 
 /* Boot-time invariant test: namespace reference, access validation, per-owner
  * handles, explicit references, close, and namespace deletion. */
 static int ObSelfTest(void) {
     OB_HANDLE kernel_handle=0,user_handle=0;
     void *body=NULL;
+    uint32_t objects_before=ObGetObjectCount(),handles_before=ObGetHandleCount();
     if(!ObCreateObject(ObTypeEvent,"\\BaseNamedObjects\\ObSelfTest",sizeof(uint64_t),
                        0,OB_ACCESS_READ|OB_ACCESS_WRITE,&kernel_handle,&body))return 0;
+    OB_OBJECT *creator_reference=ObObjectFromBody(body);
     if(!body) {
-        ObCloseHandle(0,kernel_handle);ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);return 0;
+        ObCloseHandle(0,kernel_handle);
+        ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);
+        return 0;
     }
     OB_OBJECT *object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_READ);
     int ok=object!=NULL;
     if(object)ObDereferenceObject(object);
-    if(ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_EXECUTE)!=NULL)ok=0;
+    object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_EXECUTE);
+    if(object){ok=0;ObDereferenceObject(object);}
+    object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeFile,OB_ACCESS_READ);
+    if(object){ok=0;ObDereferenceObject(object);}
+    object=ObReferenceObjectByHandle(8,kernel_handle,ObTypeEvent,OB_ACCESS_READ);
+    if(object){ok=0;ObDereferenceObject(object);}
+    if(ObCloseHandle(8,kernel_handle))ok=0;
     if(!ObOpenObjectByName(7,"\\BaseNamedObjects\\ObSelfTest",ObTypeEvent,OB_ACCESS_READ,&user_handle))ok=0;
-    if(ObReferenceObjectByHandle(8,user_handle,ObTypeEvent,OB_ACCESS_READ)!=NULL)ok=0;
+    object=ObReferenceObjectByHandle(7,user_handle,ObTypeEvent,OB_ACCESS_READ);
+    if(!object)ok=0;
+    if(object)ObDereferenceObject(object);
+    object=ObReferenceObjectByHandle(8,user_handle,ObTypeEvent,OB_ACCESS_READ);
+    if(object){ok=0;ObDereferenceObject(object);}
     if(user_handle)ObCloseHandle(7,user_handle);
-    ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent);
     if(!ObCloseHandle(0,kernel_handle))ok=0;
+    if(ObCloseHandle(0,kernel_handle))ok=0;
+    object=ObReferenceObjectByHandle(0,kernel_handle,ObTypeEvent,OB_ACCESS_READ);
+    if(object){ok=0;ObDereferenceObject(object);}
+    if(!ObDeleteNamedObject("\\BaseNamedObjects\\ObSelfTest",ObTypeEvent))ok=0;
+    ObDereferenceObject(creator_reference);
+    if(ObGetObjectCount()!=objects_before||ObGetHandleCount()!=handles_before)ok=0;
+
+    OB_HANDLE handle_only=0;
+    if(!ObCreateObject(ObTypeEvent,NULL,0,3,OB_ACCESS_READ,&handle_only,NULL))return 0;
+    OB_OBJECT *handle_object=ObReferenceObjectByHandle(3,handle_only,ObTypeEvent,OB_ACCESS_READ);
+    if(!handle_object)ok=0;
+    if(handle_object) {
+        if(handle_object->references!=2)ok=0;
+        ObDereferenceObject(handle_object);
+    }
+    if(!ObCloseHandle(3,handle_only))ok=0;
+    if(ObGetObjectCount()!=objects_before||ObGetHandleCount()!=handles_before)ok=0;
     return ok;
 }

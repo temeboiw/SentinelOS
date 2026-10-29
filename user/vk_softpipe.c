@@ -33,6 +33,10 @@ static float sf_edge(float ax, float ay, float bx, float by,
 }
 static float sf_wrap(float x, uint8_t repeat) {
     if (repeat) {
+        /* Avoid undefined float-to-int conversion for NaN, infinities, or
+         * values outside int32 range. At these magnitudes a binary32 value
+         * has no fractional component, so the stable repeat coordinate is 0. */
+        if (!(x >= -2147483000.0f && x <= 2147483000.0f)) return 0.0f;
         x = x - (float)(int)x;
         if (x < 0.0f) x += 1.0f;
         return x;

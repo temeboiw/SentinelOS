@@ -239,8 +239,11 @@ extern "C" void game_mainCRTStartup() {
 
     GameMessage msg{};
     for (;;) {
-        if (!get_message(&msg, nullptr, 0, 0)) {
-            (void)syscall3(SYS_TERMINATE_PROCESS, 0, 0, 0);
+        BOOL message_result = get_message(&msg, nullptr, 0, 0);
+        if (message_result <= 0) {
+            if (message_result < 0)
+                debug_print("game.exe: GetMessageA failed; exiting with error\n");
+            (void)syscall3(SYS_TERMINATE_PROCESS, message_result < 0 ? 1 : 0, 0, 0);
             for (;;) __asm__ volatile("pause");
         }
         if (translate_message) (void)translate_message(&msg);

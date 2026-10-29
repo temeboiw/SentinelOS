@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "bootinfo.h"
 #include "serial.h"
+#include "spinlock.h"
 #include "pmm.h"
 #include "cpu.h"
 
@@ -41,17 +42,16 @@ static uint64_t *pml4;
 static uint64_t  vmm_table_pages;
 static KPROCESS *PspSystemProcess;
 #define MmCurrentProcess ((KPROCESS *)cpu_local_current()->current_process)
-static volatile uint32_t MmProcessLock;
+static KSPIN_LOCK MmProcessLock = KSPIN_LOCK_INIT;
 static ULONG MmNextPid = 1;
 static uint64_t MmLock(void) {
     uint64_t flags;
     __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
-    while (__atomic_exchange_n(&MmProcessLock,1,__ATOMIC_ACQUIRE))
-        while (__atomic_load_n(&MmProcessLock,__ATOMIC_RELAXED)) __asm__ volatile("pause");
+    KeAcquireSpinLock(&MmProcessLock);
     return flags;
 }
 static void MmUnlock(uint64_t flags) {
-    __atomic_store_n(&MmProcessLock,0,__ATOMIC_RELEASE);
+    KeReleaseSpinLock(&MmProcessLock);
     if (flags & 0x200) __asm__ volatile("sti" ::: "memory");
 }
 
@@ -325,7 +325,10 @@ static int MmVirtualPagePresent(KPROCESS *proc, uint64_t va) {
 }
 
 static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
-    if (!proc || !len || va < 0x10000ULL ||
+    /* PML4[0]/PDPT[0] is borrowed from the system address space to retain
+       supervisor-only identity aliases. Keep all private user mappings out
+       of that shared 1 GiB region. */
+    if (!proc || !len || va < USER_CODE_BASE ||
         va >= 0x0000800000000000ULL || len > UINT64_MAX - va ||
         va + len > 0x0000800000000000ULL) return 0;
     uint64_t last_page = (va + len - 1) & ~0xFFFULL;
@@ -341,7 +344,7 @@ static int MmUserRangeUnmapped(KPROCESS *proc, uint64_t va, uint64_t len) {
 /* Only for frames allocated by the user-memory allocator, never device mappings. */
 static int MmUnmapAllocatedUserPage(KPROCESS *proc, uint64_t va) {
     uint64_t mmfl = MmLock();
-    if (!proc || va < 0x10000ULL || va >= 0x0000800000000000ULL) {
+    if (!proc || va < USER_CODE_BASE || va >= 0x0000800000000000ULL) {
         MmUnlock(mmfl);
         return 0;
     }
@@ -384,8 +387,9 @@ static void MmDeleteAddressSpace(KPROCESS *p) {
     uint64_t mmfl = MmLock();
     if (__atomic_load_n(&p->ActiveCpus, __ATOMIC_ACQUIRE) != 0) { MmUnlock(mmfl); return; }
 
-    /* Lower-half page tables are private to this process. The upper-half
-       kernel mappings are shared and intentionally never traversed here. */
+    /* Lower-half page tables are private except for PDPT[0] under PML4[0],
+       which is borrowed from the system address space as a supervisor-only
+       identity map. The upper-half kernel mappings are shared too. */
     uint64_t *root = PHYS_TO_VIRT(p->DirectoryTableBase & PTE_ADDR);
     for (unsigned i4 = 0; i4 < 256; i4++) {
         uint64_t e4 = root[i4];
@@ -393,6 +397,11 @@ static void MmDeleteAddressSpace(KPROCESS *p) {
         uint64_t pdpt_pa = e4 & PTE_ADDR;
         uint64_t *pdpt = PHYS_TO_VIRT(pdpt_pa);
         for (unsigned i3 = 0; i3 < 512; i3++) {
+            /* MmCreateAddressSpace installs the system's PDPT[0] here by
+               reference. Its PD/PT pages belong to the system root and must
+               survive process teardown. Private user mappings are rejected
+               below USER_CODE_BASE, so this subtree contains no owned pages. */
+            if (i4 == 0 && i3 == 0) continue;
             uint64_t e3 = pdpt[i3];
             if (!(e3 & PTE_P) || (e3 & PTE_PS)) continue;
             uint64_t pd_pa = e3 & PTE_ADDR;
@@ -540,5 +549,35 @@ static void vmm_selftest(const BootInfo *bi, uint64_t code_addr, uint64_t stack_
             (vmm_translate(bi->fb_base) == bi->fb_base && vmm_translate(HHDM_BASE + bi->fb_base) == bi->fb_base) ? "ok" : "FAIL");
     DbgPrint("vmm test: unmapped address is really unmapped: %s\n",
             vmm_translate(0x00007F0000000000ULL) == ~0ULL ? "ok" : "FAIL");
+
+    /* Exercise teardown while a process holds the borrowed low identity map. */
+    KPROCESS *test_proc = MmCreateAddressSpace("vmm-teardown-test");
+    uint64_t shared_pd_pa = 0, shared_va = 0;
+    if (test_proc && (PspSystemProcess->Pml4[0] & PTE_P)) {
+        uint64_t *sys_pdpt = PHYS_TO_VIRT(PspSystemProcess->Pml4[0] & PTE_ADDR);
+        uint64_t low_e3 = sys_pdpt[0];
+        if ((low_e3 & PTE_P) && !(low_e3 & PTE_PS)) {
+            shared_pd_pa = low_e3 & PTE_ADDR;
+            uint64_t *shared_pd = PHYS_TO_VIRT(shared_pd_pa);
+            for (unsigned i = 0; i < 512; ++i) {
+                if ((shared_pd[i] & (PTE_P | PTE_PS)) == (PTE_P | PTE_PS)) {
+                    shared_va = ((uint64_t)i << 21) + 0x1000ULL;
+                    break;
+                }
+            }
+        }
+    }
+    int teardown_ok = 0;
+    if (test_proc && shared_pd_pa && shared_va && pmm_is_used(shared_pd_pa) &&
+        MmVirtualPagePresent(test_proc, shared_va)) {
+        MmDeleteAddressSpace(test_proc);
+        teardown_ok = pmm_is_used(shared_pd_pa) &&
+                      MmVirtualPagePresent(PspSystemProcess, shared_va) &&
+                      vmm_translate(shared_va) == shared_va;
+    } else if (test_proc) {
+        MmDeleteAddressSpace(test_proc);
+    }
+    DbgPrint("vmm test: process teardown preserves borrowed identity tables: %s\n",
+             teardown_ok ? "ok" : "FAIL");
     pmm_free(pa);
 }

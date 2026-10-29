@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "ntdef.h"
 #include "hal.h"
+#include "spinlock.h"
 #include "serial.h"
 #include "cpu.h"
 #include "heap.h"
@@ -35,22 +36,21 @@ static KTHREAD *rq_head, *rq_tail;
 static volatile ULONGLONG KeTickCount;
 static volatile ULONGLONG ki_switches;
 static volatile ULONG ki_next_id;
-static volatile uint32_t ki_scheduler_lock;
+static KSPIN_LOCK ki_scheduler_lock = KSPIN_LOCK_INIT;
 #define ki_current (*(KTHREAD **)&cpu_local_current()->scheduler_current)
 #define ki_idle (*(KTHREAD **)&cpu_local_current()->scheduler_idle)
 #define ki_quantum_left (cpu_local_current()->scheduler_quantum)
 static void KiSchedulerLock(void) {
-    while (__atomic_exchange_n(&ki_scheduler_lock, 1, __ATOMIC_ACQUIRE))
-        while (__atomic_load_n(&ki_scheduler_lock, __ATOMIC_RELAXED)) __asm__ volatile("pause");
+    KeAcquireSpinLock(&ki_scheduler_lock);
 }
-static void KiSchedulerUnlock(void) { __atomic_store_n(&ki_scheduler_lock, 0, __ATOMIC_RELEASE); }
+static void KiSchedulerUnlock(void) { KeReleaseSpinLock(&ki_scheduler_lock); }
 
-static void rq_push(KTHREAD *t) {
+void rq_push(KTHREAD *t) {
     t->next = NULL; t->state = ThreadReady;
     if (rq_tail) rq_tail->next = t; else rq_head = t;
     rq_tail = t;
 }
-static void rq_push_front(KTHREAD *t) {                        // wake-up boost: a thread leaving a wait runs next
+void rq_push_front(KTHREAD *t) {                        // wake-up boost: a thread leaving a wait runs next
     t->state = ThreadReady; t->next = rq_head; rq_head = t;
     if (!rq_tail) rq_tail = t;
 }

@@ -3,6 +3,9 @@
 
 #define UT_MAX 16
 #define UT_STACK_SIZE 0x10000ULL
+#define UT_HANDLE_SLOT_BITS 5u
+#define UT_HANDLE_SLOT_MASK ((1u << UT_HANDLE_SLOT_BITS) - 1u)
+#define UT_HANDLE_GENERATION_MASK 0x03FFFFFFu
 
 typedef struct {
     KPROCESS *proc;
@@ -13,17 +16,37 @@ typedef struct {
     uint64_t teb_base;
     int alive;
     int fresh;
+    int finished;
     int handle;
 } UThread;
 
 static UThread ut_tab[UT_MAX];
 static int ut_n;
 static int ut_cur = -1;
+static volatile uint32_t ut_next_generation;
+
+/* Handles carry a generation so reusing a table slot cannot revive a stale ID. */
+static int ut_make_handle(int slot) {
+    if (slot < 0 || slot >= UT_MAX) return 0;
+    uint32_t generation;
+    do {
+        generation = __atomic_add_fetch(&ut_next_generation, 1u,
+                                        __ATOMIC_RELAXED) &
+                     UT_HANDLE_GENERATION_MASK;
+    } while (!generation);
+    return (int)((generation << UT_HANDLE_SLOT_BITS) | (uint32_t)(slot + 1));
+}
 
 static int ut_find_handle(int h) {
-    for (int i = 0; i < UT_MAX; i++)
-        if (ut_tab[i].alive && ut_tab[i].handle == h) return i;
-    return -1;
+    if (h <= 0) return -1;
+    uint32_t value = (uint32_t)h;
+    uint32_t encoded_slot = value & UT_HANDLE_SLOT_MASK;
+    if (!encoded_slot || encoded_slot > UT_MAX) return -1;
+    int slot = (int)encoded_slot - 1;
+    UThread *thread = &ut_tab[slot];
+    if (thread->handle != h || (!thread->alive && !thread->finished) ||
+        !thread->proc || thread->proc != MmCurrentProcess) return -1;
+    return slot;
 }
 static int ut_find_slot(void) {
     for (int i = 0; i < UT_MAX; i++)
@@ -36,6 +59,21 @@ static void ut_save(Frame *f, int idx) {
     ut_tab[idx].rsp = f->rsp;
     ut_tab[idx].rflags = f->rflags;
     ut_tab[idx].fresh = 0;
+}
+/* A completed thread keeps its handle state for waits, but no longer needs
+ * its private stack or TEB mappings. The unmap helper validates PTE_OWNED
+ * before releasing each frame, so cleanup cannot free borrowed pages. */
+static void ut_release_resources(UThread *thread) {
+    if (!thread || !thread->proc) return;
+    if (thread->stack_base) {
+        for (uint64_t off = 0; off < UT_STACK_SIZE; off += 0x1000)
+            MmUnmapAllocatedUserPage(thread->proc, thread->stack_base + off);
+        thread->stack_base = 0;
+    }
+    if (thread->teb_base) {
+        MmUnmapAllocatedUserPage(thread->proc, thread->teb_base);
+        thread->teb_base = 0;
+    }
 }
 static void ut_load(Frame *f, int idx) {
     UThread *t = &ut_tab[idx];
@@ -116,20 +154,28 @@ static uint64_t ut_create(uint64_t start, uint64_t param) {
     t->rflags = 0x202;
     t->alive = 1;
     t->fresh = 1;
-    t->handle = slot + 1;
+    t->finished = 0;
+    t->handle = ut_make_handle(slot);
     if (slot >= ut_n) ut_n = slot + 1;
     DbgPrint("uthread: created");
     return (uint64_t)t->handle;
 }
 static void ut_exit_current(void) {
-    if (ut_cur >= 0 && ut_cur < UT_MAX) ut_tab[ut_cur].alive = 0;
+    if (ut_cur >= 0 && ut_cur < UT_MAX && ut_tab[ut_cur].alive) {
+        UThread *thread = &ut_tab[ut_cur];
+        thread->alive = 0;
+        thread->finished = 1;
+        ut_release_resources(thread);
+    }
 }
 static uint64_t ut_wait(Frame *f, int handle, uint32_t ms) {
     int idx = ut_find_handle(handle);
-    if (idx < 0) return 0;
+    if (idx < 0) return 0xFFFFFFFFULL; /* WAIT_FAILED */
+    if (ut_tab[idx].finished) return 0; /* WAIT_OBJECT_0 */
     int spins = (ms == 0) ? 1 : (ms == 0xFFFFFFFFu ? 1000 : (int)(ms / 10 + 1));
     for (int s = 0; s < spins; s++) {
-        if (!ut_tab[idx].alive) return 0;
+        if (ut_tab[idx].finished) return 0;
+        if (!ut_tab[idx].alive) return 0xFFFFFFFFULL;
         int me = ut_cur;
         if (me >= 0) ut_save(f, me);
         int nxt = ut_pick_next();
@@ -138,5 +184,5 @@ static uint64_t ut_wait(Frame *f, int handle, uint32_t ms) {
             return 0x103;
         }
     }
-    return ut_tab[idx].alive ? 0x102 : 0;
+    return ut_tab[idx].finished ? 0 : (ut_tab[idx].alive ? 0x102 : 0xFFFFFFFFULL);
 }

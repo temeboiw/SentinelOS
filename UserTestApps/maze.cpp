@@ -727,6 +727,11 @@ extern "C" void maze_mainCRTStartup() {
     int window_h=display_h<680?display_h-96:600;
     if(window_w<320)window_w=320;
     if(window_h<240)window_h=240;
+    /* Keep the window rectangle inside small displays. Without this clamp,
+       the minimum size above can produce negative centered coordinates, which
+       become huge unsigned viewport offsets and make the GPU layer vanish. */
+    if(window_w>display_w)window_w=display_w;
+    if(window_h>display_h)window_h=display_h;
     int window_x=(display_w-window_w)/2;
     int window_y=(display_h-window_h)/2;
     maze_view_x=(u32)window_x;maze_view_y=(u32)window_y;

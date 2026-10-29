@@ -473,6 +473,11 @@ void mainCRTStartup(void) {
     if (begin_batch) begin_batch();
     g_window = create(0, "CMD", "SentinelOS CMD",
                       0, 120, 70, 680, 420, 0, 0, 0, 0);
+    if (!g_window) {
+        NtWriteConsole("cmd: could not create command window\n");
+        NtExit(2);
+        return;
+    }
     show(g_window, 1);
 
     print_line("SentinelOS Command Prompt");

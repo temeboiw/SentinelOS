@@ -56,9 +56,12 @@ __declspec(dllimport) BOOL DestroyWindow(HWND);
 __declspec(dllimport) void PostQuitMessage(int);
 __declspec(dllimport) void ExitProcess(UINT);
 
+static int window_destroyed;
+
 static LONG_PTR test_window_proc(HWND hwnd, UINT message,
                                  ULONG_PTR wParam, LONG_PTR lParam) {
     if (message == 0x0002u) { /* WM_DESTROY */
+        window_destroyed = 1;
         PostQuitMessage(0);
         return 0;
     }
@@ -88,6 +91,8 @@ void win32_compat_main(void) {
         TranslateMessage(&message);
         DispatchMessageA(&message);
     }
-    DestroyWindow(window);
+    /* Closing from the title bar already delivered WM_DESTROY. Avoid calling
+       DestroyWindow a second time with a stale window handle in that path. */
+    if (!window_destroyed) DestroyWindow(window);
     ExitProcess((UINT)message.wParam);
 }

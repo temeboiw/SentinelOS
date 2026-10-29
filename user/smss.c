@@ -16,7 +16,11 @@ void smss_main(void) {
     puts("smss: Session Manager started\n");
     puts("smss: starting bootvid.exe\n");
     char name[] = { 98,111,111,116,118,105,100,46,101,120,101,0 };
-    (void)sy3(SYS_Create, (u64)name, 0, 0);
+    u64 bootvid_pid = sy3(SYS_Create, (u64)name, 0, 0);
+    if (bootvid_pid == 0 || bootvid_pid == (u64)-1 || bootvid_pid == (u64)-2) {
+        puts("smss: ERROR unable to start bootvid.exe\n");
+        for (;;) (void)sy3(SYS_Yield, 0, 0, 0);
+    }
     puts("smss: session manager staying alive\n");
     for (;;) (void)sy3(SYS_Yield, 0, 0, 0);
 }

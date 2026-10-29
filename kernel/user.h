@@ -3866,7 +3866,7 @@ static Frame *syscall_handler(Frame *f) {
         SENTINEL_BLOCK_DEVICE *d=SentinelBlockGet((uint32_t)f->rcx);
         uint64_t capacity=0,off=f->rsi*512ULL;
         if(!d||d->sector_size!=512||f->rsi>=d->sector_count||
-           !SentinelBlockByteCapacity(d,&capacity)||off>capacity||512>capacity-off) {
+           SentinelBlockByteCapacity(d,&capacity)!=0||off>capacity||512>capacity-off) {
             f->rax=(uint64_t)-1LL; return f;
         }
         int rc=f->rdi==0?SentinelBlockReadDevice(d,off,(void *)(uintptr_t)f->rdx,512):
@@ -3920,7 +3920,7 @@ static Frame *syscall_handler(Frame *f) {
         uint64_t capacity=0, dest=f->rdi?264192ULL:2048ULL;
         uint64_t off=f->rsi,bytes=f->rdx;
         if(!m||!m->phys||!m->size||m->size>(1ULL<<30)||(m->size&511ULL)||!d||d->sector_size!=512||
-           !SentinelBlockByteCapacity(d,&capacity)||dest>d->sector_count||m->size/512ULL>d->sector_count-dest||
+           SentinelBlockByteCapacity(d,&capacity)!=0||dest>d->sector_count||m->size/512ULL>d->sector_count-dest||
            (off&511ULL)||(bytes&511ULL)||!bytes||bytes>4ULL*1024*1024||off>m->size||bytes>m->size-off) {
             f->rax=(uint64_t)-1LL;return f;
         }

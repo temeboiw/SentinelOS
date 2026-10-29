@@ -242,8 +242,7 @@ void instlr_main(void){
      install_state=1;install_progress_done=0;install_progress_total=esp_package_size+system_package_size;
      paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);(void)NtFlushGraphics(0,0,f.w,f.h);
      if(disk.sectors<264192ULL+system_package_size/512ULL+34ULL){install_state=-1;NtWriteConsole("instlr: target disk is too small for the selected system image\n");}
-     else if(make_gpt(disk.sectors)!=0){install_state=-1;NtWriteConsole("instlr: GPT creation failed\n");}
-     else {
+     else {int gpt_rc=make_gpt(disk.sectors);if(gpt_rc!=0){char error[24];decstr((u64)(0-gpt_rc),error);install_state=-1;NtWriteConsole("instlr: GPT creation failed at step ");NtWriteConsole(error);NtWriteConsole("\n");}else {
       NtWriteConsole("instlr: GPT verified; installing SentinelOS\n");
       install_state=2;install_progress_done=0;
       paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);(void)NtFlushGraphics(0,0,f.w,f.h);
@@ -280,7 +279,7 @@ void instlr_main(void){
        (void)sy3(SYS_Shutdown,1,0,0);
        for(;;)(void)sy3(SYS_Yield,0,0,0);
       }
-     }
+     }}
     }else if(install_state<0){NtWriteConsole("instlr: retry requested; review target and confirm erase again\n");install_state=0;}else{install_state=4;NtWriteConsole("instlr: target selected; explicit erase confirmation required\n");}}
   }
   paint(fb,&b,page,accepted,checked,disk_present,disk_mib,install_state);if(install_state!=3)draw_cursor(fb,&b,mouse_x,mouse_y);(void)NtFlushGraphics(0,0,f.w,f.h);

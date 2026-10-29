@@ -375,7 +375,7 @@ static int PspIsExplicitSystemPath(const char *name) {
 
 static int PspIsSystemAppName(const char *name) {
     static const char *const names[] = {
-        "smss.exe", "bootvid.exe", "sentlogon.exe",
+        "smss.exe", "bootvid.exe", "sentlogon.exe", "explorer.exe",
         "instlr.exe", "screen.exe"
     };
     name = PspImageBaseName(name);

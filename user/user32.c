@@ -1988,7 +1988,15 @@ static void on_click(int x, int y) {
            y>=wy+5 && y<wy+28) {
             if(x>=wx+ww-29 && x<wx+ww-5) {
                 SendMessageA((void *)1,0x0010u,0,0); /* WM_CLOSE */
+                int desktop_owner = u32_is_desktop_window();
                 DestroyWindow((void *)1);
+                /* This title-bar hit-test runs before the child-button close
+                 * path below. Ordinary apps must exit here too, otherwise
+                 * their event loop survives after its window was unregistered. */
+                if (!desktop_owner) {
+                    (void)sy3(SYS_Exit, 0, 0, 0);
+                    return;
+                }
                 return;
             }
             if(x>=wx+ww-56 && x<wx+ww-32) {

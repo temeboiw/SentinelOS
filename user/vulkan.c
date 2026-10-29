@@ -11,7 +11,12 @@
 #include <stddef.h>
 #include "vk_softpipe.h"
 
+/* The Microsoft x64 ABI is meaningful only when targeting x86-64. */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #define VKAPI_CALL __attribute__((ms_abi))
+#else
+#define VKAPI_CALL
+#endif
 #if defined(_WIN32) || defined(_WIN64)
 #define VKAPI_EXPORT __declspec(dllexport)
 #elif defined(__GNUC__) || defined(__clang__)
@@ -372,18 +377,33 @@ static int vk_spirv_execute_u32(const uint32_t *w,size_t n,uint32_t entry,
    else if(op==254u&&wc==2u) { active=0;found=1; }
    else if(op==249u&&wc==2u) {
     size_t target=vk_spirv_find_label(w,n,entry,w[i+1]);
-    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+    if (target >= n) {
+      return 0;
+     }
+     predecessor = current_label;
+     i = target;
+     continue;
    }
    else if(op==250u&&wc==4u) {
     uint32_t cond=w[i+1];if(cond>=VK_SPIRV_MAX_IDS||!defined[cond])return 0;
     size_t target=vk_spirv_find_label(w,n,entry,w[ids[cond]?i+2:i+3]);
-    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+    if (target >= n) {
+      return 0;
+     }
+     predecessor = current_label;
+     i = target;
+     continue;
    }
    else if(op==251u&&wc>=3u&&((wc-3u)&1u)==0u) {
     uint32_t selector=w[i+1],label=w[i+2];if(selector>=VK_SPIRV_MAX_IDS||!defined[selector])return 0;
     for(uint32_t k=3;k+1<wc;k+=2)if(w[i+k]==ids[selector]){label=w[i+k+1];break;}
     size_t target=vk_spirv_find_label(w,n,entry,label);
-    if(target>=n)return 0;predecessor=current_label;i=target;continue;
+    if (target >= n) {
+      return 0;
+     }
+     predecessor = current_label;
+     i = target;
+     continue;
    }
    else if(op==245u&&wc>=5u&&((wc-3u)&1u)==0u) {
     rid=w[i+2];if(rid>=VK_SPIRV_MAX_IDS)return 0;
@@ -659,10 +679,38 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceVersion(uint32_t *v) { if(!v
 VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *layer,uint32_t *count,void *props) { if(!count)return VK_ERROR_INITIALIZATION_FAILED;if(layer)return VK_ERROR_LAYER_NOT_PRESENT;(void)props;*count=0;return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t *count,void *props) { if(!count)return VK_ERROR_INITIALIZATION_FAILED;(void)props;*count=0;return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *ci,const void *alloc,VkInstance *out) {
- if(!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;
- if(ci->enabledLayerCount)return VK_ERROR_LAYER_NOT_PRESENT;VkResult er=unsupported_extensions(ci->enabledExtensionCount,ci->ppEnabledExtensionNames);if(er)return er;
+ if (!ci || !out || ci->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO) {
+  return VK_ERROR_INITIALIZATION_FAILED;
+ }
+ *out = 0;
+ if (alloc) {
+  return VK_ERROR_INITIALIZATION_FAILED;
+ }
+ if (ci->enabledLayerCount) {
+  return VK_ERROR_LAYER_NOT_PRESENT;
+ }
+ VkResult er = unsupported_extensions(ci->enabledExtensionCount,
+                                      ci->ppEnabledExtensionNames);
+ if (er) {
+  return er;
+ }
  if(ci->pApplicationInfo&&(ci->pApplicationInfo->sType!=VK_STRUCTURE_TYPE_APPLICATION_INFO||ci->pApplicationInfo->apiVersion>VK_API_VERSION_1_0))return VK_ERROR_INCOMPATIBLE_DRIVER;
- for(unsigned i=0;i<VK_MAX_INSTANCES;i++)if(!g_instances[i].magic){g_instances[i].magic=MAGIC_INSTANCE;g_instances[i].apiVersion=VK_API_VERSION_1_0;*out=(VkInstance)&g_instances[i];for(unsigned p=0;p<VK_MAX_DEVICES;p++)if(!g_phys[p].magic){g_phys[p].magic=VK_OBJECT_MAGIC;g_phys[p].parent=*out;break;}return VK_SUCCESS;}return VK_ERROR_OUT_OF_HOST_MEMORY;
+ for (unsigned i = 0; i < VK_MAX_INSTANCES; i++) {
+  if (!g_instances[i].magic) {
+   g_instances[i].magic = MAGIC_INSTANCE;
+   g_instances[i].apiVersion = VK_API_VERSION_1_0;
+   *out = (VkInstance)&g_instances[i];
+   for (unsigned p = 0; p < VK_MAX_DEVICES; p++) {
+    if (!g_phys[p].magic) {
+     g_phys[p].magic = VK_OBJECT_MAGIC;
+     g_phys[p].parent = *out;
+     break;
+    }
+   }
+   return VK_SUCCESS;
+  }
+ }
+ return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 VKAPI_EXPORT void VKAPI_CALL vkDestroyInstance(VkInstance h,const void *alloc) { if(alloc||!inst_ok(h))return;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].parent==h){int used=0;for(unsigned d=0;d<VK_MAX_DEVICES;d++)if(g_devices[d].magic&&g_devices[d].physical==(VkPhysicalDevice)&g_phys[i])used=1;if(!used)g_phys[i].magic=0;}h->magic=0; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance h,uint32_t *count,VkPhysicalDevice *out) { if(!inst_ok(h)||!count)return VK_ERROR_INITIALIZATION_FAILED;uint32_t n=0;for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)n++;if(!out){*count=n;return VK_SUCCESS;}uint32_t cap=*count,k=0;for(unsigned i=0;i<VK_MAX_DEVICES&&k<cap;i++)if(g_phys[i].magic==VK_OBJECT_MAGIC&&g_phys[i].parent==h)out[k++]=(VkPhysicalDevice)&g_phys[i];*count=k;return k<n?VK_INCOMPLETE:VK_SUCCESS; }
@@ -702,12 +750,48 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(VkPhys
 }
 VKAPI_EXPORT void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p,VkPhysicalDeviceMemoryProperties *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!phys_ok(p))return;out->memoryTypeCount=1;out->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;out->memoryTypes[0].heapIndex=0;out->memoryHeapCount=1;out->memoryHeaps[0].size=(VkDeviceSize)VK_MAX_MEMORY*VK_MEMORY_BYTES; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p,const VkDeviceCreateInfo *ci,const void *alloc,VkDevice *out) {
- if(!phys_ok(p)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;
- if(ci->enabledLayerCount)return VK_ERROR_LAYER_NOT_PRESENT;VkResult er=unsupported_extensions(ci->enabledExtensionCount,ci->ppEnabledExtensionNames);if(er)return er;
+ if (!phys_ok(p) || !ci || !out ||
+     ci->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO) {
+  return VK_ERROR_INITIALIZATION_FAILED;
+ }
+ *out = 0;
+ if (alloc) {
+  return VK_ERROR_INITIALIZATION_FAILED;
+ }
+ if (ci->enabledLayerCount) {
+  return VK_ERROR_LAYER_NOT_PRESENT;
+ }
+ VkResult er = unsupported_extensions(ci->enabledExtensionCount,
+                                      ci->ppEnabledExtensionNames);
+ if (er) {
+  return er;
+ }
  if(ci->pEnabledFeatures){const uint32_t *f=(const uint32_t*)ci->pEnabledFeatures;for(unsigned i=0;i<55;i++)if(f[i])return VK_ERROR_FEATURE_NOT_PRESENT;}
  if(ci->queueCreateInfoCount!=1||!ci->pQueueCreateInfos)return VK_ERROR_INITIALIZATION_FAILED;
  for(uint32_t q=0;q<ci->queueCreateInfoCount;q++){const VkDeviceQueueCreateInfo *qi=&ci->pQueueCreateInfos[q];if(qi->sType!=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO||qi->queueFamilyIndex!=0||!qi->queueCount||qi->queueCount>1||!qi->pQueuePriorities)return VK_ERROR_INITIALIZATION_FAILED;}
- for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(!g_devices[i].magic){VkDeviceObj *d=&g_devices[i];d->magic=VK_OBJECT_MAGIC;d->physical=p;for(uint32_t q=0;q<ci->queueCreateInfoCount;q++){for(unsigned k=0;k<VK_MAX_QUEUES;k++)if(!g_queues[k].magic){VkQueueObj *qo=&g_queues[k];qo->magic=VK_OBJECT_MAGIC;qo->device=(VkDevice)d;qo->family=0;qo->index=0;d->queues[d->queueCount++]=(VkQueue)qo;break;}}*out=(VkDevice)d;return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS;
+ for (unsigned i = 0; i < VK_MAX_DEVICES; i++) {
+  if (!g_devices[i].magic) {
+   VkDeviceObj *d = &g_devices[i];
+   d->magic = VK_OBJECT_MAGIC;
+   d->physical = p;
+   for (uint32_t q = 0; q < ci->queueCreateInfoCount; q++) {
+    for (unsigned k = 0; k < VK_MAX_QUEUES; k++) {
+     if (!g_queues[k].magic) {
+      VkQueueObj *qo = &g_queues[k];
+      qo->magic = VK_OBJECT_MAGIC;
+      qo->device = (VkDevice)d;
+      qo->family = 0;
+      qo->index = 0;
+      d->queues[d->queueCount++] = (VkQueue)qo;
+      break;
+     }
+    }
+   }
+   *out = (VkDevice)d;
+   return VK_SUCCESS;
+  }
+ }
+ return VK_ERROR_TOO_MANY_OBJECTS;
 }
 VKAPI_EXPORT void VKAPI_CALL vkDestroyDevice(VkDevice d,const void *alloc) { if(alloc||!dev_ok(d))return;for(unsigned i=0;i<VK_MAX_QUEUES;i++)if(g_queues[i].device==d)g_queues[i].magic=0;for(unsigned i=0;i<VK_MAX_BUFFERS;i++)if(g_buffers[i].device==d)g_buffers[i].magic=0;for(unsigned i=0;i<VK_MAX_MEMORY;i++)if(g_memories[i].device==d)g_memories[i].magic=0;for(unsigned i=0;i<VK_MAX_POOLS;i++)if(g_pools[i].device==d)g_pools[i].magic=0;for(unsigned i=0;i<VK_MAX_CMDS;i++)if(g_cmds[i].device==d)g_cmds[i].magic=0;for(unsigned i=0;i<VK_MAX_FENCES;i++)if(g_fences[i].device==d)g_fences[i].magic=0;for(unsigned i=0;i<VK_MAX_SEMAPHORES;i++)if(g_semaphores[i].device==d)g_semaphores[i].magic=0;for(unsigned i=0;i<VK_MAX_SHADER_MODULES;i++)if(g_shader_modules[i].device==d)g_shader_modules[i].magic=0;for(unsigned i=0;i<VK_MAX_PIPELINES;i++)if(g_pipelines[i].device==d)g_pipelines[i].magic=0;for(unsigned i=0;i<32;i++)if(g_samplers[i].device==d)g_samplers[i].magic=0;d->magic=0; }
 VKAPI_EXPORT void VKAPI_CALL vkGetDeviceQueue(VkDevice d,uint32_t family,uint32_t index,VkQueue *out) { if(!out)return;*out=0;if(!dev_ok(d)||family)return;for(uint32_t i=0;i<d->queueCount;i++)if(((VkQueueObj*)d->queues[i])->index==index){*out=d->queues[i];return;} }

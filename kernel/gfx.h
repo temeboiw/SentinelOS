@@ -182,11 +182,14 @@ static void gfx_log_display_adapters(void) {
             for(uint32_t fn=0;fn<nf;fn++) {
                 uint32_t id=fn?gfx_cfg_read((uint8_t)b,(uint8_t)d,(uint8_t)fn,0):id0;
                 uint16_t vendor=(uint16_t)id,device=(uint16_t)(id>>16);
+                (void)device;
                 if(!vendor||vendor==0xFFFFu)continue;
                 uint32_t cl=gfx_cfg_read((uint8_t)b,(uint8_t)d,(uint8_t)fn,8);
                 uint8_t base=(uint8_t)(cl>>24),sub=(uint8_t)(cl>>16);
+                (void)sub;
                 if(base!=0x03u)continue;
                 const char *name="other";
+                (void)name;
                 if(vendor==0x8086u)name="Intel";
                 else if(vendor==0x10DEu)name="NVIDIA";
                 else if(vendor==0x1002u || vendor==0x1022u)name="AMD";

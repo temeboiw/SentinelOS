@@ -2023,6 +2023,17 @@ static void on_click(int x, int y) {
              * window in the system window list.
              */
             DestroyWindow((void *)1);
+
+            /*
+             * Closing an ordinary application's main window should end that
+             * application, not leave its event loop running invisibly. The
+             * desktop shell is the exception: closing its window hides it but
+             * must not tear down the interactive session.
+             */
+            if (!u32_is_desktop_window()) {
+                (void)sy3(SYS_Exit, 0, 0, 0);
+                return; /* SYS_Exit normally switches away from this process. */
+            }
             return;
         }
 

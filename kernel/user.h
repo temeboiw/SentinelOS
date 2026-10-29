@@ -1992,6 +1992,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                 for(uint32_t xx=x;xx<x+w;xx++)dstrow[xx]=srcrow[xx];
             }
             int flush_ok=gfx_flush(x,y,w,h);
+    (void)flush_ok;
             (void)flush_ok;
             if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
             return;
@@ -2013,6 +2014,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     static uint64_t wm_dbg_composed_pixels;
     uint64_t damage_pixels=(uint64_t)w*(uint64_t)h;
     wm_dbg_composed_pixels+=damage_pixels;
+    (void)wm_dbg_composed_pixels;
     if(x==0&&y==0&&w==width&&h==height) {
         SENTINEL_GFX_LOG("[gfx] full-screen compose #%llu pixels=%llu total=%llu\n",
                  (unsigned long long)dbg_n,
@@ -2024,6 +2026,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                  (unsigned long long)dbg_n,x,y,w,h,count,pitch);
         for(int oi=0;oi<count;oi++) {
             WmEntry *e=&wm_tab[order[oi]];
+            (void)e;
             SENTINEL_GFX_LOG("[gfx]   z[%d] pid=%d rect=(%d,%d %dx%d) minimized=%d\n",
                      oi,e->pid,e->x,e->y,e->w,e->h,e->minimized);
         }
@@ -2076,6 +2079,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
         }
     }
     wm_dbg_window_overlay_pixels+=window_overlay_pixels;
+    (void)wm_dbg_window_overlay_pixels;
     if(wm_dbg_sample(dbg_n))
         SENTINEL_GFX_LOG("[gfx] overlay-work #%llu pixels=%llu cumulative=%llu\n",
                  (unsigned long long)dbg_n,

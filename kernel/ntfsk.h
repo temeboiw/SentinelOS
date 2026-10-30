@@ -470,23 +470,23 @@ static int ntfsk_find_and_mount(NTFSK_VOLUME *v, SENTINEL_BLOCK_DEVICE *d) {
     if(mbr_rc==0) {
         uint32_t p0_start=ntfsk_u32(mbr_probe+454);
         uint32_t p0_count=ntfsk_u32(mbr_probe+458);
-        DbgPrint("ntfs: raw disk %s sectors=%llu sector_size=%u MBR=%02x%02x p0_type=%02x start=%u count=%u\\n",
+        DbgPrint("ntfs: raw disk %s sectors=%llu sector_size=%u MBR=%02x%02x p0_type=%02x start=%u count=%u\n",
                  d->name,(unsigned long long)d->sector_count,d->sector_size,
                  mbr_probe[511],mbr_probe[510],mbr_probe[450],p0_start,p0_count);
     } else {
-        DbgPrint("ntfs: raw disk %s LBA0 read failed\\n",d->name);
+        DbgPrint("ntfs: raw disk %s LBA0 read failed\n",d->name);
     }
     if(gpt_rc==0)
-        DbgPrint("ntfs: raw GPT LBA1 signature=%016llx header_size=%u\\n",
+        DbgPrint("ntfs: raw GPT LBA1 signature=%016llx header_size=%u\n",
                  (unsigned long long)ntfsk_u64(gpt_probe),
                  ntfsk_u32(gpt_probe+12));
     else
-        DbgPrint("ntfs: raw disk %s LBA1 read failed\\n",d->name);
+        DbgPrint("ntfs: raw disk %s LBA1 read failed\n",d->name);
 
     SENTINEL_PARTITION parts[SENTINEL_PARTITION_MAX];
     int count=SentinelPartitionScan(ntfsk_partition_read,d,d->sector_count,
                                     d->sector_size,parts,SENTINEL_PARTITION_MAX);
-    DbgPrint("ntfs: partition scan %s result=%d\\n",d->name,count);
+    DbgPrint("ntfs: partition scan %s result=%d\n",d->name,count);
     if(count<0)return -1;
     static const uint8_t basic_data_guid[16] = {
         0xA2,0xA0,0xD0,0xEB,0xE5,0xB9,0x33,0x44,

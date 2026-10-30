@@ -164,14 +164,19 @@ static void draw(void){
         unsigned fill=hover?0xFF422326:active?0xFF292E37:0xFF252A33;
         unsigned border=(hover||active)?0xFFFF3B30:0xFF454B56;
         if(g_decor){
-            g_decor(g_window,(int)i,16,68+(int)i*48,232,40,8,fill,border,
-                    (hover||active)?4:0,"");
+            g_decor(g_window,(int)i,16,68+(int)i*48,232,40,8,fill,border,0,"");
             category_icon(i,26,81+(int)i*48);
         }
         if(g_text&&g_window)(void)g_text(g_window,6,2+(int)i*3,categories[i],-1);
     }
-    /* The selected category gets its own larger visual marker in the content
-       header; category buttons themselves intentionally contain no icons. */
+    /* Match File Explorer's hover treatment: a dark-red rounded row with
+       a narrow signal-red marker on its left edge, never a text '>' glyph. */
+    if(g_decor){
+        if(g_hover_page>=0)
+            g_decor(g_window,31,16,68+g_hover_page*48,3,40,4,0xFFFF3B30,0,0,"");
+        else
+            g_decor(g_window,31,0,0,0,0,0,0,0,0,"");
+    }
     content(1,categories[g_page]);
     switch(g_page){case 0:page_system();break;case 1:page_display();break;case 2:page_personalization();break;case 3:page_input();break;case 4:page_performance();break;case 5:page_storage();break;case 6:page_network();break;case 7:page_apps();break;case 8:page_accounts();break;default:page_about();break;}
     content(35,"Unsupported controls are described instead of simulated.");

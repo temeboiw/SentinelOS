@@ -138,3 +138,43 @@ __attribute__((dllexport)) UINT FindImageResourceA(const char *name) {
 __attribute__((dllexport)) UINT GetImageResourceIdA(const char *name) {
     return FindImageResourceA(name);
 }
+
+
+/* Read a catalog bitmap into caller-owned memory. The returned byte count is
+ * zero for an invalid ID, unreadable file, non-BMP payload, or short buffer.
+ * The API deliberately returns the encoded BMP so USER32 and applications
+ * can decode it without depending on the process working directory. */
+typedef unsigned long long U64;
+enum { IMAGERES_SYS_OPEN_FILE=5, IMAGERES_SYS_READ_FILE=6, IMAGERES_SYS_CLOSE_FILE=22 };
+static U64 imageres_syscall(U64 number,U64 a,U64 b,U64 c) {
+    U64 result;
+    __asm__ volatile(
+        "mov %[n], %%rax\n"
+        "mov %[a], %%rdi\n"
+        "mov %[b], %%rsi\n"
+        "mov %[c], %%rdx\n"
+        "int $0x80\n"
+        "mov %%rax, %[r]"
+        : [r]"=r"(result)
+        : [n]"r"(number),[a]"r"(a),[b]"r"(b),[c]"r"(c)
+        : "rax","rdi","rsi","rdx","memory","cc");
+    return result;
+}
+__attribute__((dllexport)) UINT GetImageResourceDataA(UINT id, void *buffer, UINT capacity) {
+    if (!buffer || capacity < 54u || id == 0 || id > GetImageResourceCount())
+        return 0;
+    char path[64] = "/magic/System32/";
+    unsigned int at = 16;
+    const char *relative = GetImageResourcePathA(id);
+    for (unsigned int i = 0; relative[i] && at + 1 < sizeof(path); ++i)
+        path[at++] = relative[i];
+    path[at] = 0;
+    U64 handle = imageres_syscall(IMAGERES_SYS_OPEN_FILE, (U64)path, 0, 0);
+    if (!handle || handle == (U64)-1) return 0;
+    U64 got = imageres_syscall(IMAGERES_SYS_READ_FILE, handle, (U64)buffer, capacity);
+    (void)imageres_syscall(IMAGERES_SYS_CLOSE_FILE, handle, 0, 0);
+    if (got < 54u || got > capacity) return 0;
+    const unsigned char *bytes = (const unsigned char *)buffer;
+    if (bytes[0] != 'B' || bytes[1] != 'M') return 0;
+    return (UINT)got;
+}

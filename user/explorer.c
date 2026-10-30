@@ -80,49 +80,10 @@ static void launch_app(const char *name, void **hwnd) {
         NtWriteConsole("explorer: application launch failed\n");
         if (pText)
             pText(*hwnd, 0, 9, "Could not launch application.", -1);
-        if (pInv) pInv(*hwnd, 0, 1);
         if (pUpd) pUpd(*hwnd);
-    } else {
     }
 
     g_launched = 0;
-}
-
-static void handle_search_key(MSG *msg, void **hwnd) {
-    if (msg->message != 0x0100)
-        return;
-
-    char c = (char)(msg->wParam & 0xFF);
-
-    if (c == '\b') {
-        if (g_search_len > 0) {
-            g_search[--g_search_len] = 0;
-            draw_search(*hwnd);
-        }
-        return;
-    }
-
-    if (c == '\n' || c == '\r') {
-        if (equals_ci(g_search, "cmd")) {
-            launch_app("cmd.exe", hwnd);
-        } else if (equals_ci(g_search, "taskmgr") ||
-                   equals_ci(g_search, "taskmgr.exe") ||
-                   equals_ci(g_search, "task manager")) {
-            launch_app("taskmgr.exe", hwnd);
-        } else if (g_search_len != 0) {
-            if (pText)
-                pText(*hwnd, 0, 9, "App not found. Try cmd or taskmgr.", -1);
-            if (pInv) pInv(*hwnd, 0, 1);
-            if (pUpd) pUpd(*hwnd);
-        }
-        return;
-    }
-
-    if (c >= 32 && c <= 126 && g_search_len < 30) {
-        g_search[g_search_len++] = c;
-        g_search[g_search_len] = 0;
-        draw_search(*hwnd);
-    }
 }
 
 void explorer_main(void) {

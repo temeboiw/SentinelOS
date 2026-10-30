@@ -287,7 +287,7 @@ assign letter=$sysLetter
     $magicTree = Join-Path $rootfs "magic"
     Copy-Tree $magicTree $sysRoot
 
-    foreach ($relative in @("smss.exe","sentlogon.exe","bootvid.exe","explorer.exe","fileexplorer.exe","krnl.exe","hal.dll","System32\smss.exe","System32\sentlogon.exe","System32\bootvid.exe","System32\explorer.exe","System32\fileexplorer.exe","System32\krnl.exe","System32\hal.dll")) {
+    foreach ($relative in @("System32\smss.exe","System32\sentlogon.exe","System32\bootvid.exe","System32\explorer.exe","System32\fileexplorer.exe","System32\krnl.exe","System32\hal.dll")) {
         $copied = Join-Path $sysRoot $relative
         if (-not (Test-Path -LiteralPath $copied -PathType Leaf) -or (Get-Item -LiteralPath $copied).Length -le 0) {
             throw "Staging verification failed; missing copied file: $copied"
@@ -308,13 +308,13 @@ assign letter=$sysLetter
         throw ("Staging verification failed for {0} file(s), e.g.:`r`n{1}" -f $mismatch.Count, (($mismatch | Select-Object -First 10) -join "`r`n"))
     }
     # The kernel rejects anything that is not an MZ PE, so check the boot chain.
-    foreach ($relative in @("smss.exe","krnl.exe","sentlogon.exe","explorer.exe")) {
+    foreach ($relative in @("System32\smss.exe","System32\krnl.exe","System32\sentlogon.exe","System32\explorer.exe")) {
         $fs = [IO.File]::OpenRead((Join-Path $sysRoot $relative))
         try { $mz = New-Object byte[] 2; [void]$fs.Read($mz, 0, 2) } finally { $fs.Close() }
         if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) { throw "$relative on the image is not a PE file (no MZ header)." }
     }
     foreach ($l in @($espLetter, $sysLetter)) { try { Write-VolumeCache -DriveLetter $l } catch { } }
-    Write-Host ("Verified {0} files; smss.exe is {1} bytes at the volume root." -f @(Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force).Count, (Get-Item -LiteralPath (Join-Path $sysRoot "smss.exe")).Length) -ForegroundColor Green
+    Write-Host ("Verified {0} files; System32\smss.exe is {1} bytes at the expected system path." -f @(Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force).Count, (Get-Item -LiteralPath (Join-Path $sysRoot "System32\smss.exe")).Length) -ForegroundColor Green
 } finally {
     Detach-Vhd
 }

@@ -1277,6 +1277,22 @@ lld -flavor link \
   "$B/obj/shell32.o" \
   "$B/obj/kernel32.lib"
 
+echo "  -> imageres.dll (SentinelOS bitmap catalog)"
+mkdir -p "$SYS32/icons"
+cp "$ROOT"/assets/icons-bmp/*.bmp "$SYS32/icons/"
+clang "${USER_CFLAGS[@]}" -fno-builtin \
+  -c "$ROOT/user/imageres.c" \
+  -o "$B/obj/imageres.o"
+lld -flavor link \
+  /dll /noentry /subsystem:native /nodefaultlib \
+  /fixed:no /dynamicbase /base:0x43B00000 \
+  /export:GetImageResourceCount \
+  /export:GetImageResourcePathA \
+  /export:GetImageResourceNameA \
+  /export:FindImageResourceA \
+  "/out:$SYS32/imageres.dll" \
+  "$B/obj/imageres.o"
+
 echo "  -> advapi32.dll"
 clang "${USER_CFLAGS[@]}" -fno-builtin -c "$ROOT/user/advapi32.c" -o "$B/obj/advapi32.o"
 lld -flavor link /dll /noentry /subsystem:native /nodefaultlib /fixed:no /base:0x43600000 \

@@ -24,11 +24,9 @@ typedef i64 (*DispatchMessageA_t)(const MSG *);
 typedef int (*TextOutA_t)(void *, int, int, const char *, int);
 typedef void (*DrawTaskbar_t)(void);
 typedef u64 (*SetTimer_t)(void *, u64, u32, void *);
-typedef int (*InvalidateRect_t)(void *, void *, int);
 typedef int (*UpdateWindow_t)(void *);
 typedef void (*BeginRedrawBatch_t)(void);
 typedef void (*EndRedrawBatch_t)(void);
-typedef struct { int left, top, right, bottom; } EXPLORER_RECT;
 
 static CreateWindowExA_t pCreate;
 static ShowWindow_t pShow;
@@ -38,31 +36,14 @@ static DispatchMessageA_t pDisp;
 static TextOutA_t pText;
 static DrawTaskbar_t pBar;
 static SetTimer_t pSetTimer;
-static InvalidateRect_t pInv;
 static UpdateWindow_t pUpd;
 static BeginRedrawBatch_t pBeginBatch;
 static EndRedrawBatch_t pEndBatch;
 
-static char g_search[32];
-static int g_search_len;
 static int g_launched;
 
 static int hit_icon(int x, int y) {
     return x >= 28 && x < 100 && y >= 64 && y < 150;
-}
-
-static int equals_ci(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = *a++;
-        char cb = *b++;
-
-        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-
-        if (ca != cb) return 0;
-    }
-
-    return *a == 0 && *b == 0;
 }
 
 static void redraw_desktop(void **hwnd) {
@@ -78,38 +59,12 @@ static void redraw_desktop(void **hwnd) {
     if (pText) {
         pText(0, 0, 4, "Welcome to SentinelOS", -1);
         pText(0, 0, 5, "Your workspace, ready when you are", -1);
-        pText(0, 0, 7, "Search apps below  |  type cmd and press Enter", -1);
-        pText(0, 0, 8, "Search: ", -1);
     }
 
     if (pBar) pBar();
     /* EndRedrawBatch performs the one initial desktop composition. */
     if (pUpd) pUpd(*hwnd);
     if (pEndBatch) pEndBatch();
-}
-
-static void draw_search(void *hwnd) {
-    char line[64];
-    const char prefix[] = "Search: ";
-    int i = 0;
-
-    while (prefix[i]) {
-        line[i] = prefix[i];
-        i++;
-    }
-
-    for (int j = 0; j < g_search_len && i < 60; j++)
-        line[i++] = g_search[j];
-
-    line[i] = 0;
-
-    if (pText) pText(hwnd, 0, 8, line, -1);
-    if (pInv) {
-        EXPLORER_RECT dirty = { 132, 171, 522, 210 };
-        pInv(hwnd, &dirty, 0);
-    }
-    /* InvalidateRect already paints immediately in this USER32; UpdateWindow
-       here would redundantly repaint the whole desktop card/taskbar. */
 }
 
 static void launch_app(const char *name, void **hwnd) {
@@ -128,11 +83,6 @@ static void launch_app(const char *name, void **hwnd) {
         if (pInv) pInv(*hwnd, 0, 1);
         if (pUpd) pUpd(*hwnd);
     } else {
-        g_search_len = 0;
-        g_search[0] = 0;
-        /* The desktop already exists. Repaint only the search field; recreating
-         * the desktop here repainted the wallpaper after every app launch. */
-        draw_search(*hwnd);
     }
 
     g_launched = 0;
@@ -190,7 +140,6 @@ void explorer_main(void) {
     pText   = (TextOutA_t)NtGetProcAddress(u32n, "TextOutA");
     pBar    = (DrawTaskbar_t)NtGetProcAddress(u32n, "DrawTaskbar");
     pSetTimer = (SetTimer_t)NtGetProcAddress(u32n, "SetTimer");
-    pInv    = (InvalidateRect_t)NtGetProcAddress(u32n, "InvalidateRect");
     pUpd    = (UpdateWindow_t)NtGetProcAddress(u32n, "UpdateWindow");
     pBeginBatch = (BeginRedrawBatch_t)NtGetProcAddress(u32n, "BeginRedrawBatch");
     pEndBatch = (EndRedrawBatch_t)NtGetProcAddress(u32n, "EndRedrawBatch");
@@ -221,8 +170,6 @@ void explorer_main(void) {
         if (pTrans) pTrans(&msg);
         if (pDisp) pDisp(&msg);
         if (msg.message == 0x0113 && pBar) pBar(); /* WM_TIMER: refresh clock/date */
-
-        handle_search_key(&msg, &hwnd);
 
         if (msg.message == 0x0201 &&
             !g_launched &&

@@ -12,6 +12,10 @@ $ErrorActionPreference = "Stop"
 if (-not $DropFallback) { $KeepFallback = $true }
 $root = Split-Path $PSScriptRoot -Parent
 $b = Join-Path $root "build"
+# The VHDX partitions are staged through NTFS folder mount points under build\mnt,
+# NOT drive letters, so the build can never run out of letters or leave extra
+# "Local Disk" drives behind in Explorer.
+$mnt = Join-Path $b "mnt"
 $vhd = Join-Path $b "magic-disk.vhdx"
 $vhdFinal = $vhd
 # Build into a scratch image and swap it in only after it is verified, so a
@@ -78,29 +82,63 @@ function Get-VirtualDiskInfo {
     foreach ($d in @(Get-Disk | Where-Object { $_.BusType -eq 'File Backed Virtual' })) {
         $ip = $null
         try { $ip = (Get-DiskImage -DevicePath ("\\.\PhysicalDrive" + $d.Number) -ErrorAction Stop).ImagePath } catch { }
-        [pscustomobject]@{ Number = $d.Number; ImagePath = $ip }
+        [pscustomobject]@{ Number = $d.Number; ImagePath = $ip; Size = $d.Size; IsOffline = $d.IsOffline }
     }
 }
 # Detach every attached virtual disk that belongs to this project. Leftovers show
-# up in Explorer as extra "Local Disk" drives. Disks from other projects are left
-# alone, and orphans with an unknown image are only touched with -Force.
+# up in Explorer as extra "Local Disk" drives and eat drive letters.
+#  - disks whose image is under the build dir / named magic-disk*
+#  - orphans: the image file is gone so the path cannot be resolved. The build always
+#    creates its disk at exactly 128 GiB, so unresolved file-backed disks of that size
+#    are ours. Any other unresolved disk is only touched with -Force.
+function Test-ProjectDisk($v, [string]$projectBuildDir, [switch]$Force) {
+    if ($v.ImagePath) { return ($v.ImagePath -like "$projectBuildDir\*" -or $v.ImagePath -like "*magic-disk*") }
+    return ($Force -or $v.Size -eq 128GB)
+}
+function Release-DiskLetters([int]$diskNumber) {
+    foreach ($p in @(Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue)) {
+        foreach ($ap in @($p.AccessPaths | Where-Object { $_ -and $_ -notlike "\\?\Volume*" })) {
+            try { Remove-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $p.PartitionNumber -AccessPath $ap -ErrorAction Stop } catch { }
+        }
+    }
+}
 function Clear-StaleDisks([string]$projectBuildDir, [switch]$Force) {
     $found = 0
     foreach ($v in @(Get-VirtualDiskInfo)) {
-        $mine = $v.ImagePath -and ($v.ImagePath -like "$projectBuildDir\*" -or $v.ImagePath -like "*magic-disk*")
-        if (-not ($mine -or ((-not $v.ImagePath) -and $Force))) { continue }
+        if (-not (Test-ProjectDisk $v $projectBuildDir -Force:$Force)) { continue }
         $found++
         Write-Host ("Detaching leftover disk {0}: {1}" -f $v.Number, $(if ($v.ImagePath) { $v.ImagePath } else { "(image file gone)" })) -ForegroundColor Yellow
         foreach ($l in @(Get-Partition -DiskNumber $v.Number -ErrorAction SilentlyContinue | ForEach-Object { $_.DriveLetter } | Where-Object { $_ -and $_ -ne [char]0 })) {
             try { Write-VolumeCache -DriveLetter $l } catch { }
         }
-        try { [void](Dismount-DiskImage -DevicePath ("\\.\PhysicalDrive" + $v.Number)) }
-        catch { Write-Warning ("Could not detach disk {0}: {1}" -f $v.Number, $_.Exception.Message) }
+        $dev = "\\.\PhysicalDrive" + $v.Number
+        try { [void](Dismount-DiskImage -DevicePath $dev -ErrorAction Stop) } catch { }
+        if ($v.ImagePath -and (Get-Disk -Number $v.Number -ErrorAction SilentlyContinue)) { Detach-Image $v.ImagePath }
+        # Orphans often refuse to dismount. Free their drive letters and take them
+        # offline so they stop showing up and stop consuming letters (a reboot removes them).
+        if (Get-Disk -Number $v.Number -ErrorAction SilentlyContinue) {
+            Release-DiskLetters $v.Number
+            try { Set-Disk -Number $v.Number -IsOffline $true -ErrorAction Stop } catch { }
+        }
     }
     Start-Sleep -Milliseconds 500
-    $left = @(Get-VirtualDiskInfo | Where-Object { $_.ImagePath -and ($_.ImagePath -like "$projectBuildDir\*" -or $_.ImagePath -like "*magic-disk*") })
+    $left = @(Get-VirtualDiskInfo | Where-Object { (Test-ProjectDisk $_ $projectBuildDir -Force:$Force) -and -not $_.IsOffline })
     if ($left.Count -gt 0) { Write-Warning ("{0} Sentinel disk(s) are still attached. Close Explorer windows or terminals open on them, then run .\scripts\vhd.ps1 Clean (or reboot)." -f $left.Count) }
     elseif ($found -gt 0) { Write-Host "Leftover disks cleaned up." -ForegroundColor Green }
+}
+# Remove the build\mnt folder mount points. A mount point left on disk is a dangling
+# reparse point, so remove it explicitly (non-recursive: never touches volume contents).
+function Remove-MountPoints {
+    foreach ($n in @("esp", "sys")) {
+        $p = Join-Path $mnt $n
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $item = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            [void](& mountvol.exe ($p + "\") /D 2>&1)
+        }
+        try { [IO.Directory]::Delete($p, $false) } catch { }
+    }
+    try { [IO.Directory]::Delete($mnt, $false) } catch { }
 }
 function Detach-Vhd { Detach-Image $vhd }
 # Copy a tree largest-files-first. Big files then land in one contiguous run on
@@ -119,7 +157,7 @@ function Copy-Tree([string]$src, [string]$dst) {
 }
 
 if ($Clean) {
-    if (Test-Path -LiteralPath $b) { Detach-Vhd; Detach-Image $vhdFinal }
+    if (Test-Path -LiteralPath $b) { Remove-MountPoints; Detach-Vhd; Detach-Image $vhdFinal; Clear-StaleDisks $b }
     Remove-Item -LiteralPath $b -Recurse -Force -ErrorAction SilentlyContinue
     return
 }
@@ -130,6 +168,7 @@ if ($ResetNvram) {
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw "Run this from an Administrator PowerShell (DiskPart needs it)." }
 New-Item -ItemType Directory -Force -Path $b | Out-Null
+Remove-MountPoints
 Clear-StaleDisks $b   # drop disks leaked by earlier builds before making a new one
 
 # Always discard the previous disk image at build start. This prevents a failed
@@ -229,14 +268,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $rootfs "magic\logo.bmp") -PathType 
 Write-Host ("Validated {0} files under magic\System32." -f (@(Get-ChildItem -LiteralPath $sys32 -File -Recurse).Count)) -ForegroundColor Green
 
 Write-Stage "Create expandable GPT VHDX with FAT32 ESP and NTFS MAGIC partition"
-$usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
-$freeLetters = @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P", "O", "N", "M") | Where-Object { $_ -notin $usedLetters }
-if (@($freeLetters).Count -lt 1) { throw "One free drive letter is required to stage the VHDX partitions. Close unused mapped/network drives or detach stale SentinelOS disks." }
-# Reuse one drive letter sequentially for the ESP and NTFS system volume.
-$espLetter = $freeLetters[0]
-$sysLetter = $espLetter
-$espRoot = "$($espLetter):\"
-$sysRoot = "$($sysLetter):\"
+# Stage through folder mount points (no drive letters needed). They must live on NTFS.
+if ((Get-Volume -FilePath $b -ErrorAction Stop).FileSystem -ne "NTFS") { throw "The build folder must be on an NTFS volume (folder mount points are used instead of drive letters): $b" }
+$espRoot = Join-Path $mnt "esp"
+$sysRoot = Join-Path $mnt "sys"
+Remove-MountPoints
+New-Item -ItemType Directory -Force -Path $espRoot, $sysRoot | Out-Null
 Detach-Vhd
 Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $vhd) { throw "Cannot recreate VHDX because it still exists or is locked: $vhd. Close QEMU and detach it in Disk Management, then retry." }
@@ -249,21 +286,14 @@ attach vdisk
 convert gpt
 create partition efi size=128
 format fs=fat32 quick label=MAGICESP
-assign letter=$espLetter
-"@)
-    if (-not (Test-Path -LiteralPath $espRoot)) { throw "EFI System Partition was not mounted at $espRoot" }
-    Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
-
-    # Free the staging letter from the ESP, then reuse it for the NTFS volume.
-    [void](Run-Diskpart @"
-select vdisk file="$vhd"
-select partition 1
-remove letter=$espLetter
+assign mount="$espRoot"
 create partition primary
 format fs=ntfs quick label=MAGIC
-assign letter=$sysLetter
+assign mount="$sysRoot"
 "@)
-    if (-not (Test-Path -LiteralPath $sysRoot)) { throw "NTFS system partition was not mounted at $sysRoot after reusing the staging letter." }
+    $espVol = Get-Volume -FilePath $espRoot -ErrorAction SilentlyContinue
+    if (-not $espVol -or $espVol.FileSystemLabel -ne "MAGICESP") { throw "EFI System Partition was not mounted at $espRoot" }
+    Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
     $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
     $partitions = @(Get-Partition -DiskNumber $disk.Number)
     # Windows may create the standard 16 MiB Microsoft Reserved (MSR)
@@ -283,7 +313,8 @@ assign letter=$sysLetter
     }
     $rootPartition = $basicPartitions[0]
     if (-not $rootPartition) { throw "NTFS system partition was not created." }
-    if (-not (Test-Path -LiteralPath $sysRoot)) { throw "NTFS system partition was not mounted at $sysRoot" }
+    $sysVol = Get-Volume -FilePath $sysRoot -ErrorAction SilentlyContinue
+    if (-not $sysVol -or $sysVol.FileSystemLabel -ne "MAGIC") { throw "NTFS system partition was not mounted at $sysRoot" }
 
     # Copy the whole rootfs recursively: all built EXEs, DLLs, drivers, fonts,
     # assets, and any future files produced by build.sh are staged automatically.
@@ -322,10 +353,12 @@ assign letter=$sysLetter
         try { $mz = New-Object byte[] 2; [void]$fs.Read($mz, 0, 2) } finally { $fs.Close() }
         if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) { throw "$relative on the image is not a PE file (no MZ header)." }
     }
-    try { Write-VolumeCache -DriveLetter $sysLetter } catch { }
+    foreach ($m in @($espRoot, $sysRoot)) { try { Write-VolumeCache -Path $m } catch { } }
     Write-Host ("Verified {0} files; System32\smss.exe is {1} bytes at the expected system path." -f @(Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force).Count, (Get-Item -LiteralPath (Join-Path $sysRoot "System32\smss.exe")).Length) -ForegroundColor Green
 } finally {
+    Remove-MountPoints
     Detach-Vhd
+    Clear-StaleDisks $b   # never leave an attached disk behind, even when the build failed
 }
 Write-Stage "Install verified disk image"
 Detach-Image $vhdFinal

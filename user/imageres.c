@@ -102,17 +102,39 @@ __attribute__((dllexport)) const char *GetImageResourceNameA(UINT id) {
     if (id == 0 || id > GetImageResourceCount()) return (const char *)0;
     return g_icon_paths[id - 1] + 6;
 }
+static int imageres_equal_name(const char *path, const char *name) {
+    if (!path || !name) return 0;
+
+    /* Accept either the catalog path (icons/icon_001.bmp) or just the
+       basename (icon_001.bmp). Windows callers may use either slash. */
+    const char *base = path;
+    for (const char *p = path; *p; ++p)
+        if (*p == '/' || *p == '\\\\') base = p + 1;
+
+    const char *candidate = name;
+    for (const char *p = name; *p; ++p)
+        if (*p == '/' || *p == '\\\\') candidate = p + 1;
+
+    while (*base && *candidate) {
+        char a = *base++, b = *candidate++;
+        if (a == '/') a = '\\\\';
+        if (b == '/') b = '\\\\';
+        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        if (a != b) return 0;
+    }
+    return !*base && !*candidate;
+}
+
 __attribute__((dllexport)) UINT FindImageResourceA(const char *name) {
     if (!name || !name[0]) return 0;
-    for (UINT i=0; i<GetImageResourceCount(); ++i) {
-        const char *a=g_icon_paths[i], *b=name;
-        while (*a && *b) {
-            char x=*a++, y=*b++;
-            if (x>='A'&&x<='Z') x=(char)(x+32);
-            if (y>='A'&&y<='Z') y=(char)(y+32);
-            if (x!=y) break;
-        }
-        if (!*a && !*b) return i+1;
-    }
+    for (UINT i = 0; i < GetImageResourceCount(); ++i)
+        if (imageres_equal_name(g_icon_paths[i], name)) return i + 1;
     return 0;
+}
+
+/* Alias with an explicit ID-oriented name for callers that treat this DLL
+   as a resource index rather than a filesystem path table. */
+__attribute__((dllexport)) UINT GetImageResourceIdA(const char *name) {
+    return FindImageResourceA(name);
 }

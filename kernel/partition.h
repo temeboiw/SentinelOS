@@ -70,7 +70,13 @@ static int SentinelPartitionScan(SENTINEL_PARTITION_READ read, void *context,
         uint32_t first = sentinel_part_u32(e + 8), count = sentinel_part_u32(e + 12);
         if (!type && !first && !count) continue;
         if (type == 0xee) {
-            if (first != 1 || !count || (uint64_t)count > disk_sectors - first) return -1;
+            /* Some GPT image creators write the protective MBR length as
+             * 0xffffffff even when the virtual disk is smaller than 2 TiB.
+             * It is a saturation value, not a real out-of-range partition:
+             * GPT header/entry validation below remains authoritative. */
+            if (first != 1 || !count ||
+                ((uint64_t)count > disk_sectors - first && count != UINT32_MAX))
+                return -1;
             protective = 1;
             continue;
         }

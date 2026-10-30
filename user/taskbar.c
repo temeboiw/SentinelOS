@@ -234,7 +234,7 @@ void TaskbarDraw(
             date_text[8] = (char)('0' + (now.day / 10) % 10);
             date_text[9] = (char)('0' + now.day % 10);
         }
-        draw_text(fb, pitch_px, width - 42, y0 + 10, clock_text, COLOR_WHITE);
-        draw_text(fb, pitch_px, width - 68, y0 + 27, date_text, COLOR_MUTED);
+        draw_text(fb, pitch_px, width - 68, y0 + 10, clock_text, COLOR_WHITE);
+        draw_text(fb, pitch_px, width - 88, y0 + 27, date_text, COLOR_MUTED);
     }
 }

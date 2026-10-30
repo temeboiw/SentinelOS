@@ -10,6 +10,7 @@ typedef int (*TextOutA_t)(void*,int,int,const char*,int);
 typedef int (*InvalidateRect_t)(void*,void*,int);
 typedef struct SettingsRect { int left,top,right,bottom; } SettingsRect;
 typedef int (*GetWindowRect_t)(void*,SettingsRect*);
+typedef int (*SetWindowDecor_t)(void*,int,int,int,int,int,int,unsigned int,unsigned int,int,const char*);
 
 enum { SYS_NtNetworkInfo=49, SYS_NtQueryVolumeMetadata=31 };
 typedef struct {
@@ -37,6 +38,31 @@ static u64 g_process_count;
 static GfxBootInfo g_gfx;
 static FBInfo g_fb;
 static int g_network_ok,g_volume_ok,g_process_ok,g_gfx_ok,g_fb_ok;
+static int g_hover_page=-1;
+static SetWindowDecor_t g_decor;
+
+/* Each category gets its own small geometric glyph. These are deliberately
+   separate from the text-only category buttons. */
+static void category_icon(unsigned page,int x,int y){
+    static const unsigned colors[10]={
+        0xFFFF766E,0xFF69B8E8,0xFFB68AE8,0xFF70C7B0,0xFFFFB454,
+        0xFF8EA3C7,0xFF70C7B0,0xFFE69A6A,0xFFB68AE8,0xFF9AA3B1
+    };
+    static const int a[10][4]={
+        {0,0,13,13},{0,1,16,10},{0,0,7,7},{2,0,10,14},{1,8,3,6},
+        {0,0,14,5},{0,6,14,2},{0,0,6,6},{3,0,8,6},{5,0,4,4}
+    };
+    static const int b[10][4]={
+        {4,4,5,5},{5,12,6,2},{9,5,7,7},{5,3,4,3},{6,3,3,11},
+        {0,8,14,5},{1,0,4,4},{9,0,6,6},{0,8,14,6},{6,7,2,8}
+    };
+    if(!g_decor)return;
+    unsigned col=colors[page];
+    g_decor(g_window,10+(int)page*2,x+a[page][0],y+a[page][1],
+            a[page][2],a[page][3],page==3?5:2,col,0,0,"");
+    g_decor(g_window,11+(int)page*2,x+b[page][0],y+b[page][1],
+            b[page][2],b[page][3],page==8?4:2,0xFFE9ECF2,0,0,"");
+}
 
 static void u32_text(char *out,u32 value){char tmp[12];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
 static void u64_text(char *out,u64 value){char tmp[24];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
@@ -128,14 +154,35 @@ static void page_about(void){
     content(14,"Report this build date and the failing application or device.");
 }
 static void draw(void){
-    clear_content();line(0,"SENTINELOS SETTINGS");line(1,"Select a category | Up/Down, Enter or 1-0");
-    for(unsigned i=0;i<10;i++){char item[28];unsigned n=0;if(i==g_page)item[n++]='>';else item[n++]=' ';for(unsigned j=0;categories[i][j]&&n<25;j++)item[n++]=categories[i][j];item[n]=0;line(2+i*2,item);}
+    clear_content();
+    line(0,"SENTINELOS SETTINGS");
+    line(1,"SYSTEM CONFIGURATION");
+    /* Text-only rounded category buttons, matching File Explorer's chrome. */
+    for(unsigned i=0;i<10;i++){
+        int active=(i==g_page),hover=(i==g_hover_page);
+        unsigned fill=hover?0xFF422326:active?0xFF292E37:0xFF252A33;
+        unsigned border=(hover||active)?0xFFFF3B30:0xFF454B56;
+        if(g_decor){
+            g_decor(g_window,(int)i,16,68+(int)i*48,232,40,8,fill,border,
+                    (hover||active)?4:0,"");
+            category_icon(i,26,81+(int)i*48);
+        }
+        if(g_text&&g_window)(void)g_text(g_window,52,2+(int)i*3,categories[i],-1);
+    }
+    /* The selected category gets its own larger visual marker in the content
+       header; category buttons themselves intentionally contain no icons. */
     content(1,categories[g_page]);
     switch(g_page){case 0:page_system();break;case 1:page_display();break;case 2:page_personalization();break;case 3:page_input();break;case 4:page_performance();break;case 5:page_storage();break;case 6:page_network();break;case 7:page_apps();break;case 8:page_accounts();break;default:page_about();break;}
     content(35,"Unsupported controls are described instead of simulated.");
     if(g_invalidate)(void)g_invalidate(g_window,0,0);
 }
-static void choose(unsigned page){if(page>=10)return;g_page=page;refresh_data();draw();}
+static void choose(unsigned page){if(page>=10)return;g_page=page;g_hover_page=(int)page;refresh_data();draw();}
+static int page_at(int x,int y){
+    if(x<16||x>=248||y<68)return -1;
+    int page=(y-68)/48;
+    if(page<0||page>=10||(y-(68+page*48))>=40)return -1;
+    return page;
+}
 
 void mainCRTStartup(void){
     const char dll[]="user32.dll";
@@ -145,6 +192,7 @@ void mainCRTStartup(void){
     DispatchMessageA_t dispatch=(DispatchMessageA_t)NtGetProcAddress(dll,"DispatchMessageA");
     g_text=(TextOutA_t)NtGetProcAddress(dll,"TextOutA");
     g_invalidate=(InvalidateRect_t)NtGetProcAddress(dll,"InvalidateRect");
+    g_decor=(SetWindowDecor_t)NtGetProcAddress(dll,"SetWindowDecorA");
     GetWindowRect_t get_rect=(GetWindowRect_t)NtGetProcAddress(dll,"GetWindowRect");
     if(!create||!show||!get||!dispatch||!g_text){NtWriteConsole("settings: required USER32 APIs are unavailable\n");NtExit(1);return;}
     g_window=create(0,"SentinelSettings","Settings - SentinelOS",0x10CF0000u,90,50,900,650,0,0,0,0);
@@ -157,9 +205,12 @@ void mainCRTStartup(void){
         if(dispatch)(void)dispatch(&msg);
         if(msg.message==0x0010u)break;
         if(msg.message==0x0100u){unsigned key=(unsigned)msg.wParam;if(key==0x26u)choose(g_page?g_page-1:9);else if(key==0x28u)choose((g_page+1)%10);else if(key==0x0Du)choose(g_page);else if(key>='1'&&key<='9')choose(key-'1');else if(key=='0')choose(9);}
-        else if(msg.message==0x0201u&&get_rect&&get_rect(g_window,&rect)){
-            int cx=msg.x-rect.left,cy=msg.y-(rect.top+44);
-            if(cx>=0&&cx<26&&cy>=32){unsigned page=(unsigned)((cy-32)/32);if(page<10)choose(page);}
+        else if(msg.message==0x0200u&&get_rect&&get_rect(g_window,&rect)){
+            int page=page_at(msg.x-rect.left,msg.y-rect.top);
+            if(page!=g_hover_page){g_hover_page=page;draw();}
+        }else if(msg.message==0x0201u&&get_rect&&get_rect(g_window,&rect)){
+            int page=page_at(msg.x-rect.left,msg.y-rect.top);
+            if(page>=0)choose((unsigned)page);
         }else if(msg.message==0x000Fu){refresh_data();draw();}
     }
     NtExit(0);

@@ -130,47 +130,6 @@ static void fill(
     }
 }
 
-static void draw_search_bar(
-    u32 *fb, u32 pitch, u32 width, u32 y
-) {
-    /*
-     * Search box sits beside START and FILES.
-     * Leave room for the C: indicator at the right.
-     */
-    const u32 x = 204;
-    const u32 right_margin = 112;
-    const u32 minimum_width = 90;
-    const u32 desired_width = 300;
-
-    if (width <= x + right_margin + minimum_width)
-        return;
-
-    u32 available = width - x - right_margin;
-    u32 box_width = desired_width;
-
-    if (box_width > available)
-        box_width = available;
-
-    /* Border and background. */
-    fill(fb, pitch, x, y, box_width, 36, COLOR_BORDER);
-    fill(fb, pitch, x + 1, y + 1,
-         box_width - 2, 34, COLOR_SEARCH);
-
-    /* Simple magnifying-glass icon. */
-    fill(fb, pitch, x + 12, y + 11, 9, 9, COLOR_MUTED);
-    fill(fb, pitch, x + 14, y + 13, 5, 5, COLOR_SEARCH);
-    fill(fb, pitch, x + 20, y + 20, 5, 3, COLOR_MUTED);
-
-    /* Placeholder text. */
-    if (box_width >= 112) {
-        draw_text(
-            fb, pitch,
-            x + 34, y + 15,
-            "SEARCH APPS",
-            COLOR_MUTED
-        );
-    }
-}
 
 void TaskbarDraw(
     u32 *fb, u32 width, u32 height, u32 pitch_px
@@ -206,9 +165,6 @@ void TaskbarDraw(
     /* Files shortcut uses a quiet hover-ready surface instead of a bright tile. */
     fill(fb, pitch_px, 48, y0 + 2, 84, bar_h - 2, COLOR_FILES);
     draw_text(fb, pitch_px, 72, y0 + 21, "FILES", COLOR_WHITE);
-
-    /* Search remains fixed-width and cannot collide with the clock area. */
-    draw_search_bar(fb, pitch_px, width, y0 + 6);
 
     /* The time and date are read from the kernel RTC, not hard-coded. */
     fill(fb, pitch_px, width > 96 ? width - 96 : 0, y0 + 2,

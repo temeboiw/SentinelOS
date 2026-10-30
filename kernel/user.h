@@ -1569,12 +1569,28 @@ static void vfs_ntfsk_invalidate_cached_file(uint32_t ino) {
 }
 static int vfs_find_image_file(const char *name, uint32_t *ino_out,
                                uint64_t *size_out) {
-    if (g_ext4_ok) return vfs_find_regular_file(name, ino_out, size_out);
-    if (!g_ntfsk_ok || !name || !name[0]) return -1;
-    uint64_t idx = 0, size = 0;
-    if (vfs_ntfsk_open_path(name, &idx, &size) < 0 || idx > UINT32_MAX) return -1;
-    *ino_out = (uint32_t)idx; *size_out = size;
-    return 0;
+    if (!name || !name[0] || !ino_out || !size_out) return -1;
+
+    /*
+     * Both filesystem backends can be mounted during boot (for example, an
+     * ext4 boot volume alongside the NTFS system volume). Do not let an ext4
+     * miss hide a valid system image on NTFS: try each mounted backend until
+     * the requested path is actually found.
+     */
+    if (g_ext4_ok &&
+        vfs_find_regular_file(name, ino_out, size_out) == 0)
+        return 0;
+
+    if (g_ntfsk_ok) {
+        uint64_t idx = 0, size = 0;
+        if (vfs_ntfsk_open_path(name, &idx, &size) == 0 &&
+            idx <= UINT32_MAX) {
+            *ino_out = (uint32_t)idx;
+            *size_out = size;
+            return 0;
+        }
+    }
+    return -1;
 }
 static int vfs_read_ntfs_image_at(uint32_t ino, uint64_t pos, void *dst,
                                   uint64_t len) {

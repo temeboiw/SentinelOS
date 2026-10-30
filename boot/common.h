@@ -54,16 +54,13 @@ static void paint_firmware_background(void) {
     UINT32 width = gop->Mode->Info->HorizontalResolution;
     UINT32 height = gop->Mode->Info->VerticalResolution;
     if (!width || !height) return;
-    /* Same top-to-bottom gradient used by user/bootvid.c, with no text/logo. */
-    for (UINT32 y=0; y<height; ++y) {
-        UINT32 t = (UINT32)(((UINT64)y * 255u) / (height > 1 ? height - 1u : 1u));
-        EFI_GRAPHICS_OUTPUT_BLT_PIXEL px;
-        px.Red = (UINT8)(((0x07u * (255u-t)) + (0x14u * t)) / 255u);
-        px.Green = (UINT8)(((0x17u * (255u-t)) + (0x7Au * t)) / 255u);
-        px.Blue = (UINT8)(((0x25u * (255u-t)) + (0xA4u * t)) / 255u);
-        px.Reserved = 0;
-        (void)gop->Blt(gop, &px, EfiBltVideoFill, 0, 0, 0, y, width, 1, 0);
-    }
+    /* Keep firmware handoff visually quiet until the OS boot video takes over. */
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px;
+    px.Red = 0;
+    px.Green = 0;
+    px.Blue = 0;
+    px.Reserved = 0;
+    (void)gop->Blt(gop, &px, EfiBltVideoFill, 0, 0, 0, 0, width, height, 0);
 }
 
 static int same(const void *a, const void *b, UINTN n) {

@@ -67,7 +67,7 @@ static void category_icon(unsigned page,int x,int y){
 static void u32_text(char *out,u32 value){char tmp[12];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
 static void u64_text(char *out,u64 value){char tmp[24];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
 static void line(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,0,(int)row,s,-1);}
-static void content(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,280,(int)row,s,-1);}
+static void content(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,35,(int)row,s,-1);}
 static void clear_content(void){static const char blank[]="                                                                                            ";for(unsigned y=2;y<38;y++)content(y,blank);}
 static void cpuid(u32 leaf,u32 subleaf,u32 *a,u32 *b,u32 *c,u32 *d){
     u32 ra,rb,rc,rd;
@@ -168,7 +168,7 @@ static void draw(void){
                     (hover||active)?4:0,"");
             category_icon(i,26,81+(int)i*48);
         }
-        if(g_text&&g_window)(void)g_text(g_window,52,2+(int)i*3,categories[i],-1);
+        if(g_text&&g_window)(void)g_text(g_window,6,2+(int)i*3,categories[i],-1);
     }
     /* The selected category gets its own larger visual marker in the content
        header; category buttons themselves intentionally contain no icons. */

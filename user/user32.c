@@ -1751,16 +1751,6 @@ static void compose(void) {
     }
 
     if(layered){g_front=u32_desktop_layer;g_pitch=g_fw;u32_clear_layer(u32_desktop_layer);}
-    /* Skip fixed desktop artwork entirely when a dirty repaint cannot touch it. */
-    if (u32_damage_intersects(12,10,194,55)) {
-        /* Floating glass identity plaque. */
-        round_fill(12,10,182,45,9,0xAFFFFFFF);
-        round_fill(14,12,178,41,8,0xEAFBFFFF);
-        fill(22,13,162,1,0xFFFFFFFF);
-        draw_text(24, 17, "SentinelOS", 0xFF1C6587);
-        draw_text(24, 33, "A calmer desktop", 0xFF477F95);
-    }
-
     if (u32_damage_intersects(31,72,122,147)) {
         int ix = 36, iy = 72, s = 48;
 
@@ -1772,24 +1762,6 @@ static void compose(void) {
         fill(ix+9,iy+43,s-22,3,0xFF8AE5F6);
         round_fill(ix-5,iy+s+7,86,20,5,0xBFFFFFFF);
         draw_text(ix-1, iy+s+10, "Explorer", 0xFF164B68);
-    }
-
-    /* Desktop welcome/search card, populated by explorer.exe through TextOutA. */
-    if (!g_wnd.visible && !u32_suppress_desktop_card &&
-        u32_damage_intersects(132,72,526,230)) {
-        int cx=132, cy=72, cw=390, ch=158;
-        round_fill(cx+4,cy+7,cw,ch,13,0x55314F62);
-        round_fill(cx,cy,cw,ch,13,0xBFFFFFFF);
-        round_fill(cx+2,cy+2,cw-4,ch-4,11,0xEAF9FDFF);
-        gradient_v(cx+3,cy+3,cw-6,35,0xFFFFFFFF,0xFFC4F1FA);
-        fill(cx+8,cy+3,cw-16,1,0xFFFFFFFF);
-        draw_text(cx+18,cy+11,g_lines[4][0]?g_lines[4]:"Welcome to SentinelOS",0xFF145777);
-        draw_text(cx+18,cy+35,g_lines[5][0]?g_lines[5]:"A fresh breeze for your desktop",0xFF4E8297);
-        draw_text(cx+18,cy+68,g_lines[7][0]?g_lines[7]:"Search apps below: type cmd and press Enter",0xFF245E78);
-        round_fill(cx+14,cy+99,cw-28,38,8,0xFFB2DDE9);
-        round_fill(cx+16,cy+101,cw-32,34,7,0xFFF9FEFF);
-        fill(cx+18,cy+102,cw-36,1,0xFFFFFFFF);
-        draw_text(cx+27,cy+111,g_lines[8][0]?g_lines[8]:"Search: ",0xFF276A84);
     }
 
     if(layered){g_front=u32_window_layer;g_pitch=g_fw;u32_clear_layer(u32_window_layer);}

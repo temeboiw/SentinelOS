@@ -460,9 +460,33 @@ static int ntfsk_find_and_mount(NTFSK_VOLUME *v, SENTINEL_BLOCK_DEVICE *d) {
     if (!v || !d || !d->online || !d->read || !d->sector_size ||
         d->sector_size < 512 || d->sector_size > 4096 ||
         d->sector_count > UINT64_MAX / d->sector_size) return -1;
+    /* Probe the raw disk before parsing. UEFI can read the ESP through
+     * firmware Block I/O even when the kernel's VirtIO path is pointed at a
+     * different or unreadable sector view; these bytes identify what the
+     * kernel actually sees at LBA 0 and LBA 1. */
+    uint8_t mbr_probe[512], gpt_probe[512];
+    int mbr_rc=SentinelBlockReadDevice(d,0,mbr_probe,sizeof(mbr_probe));
+    int gpt_rc=SentinelBlockReadDevice(d,d->sector_size,gpt_probe,sizeof(gpt_probe));
+    if(mbr_rc==0) {
+        uint32_t p0_start=ntfsk_u32(mbr_probe+454);
+        uint32_t p0_count=ntfsk_u32(mbr_probe+458);
+        DbgPrint("ntfs: raw disk %s sectors=%llu sector_size=%u MBR=%02x%02x p0_type=%02x start=%u count=%u\\n",
+                 d->name,(unsigned long long)d->sector_count,d->sector_size,
+                 mbr_probe[511],mbr_probe[510],mbr_probe[450],p0_start,p0_count);
+    } else {
+        DbgPrint("ntfs: raw disk %s LBA0 read failed\\n",d->name);
+    }
+    if(gpt_rc==0)
+        DbgPrint("ntfs: raw GPT LBA1 signature=%016llx header_size=%u\\n",
+                 (unsigned long long)ntfsk_u64(gpt_probe),
+                 ntfsk_u32(gpt_probe+12));
+    else
+        DbgPrint("ntfs: raw disk %s LBA1 read failed\\n",d->name);
+
     SENTINEL_PARTITION parts[SENTINEL_PARTITION_MAX];
     int count=SentinelPartitionScan(ntfsk_partition_read,d,d->sector_count,
                                     d->sector_size,parts,SENTINEL_PARTITION_MAX);
+    DbgPrint("ntfs: partition scan %s result=%d\\n",d->name,count);
     if(count<0)return -1;
     static const uint8_t basic_data_guid[16] = {
         0xA2,0xA0,0xD0,0xEB,0xE5,0xB9,0x33,0x44,

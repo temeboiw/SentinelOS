@@ -665,9 +665,8 @@ static void draw_text(int x, int y, const char *s, u32 col) {
  * still contain the cursor's own colour, so content that another process
  * repainted underneath is never overwritten with stale pixels. */
 static const char u32_cursor_shape[16][17] = {
-    "#...............",
     "##..............",
-    "#w+#............",
+    "#w#.............",
     "#ww#............",
     "#www#...........",
     "#wwww#..........",
@@ -675,12 +674,13 @@ static const char u32_cursor_shape[16][17] = {
     "#wwwwww#........",
     "#wwwwwww#.......",
     "#wwwwwwww#......",
-    "#wwww#####......",
-    "#ww#ww#.........",
-    "#w#.#ww#........",
-    "##...#ww#.......",
-    "#.....#ww#......",
-    "......##........"
+    "#wwwwwwwwww#....",
+    "#wwwwwwwwwwww#..",
+    "#wwwwwwwwwwww#..",
+    "#wwwwwwwwww#....",
+    "#ww#wwwwww#.....",
+    "#w#..#wwww#.....",
+    "##....####......"
 };
 
 static u32 cur_under[16*16];
@@ -824,18 +824,26 @@ static char u32_cursor_pixel(unsigned int id,int x,int y) {
            (dx-dy<=1&&dx-dy>=-1))return 'w';
         return '.';
     }
-    if(id==32649u) { /* hand / clickable */
-        /* index finger */
-        if((x>=6&&x<=8&&y>=1&&y<=8) ||
-           (x>=4&&x<=10&&y>=7&&y<=11) ||
-           (x>=3&&x<=11&&y>=10&&y<=13) ||
-           (x>=5&&x<=10&&y==14) ||
-           (x>=3&&x<=5&&y>=8&&y<=11) ||
-           (x>=9&&x<=11&&y>=8&&y<=10)) {
-            if(x==4||x==10||y==13||y==14|| (x==6&&y==1))return '#';
-            return 'w';
-        }
-        return '.';
+    if(id==32649u) { /* conventional pointing hand: index finger, thumb and palm */
+        static const char hand[16][17] = {
+            "......##........",
+            ".....#ww#.......",
+            ".....#ww#.......",
+            ".....#ww#.......",
+            ".....#ww#.......",
+            ".....#ww#.......",
+            "..####ww####....",
+            ".#wwwwwwwwww#...",
+            ".#wwwwwwwwww#...",
+            ".#wwwwwwwwww#...",
+            "..#wwwwwwww#....",
+            "...#wwwwwwww#...",
+            "...#wwwwwwww#...",
+            "....#wwwwww#....",
+            ".....#wwww#.....",
+            "......####......"
+        };
+        return hand[y][x];
     }
     if(id==32651u) { /* help cursor: arrow with question mark */
         if(x<=5&&y<=10&&x+y>=3&&x+y<=7)return '#';

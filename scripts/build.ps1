@@ -268,12 +268,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $rootfs "magic\logo.bmp") -PathType 
 Write-Host ("Validated {0} files under magic\System32." -f (@(Get-ChildItem -LiteralPath $sys32 -File -Recurse).Count)) -ForegroundColor Green
 
 Write-Stage "Create expandable GPT VHDX with FAT32 ESP and NTFS MAGIC partition"
-# Stage through folder mount points (no drive letters needed). They must live on NTFS.
+# The NTFS system partition is staged through a folder mount point. DiskPart refuses to
+# mount an EFI System Partition on a folder, so the ESP alone gets one temporary letter.
 if ((Get-Volume -FilePath $b -ErrorAction Stop).FileSystem -ne "NTFS") { throw "The build folder must be on an NTFS volume (folder mount points are used instead of drive letters): $b" }
-$espRoot = Join-Path $mnt "esp"
+$usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
+$espLetter = ([char[]]"ZYXWVUTSRQPONMLKJIHGFED") | Where-Object { "$_" -notin $usedLetters } | Select-Object -First 1
+if (-not $espLetter) { throw "One free drive letter is required to stage the EFI System Partition (DiskPart cannot mount an ESP on a folder). Free one with 'mountvol /R' or reboot, then retry." }
+$espRoot = "$($espLetter):\"
 $sysRoot = Join-Path $mnt "sys"
 Remove-MountPoints
-New-Item -ItemType Directory -Force -Path $espRoot, $sysRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $sysRoot | Out-Null
 Detach-Vhd
 Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $vhd) { throw "Cannot recreate VHDX because it still exists or is locked: $vhd. Close QEMU and detach it in Disk Management, then retry." }
@@ -286,7 +290,7 @@ attach vdisk
 convert gpt
 create partition efi size=128
 format fs=fat32 quick label=MAGICESP
-assign mount="$espRoot"
+assign letter=$espLetter
 create partition primary
 format fs=ntfs quick label=MAGIC
 assign mount="$sysRoot"

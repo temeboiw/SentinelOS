@@ -67,8 +67,8 @@ static void category_icon(unsigned page,int x,int y){
 static void u32_text(char *out,u32 value){char tmp[12];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
 static void u64_text(char *out,u64 value){char tmp[24];unsigned n=0;if(!value){out[0]='0';out[1]=0;return;}while(value&&n<sizeof(tmp)){tmp[n++]=(char)('0'+value%10);value/=10;}for(unsigned i=0;i<n;i++)out[i]=tmp[n-i-1];out[n]=0;}
 static void line(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,0,(int)row,s,-1);}
-static void content(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,27,(int)row,s,-1);}
-static void clear_content(void){static const char blank[]="                                                    ";for(unsigned y=2;y<38;y++)content(y,blank);}
+static void content(unsigned row,const char *s){if(g_text&&g_window&&row<40)(void)g_text(g_window,280,(int)row,s,-1);}
+static void clear_content(void){static const char blank[]="                                                                                            ";for(unsigned y=2;y<38;y++)content(y,blank);}
 static void cpuid(u32 leaf,u32 subleaf,u32 *a,u32 *b,u32 *c,u32 *d){
     u32 ra,rb,rc,rd;
     __asm__ volatile("cpuid":"=a"(ra),"=b"(rb),"=c"(rc),"=d"(rd):"a"(leaf),"c"(subleaf));
@@ -155,6 +155,7 @@ static void page_about(void){
 }
 static void draw(void){
     clear_content();
+    if(g_decor)g_decor(g_window,30,264,66,612,552,12,0xFF1B2028,0xFF343B46,0,"");
     line(0,"SENTINELOS SETTINGS");
     line(1,"SYSTEM CONFIGURATION");
     /* Text-only rounded category buttons, matching File Explorer's chrome. */

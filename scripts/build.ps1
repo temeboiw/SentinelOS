@@ -231,9 +231,10 @@ Write-Host ("Validated {0} files under magic\System32." -f (@(Get-ChildItem -Lit
 Write-Stage "Create expandable GPT VHDX with FAT32 ESP and NTFS MAGIC partition"
 $usedLetters = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
 $freeLetters = @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P", "O", "N", "M") | Where-Object { $_ -notin $usedLetters }
-if (@($freeLetters).Count -lt 2) { throw "Two free drive letters are required to stage the ESP and NTFS system partition." }
+if (@($freeLetters).Count -lt 1) { throw "One free drive letter is required to stage the VHDX partitions. Close unused mapped/network drives or detach stale SentinelOS disks." }
+# Reuse one drive letter sequentially for the ESP and NTFS system volume.
 $espLetter = $freeLetters[0]
-$sysLetter = $freeLetters[1]
+$sysLetter = $espLetter
 $espRoot = "$($espLetter):\"
 $sysRoot = "$($sysLetter):\"
 Detach-Vhd
@@ -249,12 +250,20 @@ convert gpt
 create partition efi size=128
 format fs=fat32 quick label=MAGICESP
 assign letter=$espLetter
+"@)
+    if (-not (Test-Path -LiteralPath $espRoot)) { throw "EFI System Partition was not mounted at $espRoot" }
+    Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
+
+    # Free the staging letter from the ESP, then reuse it for the NTFS volume.
+    [void](Run-Diskpart @"
+select vdisk file="$vhd"
+select partition 1
+remove letter=$espLetter
 create partition primary
 format fs=ntfs quick label=MAGIC
 assign letter=$sysLetter
 "@)
-    if (-not (Test-Path -LiteralPath $espRoot)) { throw "EFI System Partition was not mounted at $espRoot" }
-    Copy-Item -Path (Join-Path $esp "*") -Destination $espRoot -Recurse -Force
+    if (-not (Test-Path -LiteralPath $sysRoot)) { throw "NTFS system partition was not mounted at $sysRoot after reusing the staging letter." }
     $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
     $partitions = @(Get-Partition -DiskNumber $disk.Number)
     # Windows may create the standard 16 MiB Microsoft Reserved (MSR)
@@ -313,7 +322,7 @@ assign letter=$sysLetter
         try { $mz = New-Object byte[] 2; [void]$fs.Read($mz, 0, 2) } finally { $fs.Close() }
         if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) { throw "$relative on the image is not a PE file (no MZ header)." }
     }
-    foreach ($l in @($espLetter, $sysLetter)) { try { Write-VolumeCache -DriveLetter $l } catch { } }
+    try { Write-VolumeCache -DriveLetter $sysLetter } catch { }
     Write-Host ("Verified {0} files; System32\smss.exe is {1} bytes at the expected system path." -f @(Get-ChildItem -LiteralPath $magicTree -File -Recurse -Force).Count, (Get-Item -LiteralPath (Join-Path $sysRoot "System32\smss.exe")).Length) -ForegroundColor Green
 } finally {
     Detach-Vhd

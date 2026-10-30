@@ -1291,6 +1291,7 @@ lld -flavor link \
   /export:GetImageResourceNameA \
   /export:FindImageResourceA \
   /export:GetImageResourceIdA \
+  /export:GetImageResourceDataA \
   "/out:$SYS32/imageres.dll" \
   "$B/obj/imageres.o"
 

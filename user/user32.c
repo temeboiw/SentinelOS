@@ -2068,15 +2068,35 @@ static void show_shutdown_screen(int reboot) {
     }
 }
 
+/* Non-desktop processes only alpha-blend over the shared scanout, so closing
+ * a window can never erase it by recomposing. Put the wallpaper back under the
+ * old window rectangle directly, then let the desktop repaint icons/taskbar. */
+static void u32_restore_bg_rect(int x0,int y0,int x1,int y1) {
+    if(!g_scanout||!g_fw||!g_fh||g_fw>1920u||g_fh>1080u)return;
+    if(u32_aero_bg_w!=g_fw||u32_aero_bg_h!=g_fh)return;
+    int taskbar_top=(int)g_fh-52; if(taskbar_top<0)taskbar_top=0;
+    if(x0<0)x0=0; if(y0<0)y0=0;
+    if(x1>(int)g_fw)x1=(int)g_fw;
+    if(y1>taskbar_top)y1=taskbar_top;
+    if(x1<=x0||y1<=y0)return;
+    cursor_restore_fast();
+    for(int y=y0;y<y1;y++)
+        for(int x=x0;x<x1;x++)
+            g_scanout[(u32)y*g_scan_pitch+(u32)x]=u32_aero_bg_cache[(u32)y*g_fw+(u32)x];
+    u32_flush_raw(x0,y0,x1-x0,y1-y0);
+}
+
 static void u32_close_window_now(void) {
     if (u32_closing) return;
     u32_closing = 1;
+    int rx0=g_wnd.x-12, ry0=g_wnd.y-12, rx1=g_wnd.x+g_wnd.w+18, ry1=g_wnd.y+g_wnd.h+24;
     int desktop_owner = u32_is_desktop_window();
     /* Give the application its WM_CLOSE, then always enforce teardown so the
      * window can never survive its X button. */
     SendMessageA((void *)1, 0x0010u, 0, 0);
     DestroyWindow((void *)1);
     g_wnd.visible = 0;
+    if (!desktop_owner) u32_restore_bg_rect(rx0,ry0,rx1,ry1);
     g_wnd.minimized = 0;
     u32_press_inside = 0;
     u32_caption_hover = 0;
@@ -2752,6 +2772,19 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
             }
         }
 
+        if (u32_is_desktop_window()) {
+            static unsigned idle_ticks; static int last_apps=-1;
+            if ((++idle_ticks & 63u) == 0) {
+                int apps=0;
+                for (int wi=0; wi<8; wi++) {
+                    char wname[40]; int wmin=0;
+                    if (!sy3(SYS_WmQuery,(u64)wi,(u64)wname,(u64)&wmin)) break;
+                    if (!(wname[0]=='D'&&wname[1]=='e'&&wname[2]=='s'&&wname[3]=='k'&&wname[4]=='t'&&wname[5]=='o'&&wname[6]=='p'&&!wname[7])) apps++;
+                }
+                if (last_apps>0 && apps==0) { u32_force_full_compose=1; compose(); }
+                last_apps=apps;
+            }
+        }
         __asm__ volatile("pause");
     }
 }

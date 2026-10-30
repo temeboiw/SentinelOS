@@ -1590,6 +1590,8 @@ static int vfs_find_image_file(const char *name, uint32_t *ino_out,
             return 0;
         }
     }
+    DbgPrint("user: image lookup miss path=%s ext4=%d ntfs=%d ntfs_mounted=%d\\n",
+             name, g_ext4_ok, g_ntfsk_ok, g_ntfsk_volume.mounted);
     return -1;
 }
 static int vfs_read_ntfs_image_at(uint32_t ino, uint64_t pos, void *dst,

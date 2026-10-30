@@ -1461,8 +1461,8 @@ static void draw_taskbar(void) {
             date_text[8] = (char)('0' + (now.day / 10) % 10);
             date_text[9] = (char)('0' + now.day % 10);
         }
-        draw_text(w - 40, ty + 10, clock_text, 0xFFE9ECF2);
-        draw_text(w - 68, ty + 29, date_text, 0xFFB7BEC9);
+        draw_text(w - 75, ty + 10, clock_text, 0xFFE9ECF2);
+        draw_text(w - 95, ty + 29, date_text, 0xFFB7BEC9);
     }
 
     if (g_menu) {
@@ -1476,16 +1476,16 @@ static void draw_taskbar(void) {
         /* Keep all menu geometry proportional to the available screen. */
         /* Start surface uses the same rounded charcoal panels and signal-red accents as the website. */
         round_fill(mx+4,my+5,mw,mh,12,0xB8080A0D);
-        round_fill(mx,my,mw,mh,11,0xFF454B56);
-        round_fill(mx+1,my+1,mw-2,mh-2,16,0xFF1B2028);
-        fill(mx+2,my+2,mw-4,1,0xFFE9ECF2);
+        round_fill(mx,my,mw,mh,11,0xFF343B46);
+        round_fill(mx+1,my+1,mw-2,mh-2,10,0xFF1B2028);
+        fill(mx+10,my+2,mw-20,1,0x447D8796);
         fill(mx,my,4,mh,0xFFFF3B30);
-        gradient_v(mx+5,my+1,mw-6,54,0xFFE9ECF2,0xFF242A33);
+        gradient_v(mx+5,my+1,mw-6,54,0xFF252A33,0xFF1B2028);
         round_fill(mx+11,my+11,32,32,9,0xFF303640);
         u32_draw_logo(mx+12,my+12,30);
         draw_text(mx+52,my+16,"SENTINELOS",0xFFF1F3F6);
         draw_text(mx+52,my+32,"YOUR WORKSPACE",0xFF9AA3B1);
-        panel(mx+12,my+60,mw-24,32,0xFF252A33,g_search_focus?0xFFFF3B30:0xFF414854);
+        panel(mx+12,my+60,mw-24,32,0xFF252A33,g_search_focus?0xFFFF3B30:0xFF454B56);
         round_fill(mx+22,my+69,9,9,5,0xFF9AA3B1);
         round_fill(mx+24,my+71,5,5,3,0xFF252A33);
         fill(mx+30,my+78,5,2,0xFF9AA3B1);
@@ -1502,7 +1502,7 @@ static void draw_taskbar(void) {
                     int hover=(g_start_hover==10+shown);
                     round_fill(mx+12,ry,mw-24,26,6,hover?0xFF422326:0xFF292E37);
                     if(hover)fill(mx+12,ry,mw-24,2,0xFFFF3B30);
-                    round_fill(mx+19,ry+6,14,14,4,0xFF3D5668);
+                    round_fill(mx+19,ry+6,14,14,4,0xFF454B56);
                     draw_text(mx+40,ry+10,u32_app_title(u32_start_apps[ai].name),0xFFF1F3F6);
                 }
                 shown++;total++;
@@ -1514,7 +1514,7 @@ static void draw_taskbar(void) {
             draw_text(mx+mw-66,my+105,"APPS",0xFFFF766E);
             round_fill(mx+12,my+116,132,48,7,g_start_hover==1?0xFF422326:0xFF292E37);
             if(g_start_hover==1)fill(mx+12,my+116,132,2,0xFFFF3B30);
-            round_fill(mx+18,my+125,25,25,4,0xFFFF3B30);
+            round_fill(mx+18,my+125,25,25,4,0xFF454B56);
             fill(mx+23,my+131,15,3,0xFFE9ECF2);fill(mx+23,my+138,15,3,0xFFE9ECF2);
             draw_text(mx+50,my+135,"Files",0xFFF1F3F6);
             round_fill(mx+154,my+116,134,48,7,g_start_hover==2?0xFF422326:0xFF292E37);
@@ -1531,10 +1531,10 @@ static void draw_taskbar(void) {
             fill(mx+12,my+248,mw-24,1,0xFF414854);
             round_fill(mx+12,my+258,132,40,7,g_start_hover==4?0xFF422326:0xFF292E37);
             if(g_start_hover==4)fill(mx+12,my+258,132,2,0xFFFF3B30);
-            draw_text(mx+24,my+274,"Shut down",0xFFFF766E);
+            draw_text(mx+24,my+274,"Shut down",0xFFE9ECF2);
             round_fill(mx+154,my+258,134,40,7,g_start_hover==5?0xFF422326:0xFF292E37);
             if(g_start_hover==5)fill(mx+154,my+258,134,2,0xFFFF3B30);
-            draw_text(mx+166,my+274,"Restart",0xFFFFB454);
+            draw_text(mx+166,my+274,"Restart",0xFFE9ECF2);
             fill(mx+12,my+310,mw-24,1,0xFF414854);
             if(g_start_hover==6)round_fill(mx+10,my+316,mw-20,24,4,0xFF422326);
             draw_text(mx+16,my+329,"Settings / Help",0xFFF1F3F6);
@@ -2011,13 +2011,16 @@ static void show_shutdown_screen(int reboot) {
     ensure_fb();
     if (!g_front || !g_fw || !g_fh) return;
     cursor_restore();
-    gradient_v(0,0,(int)g_fw,(int)g_fh,0xFF071725,0xFF123F5C);
+    fill(0,0,(int)g_fw,(int)g_fh,0xFF11151B);
     int cx=(int)g_fw/2, cy=(int)g_fh/2;
-    round_fill(cx-190,cy-72,380,144,14,0xE8193448);
-    round_fill(cx-188,cy-70,376,140,12,0xFF102D42);
-    fill(cx-174,cy-52,348,1,0xFF4BA6C7);
-    draw_text(cx-142,cy-22,reboot?"Restarting SentinelOS":"Shutting down SentinelOS",0xFFFFFFFF);
-    draw_text(cx-142,cy+12,reboot?"Your system is restarting...":"Your system is shutting down...",0xFF9CD9EB);
+    round_fill(cx-210,cy-82,420,164,16,0xFF343B46);
+    round_fill(cx-208,cy-80,416,160,14,0xFF1B2028);
+    fill(cx-188,cy-58,376,2,0xFFFF3B30);
+    round_fill(cx-184,cy-28,34,34,9,0xFF303640);
+    fill(cx-173,cy-20,12,3,0xFFFF3B30);
+    fill(cx-173,cy-12,12,3,0xFFFF3B30);
+    draw_text(cx-136,cy-22,reboot?"Restarting SentinelOS":"Shutting down SentinelOS",0xFFF1F3F6);
+    draw_text(cx-136,cy+12,reboot?"Preparing to restart...":"Powering off safely...",0xFF9AA3B1);
 
     /*
      * This screen is drawn directly into the shared scanout, bypassing the
@@ -2027,16 +2030,40 @@ static void show_shutdown_screen(int reboot) {
      */
     u32_flush_raw(0,0,(int)g_fw,(int)g_fh);
 
-    /* Keep the shutdown screen visible before handing control to firmware. */
+    /* Hold the themed status screen, then fade the complete scanout to black
+       before the restart/shutdown syscall transfers control away from the UI. */
     u64 start=sy3(SYS_GetTickCount,0,0,0);
     if (start!=(u64)-1) {
         for (;;) {
             u64 now=sy3(SYS_GetTickCount,0,0,0);
-            if (now!=(u64)-1 && now>=start && now-start>=5000) break;
+            if (now!=(u64)-1 && now>=start && now-start>=900) break;
             __asm__ volatile("pause");
+        }
+        for (unsigned int step=1;step<=16;step++) {
+            unsigned int a=step*16u;
+            if(a>255u)a=255u;
+            for(unsigned int yy=0;yy<g_fh;yy++) {
+                u32 *row=g_front+(u64)yy*g_pitch;
+                for(unsigned int xx=0;xx<g_fw;xx++) {
+                    u32 old=row[xx];
+                    unsigned int r=((old>>16)&255u)*(255u-a)/255u;
+                    unsigned int g=((old>>8)&255u)*(255u-a)/255u;
+                    unsigned int b=(old&255u)*(255u-a)/255u;
+                    row[xx]=0xFF000000u|(r<<16)|(g<<8)|b;
+                }
+            }
+            u32_flush_raw(0,0,(int)g_fw,(int)g_fh);
+            u64 frame=sy3(SYS_GetTickCount,0,0,0);
+            while(frame!=(u64)-1) {
+                u64 now=sy3(SYS_GetTickCount,0,0,0);
+                if(now==(u64)-1||now-frame>=25)break;
+                __asm__ volatile("pause");
+            }
         }
     } else {
         for (volatile u64 i=0;i<100000000ULL;i++) __asm__ volatile("pause");
+        fill(0,0,(int)g_fw,(int)g_fh,0xFF000000);
+        u32_flush_raw(0,0,(int)g_fw,(int)g_fh);
     }
 }
 

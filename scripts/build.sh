@@ -48,8 +48,17 @@ DO_RUN=0
 DO_CLEAN=0
 DO_NO_DISK_IMAGE=0
 SECURE_BOOT_MODE="${SECURE_BOOT:-0}"
+PARTITION_STYLE="gpt"
+EXPECT_VALUE=""
 
 for arg in "$@"; do
+  if [[ -n "$EXPECT_VALUE" ]]; then
+    case "$EXPECT_VALUE" in
+      partition) PARTITION_STYLE="$arg" ;;
+    esac
+    EXPECT_VALUE=""
+    continue
+  fi
   case "$arg" in
     --run|-r)            DO_RUN=1 ;;
     --keep-fallback|-k)  KEEP_FALLBACK=1 ;;
@@ -57,8 +66,11 @@ for arg in "$@"; do
     --clean|-c)          DO_CLEAN=1 ;;
     --no-disk-image)     DO_NO_DISK_IMAGE=1 ;;
     --secure-boot)       SECURE_BOOT_MODE=1 ;;
+    --mbr)               PARTITION_STYLE="mbr" ;;
+    --partition)         EXPECT_VALUE="partition" ;;
+    --partition=*)       PARTITION_STYLE="${arg#--partition=}" ;;
     -h|--help)
-      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image] [--secure-boot]"
+      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image] [--secure-boot] [--mbr|--partition={gpt|mbr|hybrid}]"
       exit 0
       ;;
     *)
@@ -67,6 +79,18 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [[ -n "$EXPECT_VALUE" ]]; then
+  echo "error: --partition requires an argument (gpt, mbr or hybrid)" >&2
+  exit 1
+fi
+case "$PARTITION_STYLE" in
+  gpt|mbr|hybrid) ;;
+  *)
+    echo "error: --partition must be gpt, mbr or hybrid (got: $PARTITION_STYLE)" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$SECURE_BOOT_MODE" == "1" ]]; then
   : "${SECURE_BOOT_KEY:?set SECURE_BOOT_KEY to the PEM signing private key}"
@@ -2362,40 +2386,331 @@ if (( DO_NO_DISK_IMAGE == 1 )); then
   exit 0
 fi
 
-echo "==> GPT disk image (content-sized FAT32 ESP + NTFS, with 100 MiB extra)"
+echo "==> Disk image ($PARTITION_STYLE)"
+
+# Partition layout (see docs/MBR_PARTITIONING.md):
+#   LBA 0     : MBR (446-byte bootstrap + 4 partition entries x 16 bytes + 0xAA55 signature)
+#   LBA 1-63  : reserved for the BIOS stage-2 loader
+#   LBA 64    : system volume (NTFS), 1 MiB aligned
+SECTOR_SIZE=512
+MIB=$((1024 * 1024))
+SECTORS_PER_MIB=$((MIB / SECTOR_SIZE))
+MBR_LBA=0
+STAGE2_START_LBA=1
+VOLUME_START_LBA=64
+
+ESP_BYTES=$(du -sb "$B/esp" | awk '{print $1}')
+ROOTFS_BYTES=$(du -sb "$B/rootfs" | awk '{print $1}')
 
 # Size the ESP from the EFI files (minimum 64 MiB for a practical FAT32 ESP),
 # and size NTFS from the rootfs contents plus at least 100 MiB of spare space.
 # Additional allowance covers filesystem metadata and avoids packing files too tightly.
-MIB=$((1024 * 1024))
-SECTOR_SIZE=512
-SECTORS_PER_MIB=$((MIB / SECTOR_SIZE))
-ESP_BYTES=$(du -sb "$B/esp" | awk '{print $1}')
-ROOTFS_BYTES=$(du -sb "$B/rootfs" | awk '{print $1}')
-
 ESP_MIB=$(((ESP_BYTES + 8 * MIB + MIB - 1) / MIB))
 (( ESP_MIB < 64 )) && ESP_MIB=64
 ESP_SECTORS=$((ESP_MIB * SECTORS_PER_MIB))
-NTFS_START=$((2048 + ESP_SECTORS))
+GPT_ESP_START=2048
 
-# Keep the NTFS system volume MiB-aligned and reserve at least 100 MiB beyond
-# staged files for later Windows-compatible applications and filesystem growth.
 NTFS_BYTES=$((ROOTFS_BYTES + ROOTFS_BYTES / 10 + 16 * MIB + 100 * MIB))
 NTFS_MIB=$(((NTFS_BYTES + MIB - 1) / MIB))
 (( NTFS_MIB < 128 )) && NTFS_MIB=128
 NTFS_SECTORS=$((NTFS_MIB * SECTORS_PER_MIB))
-NTFS_OFF=$((NTFS_START * SECTOR_SIZE))
 
-# Round the whole disk up to a MiB and leave room for the backup GPT header.
-DISK_SECTORS=$((((NTFS_START + NTFS_SECTORS + 34 + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
-DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
+# Round a sector count up to a whole MiB.
+round_up_mib() {
+  local s="$1"
+  echo $((((s + SECTORS_PER_MIB - 1) / SECTORS_PER_MIB) * SECTORS_PER_MIB))
+}
 
-echo "  -> ESP: ${ESP_MIB} MiB; NTFS system volume: ${NTFS_MIB} MiB; staged files: $((ROOTFS_BYTES / MIB)) MiB; disk: ${DISK_MIB} MiB"
+# ---------------------------------------------------------------------------
+# Build a standalone NTFS system volume image populated from $B/rootfs.
+#   $1 = output NTFS image path, $2 = starting LBA of the volume on the disk.
+# Populating without mounting: ntfscp writes file data but cannot create
+# parent directories, so scripts/ntfs-mkdir.c (libntfs-3g directly, no FUSE)
+# creates the directory tree first.
+# ---------------------------------------------------------------------------
+build_ntfs_volume() {
+  local ntfs_img="$1" start_sector="$2"
+  rm -f "$ntfs_img"
+  qemu-img create -f raw "$ntfs_img" "${NTFS_MIB}M" >/dev/null
+  mkntfs -F -Q -L magic -s 512 -c 4096 -p "$start_sector" -H 255 -S 63 "$ntfs_img" >/dev/null
 
+  NTFS_DIR_LIST="$B/ntfs-directories.list"
+  NTFS_FILE_LIST="$B/ntfs-files.list"
+  NTFS_MKDIR="$B/ntfs-mkdir"
+  # The NTFS helper MUST use Linux/proot tools, never Termux's Android toolchain.
+  # Do not fall back to PATH unless the resolved executable is outside Termux.
+  NTFS_CC=""
+  for candidate in /usr/bin/gcc /usr/local/bin/gcc /bin/gcc /usr/bin/cc /usr/local/bin/cc /bin/cc; do
+    if [[ -x "$candidate" && ! -d "$candidate" ]]; then
+      NTFS_CC="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$NTFS_CC" ]]; then
+    for tool in gcc cc; do
+      candidate="$(command -v "$tool" 2>/dev/null || true)"
+      case "$candidate" in
+        /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) continue ;;
+      esac
+      if [[ -n "$candidate" && -x "$candidate" ]]; then
+        NTFS_CC="$candidate"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$NTFS_CC" ]]; then
+    echo "error: no Linux/proot gcc or cc found; refusing to use Termux's Android compiler" >&2
+    echo "diagnostic: PATH=$PATH" >&2
+    echo "diagnostic: gcc=$(command -v gcc 2>/dev/null || echo unavailable)" >&2
+    echo "diagnostic: cc=$(command -v cc 2>/dev/null || echo unavailable)" >&2
+    rm -f "$ntfs_img" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
+  fi
+
+  echo "  -> compiling NTFS helper with Linux/proot compiler $NTFS_CC"
+  # Resolve pkg-config/pkgconf from the same Linux/proot environment as GCC.
+  # Some minimal proot installs have the libntfs-3g headers and library but omit
+  # pkg-config entirely, so support a verified system-header/library fallback.
+  NTFS_PKG_CONFIG=""
+  for candidate in /usr/bin/pkg-config /usr/local/bin/pkg-config /bin/pkg-config /usr/bin/pkgconf /usr/local/bin/pkgconf /bin/pkgconf; do
+    if [[ -x "$candidate" && ! -d "$candidate" ]]; then
+      NTFS_PKG_CONFIG="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$NTFS_PKG_CONFIG" ]]; then
+    for tool in pkg-config pkgconf; do
+      candidate="$(command -v "$tool" 2>/dev/null || true)"
+      case "$candidate" in
+        /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) candidate="" ;;
+      esac
+      if [[ -n "$candidate" && -x "$candidate" ]]; then
+        NTFS_PKG_CONFIG="$candidate"
+        break
+      fi
+    done
+  fi
+
+  NTFS_CFLAGS=""
+  NTFS_LIBS=""
+  if [[ -n "$NTFS_PKG_CONFIG" ]] && "$NTFS_PKG_CONFIG" --exists libntfs-3g; then
+    NTFS_CFLAGS="$("$NTFS_PKG_CONFIG" --cflags libntfs-3g)"
+    NTFS_LIBS="$("$NTFS_PKG_CONFIG" --libs libntfs-3g)"
+    echo "  -> libntfs-3g metadata: $NTFS_PKG_CONFIG"
+  else
+    # GCC's normal system include search path covers /usr/include. Confirm both
+    # the public headers and a linkable library exist before using -lntfs-3g.
+    NTFS_HEADER=""
+    for candidate in /usr/include/ntfs-3g/dir.h /usr/local/include/ntfs-3g/dir.h; do
+      if [[ -s "$candidate" ]]; then NTFS_HEADER="$candidate"; break; fi
+    done
+    NTFS_LIBRARY=""
+    for candidate in /usr/lib/libntfs-3g.so /usr/lib64/libntfs-3g.so /usr/local/lib/libntfs-3g.so /usr/lib/*/libntfs-3g.so; do
+      if [[ -s "$candidate" ]]; then NTFS_LIBRARY="$candidate"; break; fi
+    done
+    if [[ -z "$NTFS_HEADER" || -z "$NTFS_LIBRARY" ]]; then
+      echo "error: cannot locate Linux/proot libntfs-3g development metadata or a usable header/library pair" >&2
+      echo "diagnostic: pkg-config/pkgconf=${NTFS_PKG_CONFIG:-unavailable}" >&2
+      echo "diagnostic: header=${NTFS_HEADER:-not found}; library=${NTFS_LIBRARY:-not found}" >&2
+      echo "diagnostic: expected ntfs-3g/dir.h and libntfs-3g.so inside the Linux/proot filesystem" >&2
+      rm -f "$ntfs_img" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+      exit 1
+    fi
+    NTFS_LIBS="-lntfs-3g"
+    echo "  -> libntfs-3g metadata: verified system header/library fallback"
+  fi
+  echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<default system includes>}"
+  echo "  -> libntfs-3g libs: $NTFS_LIBS"
+  # shellcheck disable=SC2086
+  if env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
+    :
+  else
+    status=$?
+    echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
+    echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2
+    rm -f "$ntfs_img" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
+  fi
+
+  if ! find "$B/rootfs" -mindepth 1 -type d -print0 | sort -z > "$NTFS_DIR_LIST"; then
+    echo "error: failed to enumerate rootfs directories for NTFS population" >&2
+    rm -f "$ntfs_img" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
+  fi
+  NTFS_DIR_ARGS=()
+  while IFS= read -r -d '' entry; do
+    [[ "$entry" == "$B/rootfs" ]] && continue
+    relative="${entry#"$B/rootfs"/}"
+    NTFS_DIR_ARGS+=("/$relative")
+  done < "$NTFS_DIR_LIST"
+  if ((${#NTFS_DIR_ARGS[@]} > 0)) && ! "$NTFS_MKDIR" "$ntfs_img" "${NTFS_DIR_ARGS[@]}"; then
+    echo "error: failed to create one or more directories in NTFS system volume" >&2
+    rm -f "$ntfs_img" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
+  fi
+  rm -f "$NTFS_DIR_LIST"
+
+  if ! find "$B/rootfs" -type f -print0 | sort -z > "$NTFS_FILE_LIST"; then
+    echo "error: failed to enumerate rootfs files for NTFS population" >&2
+    rm -f "$ntfs_img" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+    exit 1
+  fi
+  while IFS= read -r -d '' entry; do
+    relative="${entry#"$B/rootfs"/}"
+    if ! ntfscp "$ntfs_img" "$entry" "/$relative"; then
+      echo "error: failed to copy file into NTFS volume: /$relative" >&2
+      rm -f "$ntfs_img" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+      exit 1
+    fi
+  done < "$NTFS_FILE_LIST"
+  rm -f "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+
+  # Fail the build if NTFS population did not preserve the expected Windows-like
+  # system tree. ntfscat reads these files directly from the image without FUSE.
+  for required in \
+    magic/System32/krnl.exe \
+    magic/System32/hal.dll \
+    magic/System32/smss.exe \
+    magic/System32/bootvid.exe \
+    magic/System32/sentlogon.exe \
+    magic/System32/settings.exe \
+    magic/System32/drivers/ata.sys
+  do
+    if ! ntfscat "$ntfs_img" "/$required" >/dev/null; then
+      echo "error: required file missing or unreadable in NTFS system volume: /$required" >&2
+      rm -f "$ntfs_img"
+      exit 1
+    fi
+  done
+  sync
+}
+
+# ---------------------------------------------------------------------------
+# Write a little-endian 32-bit value to a byte offset in a file.
+# ---------------------------------------------------------------------------
+write_le32_at() {
+  local file="$1" off="$2" v="$3"
+  local fmt
+  fmt="$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' \
+    $((v & 0xff)) $(((v >> 8) & 0xff)) $(((v >> 16) & 0xff)) $(((v >> 24) & 0xff)))"
+  printf "$fmt" | dd of="$file" bs=1 seek="$off" conv=notrunc status=none
+}
+
+# Write a single byte to a byte offset in a file.
+write_mbr_byte() {
+  local file="$1" off="$2" val="$3"
+  printf "\\x$(printf '%02x' "$val")" | dd of="$file" bs=1 seek="$off" conv=notrunc status=none
+}
+
+# ---------------------------------------------------------------------------
+# Build a 512-byte MBR image.
+#   $1 output path, $2 style (mbr|hybrid), $3 volume start LBA,
+#   $4 volume sector count, $5 total disk sectors, $6 GPT ESP start LBA
+#
+# Layout:
+#   [0x000-0x1BD] 446-byte bootstrap code (placeholder, zeros)
+#   [0x1BE-0x1FD] 4 partition entries x 16 bytes
+#   [0x1FE-0x1FF] signature 0x55 0xAA
+#
+# Partition entry 1 is always active/bootable, type 0x07 (NTFS), starting at
+# the system volume LBA. For hybrid, entry 2 is a protective type 0xEE entry
+# starting at LBA 1 so the disk remains a valid GPT disk.
+# ---------------------------------------------------------------------------
+build_mbr() {
+  local out="$1" style="$2" vol_start="$3" vol_sectors="$4" disk_sectors="$5" gpt_esp_start="$6"
+  dd if=/dev/zero of="$out" bs=512 count=1 status=none
+  # Partition entry 1: active/bootable, type 0x07 (NTFS).
+  write_mbr_byte "$out" 446 128   # status: 0x80 active
+  write_mbr_byte "$out" 450 7     # type: 0x07 NTFS
+  write_le32_at "$out" 454 "$vol_start"
+  write_le32_at "$out" 458 "$vol_sectors"
+  if [[ "$style" == "hybrid" ]]; then
+    # Partition entry 2: protective type 0xEE covering the GPT area, first LBA 1.
+    write_mbr_byte "$out" 462 0    # status: not bootable
+    write_mbr_byte "$out" 466 238  # type: 0xEE protective MBR
+    write_le32_at "$out" 470 1
+    write_le32_at "$out" 474 $((disk_sectors - 1))
+  fi
+  # MBR signature at offset 510-511.
+  write_mbr_byte "$out" 510 85   # 0x55
+  write_mbr_byte "$out" 511 170  # 0xAA
+}
+
+# ---------------------------------------------------------------------------
+# Validate the MBR written at LBA 0 of a disk image.
+#   $1 disk, $2 disk sectors, $3 expected volume start, $4 expected volume sectors,
+#   $5 style (mbr|hybrid), $6 GPT ESP start LBA
+# ---------------------------------------------------------------------------
+validate_mbr() {
+  local disk="$1" disk_sectors="$2" vol_start="$3" vol_sectors="$4" style="$5" gpt_esp_start="$6"
+  local b510 b511 st pt b0 b1 b2 b3 first count p2t p2f p2c
+
+  b510="$(od -An -tu1 -j 510 -N 1 "$disk" | tr -d ' ')"
+  b511="$(od -An -tu1 -j 511 -N 1 "$disk" | tr -d ' ')"
+  if [[ "$b510" != "85" || "$b511" != "170" ]]; then
+    echo "FATAL: MBR signature missing at offset 510-511 (got 0x$b510 0x$b511, expected 0x55 0xaa)" >&2
+    exit 1
+  fi
+
+  st="$(od -An -tu1 -j 446 -N 1 "$disk" | tr -d ' ')"
+  pt="$(od -An -tu1 -j 450 -N 1 "$disk" | tr -d ' ')"
+  read -r b0 b1 b2 b3 <<< "$(od -An -tu1 -j 454 -N 4 "$disk" | tr -s ' \n' ' ')"
+  first=$((b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)))
+  read -r b0 b1 b2 b3 <<< "$(od -An -tu1 -j 458 -N 4 "$disk" | tr -s ' \n' ' ')"
+  count=$((b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)))
+
+  if [[ "$st" != "128" ]]; then
+    echo "FATAL: MBR partition entry 1 is not active/bootable (status 0x$st)" >&2
+    exit 1
+  fi
+  if [[ "$pt" != "7" ]]; then
+    echo "FATAL: MBR partition entry 1 type is not 0x07 NTFS (got 0x$pt)" >&2
+    exit 1
+  fi
+  if [[ "$first" -ne "$vol_start" ]]; then
+    echo "FATAL: MBR partition entry 1 first LBA $first != expected $vol_start" >&2
+    exit 1
+  fi
+  if [[ "$count" -ne "$vol_sectors" ]]; then
+    echo "FATAL: MBR partition entry 1 sector count $count != expected $vol_sectors" >&2
+    exit 1
+  fi
+  if [[ $((first + count)) -gt "$disk_sectors" ]]; then
+    echo "FATAL: MBR partition entry 1 extends past end of disk ($((first + count)) > $disk_sectors)" >&2
+    exit 1
+  fi
+
+  if [[ "$style" == "hybrid" ]]; then
+    p2t="$(od -An -tu1 -j 466 -N 1 "$disk" | tr -d ' ')"
+    read -r b0 b1 b2 b3 <<< "$(od -An -tu1 -j 470 -N 4 "$disk" | tr -s ' \n' ' ')"
+    p2f=$((b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)))
+    read -r b0 b1 b2 b3 <<< "$(od -An -tu1 -j 474 -N 4 "$disk" | tr -s ' \n' ' ')"
+    p2c=$((b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)))
+    if [[ "$p2t" != "238" ]]; then
+      echo "FATAL: hybrid MBR partition entry 2 is not type 0xEE protective (got 0x$p2t)" >&2
+      exit 1
+    fi
+    if [[ "$p2f" -ne 1 ]]; then
+      echo "FATAL: hybrid MBR protective entry must start at LBA 1 (got $p2f)" >&2
+      exit 1
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Assemble the disk image per partition style.
+# ---------------------------------------------------------------------------
 rm -f "$DISKIMG"
-qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
 
-sfdisk "$DISKIMG" <<SFDISK
+if [[ "$PARTITION_STYLE" == "gpt" ]]; then
+  NTFS_START=$((GPT_ESP_START + ESP_SECTORS))
+  DISK_SECTORS=$(round_up_mib $((NTFS_START + NTFS_SECTORS + 34)))
+  DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
+  echo "  -> GPT: ESP ${ESP_MIB} MiB at LBA 2048; NTFS system volume ${NTFS_MIB} MiB at LBA ${NTFS_START}; disk ${DISK_MIB} MiB"
+
+  qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
+
+  sfdisk "$DISKIMG" <<SFDISK
 label: gpt
 unit: sectors
 first-lba: 2048
@@ -2404,195 +2719,131 @@ start=2048, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="
 start=$NTFS_START, size=$NTFS_SECTORS, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="magic"
 SFDISK
 
-dd if=/dev/zero \
-  of="$B/esp.fat" \
-  bs=1M count="$ESP_MIB" status=none
+  dd if=/dev/zero \
+    of="$B/esp.fat" \
+    bs=1M count="$ESP_MIB" status=none
 
-mkfs.vfat -F 32 -n MAGICESP "$B/esp.fat" >/dev/null
+  mkfs.vfat -F 32 -n MAGICESP "$B/esp.fat" >/dev/null
 
-export MTOOLS_SKIP_CHECK=1
+  export MTOOLS_SKIP_CHECK=1
 
-mmd -i "$B/esp.fat" ::/EFI
-mmd -i "$B/esp.fat" ::/EFI/BOOT
-mmd -i "$B/esp.fat" ::/EFI/magic
+  mmd -i "$B/esp.fat" ::/EFI
+  mmd -i "$B/esp.fat" ::/EFI/BOOT
+  mmd -i "$B/esp.fat" ::/EFI/magic
 
-mcopy -i "$B/esp.fat" -s \
-  "$B/esp/EFI/BOOT/"* ::/EFI/BOOT/
+  mcopy -i "$B/esp.fat" -s \
+    "$B/esp/EFI/BOOT/"* ::/EFI/BOOT/
 
-mcopy -i "$B/esp.fat" -s \
-  "$B/esp/EFI/magic/"* ::/EFI/magic/
+  mcopy -i "$B/esp.fat" -s \
+    "$B/esp/EFI/magic/"* ::/EFI/magic/
 
-dd if="$B/esp.fat" \
-  of="$DISKIMG" \
-  bs=512 seek=2048 conv=notrunc status=none
+  dd if="$B/esp.fat" \
+    of="$DISKIMG" \
+    bs=512 seek=2048 conv=notrunc status=none
 
-rm -f "$B/esp.fat"
+  rm -f "$B/esp.fat"
 
-# Build the system partition as NTFS. A temporary standalone image avoids
-# offset-sensitive filesystem creation; it is copied into the GPT partition
-# only after every staged file has been written successfully.
-rm -f "$B/ntfs.tmp"
-qemu-img create -f raw "$B/ntfs.tmp" "${NTFS_MIB}M" >/dev/null
-mkntfs -F -Q -L magic -s 512 -c 4096 -p "$NTFS_START" -H 255 -S 63 "$B/ntfs.tmp" >/dev/null
+  build_ntfs_volume "$B/ntfs.tmp" "$NTFS_START"
 
-# Populate NTFS without mounting. ntfscp can write file data but cannot
-# create parent directories; scripts/ntfs-mkdir.c uses libntfs-3g directly,
-# avoiding FUSE and mount permissions (which are unavailable in Android/proot).
-NTFS_DIR_LIST="$B/ntfs-directories.list"
-NTFS_FILE_LIST="$B/ntfs-files.list"
-NTFS_MKDIR="$B/ntfs-mkdir"
-# The NTFS helper MUST use Linux/proot tools, never Termux's Android toolchain.
-# Do not fall back to PATH unless the resolved executable is outside Termux.
-NTFS_CC=""
-for candidate in /usr/bin/gcc /usr/local/bin/gcc /bin/gcc /usr/bin/cc /usr/local/bin/cc /bin/cc; do
-  if [[ -x "$candidate" && ! -d "$candidate" ]]; then
-    NTFS_CC="$candidate"
-    break
-  fi
-done
-if [[ -z "$NTFS_CC" ]]; then
-  for tool in gcc cc; do
-    candidate="$(command -v "$tool" 2>/dev/null || true)"
-    case "$candidate" in
-      /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) continue ;;
-    esac
-    if [[ -n "$candidate" && -x "$candidate" ]]; then
-      NTFS_CC="$candidate"
-      break
-    fi
-  done
-fi
-if [[ -z "$NTFS_CC" ]]; then
-  echo "error: no Linux/proot gcc or cc found; refusing to use Termux's Android compiler" >&2
-  echo "diagnostic: PATH=$PATH" >&2
-  echo "diagnostic: gcc=$(command -v gcc 2>/dev/null || echo unavailable)" >&2
-  echo "diagnostic: cc=$(command -v cc 2>/dev/null || echo unavailable)" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
+  dd if="$B/ntfs.tmp" \
+    of="$DISKIMG" \
+    bs=512 seek="$NTFS_START" conv=notrunc status=none
 
-echo "  -> compiling NTFS helper with Linux/proot compiler $NTFS_CC"
-# Resolve pkg-config/pkgconf from the same Linux/proot environment as GCC.
-# Some minimal proot installs have the libntfs-3g headers and library but omit
-# pkg-config entirely, so support a verified system-header/library fallback.
-NTFS_PKG_CONFIG=""
-for candidate in /usr/bin/pkg-config /usr/local/bin/pkg-config /bin/pkg-config /usr/bin/pkgconf /usr/local/bin/pkgconf /bin/pkgconf; do
-  if [[ -x "$candidate" && ! -d "$candidate" ]]; then
-    NTFS_PKG_CONFIG="$candidate"
-    break
-  fi
-done
-if [[ -z "$NTFS_PKG_CONFIG" ]]; then
-  for tool in pkg-config pkgconf; do
-    candidate="$(command -v "$tool" 2>/dev/null || true)"
-    case "$candidate" in
-      /data/data/com.termux/*|/data/user/0/com.termux/*|*/com.termux/files/*) candidate="" ;;
-    esac
-    if [[ -n "$candidate" && -x "$candidate" ]]; then
-      NTFS_PKG_CONFIG="$candidate"
-      break
-    fi
-  done
-fi
+  rm -f "$B/ntfs.tmp"
 
-NTFS_CFLAGS=""
-NTFS_LIBS=""
-if [[ -n "$NTFS_PKG_CONFIG" ]] && "$NTFS_PKG_CONFIG" --exists libntfs-3g; then
-  NTFS_CFLAGS="$("$NTFS_PKG_CONFIG" --cflags libntfs-3g)"
-  NTFS_LIBS="$("$NTFS_PKG_CONFIG" --libs libntfs-3g)"
-  echo "  -> libntfs-3g metadata: $NTFS_PKG_CONFIG"
+elif [[ "$PARTITION_STYLE" == "mbr" ]]; then
+  NTFS_START=$VOLUME_START_LBA
+  DISK_SECTORS=$(round_up_mib $((NTFS_START + NTFS_SECTORS)))
+  DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
+  echo "  -> MBR: MBR at LBA 0; BIOS stage-2 reserved LBA 1-63; NTFS system volume ${NTFS_MIB} MiB at LBA ${NTFS_START}; disk ${DISK_MIB} MiB"
+
+  qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
+
+  build_ntfs_volume "$B/ntfs.tmp" "$NTFS_START"
+
+  dd if="$B/ntfs.tmp" \
+    of="$DISKIMG" \
+    bs=512 seek="$NTFS_START" conv=notrunc status=none
+
+  rm -f "$B/ntfs.tmp"
+
+  build_mbr "$B/mbr.bin" mbr "$NTFS_START" "$NTFS_SECTORS" "$DISK_SECTORS" 0
+
+  dd if="$B/mbr.bin" \
+    of="$DISKIMG" \
+    bs=512 seek=0 conv=notrunc status=none
+
+  validate_mbr "$DISKIMG" "$DISK_SECTORS" "$NTFS_START" "$NTFS_SECTORS" mbr 0
+
+  rm -f "$B/mbr.bin"
+
+elif [[ "$PARTITION_STYLE" == "hybrid" ]]; then
+  # Hybrid: a GPT disk (ESP + NTFS system volume) with a real MBR overlaid at
+  # LBA 0 so the same disk can boot under both UEFI (GPT) and BIOS (MBR).
+  NTFS_START=$((GPT_ESP_START + ESP_SECTORS))
+  DISK_SECTORS=$(round_up_mib $((NTFS_START + NTFS_SECTORS + 34)))
+  DISK_MIB=$((DISK_SECTORS / SECTORS_PER_MIB))
+  echo "  -> Hybrid: GPT ESP ${ESP_MIB} MiB at LBA 2048 + NTFS system volume ${NTFS_MIB} MiB at LBA ${NTFS_START}, plus MBR at LBA 0; disk ${DISK_MIB} MiB"
+
+  qemu-img create -f raw "$DISKIMG" "${DISK_MIB}M" >/dev/null
+
+  sfdisk "$DISKIMG" <<SFDISK
+label: gpt
+unit: sectors
+first-lba: 2048
+
+start=2048, size=$ESP_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="MAGICESP"
+start=$NTFS_START, size=$NTFS_SECTORS, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="magic"
+SFDISK
+
+  dd if=/dev/zero \
+    of="$B/esp.fat" \
+    bs=1M count="$ESP_MIB" status=none
+
+  mkfs.vfat -F 32 -n MAGICESP "$B/esp.fat" >/dev/null
+
+  export MTOOLS_SKIP_CHECK=1
+
+  mmd -i "$B/esp.fat" ::/EFI
+  mmd -i "$B/esp.fat" ::/EFI/BOOT
+  mmd -i "$B/esp.fat" ::/EFI/magic
+
+  mcopy -i "$B/esp.fat" -s \
+    "$B/esp/EFI/BOOT/"* ::/EFI/BOOT/
+
+  mcopy -i "$B/esp.fat" -s \
+    "$B/esp/EFI/magic/"* ::/EFI/magic/
+
+  dd if="$B/esp.fat" \
+    of="$DISKIMG" \
+    bs=512 seek=2048 conv=notrunc status=none
+
+  rm -f "$B/esp.fat"
+
+  build_ntfs_volume "$B/ntfs.tmp" "$NTFS_START"
+
+  dd if="$B/ntfs.tmp" \
+    of="$DISKIMG" \
+    bs=512 seek="$NTFS_START" conv=notrunc status=none
+
+  rm -f "$B/ntfs.tmp"
+
+  # Overlay a real MBR at LBA 0: entry 1 active 0x07 at LBA 64, entry 2
+  # protective 0xEE starting at LBA 1. GPT structures at LBA 1+ are untouched.
+  build_mbr "$B/mbr.bin" hybrid 64 $((GPT_ESP_START - 64)) "$DISK_SECTORS" "$GPT_ESP_START"
+
+  dd if="$B/mbr.bin" \
+    of="$DISKIMG" \
+    bs=512 seek=0 conv=notrunc status=none
+
+  validate_mbr "$DISKIMG" "$DISK_SECTORS" 64 $((GPT_ESP_START - 64)) hybrid "$GPT_ESP_START"
+
+  rm -f "$B/mbr.bin"
+
 else
-  # GCC's normal system include search path covers /usr/include. Confirm both
-  # the public headers and a linkable library exist before using -lntfs-3g.
-  NTFS_HEADER=""
-  for candidate in /usr/include/ntfs-3g/dir.h /usr/local/include/ntfs-3g/dir.h; do
-    if [[ -s "$candidate" ]]; then NTFS_HEADER="$candidate"; break; fi
-  done
-  NTFS_LIBRARY=""
-  for candidate in /usr/lib/libntfs-3g.so /usr/lib64/libntfs-3g.so /usr/local/lib/libntfs-3g.so /usr/lib/*/libntfs-3g.so; do
-    if [[ -s "$candidate" ]]; then NTFS_LIBRARY="$candidate"; break; fi
-  done
-  if [[ -z "$NTFS_HEADER" || -z "$NTFS_LIBRARY" ]]; then
-    echo "error: cannot locate Linux/proot libntfs-3g development metadata or a usable header/library pair" >&2
-    echo "diagnostic: pkg-config/pkgconf=${NTFS_PKG_CONFIG:-unavailable}" >&2
-    echo "diagnostic: header=${NTFS_HEADER:-not found}; library=${NTFS_LIBRARY:-not found}" >&2
-    echo "diagnostic: expected ntfs-3g/dir.h and libntfs-3g.so inside the Linux/proot filesystem" >&2
-    rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-    exit 1
-  fi
-  NTFS_LIBS="-lntfs-3g"
-  echo "  -> libntfs-3g metadata: verified system header/library fallback"
-fi
-echo "  -> libntfs-3g cflags: ${NTFS_CFLAGS:-<default system includes>}"
-echo "  -> libntfs-3g libs: $NTFS_LIBS"
-# shellcheck disable=SC2086
-if env -u TERMUX_EXEC__PROC_SELF_EXE "$NTFS_CC" "$ROOT/scripts/ntfs-mkdir.c" $NTFS_CFLAGS -O2 -Wall -Wextra -o "$NTFS_MKDIR" $NTFS_LIBS; then
-  :
-else
-  status=$?
-  echo "error: NTFS helper compilation failed (compiler exit $status); see compiler diagnostics above" >&2
-  echo "diagnostic: compiler=$(readlink -f "$NTFS_CC" 2>/dev/null || printf '%s' "$NTFS_CC")" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
+  echo "FATAL: unknown partition style: $PARTITION_STYLE" >&2
   exit 1
 fi
-
-if ! find "$B/rootfs" -mindepth 1 -type d -print0 | sort -z > "$NTFS_DIR_LIST"; then
-  echo "error: failed to enumerate rootfs directories for NTFS population" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-NTFS_DIR_ARGS=()
-while IFS= read -r -d '' entry; do
-  [[ "$entry" == "$B/rootfs" ]] && continue
-  relative="${entry#"$B/rootfs"/}"
-  NTFS_DIR_ARGS+=("/$relative")
-done < "$NTFS_DIR_LIST"
-if ((${#NTFS_DIR_ARGS[@]} > 0)) && ! "$NTFS_MKDIR" "$B/ntfs.tmp" "${NTFS_DIR_ARGS[@]}"; then
-  echo "error: failed to create one or more directories in NTFS system volume" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_DIR_LIST" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-rm -f "$NTFS_DIR_LIST"
-
-if ! find "$B/rootfs" -type f -print0 | sort -z > "$NTFS_FILE_LIST"; then
-  echo "error: failed to enumerate rootfs files for NTFS population" >&2
-  rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-  exit 1
-fi
-while IFS= read -r -d '' entry; do
-  relative="${entry#"$B/rootfs"/}"
-  if ! ntfscp "$B/ntfs.tmp" "$entry" "/$relative"; then
-    echo "error: failed to copy file into NTFS volume: /$relative" >&2
-    rm -f "$B/ntfs.tmp" "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-    exit 1
-  fi
-done < "$NTFS_FILE_LIST"
-rm -f "$NTFS_FILE_LIST" "$NTFS_MKDIR"
-
-# Fail the build if NTFS population did not preserve the expected Windows-like
-# system tree. ntfscat reads these files directly from the image without FUSE.
-for required in \
-  magic/System32/krnl.exe \
-  magic/System32/hal.dll \
-  magic/System32/smss.exe \
-  magic/System32/bootvid.exe \
-  magic/System32/sentlogon.exe \
-  magic/System32/settings.exe \
-  magic/System32/drivers/ata.sys
-do
-  if ! ntfscat "$B/ntfs.tmp" "/$required" >/dev/null; then
-    echo "error: required file missing or unreadable in NTFS system volume: /$required" >&2
-    rm -f "$B/ntfs.tmp"
-    exit 1
-  fi
-done
-sync
-
-dd if="$B/ntfs.tmp" \
-  of="$DISKIMG" \
-  bs=512 seek="$NTFS_START" conv=notrunc status=none
-
-rm -f "$B/ntfs.tmp"
 
 echo "build ok -> $DISKIMG"
 

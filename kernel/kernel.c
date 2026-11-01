@@ -43,6 +43,8 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
             bi->desc_size ? bi->mmap_size / bi->desc_size : 0);
 
     cpu_init();
+    if (bi->boot_mode == BOOT_MODE_BIOS)
+        pic_remap();
     PciScanNetworkDevices();
     uint16_t cs; uint64_t sp;
     __asm__ volatile("movw %%cs, %0" : "=r"(cs));
@@ -67,9 +69,14 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     smp_discover();
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
-    uint64_t got = pmm_reclaim_boot_services(bi);
-    DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",
-            got, got * 4 / 1024, pmm_free_pages() * 4 / 1024);
+    uint64_t got = 0;
+    if (bi->boot_mode == BOOT_MODE_UEFI) {
+        got = pmm_reclaim_boot_services(bi);
+        DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",
+                got, got * 4 / 1024, pmm_free_pages() * 4 / 1024);
+    } else {
+        DbgPrint("pmm: BIOS boot — skipping boot-services reclaim (no EFI services)\n");
+    }
     pmm_touch_test(HHDM_BASE);
 
     DbgPrint("\n-- kernel heap --\n");
@@ -85,7 +92,10 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and filesystem loader ready\n",
              SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);
     modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
-    smp_start_aps(bi);
+    if (bi->boot_mode == BOOT_MODE_UEFI)
+        smp_start_aps(bi);
+    else
+        DbgPrint("smp: BIOS boot — skipping AP startup (no SIPI trampoline)\n");
 
 #if TEST_FAULT == 1
     DbgPrint("triggering #UD...\n");

@@ -369,3 +369,28 @@ static void cpu_init_cpu(uint32_t cpu_index) {
     cpu_set_gs_base(cpu);
 }
 static void cpu_init(void) { cpu_init_cpu(0); }
+
+/* ---- BIOS: legacy PIC remapping ---- */
+/* Remap the 8259A PIC: master IRQs 0x20-0x27, slave IRQs 0x28-0x2F. */
+static void pic_remap(void) {
+    uint8_t m1, m2;
+    __asm__ volatile ("inb $0x21, %0" : "=a"(m1));
+    __asm__ volatile ("inb $0xA1, %0" : "=a"(m2));
+    __asm__ volatile ("outb %0, $0x20" :: "a"((uint8_t)0x11));   /* ICW1: init, icw4 needed */
+    __asm__ volatile ("outb %0, $0xA0" :: "a"((uint8_t)0x11));
+    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x20));   /* ICW2: master base 0x20 */
+    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x28));   /* ICW2: slave base 0x28 */
+    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x04));   /* ICW3: slave at IRQ2 */
+    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x02));   /* ICW3: cascade identity */
+    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x01));   /* ICW4: 8086 mode */
+    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x01));
+    __asm__ volatile ("outb %0, $0x21" :: "a"(m1));              /* restore master mask */
+    __asm__ volatile ("outb %0, $0xA1" :: "a"(m2));              /* restore slave mask */
+}
+
+/* BIOS-mode HAL init: PIC remap + IDT/GDT + int 0x80 syscall gate.
+ * Called instead of HalInitSystem() when boot_mode == BOOT_MODE_BIOS. */
+static void HalInitSystemBIOS(void) {
+    pic_remap();
+    cpu_init_cpu(0);   /* loads GDT/IDT, sets up int 0x80 gate */
+}

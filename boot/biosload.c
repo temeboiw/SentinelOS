@@ -898,8 +898,8 @@ static void enter_long_mode(uint64_t entry64, void *bi) {
         "orl $0x100, %%eax\n\t"
         "wrmsr\n\t"
 
-        /* CR3 = PML4 */
-        "movl %[pml4_addr], %%eax\n\t"
+        /* CR3 = PML4 (at fixed physical 0x7000) */
+        "movl $0x7000, %%eax\n\t"
         "mov %%eax, %%cr3\n\t"
 
         /* CR0: PG(31) | PE(0) */
@@ -922,14 +922,14 @@ static void enter_long_mode(uint64_t entry64, void *bi) {
 
         ".code64\n\t"             /* now in 64-bit long mode */
         /* RDI = BootInfo*, RAX = entry point, jump */
-        "movq %[bi_val], %%rdi\n\t"
+        "movq %[entry64_val], %%rax\n\t"   /* entry64_val in rdi ("D") */
+        "movq %[bi_val], %%rdi\n\t"        /* bi_val in rsi ("S") */
         "jmpq *%%rax\n\t"
         :
         : [gdt_desc_addr] "b"(gdt_desc_addr),   /* ebx */
-          [pml4_addr] "d"(pml4_addr),            /* edx */
           [bi_val] "S"(bi_val),                  /* rsi */
-          "a"(entry64_val)                       /* rax */
-        : "rax", "rcx", "rdx", "rdi", "memory"
+          [entry64_val] "D"(entry64_val)         /* rdi */
+        : "eax", "ecx", "edx", "memory"
     );
     for (;;) __asm__ volatile ("hlt");
 }

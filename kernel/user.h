@@ -47,7 +47,7 @@
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
 #define SYS_DeleteFile                    32
-#define SYS_NtInitializeGraphics        37
+#define SYS_NtInitializeGraphics        54
 #define SYS_NtFlushGraphics              33
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35

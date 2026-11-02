@@ -110,7 +110,6 @@ static int ata_identify(ATA_CONTEXT *ata, uint8_t drive_select, uint64_t *sector
 }
 static int ata_read_sector(ATA_CONTEXT *ata, uint64_t lba, uint8_t *buffer) {
     if (!ata || !ata->online) return -1;
-    uint64_t capacity = ata->sector_count * ATA_SECTOR_BYTES;
     if (lba >= ata->sector_count) return -1;
     /* LBA28: sectors 0 .. 2^28-1 (268M). LBA48: sectors 2^28 .. 2^48-1. */
     if (lba < ATA_LBA28_MAX_SECTORS) {
@@ -153,7 +152,6 @@ static int ata_read_sector(ATA_CONTEXT *ata, uint64_t lba, uint8_t *buffer) {
 }
 static int ata_write_sector(ATA_CONTEXT *ata, uint64_t lba, const uint8_t *buffer) {
     if (!ata || !ata->online) return -1;
-    uint64_t capacity = ata->sector_count * ATA_SECTOR_BYTES;
     if (lba >= ata->sector_count) return -1;
     /* LBA28: sectors 0 .. 2^28-1 (268M). LBA48: sectors 2^28 .. 2^48-1. */
     if (lba < ATA_LBA28_MAX_SECTORS) {

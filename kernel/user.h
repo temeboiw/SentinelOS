@@ -37,7 +37,7 @@
 #define SYS_WmQuery                 18
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
-#define SYS_NtYield                  21
+#define SYS_Yield                  21
 #define SYS_WmGetDirty               53
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
@@ -46,7 +46,8 @@
 #define SYS_NtQueryVirtualMemory       29
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
-#define SYS_NtInitializeGraphics        32
+#define SYS_DeleteFile                    32
+#define SYS_NtInitializeGraphics        33
 #define SYS_NtFlushGraphics              33
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35
@@ -3271,6 +3272,32 @@ socket_close_done:
         f->rax = vfs_close_user_file(f->rdi);
         return f;
 
+    case SYS_DeleteFile: {
+        KPROCESS *proc = MmCurrentProcess;
+        OB_OBJECT *obj = proc ? ObReferenceObjectByHandle((uintptr_t)proc->Pid,
+            (OB_HANDLE)f->rdi, ObTypeFile, OB_ACCESS_WRITE) : NULL;
+        if (!obj) { f->rax = (uint64_t)-1LL; return f; }
+        VfsUserHandle *vh = (VfsUserHandle *)obj->body;
+        if (!vh->used || !vh->writable) {
+            ObDereferenceObject(obj);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        int result;
+        if (vh->ntfs) {
+            result = ntfsk_unlink_file(&g_ntfsk_volume, vh->ino);
+        } else if (g_ext4_ok) {
+            result = e4_dir_remove(&g_ext4, vh->ino, (const char *)f->rsi);
+        } else {
+            ObDereferenceObject(obj);
+            f->rax = (uint64_t)-1LL;
+            return f;
+        }
+        ObDereferenceObject(obj);
+        f->rax = (uint64_t)result;
+        return f;
+    }
+
     case SYS_NtQueryFileSize: {
         KPROCESS *proc=MmCurrentProcess;
         OB_OBJECT *obj=proc?ObReferenceObjectByHandle((uintptr_t)proc->Pid,
@@ -4005,7 +4032,7 @@ socket_close_done:
         wm_scene_dirty = 0;
         return f;
     }
-    case SYS_NtYield: {
+    case SYS_Yield: {
         int me = up_find_proc(MmCurrentProcess);
         if (me >= 0) {
             up_save(f, me);

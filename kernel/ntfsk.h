@@ -200,6 +200,28 @@ static void ntfsk_unmount(NTFSK_VOLUME *v) {
     if(v->mft_runs)kfree(v->mft_runs);
     memset(v,0,sizeof(*v));
 }
+
+static int ntfsk_unlink_file(NTFSK_VOLUME *v, uint64_t ino) {
+    if (!v || !v->mounted) return -1;
+    if (!ino) return -1;
+    /* Read the MFT record and mark it free by clearing the in-use flag,
+     * rather than zeroing the entire entry. This preserves MFT structure
+     * while preventing reuse and indicating the file is deleted. */
+    uint8_t *r = kmalloc(v->record_size);
+    if (!r) return -1;
+    int rc = ntfsk_record(v, ino, r);
+    if (rc < 0) { kfree(r); return -1; }
+    /* Clear the in-use flag (bit 0) to mark the entry as deleted.
+     * Full link count decrement and directory entry removal would require
+     * additional NTFS attribute support not yet implemented. */
+    uint16_t flags = ntfsk_u16(r + 22);
+    flags &= ~NTFSK_FILE_IN_USE;
+    ntfsk_put_u16(r + 22, flags);
+    rc = ntfsk_record_write(v, ino, r);
+    kfree(r);
+    if (rc < 0) return rc;
+    return 0;
+}
 static int ntfsk_mount(NTFSK_VOLUME *v,SENTINEL_BLOCK_DEVICE *d,
                        uint64_t partition_offset,uint64_t partition_bytes) {
     if(!v||!d||!d->online||!d->read||!d->sector_size||

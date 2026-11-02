@@ -10,7 +10,9 @@
 #define ATA_SECTOR_BYTES 512u
 #define ATA_WAIT_LIMIT 500000u
 #define ATA_MAX_LBA28 0x10000000ull
+#define ATA_MAX_LBA48 0x100000000000ull  /* 128 TiB in LBA48 */
 #define ATA_MAX_DRIVES 4u
+#define ATA_LBA28_MAX_SECTORS 268435456u  /* 2^28, the LBA28 limit */
 
 typedef struct {
     const SENTINEL_DRIVER_SERVICES *services;
@@ -87,42 +89,112 @@ static int ata_identify(ATA_CONTEXT *ata, uint8_t drive_select, uint64_t *sector
     if (ata_wait_data(ata) != 0) return -1;
     uint16_t identify[256];
     ata_insw(ata->io_base, identify, 256);
-    uint64_t count = (uint64_t)identify[60] | ((uint64_t)identify[61] << 16);
-    if (!count) return -1;
-    if (count > ATA_MAX_LBA28) count = ATA_MAX_LBA28;
-    *sectors = count;
+    /*
+     * LBA28 user sector count is at IDENTIFY words 60-61 (0x3C-0x3D).
+     * LBA48 user sector count is at IDENTIFY words 100-103 (0x64-0x67).
+     * Check bit 10 of Features/Capabilities (words 49-50) to detect LBA48.
+     * If LBA48 is supported, read the 48-bit count; otherwise use LBA28 count.
+     */
+    uint16_t lba28_count = (uint16_t)identify[60] | ((uint16_t)identify[61] << 16);
+    uint16_t lba48_count = (uint16_t)identify[100] | ((uint16_t)identify[101] << 16) |
+                           ((uint64_t)identify[102] << 32) | ((uint64_t)identify[103] << 48);
+    /* Check bit 10 of word 49 (Features) for LBA48 capability */
+    uint8_t lba48_supported = (uint8_t)((identify[49] >> 8) & 0x01) || (uint8_t)(identify[49] & 0x01);
+    if (lba48_supported && lba48_count > 0) {
+        *sectors = (uint64_t)lba48_count;
+    } else {
+        *sectors = (uint64_t)lba28_count;
+        if (!*sectors) *sectors = ATA_MAX_LBA28;
+    }
     return 0;
 }
-static int ata_read_sector(ATA_CONTEXT *ata, uint32_t lba, uint8_t *buffer) {
-    if (!ata || !ata->online || lba >= ATA_MAX_LBA28 ||
-        (uint64_t)lba >= ata->sector_count) return -1;
-    if (ata_wait_not_busy(ata, 0) != 0) return -1;
-    ata_outb((uint16_t)(ata->io_base + 6),
-             (uint8_t)(ata->drive_select | ((lba >> 24) & 0x0F)));
-    ata_outb((uint16_t)(ata->io_base + 2), 1);
-    ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
-    ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
-    ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
-    ata_outb((uint16_t)(ata->io_base + 7), 0x20);
-    if (ata_wait_data(ata) != 0) return -1;
-    ata_insw(ata->io_base, buffer, 256);
+static int ata_read_sector(ATA_CONTEXT *ata, uint64_t lba, uint8_t *buffer) {
+    if (!ata || !ata->online) return -1;
+    uint64_t capacity = ata->sector_count * ATA_SECTOR_BYTES;
+    if (lba >= ata->sector_count) return -1;
+    /* LBA28: sectors 0 .. 2^28-1 (268M). LBA48: sectors 2^28 .. 2^48-1. */
+    if (lba < ATA_LBA28_MAX_SECTORS) {
+        /* ---- LBA28 path ---- */
+        if (ata_wait_not_busy(ata, 0) != 0) return -1;
+        ata_outb((uint16_t)(ata->io_base + 6),
+                 (uint8_t)(ata->drive_select | ((lba >> 24) & 0x0F)));
+        ata_outb((uint16_t)(ata->io_base + 2), 1);
+        ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
+        ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
+        ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
+        ata_outb((uint16_t)(ata->io_base + 7), 0x20);
+        if (ata_wait_data(ata) != 0) return -1;
+        ata_insw(ata->io_base, buffer, 256);
+    } else {
+        /* ---- LBA48 path ---- */
+        /* Set up 48-bit LBA via Device/Feature/LBA registers */
+        if (ata_wait_not_busy(ata, 0) != 0) return -1;
+        /* Feature register: enable LBA48 (per ATA spec) */
+        ata_outb((uint16_t)(ata->io_base + 1), 0x2F);  /* 0x2F = EN_LBA */
+        /* Device register: set LBA48 bit (bit 6) and drive number */
+        uint8_t dev = (uint8_t)(ata->drive_select | 0x40 | ((lba >> 40) & 0x0F));
+        ata_outb((uint16_t)(ata->io_base + 6), dev);
+        /* LBA Low (bits 0-7) */
+        ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
+        /* LBA Mid (bits 8-15) */
+        ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
+        /* LBA High (bits 16-23) */
+        ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
+        /* LBA High-B (bits 24-31) */
+        ata_outb((uint16_t)(ata->io_base + 6), (uint8_t)(lba >> 24));
+        /* LBA High-C (bits 32-39) - set Device bit 6 via Feature reg */
+        ata_outb((uint16_t)(ata->io_base + 1), 0x3F);  /* 0x3F = EN_LBA48 */
+        /* Command: READ DMA EXT (0x25) or READ 48 (0x20 with LBA48 enabled) */
+        ata_outb((uint16_t)(ata->io_base + 7), 0x25);
+        if (ata_wait_data(ata) != 0) return -1;
+        ata_insw(ata->io_base, buffer, 256);
+    }
     return 0;
 }
-static int ata_write_sector(ATA_CONTEXT *ata, uint32_t lba, const uint8_t *buffer) {
-    if (!ata || !ata->online || lba >= ATA_MAX_LBA28 ||
-        (uint64_t)lba >= ata->sector_count) return -1;
-    if (ata_wait_not_busy(ata, 0) != 0) return -1;
-    ata_outb((uint16_t)(ata->io_base + 6),
-             (uint8_t)(ata->drive_select | 0x40 | ((lba >> 24) & 0x0F)));
-    ata_outb((uint16_t)(ata->io_base + 2), 1);
-    ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
-    ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
-    ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
-    ata_outb((uint16_t)(ata->io_base + 7), 0x30);
-    if (ata_wait_data(ata) != 0) return -1;
-    ata_outsw(ata->io_base, buffer, 256);
-    ata_outb((uint16_t)(ata->io_base + 7), 0xE7);
-    return ata_wait_not_busy(ata, 0);
+static int ata_write_sector(ATA_CONTEXT *ata, uint64_t lba, const uint8_t *buffer) {
+    if (!ata || !ata->online) return -1;
+    uint64_t capacity = ata->sector_count * ATA_SECTOR_BYTES;
+    if (lba >= ata->sector_count) return -1;
+    /* LBA28: sectors 0 .. 2^28-1 (268M). LBA48: sectors 2^28 .. 2^48-1. */
+    if (lba < ATA_LBA28_MAX_SECTORS) {
+        /* ---- LBA28 path ---- */
+        if (ata_wait_not_busy(ata, 0) != 0) return -1;
+        ata_outb((uint16_t)(ata->io_base + 6),
+                 (uint8_t)(ata->drive_select | 0x40 | ((lba >> 24) & 0x0F)));
+        ata_outb((uint16_t)(ata->io_base + 2), 1);
+        ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
+        ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
+        ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
+        ata_outb((uint16_t)(ata->io_base + 7), 0x30);
+        if (ata_wait_data(ata) != 0) return -1;
+        ata_outsw(ata->io_base, buffer, 256);
+        ata_outb((uint16_t)(ata->io_base + 7), 0xE7);
+        return ata_wait_not_busy(ata, 0);
+    } else {
+        /* ---- LBA48 path ---- */
+        if (ata_wait_not_busy(ata, 0) != 0) return -1;
+        /* Set LBA48 features */
+        ata_outb((uint16_t)(ata->io_base + 1), 0x2F);  /* EN_LBA */
+        /* Device register: LBA48 bit (6) + drive number */
+        uint8_t dev = (uint8_t)(ata->drive_select | 0x40 | ((lba >> 40) & 0x0F));
+        ata_outb((uint16_t)(ata->io_base + 6), dev);
+        /* Write LBA 0-7 */
+        ata_outb((uint16_t)(ata->io_base + 3), (uint8_t)lba);
+        /* Write LBA 8-15 */
+        ata_outb((uint16_t)(ata->io_base + 4), (uint8_t)(lba >> 8));
+        /* Write LBA 16-23 */
+        ata_outb((uint16_t)(ata->io_base + 5), (uint8_t)(lba >> 16));
+        /* Write LBA 24-31 */
+        ata_outb((uint16_t)(ata->io_base + 6), (uint8_t)(lba >> 24));
+        /* Write LBA 32-39 - enable LBA48 via Feature reg 0x3F */
+        ata_outb((uint16_t)(ata->io_base + 1), 0x3F);
+        /* Command: WRITE DMA EXT (0x35) */
+        ata_outb((uint16_t)(ata->io_base + 7), 0x35);
+        if (ata_wait_data(ata) != 0) return -1;
+        ata_outsw(ata->io_base, buffer, 256);
+        ata_outb((uint16_t)(ata->io_base + 7), 0xE7);
+        return ata_wait_not_busy(ata, 0);
+    }
 }
 static int ata_block_read(void *context, uint64_t offset, void *destination, uint64_t length) {
     ATA_CONTEXT *ata = (ATA_CONTEXT *)context;

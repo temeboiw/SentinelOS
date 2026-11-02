@@ -37,7 +37,7 @@
 #define SYS_WmQuery                 18
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
-#define SYS_NtYield                  21
+#define SYS_Yield                  21
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
@@ -2541,7 +2541,7 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = 0;
         return f;
 
-    case SYS_NtYield: {
+    case SYS_Yield: {
         int me = up_find_proc(MmCurrentProcess);
 
         if (me >= 0) {

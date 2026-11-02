@@ -11,7 +11,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_NtYield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52, SYS_QueryFileMetadata=30, SYS_WmUnregister=17 };
+enum { SYS_Exit=0, SYS_Write=1, SYS_Alloc=3, SYS_OpenFile=5, SYS_ReadFile=6, SYS_GetProcAddress=9, SYS_Yield=21, SYS_CloseFile=22, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52, SYS_QueryFileMetadata=30, SYS_WmUnregister=17 };
 #define ARG_VA ((const char *)0x6FF00000ULL)
 #define MAX_BUFFER 0xFFFFFFFFu /* grow until allocation fails; parser offsets are currently 32-bit */
 #define MAX_FAT 524288
@@ -110,7 +110,7 @@ static void show_and_exit(const char *title, const char *message, u64 code) {
         (u64)"user32.dll",(u64)"MessageBoxA",0);
     if (box) (void)box(0,message,title,0);
     (void)sy3(SYS_Exit,code,0,0);
-    for (;;) (void)sy3(SYS_NtYield,0,0,0);
+    for (;;) (void)sy3(SYS_Yield,0,0,0);
 }
 static void out_u32(u32 v) {
     char b[12]; int n=0;
@@ -672,7 +672,7 @@ static int extract_embedded_installer(void) {
         /* Extraction is a long-running user task. Cooperatively yield after
            each bounded read/write pair so input, window management, and other
            user processes are not starved for the entire 169 MiB operation. */
-        (void)sy3(SYS_NtYield,0,0,0);
+        (void)sy3(SYS_Yield,0,0,0);
         if (offset>=next_report) {
             out("msiexec: extracted "); out_u32((u32)offset); out(" bytes\n");
             next_report+=16u*1024u*1024u;
@@ -886,7 +886,7 @@ static void show_installer_window(const char *name) {
         if (!msi_getmsg(&msg,0,0,0)) {
             /* Let other runnable processes and input polling progress instead
              * of spinning at full CPU while the message queue is empty. */
-            (void)sy3(SYS_NtYield,0,0,0);
+            (void)sy3(SYS_Yield,0,0,0);
             continue;
         }
         if ((msg.message==0x0100u && msg.wParam==27u) || msg.message==0x0010u) {
@@ -894,7 +894,7 @@ static void show_installer_window(const char *name) {
              * Kernel exit cleanup remains a defensive second line of cleanup. */
             (void)sy3(SYS_WmUnregister,0,0,0);
             (void)sy3(SYS_Exit,0,0,0);
-            for (;;) (void)sy3(SYS_NtYield,0,0,0);
+            for (;;) (void)sy3(SYS_Yield,0,0,0);
         }
     }
 }
@@ -903,7 +903,7 @@ void mainCRTStartup(void) {
     const char *name=ARG_VA;
     if (!name[0]) {
         out("Usage: double-click an .msi in File Explorer.\n");
-        for (;;) (void)sy3(SYS_NtYield,0,0,0);
+        for (;;) (void)sy3(SYS_Yield,0,0,0);
     }
     out("msiexec: inspecting "); out(name); out("\n");
     if (!init_msi_workspace()) {
@@ -914,7 +914,7 @@ void mainCRTStartup(void) {
     u64 h=sy3(SYS_OpenFile,(u64)name,0,0);
     if ((long long)h<0) {
         out("msiexec: cannot open package in the current directory\n");
-        for (;;) (void)sy3(SYS_NtYield,0,0,0);
+        for (;;) (void)sy3(SYS_Yield,0,0,0);
     }
     /*
      * Grow the total MSI buffer as needed. 16 MiB is only the maximum size
@@ -967,7 +967,7 @@ void mainCRTStartup(void) {
         if (!n) break;
         total+=(u32)n;
         /* Package reads must not monopolize the cooperative user scheduler. */
-        (void)sy3(SYS_NtYield,0,0,0);
+        (void)sy3(SYS_Yield,0,0,0);
         if (total-last_ui_progress>=4u*1024u*1024u ||
             (expected_size && total>=expected_size)) {
             msi_ui_progress("Reading MSI package",total,expected_size);
@@ -1009,7 +1009,7 @@ void mainCRTStartup(void) {
         }
         show_installer_window(name);
         (void)sy3(SYS_Exit,0,0,0);
-        for (;;) (void)sy3(SYS_NtYield,0,0,0);
+        for (;;) (void)sy3(SYS_Yield,0,0,0);
     }
     show_and_exit("MSI Reader",
         "This file is not a supported MSI compound database. No files were changed.",1);

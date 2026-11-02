@@ -33,9 +33,39 @@ __attribute__((naked)) void __chkstk(void) {
 #endif
 
 static uint8_t kstack[64 * 1024] __attribute__((aligned(16)));
+/* Kernel stack canary: placed at the top of the stack so any overflow
+ * clobbers it before corrupting return addresses. Checked in the exception
+ * dispatcher (cpu.h) and on every syscall entry path that can recurse. */
+static uint64_t kstack_canary __attribute__((aligned(8)));
+static void kstack_canary_init(void) {
+    uint64_t seed = 0xA5A5A5A5A5A5A5A5ULL;
+    /* Mix in a runtime-varying value (stack address) so the canary isn't
+     * a fixed constant an attacker could guess. */
+    uint64_t addr = (uint64_t)(uintptr_t)kstack;
+    seed ^= addr;
+    seed ^= (addr << 13) | (addr >> 51);
+    seed ^= (addr << 37) | (addr >> 27);
+    kstack_canary = seed;
+    *(uint64_t *)(kstack + sizeof kstack - 8) = kstack_canary;
+}
+static int kstack_canary_ok(void) {
+    return *(uint64_t *)(kstack + sizeof kstack - 8) == kstack_canary;
+}
 
 __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     HalInitSystem(0, bi);
+    kstack_canary_init();
+    /* Early validation: verify the canary at the stack top matches the
+     * initialized kstack_canary variable. If mismatch, something clobbered
+     * the stack before we even got here — halt immediately rather than
+     * risking silent data corruption later. */
+    if (!kstack_canary_ok()) {
+        DbgPrint("\n*** KERNEL STACK CANARY EARLY FAILURE ***\n");
+        DbgPrint("kstack_canary expected=%016llx, stored=%016llx\n",
+            (unsigned long long)kstack_canary,
+            (unsigned long long)*(uint64_t *)(kstack + sizeof kstack - 8));
+        for (;;) __asm__ volatile("cli; hlt");
+    }
     DbgPrint("\n=== magic kernel ===\n");
     DbgPrint("bootinfo: fb=%p %ux%u pitch=%u  mmap=%p size=%llu desc=%llu (%llu entries)\n",
             (void *)bi->fb_base, bi->width, bi->height, bi->pitch,

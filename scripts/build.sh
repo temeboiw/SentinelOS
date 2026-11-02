@@ -65,12 +65,24 @@ for arg in "$@"; do
     --reset-nvram)       RESET_NVRAM=1 ;;
     --clean|-c)          DO_CLEAN=1 ;;
     --no-disk-image)     DO_NO_DISK_IMAGE=1 ;;
+    --only-efi|-e)       DO_NO_DISK_IMAGE=1; echo "build: compiling PE/EFI images only (disk image creation skipped)" ;;
     --secure-boot)       SECURE_BOOT_MODE=1 ;;
     --mbr)               PARTITION_STYLE="mbr" ;;
     --partition)         EXPECT_VALUE="partition" ;;
     --partition=*)       PARTITION_STYLE="${arg#--partition=}" ;;
     -h|--help)
-      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image] [--secure-boot] [--mbr|--partition={gpt|mbr|hybrid}]"
+      echo "Usage: $0 [--run] [--keep-fallback] [--reset-nvram] [--clean] [--no-disk-image] [--only-efi|-e] [--secure-boot] [--mbr|--partition={gpt|mbr|hybrid}]"
+      echo ""
+      echo "Options:"
+      echo "  --no-disk-image   Skip disk-image creation (PE/EFI images only)"
+      echo "  --only-efi / -e   Compile PE/EFI images only (skip disk/ISO entirely)"
+      echo "  --secure-boot     Enable secure boot (requires SECURE_BOOT_KEY and SECURE_BOOT_CERT)"
+      echo "  --mbr             Use MBR partition style instead of GPT"
+      echo "  --partition={gpt|mbr|hybrid}  Set partition style (default: gpt)"
+      echo "  --run             Build and launch in QEMU"
+      echo "  --keep-fallback   Keep EFI\\BOOT\\BOOTX64.EFI after registering UEFI entry"
+      echo "  --reset-nvram     Reset NVRAM variables before rebuilding"
+      echo "  --clean           Remove build/ directory before building"
       exit 0
       ;;
     *)

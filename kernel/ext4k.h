@@ -872,253 +872,90 @@ static int e4_dir_add_file(Ext4k *fs, uint32_t dir_ino,
  * Inline extent-root only; metadata rollback is best-effort and cannot recover
  * from power loss or a failed rollback write.
  */
-static int e4_dir_grow_add_file(Ext4k *fs, uint32_t dir_ino,
-                                const char *name, uint32_t child_ino) {
-    if (!fs || !fs->ok || !name || !child_ino || fs->is64 ||
-        fs->blksz != 4096) return -1;
-    uint8_t dir[256], block[4096];
-    if (e4_inode(fs, dir_ino, dir) < 0 ||
-        (E16(dir, 0) & 0xF000u) != 0x4000u) return -1;
-    uint8_t original[256];
-    for (uint32_t i = 0; i < fs->isize; ++i) original[i] = dir[i];
-    uint64_t old_size = e4_size(dir);
-    if (old_size % fs->blksz) return -1;
-    uint64_t lb = old_size / fs->blksz;
-    if (lb > UINT32_MAX) return -1;
-    uint64_t physical = 0;
-    if (e4_alloc_block(fs, &physical) < 0) return -1;
-    for (uint32_t i = 0; i < fs->blksz; ++i) block[i] = 0;
-    E32(block, 0) = child_ino;
-    E16(block, 4) = (uint16_t)fs->blksz;
-    uint32_t nl = 0;
-    while (name[nl] && nl < 255) ++nl;
-    if (!nl || name[nl]) { e4_free_block(fs, physical); return -1; }
-    block[6] = (uint8_t)nl;
-    block[7] = 1;
-    for (uint32_t i = 0; i < nl; ++i) block[8 + i] = (uint8_t)name[i];
-    if (e4_write(fs, physical * fs->blksz, block, fs->blksz) < 0) {
-        e4_free_block(fs, physical); return -1;
-    }
-    if (e4_extent_append_root(fs, dir, (uint32_t)lb, physical) < 0) {
-        e4_free_block(fs, physical); return -1;
-    }
-    E32(dir, 4) = (uint32_t)(old_size + fs->blksz);
-    E32(dir, 28) += fs->blksz / 512;
-    if (e4_inode_write(fs, dir_ino, dir) < 0) {
-        (void)e4_inode_write(fs, dir_ino, original);
-        (void)e4_free_block(fs, physical);
-        return -1;
-    }
-    uint8_t verify_inode[256];
-    if (e4_inode(fs, dir_ino, verify_inode) < 0 ||
-        e4_size(verify_inode) != old_size + fs->blksz ||
-        e4_map(fs, verify_inode, (uint32_t)lb) != physical) {
-        if (e4_inode_write(fs, dir_ino, original) < 0) {
-            fs->write_faulted = 1; fs->ok = 0;
-        }
-        if (e4_free_block(fs, physical) < 0) {
-            fs->write_faulted = 1; fs->ok = 0;
-        }
-        return -1;
-    }
-    return 0;
-}
 
-/*
- * Compose the existing inode and directory primitives into a named empty
- * regular file. Directory space is checked before reserving the inode, but
- * disk I/O failures can still leave an allocated, unreachable inode; full
- * journaling/rollback and directory growth remain future work.
- */
-static int e4_create_empty_file(Ext4k *fs, uint32_t dir_ino,
-                                const char *name, uint32_t *out_ino) {
-    if (!fs || !fs->ok || !name || !out_ino || !dir_ino) return -1;
+static int e4_dir_remove(Ext4k *fs, uint32_t dir_ino, const char *name) {
+    if (!e4_write_supported(fs) || !name) return -1;
     uint32_t nl = 0;
     while (name[nl] && nl < 256) {
         if (name[nl] == '/' || name[nl] == '\\') return -1;
         ++nl;
     }
-    if (!nl || nl > 255 || name[0] == '.' ||
-        e4_lookup(fs, dir_ino, name))
-        return -1;
+    if (!nl || nl > 255) return -1;
+    if (name[0] == '.' || (nl == 2 && name[1] == '.')) return -1;
 
-    uint8_t dir[256];
-    if (e4_inode(fs, dir_ino, dir) < 0 ||
-        (E16(dir, 0) & 0xF000u) != 0x4000u)
-        return -1;
-
-    uint32_t ino = 0;
-    if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
-    int drc = e4_dir_add_file(fs, dir_ino, name, ino);
-    if (drc == -2) drc = e4_dir_grow_add_file(fs, dir_ino, name, ino);
-    if (drc < 0) { (void)e4_discard_file_inode(fs, ino); return -1; }
-    *out_ino = ino;
-    return 0;
-}
-
-
-/*
- * Create a named file and populate it. Metadata writes are not journaled;
- * failures may leave an incomplete published entry and require recovery.
- */
-static int e4_create_file_with_data(Ext4k *fs, uint32_t dir_ino,
-                                    const char *name, const void *data,
-                                    uint64_t len, uint32_t *out_ino) {
-    if (!fs || !fs->ok || !name || !data || !len || !out_ino ||
-        len > UINT32_MAX || !dir_ino)
-        return -1;
-
-    /* Validate the parent and reject duplicates before reserving resources. */
-    uint8_t dir[256];
-    if (e4_inode(fs, dir_ino, dir) < 0 ||
-        (E16(dir, 0) & 0xF000u) != 0x4000u ||
-        e4_lookup(fs, dir_ino, name))
-        return -1;
-
-    /* Keep the inode unreachable until its payload is written successfully. */
-    uint32_t ino = 0;
-    if (e4_create_empty_file_inode(fs, &ino) < 0) return -1;
-    if (e4_write_inode_grow(fs, ino, 0, data, len) < 0) {
-        /* No directory entry was published; inode/data cleanup is best-effort. */
-        (void)e4_discard_file_inode(fs, ino);
-        return -1;
-    }
-
-    int rc = e4_dir_add_file(fs, dir_ino, name, ino);
-    if (rc == -2) rc = e4_dir_grow_add_file(fs, dir_ino, name, ino);
-    if (rc < 0) {
-        (void)e4_discard_file_inode(fs, ino);
-        return -1;
-    }
-    *out_ino = ino;
-    return 0;
-}
-
-#define VFS_MAX_ENT 1024
-typedef struct { char name[256]; uint8_t is_dir; uint32_t ino; } VfsEnt;
-static VfsEnt vfs_ents[VFS_MAX_ENT];
-static int vfs_nent;
-static Ext4k g_ext4;
-static int g_ext4_ok;
-static uint32_t vfs_parent_ino;
-#define VFS_MAX_DEPTH 64
-static uint32_t vfs_dir_stack[VFS_MAX_DEPTH];
-static int vfs_depth;
-static char vfs_cwd[128];
-static uint32_t vfs_cwd_ino = 2;
-
-static int vfs_listdir(uint32_t dir_ino) {
-    uint8_t inode[256];
-    vfs_nent = 0;
-    /* The NTFS path can reach this legacy ext4 cache through file-close and
-       output-file syscall paths. Never use the unmounted ext4 volume's zero
-       block size as a divisor. */
-    if (!g_ext4_ok || !g_ext4.blksz || g_ext4.blksz > sizeof(g_ext4.blk))
-        return -1;
-    if (e4_inode(&g_ext4, dir_ino, inode) < 0) return -1;
-    uint64_t size = e4_size(inode);
-    static uint8_t buf[4096];
-    for (uint64_t pos = 0; pos < size && vfs_nent < VFS_MAX_ENT; pos += g_ext4.blksz) {
-        uint64_t pb = e4_map(&g_ext4, inode, (uint32_t)(pos / g_ext4.blksz));
-        if (!pb || e4_read(&g_ext4, pb * g_ext4.blksz, buf, g_ext4.blksz) < 0) continue;
-        for (uint32_t o = 0; o + 8 <= g_ext4.blksz && vfs_nent < VFS_MAX_ENT; ) {
-            uint16_t rl = E16(buf, o + 4);
-            if (rl < 8) break;
-            uint32_t ino = E32(buf, o);
-            uint8_t nl = buf[o + 6];
-            uint8_t ft = buf[o + 7];
-            if (ino && nl > 0) {
-                if (!(nl == 1 && buf[o + 8] == '.') &&
-                    !(nl == 2 && buf[o + 8] == '.' && buf[o + 9] == '.')) {
-                    VfsEnt *e = &vfs_ents[vfs_nent++];
-                    for (int i = 0; i < nl; i++) e->name[i] = (char)buf[o + 8 + i];
-                    e->name[nl] = 0;
-                    e->ino = ino;
-                    /*
-                     * Do not rely solely on the directory-entry file_type.
-                     * Some ext filesystems omit that field or have entries
-                     * whose type is unknown. The inode's i_mode is authoritative.
-                     */
-                    e->is_dir = (ft == 2);
-                    {
-                        uint8_t in2[256];
-                        if (e4_inode(&g_ext4, ino, in2) == 0) {
-                            uint16_t mode = E16(in2, 0) & 0xF000;
-                            if (mode == 0x4000) e->is_dir = 1;
-                            else if (mode == 0x8000 || mode == 0xA000 ||
-                                     mode == 0x2000 || mode == 0x6000 ||
-                                     mode == 0x1000 || mode == 0xC000)
-                                e->is_dir = 0;
-                        }
+    /* Find the directory entry, mark it free, decrement link count, update dir size. */
+    for (uint64_t pos = 0; pos < fs->volume_bytes; pos += fs->blksz) {
+        uint64_t pb = e4_map(fs, dir_ino, (uint32_t)(pos / fs->blksz));
+        if (!pb) return -1;
+        uint8_t block[4096];
+        if (e4_read(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+        for (uint32_t off = 0; off + 8 <= fs->blksz; ) {
+            uint32_t ino = E32(block, off);
+            uint16_t rec = E16(block, off + 4);
+            uint8_t rec_nl = block[off + 6];
+            if (rec < 8 || (rec & 3u) || rec > fs->blksz - off)
+                return -1;
+            if (ino != 0 && rec_nl == nl) {
+                /* Check name matches */
+                int match = 1;
+                for (uint32_t j = 0; j < nl; ++j) {
+                    if (block[off + 8 + j] != (uint8_t)name[j]) {
+                        match = 0;
+                        break;
                     }
                 }
+                if (match) {
+                    /* Mark entry as free by setting ino=0 */
+                    E32(block, off) = 0;
+                    if (e4_write(fs, pb * fs->blksz, block, fs->blksz) < 0) return -1;
+                    /* Decrement the link count in the deleted inode */
+                    uint8_t inode[256];
+                    if (e4_inode(fs, ino, inode) < 0) return -1;
+                    if (E16(inode, 26) > 0) {
+                        E16(inode, 26)--;
+                        if (e4_inode_write(fs, ino, inode) < 0) return -1;
+                    }
+                    /* If link count reached 0, free the inode */
+                    if (E16(inode, 26) == 0) {
+                        (void)e4_free_inode(fs, ino);
+                    }
+                    /* Compute new directory size by scanning all entries */
+                    uint32_t total_size = 0;
+                    for (uint64_t p2 = 0; p2 < fs->volume_bytes; p2 += fs->blksz) {
+                        uint64_t pb2 = e4_map(fs, dir_ino, (uint32_t)(p2 / fs->blksz));
+                        if (!pb2) break;
+                        uint8_t block2[4096];
+                        if (e4_read(fs, pb2 * fs->blksz, block2, fs->blksz) < 0) return -1;
+                        for (uint32_t off2 = 0; off2 + 8 <= fs->blksz; ) {
+                            uint32_t e_ino = E32(block2, off2);
+                            uint16_t e_rec = E16(block2, off2 + 4);
+                            uint8_t e_nl = block2[off2 + 6];
+                            if (e_rec < 8 || (e_rec & 3u) || e_rec > fs->blksz - off2) break;
+                            if (e_ino != 0) {
+                                uint32_t used = (8u + e_nl + 3u) & ~3u;
+                                total_size += used;
+                            }
+                            off2 += e_rec;
+                        }
+                    }
+                    /* Update directory size in the parent inode */
+                    uint8_t dir_inode[256];
+                    if (e4_inode(fs, dir_ino, dir_inode) < 0) return -1;
+                    E32(dir_inode, 4) = total_size;
+                    if (e4_inode_write(fs, dir_ino, dir_inode) < 0) return -1;
+                    return 0;
+                }
             }
-            o += rl;
+            if (ino == 0) {
+                /* Skip free entry */
+                off += rec;
+                continue;
+            }
+            off += rec;
         }
     }
-    return vfs_nent;
+    return -1; /* entry not found */
 }
 
-static int vfs_partition_read(void *context,uint64_t offset,void *dst,uint64_t len) {
-    return SentinelBlockReadDevice((SENTINEL_BLOCK_DEVICE *)context,offset,dst,len);
-}
+/*
 
-
-static int vfs_chdir(const char *name) {
-    if (!name || !name[0]) return -1;
-    /* parent */
-    if (name[0]=='.' && name[1]=='.' && name[2]==0) {
-        if (vfs_depth <= 0) return 0;
-        vfs_cwd_ino = vfs_dir_stack[--vfs_depth];
-        vfs_parent_ino = vfs_depth > 0 ? vfs_dir_stack[vfs_depth - 1] : 2;
-        return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
-    }
-    for (int i = 0; i < vfs_nent; i++) {
-        const char *a = vfs_ents[i].name, *b = name;
-        int ok = 1;
-        while (*a || *b) { if (*a++ != *b++) { ok = 0; break; } }
-        if (!ok) continue;
-        if (!vfs_ents[i].is_dir) return -2;
-        if (vfs_depth >= VFS_MAX_DEPTH) return -1;
-        vfs_dir_stack[vfs_depth++] = vfs_cwd_ino;
-        vfs_parent_ino = vfs_cwd_ino;
-        vfs_cwd_ino = vfs_ents[i].ino;
-        return vfs_listdir(vfs_cwd_ino) >= 0 ? 0 : -1;
-    }
-    return -1;
-}
-
-static int vfs_mount_c(void) {
-    SENTINEL_PARTITION partitions[SENTINEL_PARTITION_MAX];
-    int mounted = 0;
-    for (uint32_t i=0;i<SentinelBlockDeviceCount&&!mounted;i++) {
-        SENTINEL_BLOCK_DEVICE *device=SentinelBlockGet(i);
-        if(!device||!device->sector_size||device->sector_count>UINT64_MAX/device->sector_size)continue;
-        int count=SentinelPartitionScan(vfs_partition_read,device,device->sector_count,
-                                        device->sector_size,partitions,SENTINEL_PARTITION_MAX);
-        if(count<0){DbgPrint("fs: %s partition scan failed (%d)\n",device->name,count);continue;}
-        for(int p=0;p<count;p++) {
-            Ext4k candidate={0};
-            if(e4_mount_device(&candidate,device,partitions[p].first_lba,
-                               partitions[p].sector_count)==0) {
-                g_ext4=candidate;
-                DbgPrint("fs: ext4 on %s partition %d at LBA %llu (%llu sectors)\n",
-                         device->name,p,(unsigned long long)partitions[p].first_lba,
-                         (unsigned long long)partitions[p].sector_count);
-                mounted=1;break;
-            }
-        }
-    }
-    if(!mounted){DbgPrint("fs: no valid ext4 partition found\n");return -1;}
-    vfs_cwd_ino = 2;
-    vfs_parent_ino = 2;
-    vfs_depth = 0;
-    vfs_cwd[0] = 67;
-    vfs_cwd[1] = 58;
-    vfs_cwd[2] = 92;
-    vfs_cwd[3] = 0;
-    vfs_listdir(2);
-    g_ext4_ok = 1;
-    DbgPrint("fs: C: volume root");
-    return 0;
-}

@@ -59,7 +59,7 @@ done
 require "$KUSER" "if(!g_ext4_ok||!g_ext4.blksz||length<sizeof(UserVolumeMetadata)" "volume metadata syscall does not claim unsupported NTFS metadata"
 require "$KUSER" "if(!vh->used||!g_ext4_ok||e4_inode(&g_ext4,vh->ino,inode)<0)" "file metadata syscall does not claim unsupported NTFS metadata"
 require "$KUSER" "#define SYS_NtCloseFile 22" "file close syscall retains its legacy dispatch number"
-require "$KUSER" "#define SYS_NtYield                  21" "yield syscall retains its legacy dispatch number"
+require "$KUSER" "#define SYS_Yield                  21" "yield syscall retains its legacy dispatch number"
 require "$KUSER" "ObCreateObject(ObTypeFile" "VFS file handles are created by the Object Manager"
 require "$KUSER" "ObReferenceObjectByHandle((uintptr_t)proc->Pid" "VFS file operations validate process-owned handles"
 if grep -Eq '^[[:space:]]*[^/].*vfs_user_handles\[' "$KUSER"; then

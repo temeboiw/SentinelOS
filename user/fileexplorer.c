@@ -6,7 +6,8 @@ typedef const char *LPCSTR;
 
 enum { SYS_Exit=0, SYS_Write=1, SYS_CreateProcess=4, SYS_GetProc=9, SYS_Chdir=12,
        SYS_OpenFile=5, SYS_ReadFile=6, SYS_CloseFile=22, SYS_QueryFileSize=25,
-       SYS_SetFilePosition=26, SYS_CreateOutputFile=51, SYS_WriteOutputFile=52 };
+       SYS_SetFilePosition=26, SYS_DeleteFile=32, SYS_CreateOutputFile=51,
+       SYS_WriteOutputFile=52 };
 
 static u64 sy3(u64 n, u64 a, u64 b, u64 c) {
     u64 r;
@@ -82,7 +83,7 @@ static const char *context_item(int i) {
         case 1: return "Properties";
         case 2: return "Copy file";
         case 3: return "Cut (not supported)";
-        case 4: return "Delete (not supported)";
+        case 4: return "Delete";
         case 5: return "Paste file";
         case 6: return "Refresh";
         case 7: return "Close menu";
@@ -871,6 +872,28 @@ void mainCRTStartup(void) {
         }
         if (msg.message == 0x0100 && g_context_menu) {
             if (msg.wParam == 0x1B) { g_context_menu=0; draw_rows(pText,pInv); }
+            if (msg.wParam == 0x0D) {
+                /* Enter selects the highlighted context menu item. */
+                int selected = g_context_row - g_scroll;
+                if (selected >= 0 && selected < CONTEXT_ITEM_COUNT) {
+                    if (selected == 4) {
+                        /* Delete the selected file. */
+                        if (selected >= 0 && selected < g_count && !g_isdir[selected]) {
+                            long long h = (long long)sy3(SYS_DeleteFile, (u64)g_names[selected], 0, 0);
+                            if (h >= 0) {
+                                /* Refresh the view after deletion. */
+                                g_last_file_row = -1;
+                                reload(pQuery, pText, pInv);
+                            }
+                        }
+                    } else if (selected == 2) {
+                        /* Copy file - not implemented via context menu yet. */
+                    }
+                }
+                g_context_menu = 0;
+                draw_rows(pText, pInv);
+                continue;
+            }
             continue;
         }
         if (msg.message == 0x0100 && msg.wParam == 0x0D && !g_context_menu) {

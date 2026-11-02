@@ -252,6 +252,23 @@ __attribute__((used)) Frame *isr_handler(Frame *f) {
     if ((f->cs & 3u) == 3u)
         return user_exception_handler(f);
 
+    /* Kernel stack overflow detection: if the canary at the top of the
+     * kernel stack has been clobbered, we are executing on a corrupted
+     * stack. Halting is the only safe option — continuing risks silent
+     * data corruption or a double fault. */
+    extern uint8_t kstack[];
+    extern uint64_t kstack_canary;
+    if ((uint64_t)f >= (uint64_t)kstack && (uint64_t)f < (uint64_t)kstack + 65536ULL) {
+        uint64_t stored = *(uint64_t *)((uint64_t)kstack + 65536ULL - 8);
+        if (stored != kstack_canary) {
+            DbgPrint("\n*** KERNEL STACK CANARY VIOLATION ***\n");
+            DbgPrint("stack=%p..%p  frame=%p  canary=%016llx expected=%016llx\n",
+                (void *)kstack, (void *)((uint64_t)kstack + 65536ULL), (void *)f,
+                (unsigned long long)stored, (unsigned long long)kstack_canary);
+            for (;;) __asm__ volatile("cli; hlt");
+        }
+    }
+
     uint64_t cr2, cr3;
     __asm__ volatile("movq %%cr2, %0" : "=r"(cr2));
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));

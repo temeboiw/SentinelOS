@@ -47,7 +47,7 @@
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
 #define SYS_DeleteFile                    32
-#define SYS_NtInitializeGraphics        33
+#define SYS_NtInitializeGraphics        37
 #define SYS_NtFlushGraphics              33
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35
@@ -2209,6 +2209,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     int flush_ok=gfx_flush(x,y,w,h);
     if(wm_dbg_sample(dbg_n))
         SENTINEL_GFX_LOG("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
+    (void)flush_ok;
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 

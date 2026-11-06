@@ -1,4 +1,3 @@
-
 typedef unsigned int u32;
 typedef unsigned int DWORD;
 typedef unsigned int UINT;
@@ -36,10 +35,10 @@ static void u32_wide_to_ansi(char *out, unsigned int cap, const unsigned short *
 static const char *u32_clip_lookup(unsigned int format);
 
 enum {
-    SYS_Exit=0, SYS_Write=1, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
+    SYS_Exit=0, SYS_Write=1, SYS_GetPid=2, SYS_MapFb=8, SYS_GetInput=10, SYS_GetSystemTime=23,
     SYS_Shutdown=11, SYS_WmReg=15, SYS_WmMin=16,
     SYS_WmUnreg=17, SYS_WmQuery=18, SYS_WmRestore=19,
-    SYS_WmRect=20, SYS_WmGetDirty=53, SYS_CreateProcess=4, SYS_QueryDir=7, SYS_SetCurrentDirectory=12,
+    SYS_WmRect=20, SYS_WmGetDirty=53, SYS_WmCursor=54, SYS_CreateProcess=4, SYS_QueryDir=7, SYS_SetCurrentDirectory=12,
     SYS_GetTickCount=24, SYS_InitializeGraphics=32, SYS_FlushGraphics=33, SYS_PresentLayer=37, SYS_PresentWindowSurface=40, SYS_NtGetApplicationError=42,
     SYS_Print=1
 };
@@ -170,6 +169,15 @@ typedef struct { DWORD pointerType,pointerId,frameId,pointerFlags; void *sourceD
 static void u32_mouse_record(void){unsigned int at=(u32_mouse_history_head+u32_mouse_history_count)%32;if(u32_mouse_history_count==32){u32_mouse_history_head=(u32_mouse_history_head+1)%32;at=(u32_mouse_history_head+u32_mouse_history_count-1)%32;}else u32_mouse_history_count++;u32_mouse_history[at].x=g_mx;u32_mouse_history[at].y=g_my;u32_mouse_history[at].time=++u32_mouse_time;u32_mouse_history[at].extra=0;}
 
 static int g_menu, g_drag, g_drag_ox, g_drag_oy;
+/* Smallest resizable window: keeps the caption controls and a usable frame. */
+#define U32_RESIZE_MIN_W 112
+#define U32_RESIZE_MIN_H 100
+/* Window resize drag state. Edges are tracked independently so a corner drags
+ * both axes while a side drags one. The start rect is kept fixed and every
+ * motion event is recomputed from it (no delta accumulation). */
+static int g_resizing, g_resize_ox, g_resize_oy;
+static int g_resize_sx, g_resize_sy, g_resize_sw, g_resize_sh;
+static int g_resize_left, g_resize_right, g_resize_top, g_resize_bottom;
 static int g_start_hover=-1;
 static int g_start_scale_active, g_start_scale_percent=100, g_start_scale_x, g_start_scale_y;
 /* A non-desktop process can receive clicks over the shared taskbar. Publish
@@ -195,6 +203,7 @@ static void u32_clear_layer(u32 *layer);
 static WINDOW g_wnd;
 /* Kernel window registration is deferred until ShowWindow for initially hidden HWNDs. */
 static int u32_wnd_registered;
+static u64 u32_self_pid(void) { return sy3(SYS_GetPid, 0, 0, 0); }
 static int u32_normal_x, u32_normal_y, u32_normal_w, u32_normal_h, u32_normal_valid;
 /* USER32 child HWNDs. Coordinates are client-relative, so moving the parent
  * automatically moves every child without stale screen-space rectangles. */
@@ -310,6 +319,15 @@ static unsigned int u32_caret_blink=530;
 static int u32_clip_left,u32_clip_top,u32_clip_right,u32_clip_bottom,u32_clip_active;
 static struct {void *hwnd;char name[48];void *data;int used;} u32_props[32];
 static int u32_clipboard_open; static unsigned int u32_clipboard_format,u32_clipboard_seq; static void *u32_clipboard_data,*u32_clipboard_owner;
+#define ERROR_NOT_SUPPORTED 50
+#define ERROR_INVALID_PARAMETER 87
+static DWORD u32_last_error;
+__attribute__((dllexport)) void SetLastError(DWORD e){u32_last_error=e;}
+__attribute__((dllexport)) DWORD GetLastError(void){return u32_last_error;}
+/* Clipboard viewer chain: windows notified when the clipboard changes. */
+#define U32_CLIP_CHAIN_MAX 16
+static struct { void *hwnd; void *next; int used; } u32_clip_chain[U32_CLIP_CHAIN_MAX];
+static void *u32_clip_viewer_head;
 static char g_lines[40][80];
 static int g_nlines, g_tb_n, g_tb_pids[8];
 
@@ -680,7 +698,7 @@ static const char u32_cursor_shape[16][17] = {
     "#wwwwwwwwww#....",
     "#ww#wwwwww#.....",
     "#w#..#wwww#.....",
-    "##....####......"
+    "##.............."
 };
 
 static u32 cur_under[16*16];
@@ -714,7 +732,11 @@ static void cursor_restore_fast(void) {
 /* Erase the pointer footprint from the authoritative scene whenever the
  * pointer is hidden. Restoring saved-under pixels alone can resurrect stale
  * window/menu pixels after another process has repainted the scanout. */
+static int u32_kernel_cursor_sync(void);
 static void cursor_clear_footprint(void) {
+    /* When the kernel compositor owns the pointer, hiding it is a request to
+     * the kernel; there is no private footprint in this process to erase. */
+    if (u32_kernel_cursor_sync()) { if (cur_on) cursor_restore_fast(); cur_on=0; return; }
     if (!cur_on || !g_scanout) return;
     int x0=cur_ox, y0=cur_oy;
     cursor_restore_fast();
@@ -890,7 +912,50 @@ static unsigned int u32_auto_cursor_at(int x,int y) {
     return 32512u;
 }
 
+/* Single system pointer.
+ *
+ * USER32 is linked into every process, and every process used to paint its
+ * own CPU cursor into the shared scanout with a private save-under buffer.
+ * After a focus change the previous process never erased its pointer and the
+ * new one saved that stale pointer as its background, leaving a ghost mouse
+ * (and a trail while dragging) per window. The kernel compositor now owns the
+ * one pointer: it blends it on top of every repaint. Processes only tell it
+ * what the pointer should look like and whether it is hidden.
+ *
+ * Returns 1 when the kernel draws the pointer (nothing to paint here), or 0
+ * for the boot/login phase before the desktop exists, where the legacy CPU
+ * cursor below is still used. */
+static u32 u32_kcursor_bitmap[16*16];
+static int u32_kcursor_hidden_sent;
+static int u32_kernel_cursor_sync(void) {
+    if (!g_gpu_surface) return 0;
+    if (!sy3(SYS_WmCursor, 0, 0, 0)) return 0;
+    int hidden = (u32_show_cursor_count < 0 || u32_cursor_explicit_hidden) ? 1 : 0;
+    if (hidden != u32_kcursor_hidden_sent) {
+        (void)sy3(SYS_WmCursor, 1, (u64)hidden, 0);
+        u32_kcursor_hidden_sent = hidden;
+    }
+    if (!hidden) {
+        unsigned int id = u32_cursor_effective_id();
+        /* Ask first: the kernel keeps the current shape, so the bitmap is only
+         * built and sent when the shape actually changes. */
+        if (!sy3(SYS_WmCursor, 2, (u64)id, 0)) {
+            for (int j=0;j<16;j++) for (int i=0;i<16;i++) {
+                char p = u32_cursor_pixel(id,i,j);
+                u32 v = 0;
+                if (p=='#') v = 0xFF000000u;
+                else if (p=='w') v = COL_WHITE;
+                else if (p=='+') v = COL_ACCENT;
+                u32_kcursor_bitmap[j*16+i] = v;
+            }
+            (void)sy3(SYS_WmCursor, 2, (u64)id, (u64)u32_kcursor_bitmap);
+        }
+    }
+    return 1;
+}
+
 static void cursor_save_draw(int x, int y) {
+    if (u32_kernel_cursor_sync()) { if (cur_on) cursor_restore_fast(); cur_on=0; return; }
     /* ShowCursor(FALSE) hides the pointer for this process. Restore any
      * previously painted pixels before returning so no cursor trail remains. */
     if (u32_show_cursor_count < 0 || u32_cursor_explicit_hidden) {
@@ -927,6 +992,9 @@ static void cursor_save_draw(int x, int y) {
 static void cursor_repaint_transition(int old_x,int old_y,int x,int y) {
     ensure_fb();
     if(!g_scanout)return;
+    /* The kernel owns the pointer once the desktop is up: no per-process
+     * paint, no save-under, no flush. Just keep its shape/hidden state current. */
+    if (u32_kernel_cursor_sync()) { if (cur_on) cursor_restore_fast(); cur_on=0; (void)old_x;(void)old_y;(void)x;(void)y; return; }
     /* Mouse input may be serviced by the foreground USER32 process after
      * the Explorer shell starts. Keep pointer movement independent of the
      * desktop window title/identity: the input path must always be able to
@@ -976,6 +1044,8 @@ static void ensure_fb(void) {
         g_fw = gfx.width;
         g_fh = gfx.height;
         g_scan_pitch = gfx.pitch / 4u;
+        g_gpu_surface = 1;
+    } else if (g_scanout && g_fw && g_fh && g_fw <= 1920u && g_fh <= 1080u && g_scan_pitch >= g_fw) {
         g_gpu_surface = 1;
     }
 
@@ -1042,6 +1112,15 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
 
     u32_layers_rebuild();
     int desktop_owner=u32_is_desktop_window();
+    if(!desktop_owner) {
+        /* An application owns its window, never the taskbar or the desktop
+         * shell. Without a window there is nothing to compose at all. */
+        if(g_wnd.w<=2||g_wnd.h<=2)return;
+        int taskbar_top=(int)g_fh-48;
+        if(taskbar_top<0)taskbar_top=0;
+        if(y1>taskbar_top)y1=taskbar_top;
+        if(x0>=x1||y0>=y1)return;
+    }
     /* Filter the stable layer descriptors once per rectangle, not once per
      * pixel. This keeps visibility/pointer checks out of the hot inner loop. */
     u32 *visible_layers[U32_LAYER_SURFACE_COUNT];
@@ -1076,8 +1155,19 @@ static void u32_composite_layers(int x0,int y0,int x1,int y1) {
                 for(unsigned int li=0;li<visible_layer_count;li++)
                     c=u32_alpha_over(c,*layer_row[li]++);
             } else {
-                c=*dst;
-                c=u32_alpha_over(c,*window_row);
+                /* Non-desktop processes blend their own window surface onto
+                 * scanout. Where the window layer is transparent, restore the
+                 * background from the aero cache so old window pixels are not
+                 * left behind (drag trails). */
+                u32 bg = (u32_aero_bg_w==g_fw&&u32_aero_bg_h==g_fh)
+                    ? u32_aero_bg_cache[at] : 0xFF000000u;
+                /* Put the desktop icons back too: the vacated area must look
+                 * like the desktop, not like bare wallpaper. */
+                bg = u32_alpha_over(bg, u32_desktop_layer[at]);
+                c = *dst;
+                u32 w = *window_row;
+                if ((w >> 24) == 0) c = bg;
+                else c = u32_alpha_over(bg, w);
             }
             *dst=c;
         }
@@ -1590,12 +1680,48 @@ static int u32_damage_intersects(int x0, int y0, int x1, int y1) {
            y1 > u32_clip_y0 && y0 < u32_clip_y1;
 }
 
+/* Number of live non-desktop windows registered with the window manager. */
+static int u32_app_window_count(void) {
+    int apps=0;
+    for(int wi=0;wi<8;wi++) {
+        char wname[40];int wmin=0;
+        if(!sy3(SYS_WmQuery,(u64)wi,(u64)wname,(u64)&wmin))break;
+        if(!(wname[0]=='D'&&wname[1]=='e'&&wname[2]=='s'&&wname[3]=='k'&&
+             wname[4]=='t'&&wname[5]=='o'&&wname[6]=='p'&&!wname[7]))apps++;
+    }
+    return apps;
+}
+
+/* CPU-scanout composition. The desktop owner only knows its own layers, not
+ * the surfaces of other processes, so while applications are open it may only
+ * repaint the taskbar band and the Start menu; repainting anything else would
+ * erase their windows. With no application open it owns the whole screen. */
+static void u32_scene_composite(int x0,int y0,int x1,int y1) {
+    if(!u32_is_desktop_window()||u32_app_window_count()==0) {
+        u32_composite_layers(x0,y0,x1,y1);
+        return;
+    }
+    int tb=(int)g_fh-48;
+    if(tb<0)tb=0;
+    u32_composite_layers(x0,y0>tb?y0:tb,x1,y1);
+    if(g_menu||u32_taskbar_menu_was_open) {
+        U32_START_LAYOUT sl=u32_start_layout();
+        int my0=sl.y-6,mx1=sl.x+sl.width+12;
+        u32_composite_layers(x0,y0>my0?y0:my0,x1<mx1?x1:mx1,y1<tb?y1:tb);
+    }
+}
+
 static void compose(void) {
     if(!u32_redraw_enabled)return;
     ensure_fb();
     if (!g_front) return;
 
-    if (sy3(SYS_WmGetDirty, 0, 0, 0) != 0) {
+    /* Only the desktop owner reacts to (and consumes) the scene-dirty flag.
+     * Every process used to poll it: the first app to compose after it
+     * registered its window won the race, switched itself to full-screen
+     * composition for the rest of its life, and then repainted wallpaper over
+     * Explorer's desktop and taskbar. An app must only ever repaint itself. */
+    if (u32_is_desktop_window() && sy3(SYS_WmGetDirty, 0, 0, 0) != 0) {
         u32_force_full_compose = 1;
     }
 
@@ -1653,8 +1779,10 @@ static void compose(void) {
     int auto_clip = 0;
     int saved_x0=u32_clip_x0, saved_y0=u32_clip_y0;
     int saved_x1=u32_clip_x1, saved_y1=u32_clip_y1;
-    if (!u32_render_clip && !u32_force_full_compose && g_wnd.visible && !g_wnd.minimized &&
-        g_wnd.w > 2 && !u32_is_desktop_window()) {
+    /* Also applies while the window is minimized/hidden/closing: the area it
+     * is vacating is still its own, and nothing outside it is. */
+    if (!u32_render_clip && !u32_force_full_compose &&
+        g_wnd.w > 2 && g_wnd.h > 2 && !u32_is_desktop_window()) {
         u32_render_clip=1;
         u32_clip_x0=g_wnd.x-6; u32_clip_y0=g_wnd.y-6;
         u32_clip_x1=g_wnd.x+g_wnd.w+10;
@@ -1759,7 +1887,24 @@ static void compose(void) {
     }
 
     if(layered){g_front=u32_desktop_layer;g_pitch=g_fw;u32_clear_layer(u32_desktop_layer);}
-    if (u32_damage_intersects(31,72,122,147)) {
+    /* On the GPU scanout the desktop layer is presented as a standalone surface
+     * (SYS_PresentLayer), not alpha-blended over a wallpaper base like the CPU
+     * compositor. Restore the cached wallpaper under the damaged rectangle so
+     * that a window dragged away from a position reveals the background rather
+     * than stale scanout pixels (drag trails). The window and taskbar layers
+     * are composited on top of this desktop surface. */
+    if (layered && g_gpu_surface && u32_aero_bg_w==g_fw && u32_aero_bg_h==g_fh &&
+        u32_render_clip && u32_clip_y1>u32_clip_y0 && u32_clip_x1>u32_clip_x0) {
+        int y0=u32_clip_y0<0?0:u32_clip_y0;
+        int y1=u32_clip_y1>(int)g_fh?(int)g_fh:u32_clip_y1;
+        int x0=u32_clip_x0<0?0:u32_clip_x0;
+        int x1=u32_clip_x1>(int)g_fw?(int)g_fw:u32_clip_x1;
+        for (int y=y0;y<y1;y++)
+            for (int x=x0;x<x1;x++)
+                u32_desktop_layer[(u64)y*g_fw+(u64)x] =
+                    u32_aero_bg_cache[(u64)y*g_fw+(u64)x];
+    }
+    if (!u32_suppress_desktop_card && u32_damage_intersects(31,72,122,147)) {
         int ix = 36, iy = 72, s = 48;
 
         round_fill(ix + 5, iy + 7, s, s, 10, 0x66324D67);
@@ -1776,6 +1921,18 @@ static void compose(void) {
     if (g_wnd.visible && !g_wnd.minimized) {
         int x = g_wnd.x, y = g_wnd.y;
         int w = g_wnd.w, h = g_wnd.h;
+        /* Auto-scale: if the window is too small for full-scale content,
+         * scale text/positions down uniformly so nothing overlaps the frame
+         * or caption buttons; clamped to a readable minimum. */
+        int title_len = 0;
+        while (g_wnd.title[title_len]) title_len++;
+        int need_w = 15 + title_len * 8 + 60;
+        int need_h = 44 + g_nlines * 16;
+        int scale_num = 100;
+        if (need_w > 0 && need_w > w) { int sw = w * 100 / need_w; if (sw < scale_num) scale_num = sw; }
+        if (need_h > 0 && need_h > h) { int sh = h * 100 / need_h; if (sh < scale_num) scale_num = sh; }
+        if (scale_num < 62) scale_num = 62;
+        if (scale_num > 100) scale_num = 100;
 
         /* Borderless popup/fullscreen windows must not inherit SentinelOS
          * Aero chrome. Keep them as managed windows; do not destroy the HWND. */
@@ -1793,7 +1950,21 @@ static void compose(void) {
             gradient_v(x+3,y+3,w-6,13,0xFF343A45,0xFF252A33);
             fill(x+4,y+3,w-8,1,0xFFE9ECF2);
             fill(x+3,y+43,w-6,1,0xFFE9ECF2);
-            draw_text(x + 15, y + 14, g_wnd.title, 0xFFF1F3F6);
+            /* Title: scaled position, truncated so it cannot collide with
+             * the minimize/close caption buttons. */
+            {
+                int title_x = x + 15 * scale_num / 100;
+                int button_start = (w >= 112) ? (x + w - 56) : (x + w);
+                int title_max_w = button_start - title_x - 4;
+                if (title_max_w < 0) title_max_w = 0;
+                int max_chars = title_max_w / 8;
+                if (max_chars > title_len) max_chars = title_len;
+                char tbuf[160];
+                if (max_chars > 159) max_chars = 159;
+                for (int k = 0; k < max_chars; k++) tbuf[k] = g_wnd.title[k];
+                tbuf[max_chars] = 0;
+                draw_text(title_x, y + 14 * scale_num / 100, tbuf, 0xFFF1F3F6);
+            }
             /* Render the standard caption controls as part of the retained
              * window frame, independent of child-HWND clipping or app menus. */
             if(w>=112) {
@@ -1836,33 +2007,42 @@ static void compose(void) {
             }
         }
 
-        for (int i = 0; i < g_nlines; i++) {
+        /* Content rows: scaled positions, clamped to fit inside the client
+         * area so nothing runs off the bottom frame. */
+        int content_y0 = y + 44 * scale_num / 100;
+        int line_h = 16 * scale_num / 100;
+        if (line_h < 1) line_h = 1;
+        int max_lines = ((y + h) - content_y0) / line_h;
+        if (max_lines < 0) max_lines = 0;
+        int draw_lines = g_nlines < max_lines ? g_nlines : max_lines;
+        for (int i = 0; i < draw_lines; i++) {
             const char *s = g_lines[i];
-            int tx = x + 14;
-            int ty = y + 44 + i * 16;
+            int tx = x + 14 * scale_num / 100;
+            int ty = content_y0 + i * line_h;
             u32 ic = 0;
 
             /* Most dirty rectangles only touch a few text rows. Avoid scanning
              * and decoding every line when its glyphs cannot reach this region. */
             if (u32_render_clip &&
-                (ty + 12 <= u32_clip_y0 || ty >= u32_clip_y1))
+                (ty + 12 * scale_num / 100 <= u32_clip_y0 || ty >= u32_clip_y1))
                 continue;
 
             if (i >= 2 && w >= 500) {
                 const char *p = s; int hov = 0;
                 if (*p == '>') { hov = 1; p++; } else if (*p == ' ') p++;
                 if (p != s && p[0] == '[' && p[1] && p[2] && p[3] && p[4] == ']' && p[5] == ' ') {
-                    int rx = x + 10, rw = w - 46;
-                    if (hov) { round_fill(rx, ty - 2, rw, 17, 5, 0xFF422326); fill(rx, ty - 1, 3, 15, 0xFFFF3B30); }
-                    else if (i & 1) fill(rx, ty - 2, rw, 17, 0xFF1F252E);
+                    int rx = x + 10 * scale_num / 100, rw = (w - 46) * scale_num / 100;
+                    if (rw < 1) rw = 1;
+                    if (hov) { round_fill(rx, ty - 2 * scale_num / 100, rw, 17 * scale_num / 100, 5, 0xFF422326); fill(rx, ty - 1 * scale_num / 100, 3 * scale_num / 100, 15 * scale_num / 100, 0xFFFF3B30); }
+                    else if (i & 1) fill(rx, ty - 2 * scale_num / 100, rw, 17 * scale_num / 100, 0xFF1F252E);
                     u32 rc = (p[1]=='D'&&p[2]=='I') ? 0xFFFFB454 :
                              (p[1]=='E') ? 0xFFFF3B30 :
                              (p[1]=='D'&&p[2]=='L') ? 0xFF7D8796 :
                              (p[1]=='M') ? 0xFF3DDC84 :
                              (p[1]=='P') ? 0xFFFF766E : 0xFF9AA3B1;
-                    round_fill(x + 18, ty, 14, 13, 3, rc);
-                    fill(x + 20, ty + 2, 10, 2, 0xFFE9ECF2);
-                    draw_text(x + 40, ty + 2, p + 6, hov ? 0xFFFFFFFF : COL_TEXT);
+                    round_fill(x + 18 * scale_num / 100, ty, 14 * scale_num / 100, 13 * scale_num / 100, 3, rc);
+                    fill(x + 20 * scale_num / 100, ty + 2 * scale_num / 100, 10 * scale_num / 100, 2 * scale_num / 100, 0xFFE9ECF2);
+                    draw_text(x + 40 * scale_num / 100, ty + 2 * scale_num / 100, p + 6, hov ? 0xFFFFFFFF : COL_TEXT);
                     continue;
                 }
             }
@@ -1875,15 +2055,15 @@ static void compose(void) {
                 ic = COL_MUTED;
 
             if (ic) {
-                fill(tx, ty, 12, 12, ic);
-                fill(tx + 2, ty + 2, 8, 3, COL_WHITE);
-                tx += 18;
+                fill(tx, ty, 12 * scale_num / 100, 12 * scale_num / 100, ic);
+                fill(tx + 2 * scale_num / 100, ty + 2 * scale_num / 100, 8 * scale_num / 100, 3 * scale_num / 100, COL_WHITE);
+                tx += 18 * scale_num / 100;
 
                 while (*s && *s != ' ') s++;
                 if (*s == ' ') s++;
             }
 
-            draw_text(tx, ty + 2, s, COL_TEXT);
+            draw_text(tx, ty + 2 * scale_num / 100, s, COL_TEXT);
         }
     }
 
@@ -1900,7 +2080,7 @@ static void compose(void) {
          u32_clip_x1>0 && u32_clip_x0<(int)g_fw);
     if(taskbar_in_damage) draw_taskbar();
     if(u32_render_clip){layer_x0=u32_clip_x0;layer_y0=u32_clip_y0;layer_x1=u32_clip_x1;layer_y1=u32_clip_y1;}
-    if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;if(!g_gpu_surface)u32_composite_layers(layer_x0,layer_y0,layer_x1,layer_y1);}
+    if(layered){g_front=g_scanout;g_pitch=g_scan_pitch;if(!g_gpu_surface)u32_scene_composite(layer_x0,layer_y0,layer_x1,layer_y1);}
     if(layered&&g_gpu_surface) {
         typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } U32_PRESENT_LAYER;
         int px0=layer_x0,py0=layer_y0,px1=layer_x1,py1=layer_y1;
@@ -1932,15 +2112,27 @@ static void compose(void) {
                 (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 u32_taskbar_dirty=0;
             } else {
-                a.layer=2;a.pixels=(u64)u32_window_layer;(void)sy3(SYS_PresentLayer,(u64)&a,0,0);
-                /* A click may be delivered to an application USER32 instance
-                 * rather than Desktop. Publish its Start-menu/taskbar change
-                 * explicitly; ordinary app paints must not overwrite layer 3. */
-                if(u32_taskbar_dirty) {
-                    a.layer=3;a.pixels=(u64)u32_taskbar_layer;
-                    if(sy3(SYS_PresentLayer,(u64)&a,0,0))
-                        u32_taskbar_dirty=0;
+                /* Present the app window layer, but never let it cover the
+                 * taskbar. Clip the presentation rectangle to the area above
+                 * the taskbar (bottom 48 px) so the taskbar stays visible at
+                 * all times regardless of which app process calls compose().
+                 * Only the desktop owner presents full-screen layers including
+                 * the taskbar. */
+                int taskbar_top=(int)g_fh-48;
+                if(taskbar_top<0)taskbar_top=0;
+                int present_y1=py1;
+                if(present_y1>taskbar_top)present_y1=taskbar_top;
+                if(present_y1>py0) {
+                    a.x=(u32)px0;a.y=(u32)py0;a.w=(u32)(px1-px0);
+                    a.h=(u32)(present_y1-py0);
+                    a.layer=2;a.pixels=(u64)u32_window_layer;
+                    (void)sy3(SYS_PresentLayer,(u64)&a,0,0);
                 }
+                /* App processes never present layer 3 (taskbar). Only the
+                 * desktop owner presents the taskbar layer. App processes
+                 * have empty/different taskbar buffers that would overwrite
+                 * Explorer's taskbar on scanout. u32_taskbar_dirty is
+                 * process-local and only meaningful for the desktop owner. */
             }
             /* Cursor is rendered exactly once below, after every layer is
              * submitted. Drawing it here as well caused duplicate save-under
@@ -1957,19 +2149,15 @@ static void compose(void) {
      * taskbar, Start-menu and partial repaint. Re-saving is safe when the
      * layered path already painted it: cursor_save_draw first restores the
      * previous footprint and then captures the newly composed underlay. */
+    /* Do not overwrite cur_ox/cur_oy here: they identify the old cursor's
+     * saved-under rectangle. cursor_repaint_transition() owns cursor drawing
+     * exclusively and repaints the pointer after every input event; compose()
+     * must not also draw it, otherwise duplicate save-under cycles leave stale
+     * pixels/trails when a window is dragged or the menu is toggled. compose()
+     * already removed the old cursor via cursor_restore() above so the scene
+     * is composed cleanly. */
     g_front=g_scanout; g_pitch=g_scan_pitch;
     u32_render_clip=0;
-    /* Do not overwrite cur_ox/cur_oy here: they identify the old cursor's
-     * saved-under rectangle. cursor_save_draw restores that rectangle first,
-     * then records the new pointer position and paints the final overlay. */
-    /* On the shared GPU scanout only the desktop owner may draw the
-     * system cursor. App-local compose() calls otherwise leave stale copies
-     * of the pointer behind when their window contents are repainted. */
-    if (!g_gpu_surface || u32_is_desktop_window()) {
-        cursor_save_draw(g_mx,g_my);
-        if(g_scanout && g_scan_pitch && g_fw && g_fh)
-            u32_flush_raw(g_mx,g_my,16,16);
-    }
     if(u32_force_full_compose) {
         u32_render_clip=force_saved_clip;
         u32_clip_x0=force_saved_x0; u32_clip_y0=force_saved_y0;
@@ -2018,6 +2206,9 @@ static void compose_region(int x0, int y0, int x1, int y1) {
 static void show_shutdown_screen(int reboot) {
     ensure_fb();
     if (!g_front || !g_fw || !g_fh) return;
+    /* This screen bypasses the compositor; a kernel-drawn pointer or a motion
+     * recompose would paint desktop pixels over it. */
+    (void)sy3(SYS_WmCursor, 3, 0, 0);
     cursor_restore();
     fill(0,0,(int)g_fw,(int)g_fh,0xFF11151B);
     int cx=(int)g_fw/2, cy=(int)g_fh/2;
@@ -2113,9 +2304,20 @@ static void u32_close_window_now(void) {
     u32_closing = 0;
 }
 
+/* Notify the window procedure of the current size (WM_SIZE) during a live
+ * resize, so applications can redraw their client area as the frame moves. */
+static void u32_send_size(void) {
+    if (!u32_wnd_proc) return;
+    typedef i64 (*U32_WNDPROC)(void *, unsigned int, u64, i64);
+    U32_WNDPROC proc = (U32_WNDPROC)u32_wnd_proc;
+    /* lParam: height in the high word, width in the low word (WM_SIZE). */
+    (void)proc((void *)1, 0x0005u, 0,
+               ((i64)(u32)g_wnd.h << 16) | (u32)g_wnd.w);
+}
+
 static void on_click(int x, int y) {
     int h = (int)g_fh;
-    int ty = h - 44;
+    int ty = h - 48;
 
     if (g_wnd.visible && !g_wnd.minimized) {
         int wx = g_wnd.x, wy = g_wnd.y;
@@ -2128,7 +2330,7 @@ static void on_click(int x, int y) {
             }
             if(x>=wx+ww-60 && x<wx+ww-33) {
                 g_wnd.minimized=1;
-                (void)sy3(SYS_WmMin,1,0,0);
+                (void)sy3(SYS_WmMin,u32_self_pid(),1,0);
                 compose();
                 return;
             }
@@ -2154,7 +2356,7 @@ static void on_click(int x, int y) {
 
         if (clicked_child && clicked_child->id==0xF020u) {
             g_wnd.minimized = 1;
-            sy3(SYS_WmMin, 1, 0, 0);
+            sy3(SYS_WmMin, u32_self_pid(), 1, 0);
             compose();
             return;
         }
@@ -2175,6 +2377,24 @@ static void on_click(int x, int y) {
             return;
         }
 
+        if (!clicked_child && !(u32_wnd_style & 0x80000000u) &&
+            !u32_is_desktop_window()) {
+            /* 4px resize border around the frame, mirroring u32_auto_cursor_at.
+             * Corners/sides take priority over the title bar so a click on the
+             * outer edge resizes rather than moves. */
+            int rl = x < wx + 4, rr = x >= wx + ww - 4;
+            int rt = y < wy + 4, rb = y >= wy + g_wnd.h - 4;
+            if (rl || rr || rt || rb) {
+                g_resizing = 1;
+                g_resize_left = rl; g_resize_right = rr;
+                g_resize_top = rt; g_resize_bottom = rb;
+                g_resize_ox = x; g_resize_oy = y;
+                g_resize_sx = wx; g_resize_sy = wy;
+                g_resize_sw = ww; g_resize_sh = g_wnd.h;
+                return;
+            }
+        }
+
         if (!clicked_child && hit(x, y, wx, wy, wx + ww - 60, wy + 32)) {
             g_drag = 1;
             g_drag_ox = x - wx;
@@ -2191,10 +2411,15 @@ static void on_click(int x, int y) {
         for(int i=0;i<g_tb_n;i++) {
             int bw=110;
             if(hit(x,y,ax,ty+6,ax+bw,ty+38)) {
-                sy3(SYS_WmRestore,(u64)g_tb_pids[i],0,0);
-                if(g_wnd.visible) {
-                    g_wnd.minimized=0;
-                    sy3(SYS_WmMin,0,0,0);
+                {
+                    char name[40];
+                    int minv=0;
+                    u64 pid=sy3(SYS_WmQuery,(u64)i,(u64)name,(u64)&minv);
+                    if(pid) {
+                        /* Toggle: restore a minimized window, minimize the active one. */
+                        if(minv) sy3(SYS_WmRestore,pid,0,0);
+                        else     sy3(SYS_WmMin,pid,1,0);
+                    }
                 }
                 compose();return;
             }
@@ -2405,7 +2630,7 @@ BOOL ShowWindow(void *hwnd, int cmd) {
     }
     if(cmd==0 || cmd==6 || cmd==2) {
         g_wnd.visible=1;g_wnd.minimized=1;
-        (void)sy3(SYS_WmMin,1,0,0);
+        (void)sy3(SYS_WmMin,u32_self_pid(),1,0);
     } else {
         g_wnd.visible=1;g_wnd.minimized=0;
         /* CreateWindowEx may have started hidden (style lacks WS_VISIBLE).
@@ -2425,7 +2650,7 @@ BOOL ShowWindow(void *hwnd, int cmd) {
             g_wnd.x=u32_normal_x;g_wnd.y=u32_normal_y;g_wnd.w=u32_normal_w;g_wnd.h=u32_normal_h;
             int r[4]={g_wnd.x,g_wnd.y,g_wnd.w,g_wnd.h};(void)sy3(SYS_WmRect,(u64)r,0,0);
         }
-        (void)sy3(SYS_WmMin,0,0,0);
+        (void)sy3(SYS_WmMin,u32_self_pid(),0,0);
     }
     compose();
     return was;
@@ -2663,7 +2888,10 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                         compose_region(0,sl.y,(int)g_fw,(int)g_fh);
                     }
                 }
-                u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
+                /* Keep the pressed drag/resize cursor stable while a drag is in
+                 * progress; otherwise recompute the cursor from position. */
+                if (!g_drag && !g_resizing)
+                    u32_hover_cursor_id=u32_auto_cursor_at(g_mx,g_my);
 
                 /* Window-scoped input: an application only sees the pointer
                  * while it is inside its window, or while a press that began
@@ -2736,9 +2964,59 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                     }
                 }
 
+                if (ev.type == 2 && g_resizing && (ev.btn & 1)) {
+                    /* Live-resize the window from the captured edges/corners.
+                     * Each motion is recomputed from the press-time start rect
+                     * so deltas never accumulate. */
+                    int old_x = g_wnd.x, old_y = g_wnd.y;
+                    int old_w = g_wnd.w, old_h = g_wnd.h;
+                    int dx = ev.x - g_resize_ox;
+                    int dy = ev.y - g_resize_oy;
+                    int nx = g_resize_sx, ny = g_resize_sy;
+                    int nw = g_resize_sw, nh = g_resize_sh;
+                    int rect[4];
+
+                    if (g_resize_left) { nx = g_resize_sx + dx; nw = g_resize_sw - dx; }
+                    if (g_resize_right) nw = g_resize_sw + dx;
+                    if (g_resize_top) { ny = g_resize_sy + dy; nh = g_resize_sh - dy; }
+                    if (g_resize_bottom) nh = g_resize_sh + dy;
+
+                    /* Enforce a minimum size so the caption and frame stay
+                     * usable, anchoring the far edge when resizing inward. */
+                    if (nw < U32_RESIZE_MIN_W) {
+                        nw = U32_RESIZE_MIN_W;
+                        if (g_resize_left) nx = g_resize_sx + g_resize_sw - U32_RESIZE_MIN_W;
+                    }
+                    if (nh < U32_RESIZE_MIN_H) {
+                        nh = U32_RESIZE_MIN_H;
+                        if (g_resize_top) ny = g_resize_sy + g_resize_sh - U32_RESIZE_MIN_H;
+                    }
+                    /* Clamp to the display. */
+                    if (nx < 0) nx = 0;
+                    if (ny < 0) ny = 0;
+                    if (nx + nw > (int)g_fw) { nw = (int)g_fw - nx; if (nw < U32_RESIZE_MIN_W) nw = U32_RESIZE_MIN_W; }
+                    if (ny + nh > (int)g_fh) { nh = (int)g_fh - ny; if (nh < U32_RESIZE_MIN_H) nh = U32_RESIZE_MIN_H; }
+
+                    g_wnd.x = nx; g_wnd.y = ny; g_wnd.w = nw; g_wnd.h = nh;
+                    rect[0]=nx; rect[1]=ny; rect[2]=nw; rect[3]=nh;
+                    sy3(SYS_WmRect, (u64)rect, 0, 0);
+                    /* Repaint the union of the old and new bounds so the frame
+                     * and the background underneath both stay correct. */
+                    int x0=old_x<nx?old_x:nx;
+                    int y0=old_y<ny?old_y:ny;
+                    int x1=(old_x+old_w+8)>(nx+nw+8)?old_x+old_w+8:nx+nw+8;
+                    int y1=(old_y+old_h+12)>(ny+nh+12)?old_y+old_h+12:ny+nh+12;
+                    compose_region(x0,y0,x1,y1);
+                    /* WM_SIZE is delivered once on release, not synchronously
+                     * in the tight motion loop: a synchronous app-proc call can
+                     * re-enter the input loop and clear g_resizing mid-drag,
+                     * breaking the grab ("1mm at a time / must re-grab"). */
+                }
+
                 if (ev.type == 3) {
                     /* Button-down starts a fresh hit-test/drag operation. */
                     g_drag = 0;
+                    g_resizing = 0;
                     on_click(ev.x, ev.y);
                 } else {
                     /* Type 2 also reports button release. End the drag on
@@ -2769,6 +3047,16 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_drag_moved=0;
                         }
                     }
+                    if (g_resizing) {
+                        g_resizing = 0;
+                        /* Deliver one final WM_SIZE with the committed size after
+                         * the drag ends, so the app proc cannot re-enter the input
+                         * loop and clear resize state mid-drag. */
+                        u32_send_size();
+                        /* Final clean paint of the window at its committed size. */
+                        compose_region(g_wnd.x-6, g_wnd.y-6,
+                                       g_wnd.x+g_wnd.w+10, g_wnd.y+g_wnd.h+14);
+                    }
                 }
 
                 /* Clear the old cursor footprint after click handlers and drag
@@ -2790,6 +3078,18 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                 }
                 if (last_apps>0 && apps==0) { u32_force_full_compose=1; compose(); }
                 last_apps=apps;
+            }
+            /* Shared-compositor safety net: the kernel keeps only what the
+             * desktop last published for the desktop and taskbar layers. Re-
+             * publish them about once a second so neither can stay missing. */
+            if (g_gpu_surface) {
+                static u64 last_publish_ms;
+                u64 now_ms=u32_tick_now();
+                if (now_ms && now_ms-last_publish_ms>=1000ULL) {
+                    last_publish_ms=now_ms;
+                    u32_force_full_compose=1;
+                    compose();
+                }
             }
         }
         __asm__ volatile("pause");
@@ -3176,7 +3476,7 @@ __attribute__((dllexport)) int GetWindowTextA(void *hwnd, LPSTR out, int cap) {
 }
 __attribute__((dllexport)) BOOL SetWindowTextA(void *hwnd, LPCSTR title) {
     int i=0; U32_CHILDWND *child=u32_child_from_hwnd(hwnd);
-    if(child){if(!title)return 0;while(title[i]&&i+1<sizeof(child->text)){child->text[i]=title[i];i++;}child->text[i]=0;compose();return 1;}
+    if(child){if(!title)return 0;while(title[i]&&i+1<(int)sizeof(child->text)){child->text[i]=title[i];i++;}child->text[i]=0;compose();return 1;}
     (void)hwnd; if (!title || !g_wnd.visible) return 0;
     while (title[i] && i<63) { g_wnd.title[i]=title[i]; i++; } g_wnd.title[i]=0; compose(); return 1;
 }
@@ -3290,7 +3590,7 @@ __attribute__((dllexport)) BOOL ReleaseCapture(void) { u32_capture=0; return 1; 
 __attribute__((dllexport)) void *GetCapture(void) { return u32_capture; }
 __attribute__((dllexport)) void *GetDesktopWindow(void) { return (void *)2; }
 __attribute__((dllexport)) void *GetDC(void *hwnd) { (void)hwnd; ensure_fb(); return g_front ? (void *)1 : (void *)0; }
-__attribute__((dllexport)) int ReleaseDC(void *hwnd, void *dc) { (void)hwnd; (void)dc; return 1; }
+__attribute__((dllexport)) int ReleaseDC(void *hwnd, void *dc) { (void)hwnd; (void)dc; /* No per-DC resources to release in single-DC model; call accepted. */ return 1; }
 __attribute__((dllexport)) void *BeginPaint(void *hwnd, U32_PAINTSTRUCT *ps) {
     if(!IsWindow(hwnd)||!ps)return 0;ps->hdc=GetDC(hwnd);ps->erase=u32_update_erase;
     if(u32_update_pending)ps->paint=u32_invalid_rect;else{ps->paint.left=0;ps->paint.top=0;ps->paint.right=g_wnd.w;ps->paint.bottom=g_wnd.h-32;}
@@ -4991,3 +5291,9 @@ __attribute__((dllexport)) BOOL UnionRect(U32_BATCH_RECT *d,const U32_BATCH_RECT
 __attribute__((dllexport)) BOOL SubtractRect(U32_BATCH_RECT *d,const U32_BATCH_RECT *a,const U32_BATCH_RECT *b){if(!d||!a||!b)return 0;U32_BATCH_RECT i;if(!IntersectRect(&i,a,b)){*d=*a;return !IsRectEmpty(a);}if(i.left<=a->left&&i.right>=a->right&&i.top<=a->top&&i.bottom>=a->bottom){SetRectEmpty(d);return 0;}*d=*a;if(i.top<=a->top&&i.bottom<a->bottom)d->top=i.bottom;else if(i.bottom>=a->bottom&&i.top>a->top)d->bottom=i.top;else if(i.left<=a->left&&i.right<a->right)d->left=i.right;else if(i.right>=a->right&&i.left>a->left)d->right=i.left;return !IsRectEmpty(d);}
 
 __attribute__((dllexport)) UINT EnumClipboardFormats(UINT previous){if(!u32_clipboard_format)return 0;if(previous==0)return u32_clipboard_format;return 0;}
+
+__attribute__((dllexport)) void *GetClipboardViewer(void){return u32_clip_viewer_head;}
+
+__attribute__((dllexport)) void *SetClipboardViewer(void *hwnd){if(!hwnd){SetLastError(ERROR_INVALID_PARAMETER);return 0;}int slot=-1;for(int i=0;i<U32_CLIP_CHAIN_MAX;i++){if(!u32_clip_chain[i].used){slot=i;break;}if(u32_clip_chain[i].hwnd==hwnd)return u32_clip_viewer_head;}if(slot<0){SetLastError(ERROR_NOT_SUPPORTED);return 0;}void *old=u32_clip_viewer_head;u32_clip_chain[slot].used=1;u32_clip_chain[slot].hwnd=hwnd;u32_clip_chain[slot].next=u32_clip_viewer_head;u32_clip_viewer_head=hwnd;return old;}
+
+__attribute__((dllexport)) BOOL ChangeClipboardChain(void *hwndRemove,void *hwndNewNext){if(!hwndRemove){SetLastError(ERROR_INVALID_PARAMETER);return 0;}if(u32_clip_viewer_head==hwndRemove){u32_clip_viewer_head=hwndNewNext;return 1;}for(int i=0;i<U32_CLIP_CHAIN_MAX;i++){if(u32_clip_chain[i].used&&u32_clip_chain[i].hwnd==hwndRemove){u32_clip_chain[i].used=0;for(int j=0;j<U32_CLIP_CHAIN_MAX;j++){if(u32_clip_chain[j].used&&u32_clip_chain[j].next==hwndRemove){u32_clip_chain[j].next=hwndNewNext;break;}}return 1;}}SetLastError(ERROR_INVALID_PARAMETER);return 0;}

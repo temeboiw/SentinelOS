@@ -11,9 +11,11 @@
 #include "driver.h"
 #include "driver_pe.h"
 #include "heap.h"
+#include "klib.h"
 #include "pmm.h"
 #include "vmm.h"
 #include "serial.h"
+#include "sha256.h"
 #include "ext4k.h"
 #include "ntfsk.h"
 
@@ -107,6 +109,78 @@ static const SENTINEL_DRIVER_SERVICES SentinelDriverServices = {
     SentinelDriverServiceUnregisterBlockDevice
 };
 
+/* ---------------------------------------------------------------
+ * Driver signature catalog — SHA-256 digests of approved drivers.
+ * Empty in development mode (all drivers loadable). Populate with
+ * known-good digests to enforce signature verification.
+ * --------------------------------------------------------------- */
+#define SENTINEL_DRIVER_CATALOG_MAX 64
+
+typedef struct SENTINEL_DRIVER_CATALOG_ENTRY {
+    char name[SENTINEL_DRIVER_NAME_MAX];
+    uint8_t sha256[32];
+} SENTINEL_DRIVER_CATALOG_ENTRY;
+
+static SENTINEL_DRIVER_CATALOG_ENTRY SentinelDriverCatalog[SENTINEL_DRIVER_CATALOG_MAX];
+static uint32_t SentinelDriverCatalogCount;
+
+static int SentinelDriverVerifySignature(const char *name, const void *image, uint64_t image_size) {
+    uint8_t hash[32];
+    sentinel_sha256((const uint8_t *)image, image_size, hash);
+
+    for (uint32_t i = 0; i < SentinelDriverCatalogCount; ++i) {
+        if (SentinelKernelExportNameEqual(name, SentinelDriverCatalog[i].name)) {
+            if (memcmp(hash, SentinelDriverCatalog[i].sha256, 32) != 0)
+                return -1;
+            return 0;
+        }
+    }
+
+    /* Not in catalog: allow in development mode, log the digest. */
+    DbgPrint("driver: %s sha256=%02x%02x%02x%02x... (no catalog entry, allowing)\n",
+             name, hash[0], hash[1], hash[2], hash[3]);
+    return 0;
+}
+
+static int SentinelDriverResolveImports(void *image, const SENTINEL_PE_IMAGE_INFO *info) {
+    if (!info->import_rva || !info->import_size) return 0;
+
+    uint32_t desc_index = 0;
+    while (1) {
+        SENTINEL_PE_IMPORT_DESCRIPTOR desc;
+        int dr = SentinelPeGetImportDescriptor(image, info->image_size, info, desc_index, &desc);
+        if (dr == 0) break;
+        if (dr < 0) return -1;
+
+        uint32_t sym_index = 0;
+        while (1) {
+            SENTINEL_PE_IMPORT_SYMBOL sym;
+            int sr = SentinelPeGetImportSymbol(image, info->image_size, &desc, sym_index, &sym);
+            if (sr == 0) break;
+            if (sr < 0) return -2;
+
+            void *addr = 0;
+            if (sym.by_ordinal) {
+                return -3;
+            } else {
+                const char *import_name = (const char *)((const uint8_t *)image + sym.name_rva + 2);
+                addr = SentinelKernelFindExport(import_name);
+            }
+
+            if (!addr) return -4;
+
+            uint64_t iat_rva = sym.iat_rva;
+            if (!SentinelPeRange(iat_rva, 8, info->image_size)) return -5;
+            uint64_t *iat_entry = (uint64_t *)((uint8_t *)image + iat_rva);
+            *iat_entry = (uint64_t)(uintptr_t)addr;
+
+            ++sym_index;
+        }
+        ++desc_index;
+    }
+    return 0;
+}
+
 static int SentinelDriverHasSysSuffix(const char *name) {
     if (!name) return 0;
     uint32_t n = 0;
@@ -150,6 +224,7 @@ static int SentinelDriverLoadImage(const char *name,
         !file || !file_size)
         return -1;
     if (SentinelDriverFind(name)) return -2;
+    if (SentinelDriverVerifySignature(name, file, file_size) != 0) return -18;
 
     SENTINEL_PE_IMAGE_INFO info = {0};
     int valid = SentinelPeValidateDriverFile(file, file_size, &info);
@@ -168,9 +243,10 @@ static int SentinelDriverLoadImage(const char *name,
             kfree(image);
             return -9;
         }
-        /* No implicit kernel export table: unresolved imports are not callable. */
-        kfree(image);
-        return -10;
+        if (SentinelDriverResolveImports(image, &info) != 0) {
+            kfree(image);
+            return -10;
+        }
     }
     if (SentinelPeApplyRelocations(image, info.image_size, &info,
                                    (uint64_t)(uintptr_t)image) != 0) {

@@ -110,6 +110,9 @@ static void map_4k_in(uint64_t *root, uint64_t virt, uint64_t phys, uint64_t att
     }
     unsigned pti = (virt >> 12) & 511;
     pt[pti] = (phys & PTE_ADDR) | PTE_P | attr;
+    /* The leaf entry may already be cached from a previous mapping of the same
+     * virtual address; invalidate it so the new translation takes effect. */
+    __asm__ volatile("invlpg (%0)" :: "r"(virt) : "memory");
 }
 
 static void map_4k(uint64_t virt, uint64_t phys, uint64_t attr) {

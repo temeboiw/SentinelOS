@@ -11,6 +11,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
     /* Silent firmware stage: same background as bootvid, diagnostics on COM1. */
     paint_firmware_background();
+    if (st && st->ConOut)
+        st->ConOut->OutputString(st->ConOut, L"bootuni: started\r\n");
     say(L"bootuni: started\r\n");
 
     EFI_LOADED_IMAGE_PROTOCOL *li;

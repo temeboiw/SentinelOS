@@ -21,7 +21,7 @@ require "$APP" 'dynamic resolution changes are unsupported' "display page disclo
 require "$APP" 'Memory capacity and uptime APIs are not exposed' "system page does not invent memory or uptime values"
 require "$APP" 'No authenticated user identity is exposed' "accounts page reports unavailable identity services"
 require "$APP" 'msg.message==0x0010u' "Settings exits on normal window close"
-require "$APP" '(cy-32)/32' "mouse hit testing maps the first sidebar row to the System page"
+require "$APP" '(y-68)/48' "mouse hit testing maps the first sidebar row to the System page"
 require "$BUILD" '"$ROOT/user/settings.c"' "build compiles the native Settings source"
 require "$BUILD" '"$SYS32/settings.exe"' "build stages Settings in System32"
 require "$ROOT/user/user32.c" 'static char settings_name[]="settings.exe"' "Start menu launches Settings through the shell process path"

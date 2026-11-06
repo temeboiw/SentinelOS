@@ -77,7 +77,10 @@ static int gpu_rasterizer_created=0;
 static S3D_SURFACE gpu_triangle_surface{};
 static int gpu_triangle_surface_ready=0;
 static int gpu_triangle_error_reported=0;
-static float gpu_triangle_angle=0.0f;
+static float g_triangle_angle=0.0f;
+static S3D_CONTEXT g_triangle_ctx;
+static uint32_t g_triangle_depth[1920u*1080u];
+static int g_triangle_ctx_ready=0;
 
 /* Match user32.c MSG exactly: HWND is a 32-bit handle in this OS ABI,
    followed by message, then naturally aligned WPARAM/LPARAM fields. */
@@ -211,32 +214,6 @@ static void draw_status_text(int x,int y,const char *s,u32 color,int scale) {
                 if(bits&(1u<<col))rect(x+col*scale,y+row*scale,scale,scale,color);
         }
     }
-}
-
-/* Diagnostic UI only: the 3D scene remains GPU-only. */
-static int gpu_status_screen_drawn=0;
-static void draw_gpu_unavailable_screen() {
-    if(gpu_status_screen_drawn||!pixels||!maze_view_w||!maze_view_h)return;
-    const u32 bg=rgb(12,18,31),panel=rgb(23,34,53),cyan=rgb(70,210,238);
-    for(u32 y=0;y<maze_view_h;y++)
-        for(u32 x=0;x<maze_view_w;x++)
-            put_pixel((int)x,(int)y,bg);
-    int pw=(int)maze_view_w-80,ph=230;
-    if(pw>760)pw=760;
-    if(pw<320)pw=(int)maze_view_w-24;
-    if(pw<1)pw=(int)maze_view_w;
-    if(ph>(int)maze_view_h-24)ph=(int)maze_view_h-24;
-    if(ph<80)ph=(int)maze_view_h;
-    int px=((int)maze_view_w-pw)/2,py=((int)maze_view_h-ph)/2;
-    rect(px,py,pw,ph,panel);
-    rect(px,py,pw,5,cyan);
-    draw_status_text(px+24,py+26,"GPU RENDERING UNAVAILABLE",rgb(245,248,255),2);
-    draw_status_text(px+24,py+82,"VIRGL 3D TARGET NOT ACTIVE",cyan,1);
-    draw_status_text(px+24,py+112,"START QEMU WITH HOST OPENGL",rgb(224,229,240),1);
-    draw_status_text(px+24,py+142,"VNC MODE WITH VIRGL=0 IS 2D ONLY",rgb(224,229,240),1);
-    draw_status_text(px+24,py+184,"NO CPU 3D FALLBACK IS USED",rgb(154,171,194),1);
-    present_maze_layer();
-    gpu_status_screen_drawn=1;
 }
 
 /* x87 trigonometry avoids a CRT/libm dependency in this freestanding PE. */
@@ -491,12 +468,54 @@ static void draw_frame_gpu() {
     report_frame_rate();
 }
 
+/* CPU software rasterizer fallback: render a single colored triangle
+ * rotating around the viewport center using the soft3d fixed-point 3D
+ * renderer. Demonstrates the graphics pipeline without VirGL. */
+static void draw_spinning_triangle(void) {
+    if (!pixels || !screen_w || !screen_h || screen_w > 1920u || screen_h > 1080u)
+        return;
+
+    if (!g_triangle_ctx_ready) {
+        int32_t focal = (int32_t)(300.0f * 65536.0f);
+        if (!S3DInitialize(&g_triangle_ctx, pixels, g_triangle_depth,
+                           (uint32_t)screen_w, (uint32_t)screen_h, pitch, focal))
+            return;
+        g_triangle_ctx_ready = 1;
+        print("maze.exe: VirGL unavailable; soft3d CPU spinning triangle demo\n");
+    }
+
+    S3DClear(&g_triangle_ctx, 0xFF101018u, S3D_DEPTH_FAR);
+
+    float r = g_triangle_angle * 0.0174532925f; /* degrees to radians */
+    float radius = (float)(screen_w < screen_h ? screen_w : screen_h) * 0.35f;
+    float world_z = 3.0f;
+
+    S3D_VERTEX v[3];
+    for (int i = 0; i < 3; i++) {
+        float a = r + (float)i * 2.09439510239f; /* 120 degrees apart */
+        float world_x = radius * fcos(a);
+        float world_y = radius * fsin(a);
+        v[i].x = (int32_t)(world_x * 65536.0f);
+        v[i].y = (int32_t)(world_y * 65536.0f);
+        v[i].z = (int32_t)(world_z * 65536.0f);
+        switch (i) {
+            case 0: v[i].color = 0xFFFF0000u; break; /* red */
+            case 1: v[i].color = 0xFF00FF00u; break; /* green */
+            case 2: v[i].color = 0xFF0000FFu; break; /* blue */
+        }
+    }
+
+    S3DDrawTriangle(&g_triangle_ctx, &v[0], &v[1], &v[2]);
+    S3DPresent(&g_triangle_ctx);
+
+    g_triangle_angle += 2.0f;
+    if (g_triangle_angle >= 360.0f) g_triangle_angle -= 360.0f;
+}
+
 static void draw_frame() {
     if(gpu_scene_ready){draw_frame_gpu();return;}
     if(!pixels||!screen_w||!screen_h)return;
-    /* Keep the launched fullscreen window visible in a 2D-only VM. This is
-       a diagnostic screen, not a CPU-rendered substitute for the 3D scene. */
-    draw_gpu_unavailable_screen();
+    draw_spinning_triangle();
     return;
     const int w=(int)screen_w,h=(int)screen_h;
     const int status_h=h>=240?18:0;

@@ -1,0 +1,135 @@
+{
+  "existing": [],
+  "missing": [
+    "GetSecurityDescriptorDacl",
+    "SetSecurityDescriptorDacl",
+    "GetSecurityDescriptorSacl",
+    "SetSecurityDescriptorSacl",
+    "GetSecurityDescriptorOwner",
+    "SetSecurityDescriptorOwner",
+    "GetSecurityDescriptorGroup",
+    "SetSecurityDescriptorGroup",
+    "GetSecurityDescriptorLength",
+    "IsValidSecurityDescriptor",
+    "IsValidAcl",
+    "GetAclInformation",
+    "SetAclInformation",
+    "GetLengthSid",
+    "IsValidSid",
+    "EqualSid",
+    "EqualPrefixSid",
+    "GetLengthSecurityDescriptor",
+    "InitializeSecurityDescriptor",
+    "ConvertToAutoInheritSecurityObject"
+  ],
+  "additions": [
+    {
+      "name": "GetSecurityDescriptorDacl",
+      "code": "__attribute__((dllexport)) BOOL GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR psd, BOOL *pbDaclPresent, PACL *pDacl, BOOL *pbDaclDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (pbDaclPresent) *pbDaclPresent = (psd->Control & SE_DACL_PRESENT) ? 1 : 0;\n    if (pDacl) *pDacl = psd->Dacl;\n    if (pbDaclDefaulted) *pbDaclDefaulted = (psd->Control & SE_DACL_DEFAULTED) ? 1 : 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "SetSecurityDescriptorDacl",
+      "code": "__attribute__((dllexport)) BOOL SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR psd, BOOL bDaclPresent, PACL pDacl, BOOL bDaclDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (psd->Control & SE_SELF_RELATIVE) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (bDaclPresent) {\n        if (psd->Control & SE_DACL_PROTECTED) { SetLastError(ERROR_ACCESS_DENIED); return 0; }\n        psd->Control |= SE_DACL_PRESENT;\n        psd->Dacl = pDacl;\n    } else {\n        psd->Control &= ~SE_DACL_PRESENT;\n        psd->Dacl = 0;\n    }\n    if (bDaclDefaulted) psd->Control |= SE_DACL_DEFAULTED;\n    else psd->Control &= ~SE_DACL_DEFAULTED;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetSecurityDescriptorSacl",
+      "code": "__attribute__((dllexport)) BOOL GetSecurityDescriptorSacl(PSECURITY_DESCRIPTOR psd, BOOL *pbSaclPresent, PACL *pSacl, BOOL *pbSaclDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (pbSaclPresent) *pbSaclPresent = (psd->Control & SE_SACL_PRESENT) ? 1 : 0;\n    if (pSacl) *pSacl = psd->Sacl;\n    if (pbSaclDefaulted) *pbSaclDefaulted = (psd->Control & SE_SACL_DEFAULTED) ? 1 : 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "SetSecurityDescriptorSacl",
+      "code": "__attribute__((dllexport)) BOOL SetSecurityDescriptorSacl(PSECURITY_DESCRIPTOR psd, BOOL bSaclPresent, PACL pSacl, BOOL bSaclDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (psd->Control & SE_SELF_RELATIVE) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (bSaclPresent) {\n        if (psd->Control & SE_SACL_PROTECTED) { SetLastError(ERROR_ACCESS_DENIED); return 0; }\n        psd->Control |= SE_SACL_PRESENT;\n        psd->Sacl = pSacl;\n    } else {\n        psd->Control &= ~SE_SACL_PRESENT;\n        psd->Sacl = 0;\n    }\n    if (bSaclDefaulted) psd->Control |= SE_SACL_DEFAULTED;\n    else psd->Control &= ~SE_SACL_DEFAULTED;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetSecurityDescriptorOwner",
+      "code": "__attribute__((dllexport)) BOOL GetSecurityDescriptorOwner(PSECURITY_DESCRIPTOR psd, PSID *pOwner, BOOL *pbOwnerDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (pOwner) *pOwner = psd->Owner;\n    if (pbOwnerDefaulted) *pbOwnerDefaulted = (psd->Control & SE_OWNER_DEFAULTED) ? 1 : 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "SetSecurityDescriptorOwner",
+      "code": "__attribute__((dllexport)) BOOL SetSecurityDescriptorOwner(PSECURITY_DESCRIPTOR psd, PSID pOwner, BOOL bOwnerDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (psd->Control & SE_SELF_RELATIVE) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    psd->Owner = pOwner;\n    if (bOwnerDefaulted) psd->Control |= SE_OWNER_DEFAULTED;\n    else psd->Control &= ~SE_OWNER_DEFAULTED;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetSecurityDescriptorGroup",
+      "code": "__attribute__((dllexport)) BOOL GetSecurityDescriptorGroup(PSECURITY_DESCRIPTOR psd, PSID *pGroup, BOOL *pbGroupDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (pGroup) *pGroup = psd->Group;\n    if (pbGroupDefaulted) *pbGroupDefaulted = (psd->Control & SE_GROUP_DEFAULTED) ? 1 : 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "SetSecurityDescriptorGroup",
+      "code": "__attribute__((dllexport)) BOOL SetSecurityDescriptorGroup(PSECURITY_DESCRIPTOR psd, PSID pGroup, BOOL bGroupDefaulted) {\n    if (!sec_desc_valid(psd)) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    if (psd->Control & SE_SELF_RELATIVE) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    psd->Group = pGroup;\n    if (bGroupDefaulted) psd->Control |= SE_GROUP_DEFAULTED;\n    else psd->Control &= ~SE_GROUP_DEFAULTED;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetSecurityDescriptorLength",
+      "code": "__attribute__((dllexport)) DWORD GetSecurityDescriptorLength(PSECURITY_DESCRIPTOR psd) {\n    if (!sec_desc_valid(psd)) return 0;\n    return sizeof(SECURITY_DESCRIPTOR);\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "IsValidSecurityDescriptor",
+      "code": "__attribute__((dllexport)) BOOL IsValidSecurityDescriptor(PSECURITY_DESCRIPTOR psd) {\n    return sec_desc_valid(psd);\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "IsValidAcl",
+      "code": "__attribute__((dllexport)) BOOL IsValidAcl(PACL pacl) {\n    if (!pacl) return 0;\n    if (pacl->AclRevision != ACL_REVISION && pacl->AclRevision != ACL_REVISION_DS) return 0;\n    if (pacl->AclSize < sizeof(ACL)) return 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetAclInformation",
+      "code": "__attribute__((dllexport)) BOOL GetAclInformation(PACL pacl, void *info, DWORD count, DWORD cls) {\n    (void)pacl; (void)info; (void)count; (void)cls;\n    SetLastError(ERROR_NOT_SUPPORTED);\n    return 0;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "SetAclInformation",
+      "code": "__attribute__((dllexport)) BOOL SetAclInformation(PACL pacl, const void *info, DWORD count, DWORD cls) {\n    (void)pacl; (void)info; (void)count; (void)cls;\n    SetLastError(ERROR_NOT_SUPPORTED);\n    return 0;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetLengthSid",
+      "code": "__attribute__((dllexport)) DWORD GetLengthSid(PSID sid) {\n    if (!sid) return 0;\n    return 8 + (DWORD)sid->SubAuthorityCount * 4;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "IsValidSid",
+      "code": "__attribute__((dllexport)) BOOL IsValidSid(PSID sid) {\n    if (!sid) return 0;\n    if (sid->Revision != 1) return 0;\n    if (sid->SubAuthorityCount == 0 || sid->SubAuthorityCount > 16) return 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "EqualSid",
+      "code": "__attribute__((dllexport)) BOOL EqualSid(PSID sid1, PSID sid2) {\n    int i;\n    if (!sid1 || !sid2) return 0;\n    if (!IsValidSid(sid1) || !IsValidSid(sid2)) return 0;\n    if (sid1->SubAuthorityCount != sid2->SubAuthorityCount) return 0;\n    for (i = 0; i < 6; i++)\n        if (sid1->IdentifierAuthority.Value[i] != sid2->IdentifierAuthority.Value[i]) return 0;\n    for (i = 0; i < sid1->SubAuthorityCount; i++)\n        if (sid1->SubAuthority[i] != sid2->SubAuthority[i]) return 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "EqualPrefixSid",
+      "code": "__attribute__((dllexport)) BOOL EqualPrefixSid(PSID sid1, PSID sid2) {\n    DWORD n;\n    int i;\n    if (!sid1 || !sid2) return 0;\n    if (!IsValidSid(sid1) || !IsValidSid(sid2)) return 0;\n    if (sid1->Revision != sid2->Revision) return 0;\n    for (i = 0; i < 6; i++)\n        if (sid1->IdentifierAuthority.Value[i] != sid2->IdentifierAuthority.Value[i]) return 0;\n    n = sid1->SubAuthorityCount < sid2->SubAuthorityCount ? sid1->SubAuthorityCount : sid2->SubAuthorityCount;\n    for (i = 0; i < (int)n; i++)\n        if (sid1->SubAuthority[i] != sid2->SubAuthority[i]) return 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "GetLengthSecurityDescriptor",
+      "code": "__attribute__((dllexport)) DWORD GetLengthSecurityDescriptor(PSECURITY_DESCRIPTOR psd) {\n    if (!sec_desc_valid(psd)) return 0;\n    return sizeof(SECURITY_DESCRIPTOR);\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "InitializeSecurityDescriptor",
+      "code": "__attribute__((dllexport)) BOOL InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR psd, DWORD revision) {\n    if (!psd) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }\n    if (revision != SECURITY_DESCRIPTOR_REVISION) { SetLastError(ERROR_INVALID_SECURITY_DESCR); return 0; }\n    psd->Revision = SECURITY_DESCRIPTOR_REVISION;\n    psd->Sbz1 = 0;\n    psd->Control = 0;\n    psd->Owner = 0;\n    psd->Group = 0;\n    psd->Sacl = 0;\n    psd->Dacl = 0;\n    return 1;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    },
+    {
+      "name": "ConvertToAutoInheritSecurityObject",
+      "code": "__attribute__((dllexport)) DWORD ConvertToAutoInheritSecurityObject(void *object, int type, void *generic_mapping, void *default_descriptor) {\n    (void)object; (void)type; (void)generic_mapping; (void)default_descriptor;\n    return ERROR_NOT_SUPPORTED;\n}",
+      "after": "After SetSecurityInfo function (advapi32.c line 366)"
+    }
+  ],
+  "notes": [
+    "All 20 unique APIs from the input list were missing; the input list contained two duplicates (SetSecurityDescriptorDacl and ConvertToAutoInheritSecurityObject each listed twice).",
+    "None of the listed APIs existed in advapi32.c. The only pre-existing security-related functions were SetEntriesInAclA, GetSecurityInfo, and SetSecurityInfo (all stubs), which are NOT part of the checked list.",
+    "Each added function uses __attribute__((dllexport)), validates inputs, sets the last error via SetLastError/GetLastError (new module-level mechanism), and returns honest codes: ERROR_INVALID_SECURITY_DESCR=1336, ERROR_INVALID_ACL=1332, ERROR_INVALID_SID=1337, ERROR_NOT_SUPPORTED=50, ERROR_ACCESS_DENIED=5, ERROR_INVALID_PARAMETER=87.",
+    "GetAclInformation, SetAclInformation, and ConvertToAutoInheritSecurityObject return ERROR_NOT_SUPPORTED because SentinelOS has no ACL internals/auto-inherit subsystem to back them.",
+    "Supporting types/constants added: SECURITY_DESCRIPTOR, ACL, SID, ACL_SIZE_INFORMATION, SID_IDENTIFIER_AUTHORITY, SECURITY_DESCRIPTOR_CONTROL, revision and SE_* control flags, ERROR_INVALID_SECURITY_DESCR/ERROR_INVALID_ACL/ERROR_INVALID_SID, plus a helper sec_desc_valid().",
+    "Verified with clang -fsyntax-only: file compiles cleanly with no errors."
+  ]
+}

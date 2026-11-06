@@ -4,6 +4,7 @@
  * This file deliberately distinguishes implemented Winsock utility semantics
  * from the limited kernel UDP backend. TCP sockets remain unsupported.
  */
+#include <stddef.h>
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
 typedef unsigned int DWORD;
@@ -60,6 +61,22 @@ typedef void *HANDLE;
 #define WSAECONNREFUSED 10061
 #define WSAEHOSTUNREACH 10065
 #define WSANOTINITIALISED 10093
+
+/* Socket option level and common options (honest no-op semantics). */
+#define SOL_SOCKET 0xffff
+#define SO_REUSEADDR 0x0004
+#define SO_KEEPALIVE 0x0008
+#define SO_DONTROUTE 0x0010
+#define SO_BROADCAST 0x0020
+#define SO_LINGER 0x0080
+#define SO_RCVBUF 0x1000
+#define SO_SNDBUF 0x1001
+#define SO_RCVLOWAT 0x1004
+#define SO_SNDLOWAT 0x1005
+#define SO_RCVTIMEO 0x1006
+#define SO_SNDTIMEO 0x1007
+#define SO_ERROR 0x1007
+#define SO_TYPE 0x1008
 #define WSAHOST_NOT_FOUND 11001
 #define WSATRY_AGAIN 11002
 #define WSANO_RECOVERY 11003
@@ -117,7 +134,7 @@ static unsigned long long ws2_syscall6(unsigned long long n,unsigned long long a
 static unsigned long long ws2_syscall3(unsigned long long n,unsigned long long a,unsigned long long b,unsigned long long c) {
     return ws2_syscall6(n,a,b,c,0,0,0);
 }
-typedef struct { unsigned long long s; SOCKADDR_IN peer; int connected; int type; } WS2_PEER;
+typedef struct { unsigned long long s; SOCKADDR_IN peer, local; int connected; int type; } WS2_PEER;
 static WS2_PEER ws2_peers[32];
 static int ws2_peer_slot(SOCKET s,int create) {
     for(int i=0;i<32;i++) if(ws2_peers[i].s==s && ws2_peers[i].s) return i;
@@ -452,6 +469,7 @@ __attribute__((dllexport)) int bind(SOCKET s,const SOCKADDR *a,int n) {
             r==NT_SOCKET_STATUS_INVALID_HANDLE?WSAENOTSOCK:WSAEINVAL;
         return SOCKET_ERROR;
     }
+    int p=ws2_peer_slot(s,0);if(p>=0)ws2_peers[p].local=*(const SOCKADDR_IN *)a;
     ws2_last_error=0;return 0;
 }
 __attribute__((dllexport)) int listen(SOCKET s,int backlog) { (void)s;(void)backlog;return ws2_no_io(); }
@@ -524,10 +542,45 @@ __attribute__((dllexport)) int recvfrom(SOCKET s,char *b,int n,int f,SOCKADDR *a
 __attribute__((dllexport)) int shutdown(SOCKET s,int how) { (void)s;(void)how;return ws2_no_io(); }
 __attribute__((dllexport)) int select(int nfds,void *r,void *w,void *e,const void *t) { (void)nfds;(void)r;(void)w;(void)e;(void)t;return ws2_no_io(); }
 __attribute__((dllexport)) int ioctlsocket(SOCKET s,long cmd,unsigned long *arg) { (void)s;(void)cmd;(void)arg;return ws2_no_io(); }
-__attribute__((dllexport)) int setsockopt(SOCKET s,int level,int opt,const char *v,int n) { (void)s;(void)level;(void)opt;(void)v;(void)n;return ws2_no_io(); }
-__attribute__((dllexport)) int getsockopt(SOCKET s,int level,int opt,char *v,int *n) { (void)s;(void)level;(void)opt;(void)v;(void)n;return ws2_no_io(); }
-__attribute__((dllexport)) int getsockname(SOCKET s,SOCKADDR *a,int *n) { (void)s;(void)a;(void)n;return ws2_no_io(); }
-__attribute__((dllexport)) int getpeername(SOCKET s,SOCKADDR *a,int *n) { (void)s;(void)a;(void)n;return ws2_no_io(); }
+__attribute__((dllexport)) int setsockopt(SOCKET s,int level,int opt,const char *v,int n) {
+    (void)s;(void)v;(void)n;
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(level==SOL_SOCKET && (opt==SO_REUSEADDR||opt==SO_KEEPALIVE||opt==SO_DONTROUTE||
+        opt==SO_BROADCAST||opt==SO_LINGER||opt==SO_RCVBUF||opt==SO_SNDBUF||
+        opt==SO_RCVLOWAT||opt==SO_SNDLOWAT||opt==SO_RCVTIMEO||opt==SO_SNDTIMEO||
+        opt==SO_ERROR||opt==SO_TYPE)){ws2_last_error=0;return 0;}
+    ws2_last_error=WSAENOPROTOOPT;return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int getsockopt(SOCKET s,int level,int opt,char *v,int *n) {
+    (void)s;
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(!v||!n){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    if(level==SOL_SOCKET && (opt==SO_REUSEADDR||opt==SO_KEEPALIVE||opt==SO_DONTROUTE||
+        opt==SO_BROADCAST||opt==SO_LINGER||opt==SO_RCVBUF||opt==SO_SNDBUF||
+        opt==SO_RCVLOWAT||opt==SO_SNDLOWAT||opt==SO_RCVTIMEO||opt==SO_SNDTIMEO||
+        opt==SO_ERROR||opt==SO_TYPE)){ws2_last_error=0;return 0;}
+    ws2_last_error=WSAENOPROTOOPT;return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int getsockname(SOCKET s,SOCKADDR *a,int *n) {
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(!a||!n){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    if(*n<(int)sizeof(SOCKADDR_IN)){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int p=ws2_peer_slot(s,0);if(p<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+    if(ws2_peers[p].local.sin_family!=AF_INET){ws2_last_error=WSAEINVAL;return SOCKET_ERROR;}
+    for(int i=0;i<(int)sizeof(SOCKADDR_IN);i++)((char*)a)[i]=((char*)&ws2_peers[p].local)[i];
+    *n=sizeof(SOCKADDR_IN);
+    ws2_last_error=0;return 0;
+}
+__attribute__((dllexport)) int getpeername(SOCKET s,SOCKADDR *a,int *n) {
+    if(!ws2_started){ws2_last_error=WSANOTINITIALISED;return SOCKET_ERROR;}
+    if(!a||!n){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    if(*n<(int)sizeof(SOCKADDR_IN)){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+    int p=ws2_peer_slot(s,0);if(p<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+    if(!ws2_peers[p].connected){ws2_last_error=WSAENOTCONN;return SOCKET_ERROR;}
+    for(int i=0;i<(int)sizeof(SOCKADDR_IN);i++)((char*)a)[i]=((char*)&ws2_peers[p].peer)[i];
+    *n=sizeof(SOCKADDR_IN);
+    ws2_last_error=0;return 0;
+}
 __attribute__((dllexport)) int WSAIoctl(SOCKET s,DWORD c,void *in,DWORD il,void *out,DWORD ol,DWORD *ret,void *ov,void *cb) { (void)s;(void)c;(void)in;(void)il;(void)out;(void)ol;if(ret)*ret=0;(void)ov;(void)cb;return ws2_no_io(); }
 __attribute__((dllexport)) int WSAEventSelect(SOCKET s,HANDLE e,long events) { (void)s;(void)e;(void)events;return ws2_no_io(); }
 __attribute__((dllexport)) HANDLE WSACreateEvent(void) { ws2_last_error=WSAENETDOWN;return (HANDLE)0; }
@@ -567,6 +620,27 @@ __attribute__((dllexport)) int WSASendTo(SOCKET s,WS2_BUF *buffers,DWORD count,D
  int r=sendto(s,buffers[0].buf,(int)buffers[0].len,(int)flags,to,tolen);
  if(r==SOCKET_ERROR)return r;if(sent)*sent=(DWORD)r;return 0;
 }
+__attribute__((dllexport)) int WSASend(SOCKET s,WS2_BUF *buffers,DWORD count,DWORD *sent,DWORD flags,void *overlapped,void *completion) {
+ if(sent)*sent=0;if(!buffers||!count||overlapped||completion){ws2_last_error=WSAEOPNOTSUPP;return SOCKET_ERROR;}
+ int p=ws2_peer_slot(s,0);if(p<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+ if(ws2_peers[p].type==SOCK_STREAM){
+   if(!ws2_peers[p].connected){ws2_last_error=WSAENOTCONN;return SOCKET_ERROR;}
+   int r=send(s,buffers[0].buf,(int)buffers[0].len,(int)flags);
+   if(r==SOCKET_ERROR)return r;if(sent)*sent=(DWORD)r;return 0;
+ }
+ int r=sendto(s,buffers[0].buf,(int)buffers[0].len,(int)flags,(const SOCKADDR *)&ws2_peers[p].peer,sizeof(SOCKADDR_IN));
+ if(r==SOCKET_ERROR)return r;if(sent)*sent=(DWORD)r;return 0;
+}
+__attribute__((dllexport)) int WSARecv(SOCKET s,WS2_BUF *buffers,DWORD count,DWORD *received,DWORD *flags,void *overlapped,void *completion) {
+ if(received)*received=0;if(!buffers||!count||overlapped||completion){ws2_last_error=WSAEOPNOTSUPP;return SOCKET_ERROR;}
+ int p=ws2_peer_slot(s,0);if(p<0){ws2_last_error=WSAENOTSOCK;return SOCKET_ERROR;}
+ if(ws2_peers[p].type==SOCK_STREAM){
+   int r=recv(s,buffers[0].buf,(int)buffers[0].len,flags?*flags:0);
+   if(r==SOCKET_ERROR)return r;if(received)*received=(DWORD)r;if(flags)*flags=0;return 0;
+ }
+ int r=recvfrom(s,buffers[0].buf,(int)buffers[0].len,flags?*flags:0,0,0);
+ if(r==SOCKET_ERROR)return r;if(received)*received=(DWORD)r;if(flags)*flags=0;return 0;
+}
 __attribute__((dllexport)) int GetAddrInfoW(const unsigned short *node,const unsigned short *service,const void *hints,WS2_ADDRINFOW **result) {
  if(result)*result=0;if(!node||!result){ws2_last_error=WSAEFAULT;return WSAEINVAL;}
  char n[256],s[32];ws2_wide_to_ascii(n,sizeof(n),node);ws2_wide_to_ascii(s,sizeof(s),service);
@@ -587,12 +661,254 @@ __attribute__((dllexport)) int WSAAddressToStringW(SOCKADDR *address,DWORD lengt
  for(unsigned i=0;i<4;i++){unsigned v=oct[i];char rev[4];unsigned n=0;do{rev[n++]=(char)('0'+v%10);v/=10;}while(v&&n<4);while(n)tmp[pos++]=rev[--n];if(i<3)tmp[pos++]='.';}tmp[pos]=0;
  unsigned need=pos+1;if(!text||*textlen<need){*textlen=need;ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}ws2_ascii_to_wide(text,*textlen,tmp);*textlen=need;ws2_last_error=0;return 0;
 }
+__attribute__((dllexport)) int WSAAddressToStringA(SOCKADDR *address,DWORD length,void *protocol,char *text,DWORD *textlen) {
+	(void)protocol;if(!address||!textlen||length<sizeof(SOCKADDR_IN)||address->sa_family!=AF_INET){ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}
+	const unsigned char *p=(const unsigned char *)&((SOCKADDR_IN *)address)->sin_addr;
+	char tmp[32];unsigned ip=(unsigned)p[0]|((unsigned)p[1]<<8)|((unsigned)p[2]<<16)|((unsigned)p[3]<<24);
+	unsigned char *oct=(unsigned char *)&ip;unsigned pos=0;
+	for(unsigned i=0;i<4;i++){unsigned v=oct[i];char rev[4];unsigned n=0;do{rev[n++]=(char)('0'+v%10);v/=10;}while(v&&n<4);while(n)tmp[pos++]=rev[--n];if(i<3)tmp[pos++]='.';}tmp[pos]=0;
+	unsigned need=pos+1;if(!text||*textlen<need){*textlen=need;ws2_last_error=WSAEFAULT;return SOCKET_ERROR;}ws2_copy(text,tmp,*textlen);*textlen=need;ws2_last_error=0;return 0;
+}
 __attribute__((dllexport)) int WSAStringToAddressW(unsigned short *text,int family,void *protocol,SOCKADDR *address,int *length) {
  (void)protocol;if(!text||!address||!length||*length<(int)sizeof(SOCKADDR_IN)||family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return SOCKET_ERROR;}
  char tmp[64];ws2_wide_to_ascii(tmp,sizeof(tmp),text);unsigned ip=inet_addr(tmp);if(ip==0xffffffffu&&!ws2_eq(tmp,"255.255.255.255")){ws2_last_error=WSAEINVAL;return SOCKET_ERROR;}
  SOCKADDR_IN *a=(SOCKADDR_IN *)address;a->sin_family=AF_INET;a->sin_addr=ip;ws2_last_error=0;return 0;
 }
+__attribute__((dllexport)) int WSAStringToAddressA(const char *text,int family,void *protocol,SOCKADDR *address,int *length) {
+	(void)protocol;if(!text||!address||!length||*length<(int)sizeof(SOCKADDR_IN)||family!=AF_INET){ws2_last_error=WSAEAFNOSUPPORT;return SOCKET_ERROR;}
+	unsigned ip=inet_addr(text);if(ip==0xffffffffu&&!ws2_eq(text,"255.255.255.255")){ws2_last_error=WSAEINVAL;return SOCKET_ERROR;}
+	SOCKADDR_IN *a=(SOCKADDR_IN *)address;a->sin_family=AF_INET;a->sin_addr=ip;ws2_last_error=0;return 0;
+}
 __attribute__((dllexport)) BOOL WSASetEvent(HANDLE event) {(void)event;ws2_last_error=WSAENETDOWN;return 0;}
 __attribute__((dllexport)) BOOL WSAResetEvent(HANDLE event) {(void)event;ws2_last_error=WSAENETDOWN;return 0;}
 
 __attribute__((dllexport)) int WSAGetLastErrorCompat2(void) { return ws2_last_error; }
+
+/* SentinelOS supports only IPv4 UDP and TCP over the kernel socket stack.
+   Report exactly those two protocols rather than fabricating a full catalog. */
+typedef struct { unsigned int Data1; unsigned short Data2; unsigned short Data3; unsigned char Data4[8]; } WS2_GUID;
+typedef struct { DWORD dwServiceFlags1; DWORD dwServiceFlags2; DWORD dwServiceFlags3; DWORD dwServiceFlags4; DWORD dwProviderFlags; WS2_GUID ProviderId; DWORD CatalogEntryId; int version; int address_family; int max_sockaddr; int min_sockaddr; int socket_type; int protocol; int message_size; } WSAPROTOCOL_INFOA;
+__attribute__((dllexport)) int WSAEnumProtocolsA(int *proto, WSAPROTOCOL_INFOA *buf, DWORD *len) {
+    (void)proto;
+    if (!len) { ws2_last_error = WSAEINVAL; return SOCKET_ERROR; }
+    static WSAPROTOCOL_INFOA protos[2];
+    if (!buf || *len < (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA))) {
+        *len = (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA));
+        ws2_last_error = WSAENOBUFS;
+        return SOCKET_ERROR;
+    }
+    /* UDP */
+    protos[0].address_family = AF_INET;
+    protos[0].socket_type = SOCK_DGRAM;
+    protos[0].protocol = IPPROTO_UDP;
+    protos[0].message_size = 0;
+    protos[0].dwServiceFlags1 = 0;
+    protos[0].dwServiceFlags2 = 0;
+    protos[0].dwServiceFlags3 = 0;
+    protos[0].dwServiceFlags4 = 0;
+    protos[0].dwProviderFlags = 0;
+    protos[0].ProviderId.Data1 = 0; protos[0].ProviderId.Data2 = 0;
+    protos[0].ProviderId.Data3 = 0;
+    for (int j = 0; j < 8; j++) protos[0].ProviderId.Data4[j] = 0;
+    protos[0].CatalogEntryId = 1;
+    protos[0].version = 2;
+    protos[0].max_sockaddr = sizeof(SOCKADDR_IN);
+    protos[0].min_sockaddr = sizeof(SOCKADDR_IN);
+    /* TCP */
+    protos[1].address_family = AF_INET;
+    protos[1].socket_type = SOCK_STREAM;
+    protos[1].protocol = IPPROTO_TCP;
+    protos[1].message_size = 0;
+    protos[1].dwServiceFlags1 = 0;
+    protos[1].dwServiceFlags2 = 0;
+    protos[1].dwServiceFlags3 = 0;
+    protos[1].dwServiceFlags4 = 0;
+    protos[1].dwProviderFlags = 0;
+    protos[1].ProviderId.Data1 = 0; protos[1].ProviderId.Data2 = 0;
+    protos[1].ProviderId.Data3 = 0;
+    for (int j = 0; j < 8; j++) protos[1].ProviderId.Data4[j] = 0;
+    protos[1].CatalogEntryId = 2;
+    protos[1].version = 2;
+    protos[1].max_sockaddr = sizeof(SOCKADDR_IN);
+    protos[1].min_sockaddr = sizeof(SOCKADDR_IN);
+    for (DWORD i = 0; i < 2; i++) buf[i] = protos[i];
+    *len = (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA));
+    ws2_last_error = 0;
+    return 2;
+}
+__attribute__((dllexport)) int WSAEnumProtocolsW(int *proto, void *buf, DWORD *len) {
+    (void)proto;
+    if (!len) { ws2_last_error = WSAEINVAL; return SOCKET_ERROR; }
+    if (!buf || *len < (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA))) {
+        *len = (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA));
+        ws2_last_error = WSAENOBUFS;
+        return SOCKET_ERROR;
+    }
+    WSAPROTOCOL_INFOA tmp[2];
+    DWORD tlen = (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA));
+    int n = WSAEnumProtocolsA(0, tmp, &tlen);
+    if (n == SOCKET_ERROR) return SOCKET_ERROR;
+    for (int i = 0; i < n; i++) {
+        WSAPROTOCOL_INFOA *s = &tmp[i];
+        char *d = (char *)buf + (size_t)i * sizeof(WSAPROTOCOL_INFOA);
+        for (size_t j = 0; j < sizeof(WSAPROTOCOL_INFOA); j++) d[j] = ((char *)s)[j];
+    }
+    *len = (DWORD)(2 * sizeof(WSAPROTOCOL_INFOA));
+    ws2_last_error = 0;
+    return n;
+}
+
+/* Extended address resolution / service lookup APIs. SentinelOS implements
+ * getaddrinfo/getnameinfo with a QEMU DNS proxy, but has no service
+ * installation/lookup database and no legacy extended name-resolution entry
+ * points. These stubs return honest initialization and not-supported errors
+ * rather than fabricating results. */
+__attribute__((dllexport)) int WSAGetAddressByNameA(const char *name, void *service_id, unsigned long *number_bytes, void *address, unsigned long *address_length) {
+    (void)name;(void)service_id;(void)number_bytes;(void)address;(void)address_length;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAGetAddressByNameW(const unsigned short *name, void *service_id, unsigned long *number_bytes, void *address, unsigned long *address_length) {
+    (void)name;(void)service_id;(void)number_bytes;(void)address;(void)address_length;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSALookupServiceBeginA(void *query_restrictions, unsigned long control_flags, void *lookup_handle) {
+    (void)query_restrictions;(void)control_flags;(void)lookup_handle;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSALookupServiceBeginW(const unsigned short *query_restrictions, unsigned long control_flags, void *lookup_handle) {
+    (void)query_restrictions;(void)control_flags;(void)lookup_handle;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSALookupServiceNextA(void *lookup_handle, unsigned long control_flags, unsigned long *buffer_length, void *query_results) {
+    (void)lookup_handle;(void)control_flags;(void)buffer_length;(void)query_results;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSALookupServiceNextW(const unsigned short *lookup_handle, unsigned long control_flags, unsigned long *buffer_length, void *query_results) {
+    (void)lookup_handle;(void)control_flags;(void)buffer_length;(void)query_results;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSALookupServiceEnd(void *lookup_handle) {
+    (void)lookup_handle;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSASetServiceA(void *query_reg_info, unsigned long ess_operation, unsigned long control_flags) {
+    (void)query_reg_info;(void)ess_operation;(void)control_flags;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSASetServiceW(const unsigned short *query_reg_info, unsigned long ess_operation, unsigned long control_flags) {
+    (void)query_reg_info;(void)ess_operation;(void)control_flags;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAGetServiceClassInfoW(const unsigned short *service_class_id, const unsigned short *class_id, unsigned long *buffer_size, void *service_class_info) {
+    (void)service_class_id;(void)class_id;(void)buffer_size;(void)service_class_info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAInstallServiceClassA(void *service_class_info) {
+    (void)service_class_info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAInstallServiceClassW(const unsigned short *service_class_info) {
+    (void)service_class_info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSARemoveServiceClassA(void *service_class_id) {
+    (void)service_class_id;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSARemoveServiceClassW(const unsigned short *service_class_id) {
+    (void)service_class_id;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAEnumNameProvidersW(unsigned long type, void *namespace_providers, unsigned long *buffer_length) {
+    (void)type;(void)namespace_providers;(void)buffer_length;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAGetServiceClassInfoA(void *service_class_id, void *class_id, unsigned long *buffer_size, void *service_class_info) {
+    (void)service_class_id;(void)class_id;(void)buffer_size;(void)service_class_info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAEnumNameProvidersA(unsigned long type, void *namespace_providers, unsigned long *buffer_length) {
+    (void)type;(void)namespace_providers;(void)buffer_length;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+
+/* Extended Winsock 2 socket APIs not backed by the SentinelOS kernel
+   socket stack (IPv4 UDP and bounded TCP client only). Each is an honest
+   stub: minimal validation, ws2_last_error set, SOCKET_ERROR returned with
+   WSAEOPNOTSUPP where the operation is unsupported (or WSANOTINITIALISED
+   when Winsock has not been started). Multicast has no IP multicast
+   backend; QoS, disconnect, accept and service-class APIs are TCP/service
+   operations SentinelOS does not implement. */
+__attribute__((dllexport)) int WSAMulticastTTL(SOCKET s, unsigned char ttl) {
+    (void)s;(void)ttl;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAMulticastLoopback(SOCKET s, unsigned char loopback) {
+    (void)s;(void)loopback;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSAGetQOS(SOCKET s, void *qos) {
+    (void)s;(void)qos;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSASetQOS(SOCKET s, const void *qos) {
+    (void)s;(void)qos;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSASendMsg(SOCKET s, const void *msg, DWORD flags, DWORD *sent, void *overlapped, void *completion) {
+    (void)s;(void)msg;(void)flags;(void)sent;(void)overlapped;(void)completion;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSARcvMsg(SOCKET s, void *msg, DWORD *received, DWORD *flags, void *overlapped, void *completion) {
+    (void)s;(void)msg;(void)received;(void)flags;(void)overlapped;(void)completion;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSANSPIoctl(SOCKET s, DWORD code, void *in, DWORD inlen, void *out, DWORD outlen, DWORD *ret, void *overlapped) {
+    (void)s;(void)code;(void)in;(void)inlen;(void)out;(void)outlen;(void)overlapped;
+    if (ret) *ret = 0;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSADuplicateSocketA(SOCKET s, DWORD pid, void *info) {
+    (void)s;(void)pid;(void)info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSADuplicateSocketW(SOCKET s, DWORD pid, void *info) {
+    (void)s;(void)pid;(void)info;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) int WSASendDisconnect(SOCKET s, void *data) {
+    (void)s;(void)data;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }
+    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;
+}
+__attribute__((dllexport)) SOCKET WSAAccept(SOCKET s, SOCKADDR *addr, int *addrlen, void *cond, unsigned long long cbdata) {
+    (void)s;(void)addr;(void)addrlen;(void)cond;(void)cbdata;
+    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return INVALID_SOCKET; }
+    ws2_last_error = WSAEOPNOTSUPP; return INVALID_SOCKET;
+}

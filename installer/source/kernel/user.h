@@ -37,7 +37,7 @@
 #define SYS_WmQuery                 18
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
-#define SYS_Yield                  21
+#define SYS_NtYield                  21
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
@@ -189,6 +189,7 @@ static void up_save(Frame *f, int idx) {
     up_tab[idx].rip = f->rip;
     up_tab[idx].rsp = f->rsp;
     up_tab[idx].rflags = f->rflags;
+    up_tab[idx].rax = f->rax;
     up_snap(f, &up_tab[idx]);
 }
 
@@ -2541,7 +2542,7 @@ static Frame *syscall_handler(Frame *f) {
         f->rax = 0;
         return f;
 
-    case SYS_Yield: {
+    case SYS_NtYield: {
         int me = up_find_proc(MmCurrentProcess);
 
         if (me >= 0) {

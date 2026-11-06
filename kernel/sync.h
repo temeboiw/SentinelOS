@@ -45,8 +45,11 @@ static inline void KeAcquireMutex(KMUTEX *mutex) {
         mutex->waiting_tail = cur;
         KiSchedulerUnlock();
         KeReleaseSpinLock(&mutex->lock);
-        KeRestoreInterrupts(irq_state);
-        // The awakened thread competes for ownership, so it retries.
+        /* Do not restore interrupts between releasing the mutex spinlock and
+         * rescheduling: a re-entrant clock interrupt in that window could
+         * re-enter the wait queue and deadlock. Keep interrupts disabled until
+         * the thread is switched away; on resume the loop's KeDisableInterrupts
+         * re-captures state. */
         __asm__ volatile("int $0x2F" ::: "memory");
     }
 }

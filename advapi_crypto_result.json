@@ -1,0 +1,151 @@
+{
+  "existing": [],
+  "missing": [
+    "CryptAcquireContextA",
+    "CryptAcquireContextW",
+    "CryptReleaseContext",
+    "CryptGenKey",
+    "CryptDestroyKey",
+    "CryptGenRandom",
+    "CryptCreateHash",
+    "CryptHashData",
+    "CryptDestroyHash",
+    "CryptDeriveKey",
+    "CryptEncrypt",
+    "CryptDecrypt",
+    "CryptSignHashA",
+    "CryptSignHashW",
+    "CryptVerifySignatureA",
+    "CryptVerifySignatureW",
+    "CryptGetHashParam",
+    "CryptSetHashParam",
+    "CryptGetKeyParam",
+    "CryptSetKeyParam",
+    "CryptExportKey",
+    "CryptImportKey",
+    "CryptSetProvParam",
+    "CryptGetProvParam"
+  ],
+  "additions": [
+    {
+      "name": "CryptAcquireContextA",
+      "after": "SystemFunction036",
+      "code": "/* CryptoAPI (CryptoAPI) -- SentinelOS has no real cryptographic subsystem.\n * These entry points provide compatible exports but report limitations\n * honestly instead of fabricating keys, hashes or signatures.\n * CryptGenRandom delegates to SystemFunction036 (RDRAND) where available.\n */\n#define NTE_BAD_ALGID 5010\n#define NTE_BAD_KEYSET 5012\n#define NTE_BAD_PROV_TYPE 5017\ntypedef unsigned int ALG_ID;\ntypedef void *HCRYPTPROV;\ntypedef void *HCRYPTKEY;\ntypedef void *HCRYPTHASH;\n#define CALG_RSA_KEYX 0x0000a400u\n#define CALG_RSA_SIGN 0x0000a200u\n#define CALG_DES 0x00006601u\n#define CALG_3DES 0x00006603u\n#define CALG_RC2 0x00006602u\n#define CALG_RC4 0x00006801u\n#define CALG_MD5 0x00008003u\n#define CALG_SHA 0x00008004u\n#define PROV_RSA_FULL 1\n#define PROV_RSA_SIGN 2\n#define CRYPTO_MAX_PROVS 16\n#define CRYPTO_MAX_KEYS 64\n#define CRYPTO_MAX_HASHES 64\ntypedef struct { int used; } CRYPTO_PROV;\ntypedef struct { int used; HCRYPTPROV prov; ALG_ID algid; BYTE key[256]; DWORD key_len; } CRYPTO_KEY;\ntypedef struct { int used; HCRYPTPROV prov; ALG_ID algid; BYTE hash[64]; DWORD hash_len; } CRYPTO_HASH;\nstatic CRYPTO_PROV crypto_provs[CRYPTO_MAX_PROVS];\nstatic CRYPTO_KEY crypto_keys[CRYPTO_MAX_KEYS];\nstatic CRYPTO_HASH crypto_hashes[CRYPTO_MAX_HASHES];\nstatic int crypto_prov_slot(void){for(int i=0;i<CRYPTO_MAX_PROVS;i++)if(!crypto_provs[i].used){crypto_provs[i].used=1;return i+1;}return 0;}\nstatic void crypto_prov_free(int i){if(i>0&&i<=CRYPTO_MAX_PROVS)crypto_provs[i-1].used=0;}\nstatic int crypto_key_slot(void){for(int i=0;i<CRYPTO_MAX_KEYS;i++)if(!crypto_keys[i].used){crypto_keys[i].used=1;return i+1;}return 0;}\nstatic void crypto_key_free(int i){if(i>0&&i<=CRYPTO_MAX_KEYS)crypto_keys[i-1].used=0;}\nstatic int crypto_hash_slot(void){for(int i=0;i<CRYPTO_MAX_HASHES;i++)if(!crypto_hashes[i].used){crypto_hashes[i].used=1;return i+1;}return 0;}\nstatic void crypto_hash_free(int i){if(i>0&&i<=CRYPTO_MAX_HASHES)crypto_hashes[i-1].used=0;}\n__attribute__((dllexport)) BOOL CryptAcquireContextA(HCRYPTPROV *prov, const char *container, const char *provider, DWORD type, DWORD flags){(void)container;(void)provider;(void)type;(void)flags;if(!prov){SetLastError(ERROR_INVALID_PARAMETER);return 0;}if(type!=PROV_RSA_FULL&&type!=PROV_RSA_SIGN){SetLastError(NTE_BAD_PROV_TYPE);return 0;}int i=crypto_prov_slot();if(!i){SetLastError(NTE_BAD_KEYSET);return 0;}*prov=(HCRYPTPROV)(unsigned long long)i;return 1;}"
+    },
+    {
+      "name": "CryptAcquireContextW",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptAcquireContextW(HCRYPTPROV *prov, const WCHAR *container, const WCHAR *provider, DWORD type, DWORD flags){(void)container;(void)provider;(void)type;(void)flags;return CryptAcquireContextA(prov,0,0,type,flags);}"
+    },
+    {
+      "name": "CryptReleaseContext",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptReleaseContext(HCRYPTPROV prov, DWORD flags){(void)flags;crypto_prov_free((int)(unsigned long long)prov);return 1;}"
+    },
+    {
+      "name": "CryptGenKey",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptGenKey(HCRYPTPROV prov, ALG_ID algid, DWORD flags, HCRYPTKEY *key){(void)prov;(void)flags;if(!key){SetLastError(ERROR_INVALID_PARAMETER);return 0;}if(algid!=CALG_RSA_KEYX&&algid!=CALG_RSA_SIGN&&algid!=CALG_DES&&algid!=CALG_3DES&&algid!=CALG_RC2&&algid!=CALG_RC4){SetLastError(NTE_BAD_ALGID);return 0;}int i=crypto_key_slot();if(!i){SetLastError(NTE_BAD_KEYSET);return 0;}crypto_keys[i-1].prov=prov;crypto_keys[i-1].algid=algid;if(!SystemFunction036(crypto_keys[i-1].key,sizeof(crypto_keys[i-1].key))){crypto_key_free(i);return 0;}crypto_keys[i-1].key_len=sizeof(crypto_keys[i-1].key);*key=(HCRYPTKEY)(unsigned long long)i;return 1;}"
+    },
+    {
+      "name": "CryptDestroyKey",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptDestroyKey(HCRYPTKEY key){crypto_key_free((int)(unsigned long long)key);return 1;}"
+    },
+    {
+      "name": "CryptGenRandom",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptGenRandom(HCRYPTPROV prov, DWORD len, BYTE *buf){(void)prov;if(!buf&&len){SetLastError(ERROR_INVALID_PARAMETER);return 0;}if(!len){SetLastError(0);return 1;}return SystemFunction036(buf,len);}"
+    },
+    {
+      "name": "CryptCreateHash",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptCreateHash(HCRYPTPROV prov, ALG_ID algid, HCRYPTKEY key, DWORD flags, HCRYPTHASH *hash){(void)prov;(void)algid;(void)key;(void)flags;if(!hash){SetLastError(ERROR_INVALID_PARAMETER);return 0;}SetLastError(NTE_BAD_ALGID);return 0;}"
+    },
+    {
+      "name": "CryptHashData",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptHashData(HCRYPTHASH hash, const BYTE *data, DWORD len, DWORD flags){(void)hash;(void)data;(void)len;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptDestroyHash",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptDestroyHash(HCRYPTHASH hash){crypto_hash_free((int)(unsigned long long)hash);return 1;}"
+    },
+    {
+      "name": "CryptDeriveKey",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptDeriveKey(HCRYPTPROV prov, ALG_ID algid, HCRYPTHASH hash, DWORD flags, HCRYPTKEY *key){(void)prov;(void)algid;(void)hash;(void)flags;(void)key;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptEncrypt",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptEncrypt(HCRYPTKEY key, HCRYPTHASH hash, BOOL final, DWORD flags, BYTE *buf, DWORD *len, DWORD buflen){(void)key;(void)hash;(void)final;(void)flags;(void)buf;(void)len;(void)buflen;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptDecrypt",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptDecrypt(HCRYPTKEY key, HCRYPTHASH hash, BOOL final, DWORD flags, BYTE *buf, DWORD *len){(void)key;(void)hash;(void)final;(void)flags;(void)buf;(void)len;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptSignHashA",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptSignHashA(HCRYPTHASH hash, DWORD dwKeySpec, const char *desc, DWORD flags, BYTE *sig, DWORD *siglen){(void)hash;(void)dwKeySpec;(void)desc;(void)flags;(void)sig;(void)siglen;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptSignHashW",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptSignHashW(HCRYPTHASH hash, DWORD dwKeySpec, const WCHAR *desc, DWORD flags, BYTE *sig, DWORD *siglen){(void)hash;(void)dwKeySpec;(void)desc;(void)flags;(void)sig;(void)siglen;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptVerifySignatureA",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptVerifySignatureA(HCRYPTHASH hash, const BYTE *sig, DWORD siglen, const char *desc, DWORD flags){(void)hash;(void)sig;(void)siglen;(void)desc;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptVerifySignatureW",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptVerifySignatureW(HCRYPTHASH hash, const BYTE *sig, DWORD siglen, const WCHAR *desc, DWORD flags){(void)hash;(void)sig;(void)siglen;(void)desc;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptGetHashParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptGetHashParam(HCRYPTHASH hash, DWORD param, BYTE *data, DWORD *len, DWORD flags){(void)hash;(void)param;(void)data;(void)len;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptSetHashParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptSetHashParam(HCRYPTHASH hash, DWORD param, const BYTE *data, DWORD flags){(void)hash;(void)param;(void)data;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptGetKeyParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptGetKeyParam(HCRYPTKEY key, DWORD param, BYTE *data, DWORD *len, DWORD flags){(void)key;(void)param;(void)data;(void)len;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptSetKeyParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptSetKeyParam(HCRYPTKEY key, DWORD param, const BYTE *data, DWORD flags){(void)key;(void)param;(void)data;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptExportKey",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptExportKey(HCRYPTKEY key, HCRYPTKEY expkey, DWORD blobtype, DWORD flags, BYTE *buf, DWORD *len){(void)key;(void)expkey;(void)blobtype;(void)flags;(void)buf;(void)len;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptImportKey",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptImportKey(HCRYPTPROV prov, const BYTE *buf, DWORD len, HCRYPTKEY pubkey, DWORD flags, HCRYPTKEY *key){(void)prov;(void)buf;(void)len;(void)pubkey;(void)flags;(void)key;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptSetProvParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptSetProvParam(HCRYPTPROV prov, DWORD param, const BYTE *data){(void)prov;(void)param;(void)data;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    },
+    {
+      "name": "CryptGetProvParam",
+      "after": "SystemFunction036",
+      "code": "__attribute__((dllexport)) BOOL CryptGetProvParam(HCRYPTPROV prov, DWORD param, BYTE *data, DWORD *len, DWORD flags){(void)prov;(void)param;(void)data;(void)len;(void)flags;SetLastError(ERROR_NOT_SUPPORTED);return 0;}"
+    }
+  ]
+}

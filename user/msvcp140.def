@@ -8,6 +8,10 @@ EXPORTS
   _Cnd_do_broadcast_at_thread_exit
   _Thrd_join
   _Thrd_id
+  msvcp_Xout_of_range
+  msvcp_Xlength_error
+  msvcp_Throw_Cpp_error
+  msvcp_Xbad_function_call
   "?_Xout_of_range@std@@YAXPEBD@Z"=msvcp_Xout_of_range
   "?_Xlength_error@std@@YAXPEBD@Z"=msvcp_Xlength_error
   "?_Throw_Cpp_error@std@@YAXH@Z"=msvcp_Throw_Cpp_error

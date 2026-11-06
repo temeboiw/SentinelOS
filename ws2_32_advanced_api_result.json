@@ -1,0 +1,79 @@
+{
+  "existing": [
+    "WSAEnumProtocols",
+    "WSAEnumNameProviders",
+    "WSAGetServiceClassInfo",
+    "WSAInstallServiceClass",
+    "WSARemoveServiceClass"
+  ],
+  "missing": [
+    "WSAMulticastTTL",
+    "WSAMulticastLoopback",
+    "WSAGetQOS",
+    "WSASetQOS",
+    "WSASendMsg",
+    "WSARcvMsg",
+    "WSANSPIoctl",
+    "WSADuplicateSocketA",
+    "WSADuplicateSocketW",
+    "WSASendDisconnect",
+    "WSAAccept"
+  ],
+  "additions": [
+    {
+      "name": "WSAMulticastTTL",
+      "code": "__attribute__((dllexport)) int WSAMulticastTTL(SOCKET s, unsigned char ttl) {\n    (void)s;(void)ttl;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSAMulticastLoopback",
+      "code": "__attribute__((dllexport)) int WSAMulticastLoopback(SOCKET s, unsigned char loopback) {\n    (void)s;(void)loopback;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSAGetQOS",
+      "code": "__attribute__((dllexport)) int WSAGetQOS(SOCKET s, void *qos) {\n    (void)s;(void)qos;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSASetQOS",
+      "code": "__attribute__((dllexport)) int WSASetQOS(SOCKET s, const void *qos) {\n    (void)s;(void)qos;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSASendMsg",
+      "code": "__attribute__((dllexport)) int WSASendMsg(SOCKET s, const void *msg, DWORD flags, DWORD *sent, void *overlapped, void *completion) {\n    (void)s;(void)msg;(void)flags;(void)sent;(void)overlapped;(void)completion;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSARcvMsg",
+      "code": "__attribute__((dllexport)) int WSARcvMsg(SOCKET s, void *msg, DWORD *received, DWORD *flags, void *overlapped, void *completion) {\n    (void)s;(void)msg;(void)received;(void)flags;(void)overlapped;(void)completion;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSANSPIoctl",
+      "code": "__attribute__((dllexport)) int WSANSPIoctl(SOCKET s, DWORD code, void *in, DWORD inlen, void *out, DWORD outlen, DWORD *ret, void *overlapped) {\n    (void)s;(void)code;(void)in;(void)inlen;(void)out;(void)outlen;(void)overlapped;\n    if (ret) *ret = 0;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSADuplicateSocketA",
+      "code": "__attribute__((dllexport)) int WSADuplicateSocketA(SOCKET s, DWORD pid, void *info) {\n    (void)s;(void)pid;(void)info;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSADuplicateSocketW",
+      "code": "__attribute__((dllexport)) int WSADuplicateSocketW(SOCKET s, DWORD pid, void *info) {\n    (void)s;(void)pid;(void)info;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSASendDisconnect",
+      "code": "__attribute__((dllexport)) int WSASendDisconnect(SOCKET s, void *data) {\n    (void)s;(void)data;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return SOCKET_ERROR; }\n    ws2_last_error = WSAEOPNOTSUPP; return SOCKET_ERROR;\n}",
+      "after": ""
+    },
+    {
+      "name": "WSAAccept",
+      "code": "__attribute__((dllexport)) SOCKET WSAAccept(SOCKET s, SOCKADDR *addr, int *addrlen, void *cond, unsigned long long cbdata) {\n    (void)s;(void)addr;(void)addrlen;(void)cond;(void)cbdata;\n    if (!ws2_started) { ws2_last_error = WSANOTINITIALISED; return INVALID_SOCKET; }\n    ws2_last_error = WSAEOPNOTSUPP; return INVALID_SOCKET;\n}",
+      "after": ""
+    }
+  ]
+}

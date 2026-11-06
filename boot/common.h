@@ -12,11 +12,11 @@ void *memset(void *d, int c, UINTN n)          { UINT8 *a = d; while (n--) *a++ 
 /* UEFI diagnostics go to COM1 only. Never print firmware text on the display:
  * the firmware stage paints the same clean blue/cyan background as bootvid. */
 static void serial_out8(UINT16 port, UINT8 value) {
-    __asm__ volatile("outb %0, %1" :: "a"(value), "Nd"(port));
+    __asm__ volatile("movw %1, %%dx\n\toutb %0, %%dx" :: "a"(value), "r"(port) : "dx");
 }
 static UINT8 serial_in8(UINT16 port) {
     UINT8 value;
-    __asm__ volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
+    __asm__ volatile("movw %1, %%dx\n\tinb %%dx, %0" : "=a"(value) : "r"(port) : "dx");
     return value;
 }
 static void serial_init(void) {
@@ -33,8 +33,9 @@ static void serial_init(void) {
 }
 static void serial_char(char c) {
     serial_init();
-    for (UINTN spin=0; spin<100000u; ++spin)
-        if (serial_in8(0x3FD) & 0x20u) { serial_out8(0x3F8, (UINT8)c); return; }
+    /* Write directly; UART THR should be ready after init. Polling THRE can
+     * spin forever if QEMU's UART LSR never sets the bit. */
+    serial_out8(0x3F8, (UINT8)c);
 }
 static void say(CHAR16 *s) {
     if (!s) return;

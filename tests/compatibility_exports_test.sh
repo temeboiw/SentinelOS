@@ -65,6 +65,50 @@ for symbol in SetStdHandle LoadLibraryExW FindFirstFileExW; do
 done
 
 
+# gdi32.dll exports — framebuffer-backed GDI implementation. Every exported
+# function either implements real drawing/state behavior or fails honestly.
+file="$ROOT/magic/System32/gdi32.dll"
+require_file "$file"
+for symbol in CreateDCA CreateCompatibleDC DeleteDC GetDC ReleaseDC \
+              SelectObject DeleteObject GetStockObject CreatePen \
+              CreateSolidBrush CreateHatchBrush GetBkColor SetBkColor \
+              SetTextColor SetBkMode CreateCompatibleBitmap GetObjectA \
+              SetPixel GetPixel MoveToEx LineTo Rectangle Ellipse FillRect \
+              BitBlt StretchBlt TextOutA DrawTextA GetDeviceCaps \
+              CreateFontA GetTextMetricsA CreateRectRgn SelectClipRgn \
+              GetMapMode SetMapMode CreatePalette GetNearestColor \
+              SetDCBrushColor SetDCPenColor GetTextExtentPoint32A \
+              SetTextAlign GetGraphicsMode SetGraphicsMode GetDIBits SetDIBits; do
+  require_export "$file" "$symbol"
+done
+
+# user32.dll exports — window management and input. Key entry points verified;
+# the full surface is large and many are aliases or forwarding stubs.
+file="$ROOT/magic/System32/user32.dll"
+require_file "$file"
+for symbol in CreateWindowExA CreateWindowExW ShowWindow UpdateWindow \
+              GetMessageA GetMessageW TranslateMessage DispatchMessageA \
+              DispatchMessageW PeekMessageA PeekMessageW MessageBoxA \
+              MessageBoxW DestroyWindow PostQuitMessage DefWindowProcA \
+              DefWindowProcW SendMessageA SendMessageW PostMessageA \
+              PostMessageW RegisterClassA RegisterClassW \
+              GetWindowTextA GetWindowTextW SetWindowTextA SetWindowTextW \
+              GetClassNameA GetClassNameW IsWindow IsWindowVisible \
+              EnableWindow SetForegroundWindow GetForegroundWindow \
+              GetActiveWindow SetActiveWindow GetDC ReleaseDC BeginPaint \
+              EndPaint GetClientRect MoveWindow SetWindowPos \
+              GetWindowRect IsIconic GetDesktopWindow GetSystemMenu \
+              CreateMenu CreatePopupMenu AppendMenuA DestroyMenu \
+              TrackPopupMenu LoadCursorA LoadIconA LoadImageA DrawMenuBar \
+              GetCursorPos SetCursorPos ShowCursor SetCapture ReleaseCapture \
+              GetCapture SetTimer KillTimer GetDlgItem \
+              SetDlgItemTextA GetDlgItemTextA SetDlgItemTextW GetDlgItemTextW \
+              DrawTaskbar S3DInitialize S3DClear S3DDrawTriangle S3DPresent \
+              BeginRedrawBatch EndRedrawBatch; do
+  require_export "$file" "$symbol"
+done
+
+
 # OpenGL is a real bounded framebuffer renderer, not a full OpenGL driver.
 file="$ROOT/magic/System32/opengl32.dll"
 require_file "$file"

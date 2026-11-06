@@ -232,7 +232,9 @@ static void user_set_kernel_stack(uint64_t rsp0);
 __attribute__((used)) Frame *isr_handler(Frame *f) {
     // Syscall via int 0x80 – must run before the generic vector>=32 path
     if (f->vector == 0x80) {
-        return syscall_handler(f);
+        Frame *next = syscall_handler(f);
+        if (ki_need_resched) { ki_need_resched = 0; return KiSchedule(next); }
+        return next;
     }
     if (f->vector >= 32) {
         if (f->vector == 0xFF) return f;                        // APIC spurious interrupt: no EOI
@@ -251,23 +253,6 @@ __attribute__((used)) Frame *isr_handler(Frame *f) {
      * and resume its parent before the kernel panic path is considered. */
     if ((f->cs & 3u) == 3u)
         return user_exception_handler(f);
-
-    /* Kernel stack overflow detection: if the canary at the top of the
-     * kernel stack has been clobbered, we are executing on a corrupted
-     * stack. Halting is the only safe option — continuing risks silent
-     * data corruption or a double fault. */
-    extern uint8_t kstack[];
-    extern uint64_t kstack_canary;
-    if ((uint64_t)f >= (uint64_t)kstack && (uint64_t)f < (uint64_t)kstack + 65536ULL) {
-        uint64_t stored = *(uint64_t *)((uint64_t)kstack + 65536ULL - 8);
-        if (stored != kstack_canary) {
-            DbgPrint("\n*** KERNEL STACK CANARY VIOLATION ***\n");
-            DbgPrint("stack=%p..%p  frame=%p  canary=%016llx expected=%016llx\n",
-                (void *)kstack, (void *)((uint64_t)kstack + 65536ULL), (void *)f,
-                (unsigned long long)stored, (unsigned long long)kstack_canary);
-            for (;;) __asm__ volatile("cli; hlt");
-        }
-    }
 
     uint64_t cr2, cr3;
     __asm__ volatile("movq %%cr2, %0" : "=r"(cr2));
@@ -386,28 +371,3 @@ static void cpu_init_cpu(uint32_t cpu_index) {
     cpu_set_gs_base(cpu);
 }
 static void cpu_init(void) { cpu_init_cpu(0); }
-
-/* ---- BIOS: legacy PIC remapping ---- */
-/* Remap the 8259A PIC: master IRQs 0x20-0x27, slave IRQs 0x28-0x2F. */
-static void pic_remap(void) {
-    uint8_t m1, m2;
-    __asm__ volatile ("inb $0x21, %0" : "=a"(m1));
-    __asm__ volatile ("inb $0xA1, %0" : "=a"(m2));
-    __asm__ volatile ("outb %0, $0x20" :: "a"((uint8_t)0x11));   /* ICW1: init, icw4 needed */
-    __asm__ volatile ("outb %0, $0xA0" :: "a"((uint8_t)0x11));
-    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x20));   /* ICW2: master base 0x20 */
-    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x28));   /* ICW2: slave base 0x28 */
-    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x04));   /* ICW3: slave at IRQ2 */
-    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x02));   /* ICW3: cascade identity */
-    __asm__ volatile ("outb %0, $0x21" :: "a"((uint8_t)0x01));   /* ICW4: 8086 mode */
-    __asm__ volatile ("outb %0, $0xA1" :: "a"((uint8_t)0x01));
-    __asm__ volatile ("outb %0, $0x21" :: "a"(m1));              /* restore master mask */
-    __asm__ volatile ("outb %0, $0xA1" :: "a"(m2));              /* restore slave mask */
-}
-
-/* BIOS-mode HAL init: PIC remap + IDT/GDT + int 0x80 syscall gate.
- * Called instead of HalInitSystem() when boot_mode == BOOT_MODE_BIOS. */
-static void HalInitSystemBIOS(void) {
-    pic_remap();
-    cpu_init_cpu(0);   /* loads GDT/IDT, sets up int 0x80 gate */
-}

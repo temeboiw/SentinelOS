@@ -612,13 +612,10 @@ static int gfx_driver_init(uint32_t width,uint32_t height) {
     if(gfx_virgl_supported) {
         if(!gfx_create_virgl_context()) {
             SENTINEL_GFX_LOG("gfx: VirGL context creation failed (CTX_CREATE rejected; verify host VirGL/capset 1 support)\n");
-            gfx_gpu_failed=1;return 0;
         } else if(!gfx_create_virgl_target()) {
             SENTINEL_GFX_LOG("gfx: VirGL render-target creation/attachment failed (CREATE_3D, ATTACH_BACKING, or CTX_ATTACH_RESOURCE)\n");
-            gfx_gpu_failed=1;return 0;
         } else if(!gfx_create_virgl_buffer()) {
             SENTINEL_GFX_LOG("gfx: VirGL shared buffer creation/attachment failed (buffer CREATE_3D/ATTACH_BACKING)\n");
-            gfx_gpu_failed=1;return 0;
         } else {
             gfx_3d_ready=1;
             SENTINEL_GFX_LOG("gfx: VirGL context, render target, and shared buffer ready; raw command submission enabled\n");

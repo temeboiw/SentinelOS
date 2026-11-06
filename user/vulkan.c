@@ -130,6 +130,7 @@
 #define VK_PIPELINE_STAGE_TRANSFER_BIT 0x1000u
 #define VK_FORMAT_R8G8B8A8_UNORM 37u
 #define VK_FORMAT_B8G8R8A8_UNORM 44u
+#define VK_KHR_SWAPCHAIN_SPEC_VERSION 4u
 #define VK_FORMAT_FEATURE_TRANSFER_SRC_BIT 0x4000u
 #define VK_FORMAT_FEATURE_TRANSFER_DST_BIT 0x8000u
 #define VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT 0x80u
@@ -202,7 +203,14 @@ typedef struct { VkStructureType sType; const void *pNext; VkFenceCreateFlags fl
 typedef struct { VkStructureType sType; const void *pNext; VkSemaphoreCreateFlags flags; } VkSemaphoreCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; uint32_t waitSemaphoreCount; const VkSemaphore *pWaitSemaphores; const VkFlags *pWaitDstStageMask; uint32_t commandBufferCount; const VkCommandBuffer *pCommandBuffers; uint32_t signalSemaphoreCount; const VkSemaphore *pSignalSemaphores; } VkSubmitInfo;
 typedef struct VkInstanceObj { uint32_t magic, apiVersion; } VkInstanceObj;
-typedef struct VkPhysicalObj { uint32_t magic; VkInstance parent; } VkPhysicalObj;
+typedef struct VkPhysicalObj {
+ uint32_t magic;
+ VkInstance parent;
+ uint32_t vendor_id, device_id;
+ uint32_t pci_bus, pci_device, pci_function;
+ uint8_t is_virgl, has_accel_3d;
+ char name[128];
+} VkPhysicalObj;
 typedef struct VkDeviceObj { uint32_t magic; VkPhysicalDevice physical; uint32_t queueCount; VkQueue queues[VK_MAX_QUEUES]; } VkDeviceObj;
 typedef struct VkQueueObj { uint32_t magic; VkDevice device; uint32_t family,index; } VkQueueObj;
 typedef struct VkBufferObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t usage; VkDeviceMemory memory; VkDeviceSize offset; } VkBufferObj;
@@ -215,7 +223,7 @@ typedef struct { VkStructureType sType; const void *pNext; VkDescriptorPool desc
 typedef struct { VkBuffer buffer; VkDeviceSize offset,range; } VkDescriptorBufferInfo;
 typedef struct { VkSampler sampler; VkImageView imageView; uint32_t imageLayout; } VkDescriptorImageInfo;
 typedef struct { VkDescriptorSet dstSet; uint32_t dstBinding,dstArrayElement,descriptorCount,descriptorType; const void *pImageInfo; const VkDescriptorBufferInfo *pBufferInfo; const void *pTexelBufferView; } VkWriteDescriptorSet;
-typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; } VkImageObj;
+typedef struct VkImageObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint32_t width,height,depth,format,usage,tiling,mipLevels,arrayLayers,samples,layout; VkDeviceMemory memory; VkDeviceSize offset; uint8_t virgl_backed; uint8_t *external_pixels; } VkImageObj;
 typedef struct VkImageViewObj { uint32_t magic; VkDevice device; VkImage image; uint32_t format, aspect; } VkImageViewObj;
 typedef struct VkSamplerObj { uint32_t magic; VkDevice device; uint32_t magFilter,minFilter,mipmapMode,addressU,addressV,addressW; float mipLodBias,maxAnisotropy,minLod,maxLod; uint32_t anisotropyEnable,compareEnable,compareOp,borderColor,unnormalizedCoordinates; } VkSamplerObj;
 typedef struct VkSamplerCreateInfo { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t magFilter,minFilter,mipmapMode,addressModeU,addressModeV,addressModeW; float mipLodBias; uint32_t anisotropyEnable; float maxAnisotropy; uint32_t compareEnable,compareOp; float minLod,maxLod; uint32_t borderColor,unnormalizedCoordinates; } VkSamplerCreateInfo;
@@ -229,9 +237,9 @@ typedef struct { uint32_t srcSubpass,dstSubpass,srcStageMask,dstStageMask,srcAcc
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; uint32_t attachmentCount; const VkAttachmentDescription *pAttachments; uint32_t subpassCount; const VkSubpassDescription *pSubpasses; uint32_t dependencyCount; const VkSubpassDependency *pDependencies; } VkRenderPassCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkFlags flags; VkRenderPass renderPass; uint32_t attachmentCount; const VkImageView *pAttachments; uint32_t width,height,layers; } VkFramebufferCreateInfo;
 typedef struct { VkStructureType sType; const void *pNext; VkRenderPass renderPass; VkFramebuffer framebuffer; uint32_t renderArea_x,renderArea_y,renderArea_width,renderArea_height; uint32_t clearValueCount; const VkClearColorValue *pClearValues; } VkRenderPassBeginInfo;
-typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
+typedef struct VkMemoryObj { uint32_t magic; VkDevice device; VkDeviceSize size; uint8_t used,mapped,memory_type_index,gpu_backed; uint8_t bytes[VK_MEMORY_BYTES]; } VkMemoryObj;
 typedef struct VkPoolObj { uint32_t magic; VkDevice device; uint32_t family; } VkPoolObj;
-typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state; uint16_t count; VkPipeline bound_pipeline; VkDescriptorSet bound_sets[4]; uint32_t bound_set_count; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target,bound_depth_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; VkImage depth_image; float color[4]; uint8_t data[256]; VkImageCopy image_copy; VkBufferImageCopy buffer_image_copy; } ops[128]; } VkCmdObj;
+typedef struct VkCmdObj { uint32_t magic; VkDevice device; VkCommandPool pool; uint8_t level,state,in_flight; uint16_t count; VkPipeline bound_pipeline; VkDescriptorSet bound_sets[4]; uint32_t bound_set_count; VkBuffer bound_vertex; VkDeviceSize bound_vertex_offset; VkImage bound_target,bound_depth_target; uint32_t active_render_final_layout; struct { uint8_t op; uint8_t pad[7]; VkBuffer a,b; VkImage image; VkDeviceSize offset,size,offset2; uint32_t value,layout; VkImage depth_image; float color[4]; uint8_t data[256]; VkImageCopy image_copy; VkBufferImageCopy buffer_image_copy; } ops[128]; } VkCmdObj;
 typedef struct VkFenceObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkFenceObj;
 typedef struct VkSemaphoreObj { uint32_t magic; VkDevice device; uint8_t signaled; } VkSemaphoreObj;
 #define VK_MAX_SHADER_MODULES 8
@@ -286,6 +294,13 @@ static const uint32_t MAGIC_INSTANCE=VK_INSTANCE_MAGIC;
 static void vk_zero(void *p, size_t n) { uint8_t *b=(uint8_t*)p; while(n--) *b++=0; }
 static void vk_copy(void *d,const void *s,size_t n) { uint8_t *a=(uint8_t*)d; const uint8_t *b=(const uint8_t*)s; while(n--) *a++=*b++; }
 static int vk_eq(const char *a,const char *b) { if(!a||!b)return 0; while(*a&&*b&&*a==*b){a++;b++;}return *a==*b; }
+/* Return the pixel write address for an image. VirGL-backed images render
+ * directly into the kernel-mapped surface VA so their output is presentable
+ * by the GPU; ordinary images render into their bound device memory. */
+static uint8_t *vk_image_pixels(VkImageObj *im) {
+ if(im->virgl_backed && im->external_pixels) return im->external_pixels;
+ return &((VkMemoryObj*)im->memory)->bytes[im->offset];
+}
 #define VALID(h,arr,typ,magicv) ((h)!=0 && (h)>=(typ*)&arr[0] && (h)<=(typ*)&arr[(sizeof(arr)/sizeof(arr[0]))-1] && (h)->magic==(magicv))
 static int inst_ok(VkInstance h) { for(unsigned i=0;i<VK_MAX_INSTANCES;i++)if(h==(VkInstance)&g_instances[i]&&g_instances[i].magic==MAGIC_INSTANCE)return 1;return 0; }
 static int phys_ok(VkPhysicalDevice h) { for(unsigned i=0;i<VK_MAX_DEVICES;i++)if(h==(VkPhysicalDevice)&g_phys[i]&&g_phys[i].magic==VK_OBJECT_MAGIC)return 1;return 0; }
@@ -591,7 +606,15 @@ static SentinelGfxBootInfo g_virgl_info;
 static uint32_t g_virgl_init_state;
 static uint32_t g_virgl_last_submit_ok;
 static uint64_t sentinel_syscall2(uint64_t number,uint64_t arg0,uint64_t arg1) {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(SENTINOS_HOST)
+  /* Host-side test build: there is no SentinelOS kernel to handle int 0x80,
+   * and a Windows host will raise an exception on the syscall instruction.
+   * Report failure so callers fall back to the pure-software path (no VirGL/
+   * GPU acceleration). This lets the host regression test exercise the
+   * software runtime independent of the freestanding PE build. */
+  (void)number; (void)arg0; (void)arg1;
+  return 0;
+#elif defined(__x86_64__) || defined(_M_X64)
  uint64_t result;
  /*
   * SentinelOS user programs enter the kernel through int 0x80. The SYSCALL
@@ -672,11 +695,34 @@ VKAPI_EXPORT VkResult VKAPI_CALL SentinelVulkanUploadVirGLBuffer(uint32_t byte_c
  uint64_t ok=sentinel_syscall2(SENTINEL_SYS_NT_UPLOAD_VIRGL_BUFFER,byte_count,0);
  return ok?VK_SUCCESS:VK_ERROR_DEVICE_LOST;
 }
+/* Create a Vulkan image whose pixels are written directly to the kernel-mapped
+ * VirGL surface VA. Rendering into this image (CPU rasterizer or SPIR-V
+ * interpreter) produces output that SentinelVulkanPresentVirGL can present
+ * through the GPU when hardware 3D acceleration is available. Returns
+ * VK_ERROR_FEATURE_NOT_PRESENT when VirGL 3D is not available. */
+VKAPI_EXPORT VkResult VKAPI_CALL SentinelVulkanCreateVirGLImage(
+ VkDevice d,uint32_t width,uint32_t height,uint32_t format,VkImage *out) {
+ if(!dev_ok(d)||!out)return VK_ERROR_INITIALIZATION_FAILED;
+ *out=0;
+ if(!sentinel_virgl_init())return VK_ERROR_FEATURE_NOT_PRESENT;
+ if(!g_virgl_info.surface_va||!g_virgl_info.width||!g_virgl_info.height)
+  return VK_ERROR_INITIALIZATION_FAILED;
+ if(width&&width!=g_virgl_info.width)return VK_ERROR_INITIALIZATION_FAILED;
+ if(height&&height!=g_virgl_info.height)return VK_ERROR_INITIALIZATION_FAILED;
+ if(!width)width=g_virgl_info.width;
+ if(!height)height=g_virgl_info.height;
+ if(format!=VK_FORMAT_R8G8B8A8_UNORM&&format!=VK_FORMAT_B8G8R8A8_UNORM)
+  return VK_ERROR_FORMAT_NOT_SUPPORTED;
+ uint64_t bytes=(uint64_t)width*(uint64_t)height*4u;
+ if(bytes>VK_MEMORY_BYTES)return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ for(unsigned i=0;i<32;i++)if(!g_images[i].magic){VkImageObj *im=&g_images[i];vk_zero(im,sizeof(*im));im->magic=VK_OBJECT_MAGIC;im->device=d;im->size=bytes;im->width=width;im->height=height;im->depth=1;im->format=format;im->usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;im->tiling=1;im->mipLevels=1;im->arrayLayers=1;im->samples=1;im->layout=VK_IMAGE_LAYOUT_GENERAL;im->virgl_backed=1;im->external_pixels=(uint8_t*)(uintptr_t)g_virgl_info.surface_va;*out=(VkImage)im;return VK_SUCCESS;}
+ return VK_ERROR_TOO_MANY_OBJECTS;
+}
 
 static VkResult unsupported_extensions(uint32_t n,const char *const *names) { (void)names; return n?VK_ERROR_EXTENSION_NOT_PRESENT:VK_SUCCESS; }
 
 VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceVersion(uint32_t *v) { if(!v)return VK_ERROR_INITIALIZATION_FAILED;*v=VK_API_VERSION_1_0;return VK_SUCCESS; }
-VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *layer,uint32_t *count,void *props) { if(!count)return VK_ERROR_INITIALIZATION_FAILED;if(layer)return VK_ERROR_LAYER_NOT_PRESENT;(void)props;*count=0;return VK_SUCCESS; }
+VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *layer,uint32_t *count,void *props) { if(!count)return VK_ERROR_INITIALIZATION_FAILED;if(layer)return VK_ERROR_LAYER_NOT_PRESENT;if(!props){*count=1;return VK_SUCCESS;}if(*count<1)return VK_INCOMPLETE;uint8_t *b=(uint8_t*)props;vk_zero(b,260);const char name[]="VK_KHR_swapchain";vk_copy(b,name,sizeof(name));uint32_t sv=VK_KHR_SWAPCHAIN_SPEC_VERSION;vk_copy(b+256,&sv,4);*count=1;return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t *count,void *props) { if(!count)return VK_ERROR_INITIALIZATION_FAILED;(void)props;*count=0;return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *ci,const void *alloc,VkInstance *out) {
  if (!ci || !out || ci->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO) {
@@ -702,8 +748,32 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *ci
    *out = (VkInstance)&g_instances[i];
    for (unsigned p = 0; p < VK_MAX_DEVICES; p++) {
     if (!g_phys[p].magic) {
-     g_phys[p].magic = VK_OBJECT_MAGIC;
-     g_phys[p].parent = *out;
+     VkPhysicalObj *phys = &g_phys[p];
+     phys->magic = VK_OBJECT_MAGIC;
+     phys->parent = *out;
+     phys->vendor_id = 0x534E544Cu; /* "SNTL" software fallback */
+     phys->device_id = 1;
+     phys->pci_bus = 0; phys->pci_device = 0; phys->pci_function = 0;
+     phys->is_virgl = 0; phys->has_accel_3d = 0;
+     const char *sw_name = "SentinelOS Vulkan (bounded software path)";
+     unsigned n = 0; while (sw_name[n] && n < sizeof(phys->name) - 1) { phys->name[n] = (char)sw_name[n]; n++; } phys->name[n] = 0;
+
+     /* When the kernel's VirtIO-GPU/VirGL backend is available, report the
+      * real GPU discovered by the kernel instead of the software fallback.
+      * This is honest: the physical device represents whichever backend the
+      * kernel initialized, and Vulkan command execution uses the matching path. */
+     if (sentinel_virgl_init() &&
+         (g_virgl_info.capabilities & SENTINEL_GFX_CAP_ACCEL_3D)) {
+       phys->vendor_id = g_virgl_info.vendor_id;
+       phys->device_id = g_virgl_info.device_id;
+       phys->pci_bus = g_virgl_info.pci_bus;
+       phys->pci_device = g_virgl_info.pci_device;
+       phys->pci_function = g_virgl_info.pci_function;
+       phys->is_virgl = 1;
+       phys->has_accel_3d = 1;
+       const char *gpu_name = "VirtIO-GPU VirGL (hardware 3D acceleration)";
+       n = 0; while (gpu_name[n] && n < sizeof(phys->name) - 1) { phys->name[n] = (char)gpu_name[n]; n++; } phys->name[n] = 0;
+     }
      break;
     }
    }
@@ -721,10 +791,22 @@ VKAPI_EXPORT void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice p,vo
  uint8_t *b=(uint8_t*)out;
  vk_zero(b,824); /* sizeof(VkPhysicalDeviceProperties on x86-64 */
  if(!phys_ok(p))return;
- uint32_t api=VK_API_VERSION_1_0,driver=1,vendor=0x534E544Cu,device=1,type=4;
- vk_copy(b,&api,4);vk_copy(b+4,&driver,4);vk_copy(b+8,&vendor,4);vk_copy(b+12,&device,4);vk_copy(b+16,&type,4);
- const char name[]="SentinelOS Vulkan (VirGL transport bridge; bounded software path)";vk_copy(b+20,name,sizeof(name));
- const uint8_t uuid[16]={0x53,0x65,0x6e,0x74,0x69,0x6e,0x65,0x6c,0x4f,0x53,0x2d,0x43,0x50,0x55,0x01,0x00};vk_copy(b+276,uuid,16);
+ VkPhysicalObj *phys=(VkPhysicalObj*)p;
+ uint32_t api=VK_API_VERSION_1_0,driver=1,type=phys->has_accel_3d?1u:4u;
+ vk_copy(b,&api,4);vk_copy(b+4,&driver,4);vk_copy(b+8,&phys->vendor_id,4);vk_copy(b+12,&phys->device_id,4);vk_copy(b+16,&type,4);
+ vk_copy(b+20,phys->name,sizeof(phys->name));
+ /* UUID: software fallback uses a fixed UUID; VirGL reports a UUID derived
+  * from the PCI bus/device/function so applications can distinguish real GPUs. */
+ uint8_t uuid[16];
+ if(phys->has_accel_3d) {
+  uuid[0]=0x53;uuid[1]=0x65;uuid[2]=0x6e;uuid[3]=0x74;uuid[4]=0x69;uuid[5]=0x6e;uuid[6]=0x65;uuid[7]=0x6c;
+  uuid[8]=0x47;uuid[9]=0x50;uuid[10]=(uint8_t)phys->pci_bus;uuid[11]=(uint8_t)phys->pci_device;
+  uuid[12]=(uint8_t)phys->pci_function;uuid[13]=0x01;uuid[14]=0x00;uuid[15]=0x00;
+ } else {
+  uuid[0]=0x53;uuid[1]=0x65;uuid[2]=0x6e;uuid[3]=0x74;uuid[4]=0x69;uuid[5]=0x6e;uuid[6]=0x65;uuid[7]=0x6c;
+  uuid[8]=0x4f;uuid[9]=0x53;uuid[10]=0x2d;uuid[11]=0x43;uuid[12]=0x50;uuid[13]=0x55;uuid[14]=0x01;uuid[15]=0x00;
+ }
+ vk_copy(b+276,uuid,16);
 }
 VKAPI_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures(VkPhysicalDevice p,void *out) {
  if(out)vk_zero(out,55u*sizeof(uint32_t));
@@ -748,7 +830,7 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(VkPhys
  out->maxMipLevels=1;out->maxArrayLayers=1;out->sampleCounts=1;out->maxResourceSize=VK_MEMORY_BYTES;
  return VK_SUCCESS;
 }
-VKAPI_EXPORT void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p,VkPhysicalDeviceMemoryProperties *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!phys_ok(p))return;out->memoryTypeCount=1;out->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;out->memoryTypes[0].heapIndex=0;out->memoryHeapCount=1;out->memoryHeaps[0].size=(VkDeviceSize)VK_MAX_MEMORY*VK_MEMORY_BYTES; }
+VKAPI_EXPORT void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice p,VkPhysicalDeviceMemoryProperties *out) { if(!out)return;vk_zero(out,sizeof(*out));if(!phys_ok(p))return;VkPhysicalObj *phys=(VkPhysicalObj*)p;out->memoryTypeCount=1;out->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;out->memoryTypes[0].heapIndex=0;out->memoryHeapCount=1;out->memoryHeaps[0].size=(VkDeviceSize)VK_MAX_MEMORY*VK_MEMORY_BYTES; if(phys->has_accel_3d&&out->memoryTypeCount<32) { out->memoryTypes[1].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; out->memoryTypes[1].heapIndex=0; out->memoryTypeCount=2; } }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p,const VkDeviceCreateInfo *ci,const void *alloc,VkDevice *out) {
  if (!phys_ok(p) || !ci || !out ||
      ci->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO) {
@@ -828,10 +910,53 @@ static uint8_t vk_unorm8(const float *fp) {
  uint64_t v=(uint64_t)m*255u+(1ULL<<(shift-1u));
  return (uint8_t)(v>>shift);
 }
-VKAPI_EXPORT VkResult VKAPI_CALL vkAllocateMemory(VkDevice d,const VkMemoryAllocateInfo *ai,const void *alloc,VkDeviceMemory *out) { if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc||!ai->allocationSize||ai->allocationSize>VK_MEMORY_BYTES||ai->memoryTypeIndex!=0)return VK_ERROR_OUT_OF_DEVICE_MEMORY;for(unsigned i=0;i<VK_MAX_MEMORY;i++)if(!g_memories[i].magic){VkMemoryObj *m=&g_memories[i];m->magic=VK_OBJECT_MAGIC;m->device=d;m->size=ai->allocationSize;m->used=1;m->mapped=0;vk_zero(m->bytes,VK_MEMORY_BYTES);*out=(VkDeviceMemory)m;return VK_SUCCESS;}return VK_ERROR_OUT_OF_HOST_MEMORY; }
-VKAPI_EXPORT void VKAPI_CALL vkFreeMemory(VkDevice d,VkDeviceMemory m,const void *alloc) { if(alloc||!dev_ok(d)||!mem_ok(m)||m->device!=d||m->mapped)return;for(unsigned i=0;i<VK_MAX_BUFFERS;i++)if(g_buffers[i].magic&&g_buffers[i].memory==m)return;for(unsigned i=0;i<32;i++)if(g_images[i].magic&&g_images[i].memory==m)return;m->magic=0;m->used=0; }
+VKAPI_EXPORT VkResult VKAPI_CALL vkAllocateMemory(VkDevice d,const VkMemoryAllocateInfo *ai,const void *alloc,VkDeviceMemory *out) { if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc||!ai->allocationSize||ai->allocationSize>VK_MEMORY_BYTES)return VK_ERROR_OUT_OF_DEVICE_MEMORY;VkPhysicalObj *phys=(VkPhysicalObj*)((VkDeviceObj*)d)->physical;int gpu_only=(ai->memoryTypeIndex==1u);if(gpu_only&&(!phys||!phys->has_accel_3d))return VK_ERROR_FEATURE_NOT_PRESENT;if(!gpu_only&&ai->memoryTypeIndex!=0u)return VK_ERROR_OUT_OF_DEVICE_MEMORY;for(unsigned i=0;i<VK_MAX_MEMORY;i++)if(!g_memories[i].magic){VkMemoryObj *m=&g_memories[i];m->magic=VK_OBJECT_MAGIC;m->device=d;m->size=ai->allocationSize;m->used=1;m->mapped=0;m->memory_type_index=(uint8_t)ai->memoryTypeIndex;m->gpu_backed=(uint8_t)gpu_only;if(!gpu_only)vk_zero(m->bytes,VK_MEMORY_BYTES);*out=(VkDeviceMemory)m;return VK_SUCCESS;}return VK_ERROR_OUT_OF_HOST_MEMORY; }
+/* Return 1 if any live command buffer references a buffer or image whose
+ * backing memory is m. Prevents freeing memory that pending or recorded
+ * command-buffer operations still read or write. */
+static int vk_memory_referenced_by_cmds(VkDevice d,VkDeviceMemory m) {
+ for(unsigned c=0;c<VK_MAX_CMDS;c++){
+  VkCmdObj *cb=&g_cmds[c];
+  if(!cb->magic||cb->device!=d)continue;
+  for(unsigned i=0;i<cb->count;i++){
+   /* Buffer-referencing ops. */
+   if(cb->ops[i].op==1u||cb->ops[i].op==2u||cb->ops[i].op==7u){
+    VkBuffer b=cb->ops[i].a;
+    if(buf_ok(b)&&b->device==d&&b->memory==m)return 1;
+   }
+   if(cb->ops[i].op==2u){
+    VkBuffer b2=(VkBuffer)cb->ops[i].b;
+    if(buf_ok(b2)&&b2->device==d&&b2->memory==m)return 1;
+   }
+   /* Vertex buffer op. */
+   if(cb->ops[i].op==13u){
+    VkBuffer vb=(VkBuffer)cb->ops[i].a;
+    if(buf_ok(vb)&&vb->device==d&&vb->memory==m)return 1;
+   }
+   /* Image-referencing ops: check the image's bound memory. */
+   VkImage im=0;
+   switch(cb->ops[i].op){
+    case 3u:case 4u:case 5u:case 6u:case 8u:case 9u:case 14u:case 15u:case 17u:
+     im=cb->ops[i].image;break;
+   }
+   if(im&&image_ok(im)&&im->device==d&&im->memory==m)return 1;
+   /* CopyImage dst image stored in the 'b' field as VkBuffer-typed storage. */
+   if(cb->ops[i].op==8u){
+    im=(VkImage)cb->ops[i].b;
+    if(im&&image_ok(im)&&im->device==d&&im->memory==m)return 1;
+   }
+   /* Depth image for draw ops. */
+   if(cb->ops[i].op==13u){
+    im=(VkImage)cb->ops[i].depth_image;
+    if(im&&image_ok(im)&&im->device==d&&im->memory==m)return 1;
+   }
+  }
+ }
+ return 0;
+}
+VKAPI_EXPORT void VKAPI_CALL vkFreeMemory(VkDevice d,VkDeviceMemory m,const void *alloc) { if(alloc||!dev_ok(d)||!mem_ok(m)||m->device!=d||m->mapped)return;for(unsigned i=0;i<VK_MAX_BUFFERS;i++)if(g_buffers[i].magic&&g_buffers[i].memory==m)return;for(unsigned i=0;i<32;i++)if(g_images[i].magic&&g_images[i].memory==m)return;if(vk_memory_referenced_by_cmds(d,m))return;m->magic=0;m->used=0; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkBindBufferMemory(VkDevice d,VkBuffer b,VkDeviceMemory m,VkDeviceSize off) { if(!dev_ok(d)||!buf_ok(b)||!mem_ok(m)||b->device!=d||m->device!=d||b->memory||m->mapped)return VK_ERROR_INITIALIZATION_FAILED;if((off&15u)||off>m->size||b->size>m->size-off)return VK_ERROR_OUT_OF_DEVICE_MEMORY;b->memory=m;b->offset=off;return VK_SUCCESS; }
-VKAPI_EXPORT VkResult VKAPI_CALL vkMapMemory(VkDevice d,VkDeviceMemory m,VkDeviceSize off,VkDeviceSize size,VkFlags flags,void **out) { (void)flags;if(!dev_ok(d)||!mem_ok(m)||m->device!=d||!out||off>m->size)return VK_ERROR_MEMORY_MAP_FAILED;if(size==VK_WHOLE_SIZE)size=m->size-off;if(size>m->size-off||m->mapped)return VK_ERROR_MEMORY_MAP_FAILED;m->mapped=1;*out=&m->bytes[off];return VK_SUCCESS; }
+VKAPI_EXPORT VkResult VKAPI_CALL vkMapMemory(VkDevice d,VkDeviceMemory m,VkDeviceSize off,VkDeviceSize size,VkFlags flags,void **out) { (void)flags;if(!dev_ok(d)||!mem_ok(m)||m->device!=d||!out||off>m->size)return VK_ERROR_MEMORY_MAP_FAILED;if(m->gpu_backed)return VK_ERROR_MEMORY_MAP_FAILED; /* GPU-backed memory is device-local only; not CPU-mappable */if(size==VK_WHOLE_SIZE)size=m->size-off;if(size>m->size-off||m->mapped)return VK_ERROR_MEMORY_MAP_FAILED;m->mapped=1;*out=&m->bytes[off];return VK_SUCCESS; }
 VKAPI_EXPORT void VKAPI_CALL vkUnmapMemory(VkDevice d,VkDeviceMemory m) { if(dev_ok(d)&&mem_ok(m)&&m->device==d)m->mapped=0; }
 static VkResult vk_validate_mapped_ranges(VkDevice d,uint32_t n,const VkMappedMemoryRange *r) { if(!dev_ok(d)||(!r&&n))return VK_ERROR_INITIALIZATION_FAILED;for(uint32_t i=0;i<n;i++){if(r[i].sType!=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE||r[i].pNext||!mem_ok(r[i].memory)||r[i].memory->device!=d||!r[i].memory->mapped||r[i].offset>r[i].memory->size)return VK_ERROR_MEMORY_MAP_FAILED;VkDeviceSize size=r[i].size==VK_WHOLE_SIZE?r[i].memory->size-r[i].offset:r[i].size;if(size>r[i].memory->size-r[i].offset||!size)return VK_ERROR_MEMORY_MAP_FAILED;}return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkFlushMappedMemoryRanges(VkDevice d,uint32_t n,const VkMappedMemoryRange *ranges) { return vk_validate_mapped_ranges(d,n,ranges); }
@@ -840,10 +965,10 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkCreateCommandPool(VkDevice d,const VkCommandP
 VKAPI_EXPORT VkResult VKAPI_CALL vkResetCommandPool(VkDevice d,VkCommandPool p,VkCommandPoolResetFlags flags) { (void)flags;if(!dev_ok(d)||!pool_ok(p)||p->device!=d)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_CMDS;i++)if(g_cmds[i].magic==VK_OBJECT_MAGIC&&g_cmds[i].pool==p){g_cmds[i].count=0;g_cmds[i].state=0;}return VK_SUCCESS; }
 VKAPI_EXPORT void VKAPI_CALL vkDestroyCommandPool(VkDevice d,VkCommandPool p,const void *alloc) { if(alloc||!dev_ok(d)||!pool_ok(p)||p->device!=d)return;for(unsigned i=0;i<VK_MAX_CMDS;i++)if(g_cmds[i].pool==p)g_cmds[i].magic=0;p->magic=0; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice d,const VkCommandBufferAllocateInfo *ai,VkCommandBuffer *out) { if(!dev_ok(d)||!ai||!out||ai->sType!=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO||!pool_ok(ai->commandPool)||ai->commandPool->device!=d||ai->level>1)return VK_ERROR_INITIALIZATION_FAILED;uint32_t made=0;for(unsigned i=0;i<VK_MAX_CMDS&&made<ai->commandBufferCount;i++)if(!g_cmds[i].magic){VkCmdObj *c=&g_cmds[i];c->magic=VK_OBJECT_MAGIC;c->device=d;c->pool=ai->commandPool;c->level=(uint8_t)ai->level;c->state=0;c->count=0;out[made++]=(VkCommandBuffer)c;}if(made<ai->commandBufferCount){for(uint32_t i=0;i<made;i++)((VkCmdObj*)out[i])->magic=0;return VK_ERROR_OUT_OF_HOST_MEMORY;}return VK_SUCCESS; }
-VKAPI_EXPORT void VKAPI_CALL vkFreeCommandBuffers(VkDevice d,VkCommandPool p,uint32_t n,const VkCommandBuffer *list) { if(!dev_ok(d)||!pool_ok(p)||p->device!=d||!list)return;for(uint32_t j=0;j<n;j++)if(cmd_ok(list[j])&&list[j]->device==d&&list[j]->pool==p)list[j]->magic=0; }
+VKAPI_EXPORT void VKAPI_CALL vkFreeCommandBuffers(VkDevice d,VkCommandPool p,uint32_t n,const VkCommandBuffer *list) { if(!dev_ok(d)||!pool_ok(p)||p->device!=d||!list)return;for(uint32_t j=0;j<n;j++)if(cmd_ok(list[j])&&list[j]->device==d&&list[j]->pool==p&&!list[j]->in_flight)list[j]->magic=0; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkBeginCommandBuffer(VkCommandBuffer c,const VkCommandBufferBeginInfo *bi) { if(!cmd_ok(c)||!bi||bi->sType!=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)return VK_ERROR_INITIALIZATION_FAILED;c->count=0;c->state=1;return VK_SUCCESS; }
 VKAPI_EXPORT VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer c) { if(!cmd_ok(c)||c->state!=1)return VK_ERROR_INITIALIZATION_FAILED;c->state=2;return VK_SUCCESS; }
-VKAPI_EXPORT VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c,VkFlags flags) { (void)flags;if(!cmd_ok(c))return VK_ERROR_INITIALIZATION_FAILED;c->count=0;c->state=0;return VK_SUCCESS; }
+VKAPI_EXPORT VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer c,VkFlags flags) { (void)flags;if(!cmd_ok(c)||c->in_flight)return VK_ERROR_INITIALIZATION_FAILED;c->count=0;c->state=0;return VK_SUCCESS; }
 VKAPI_EXPORT void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,uint32_t value) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||c->count>=128||off>b->size||(off&3u))return;if(size==VK_WHOLE_SIZE)size=b->size-off;if(size>b->size-off||(size!=VK_WHOLE_SIZE&&(size&3u)))return;unsigned i=c->count++;c->ops[i].op=1;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;c->ops[i].value=value; }
 VKAPI_EXPORT void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer c,VkBuffer b,VkDeviceSize off,VkDeviceSize size,const void *data) { if(!cmd_ok(c)||c->state!=1||!buf_ok(b)||!b->memory||b->device!=c->device||!(b->usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)||!data||!size||size>256u||(size&3u)||(off&3u)||off>b->size||size>b->size-off||c->count>=128)return;unsigned i=c->count++;c->ops[i].op=7;c->ops[i].a=b;c->ops[i].offset=off;c->ops[i].size=size;vk_copy(c->ops[i].data,data,(size_t)size); }
 VKAPI_EXPORT void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer c,VkBuffer src,VkBuffer dst,uint32_t n,const void *regions) {
@@ -1116,7 +1241,7 @@ VKAPI_EXPORT void VKAPI_CALL vkCmdBindVertexBuffers(VkCommandBuffer c,uint32_t f
  * objects are not yet implemented. vkCmdDraw itself uses the standard call
  * shape, but this target hook is an explicit backend extension. */
 VKAPI_EXPORT void VKAPI_CALL SentinelVulkanCmdBindColorTarget(VkCommandBuffer c,VkImage im) {
- if(!cmd_ok(c)||c->state!=1||!image_ok(im)||im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->count>=128)return;
+ if(!cmd_ok(c)||c->state!=1||!image_ok(im)||im->device!=c->device||(!im->virgl_backed&&!mem_ok(im->memory))||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->count>=128)return;
  c->bound_target=im;unsigned i=c->count++;c->ops[i].op=12;c->ops[i].image=im;
 }
 /* Record one CPU-rasterized triangle per three vertices. This implements
@@ -1324,11 +1449,11 @@ static int vk_pipeline_texture(VkCmdObj *c,VkPipelineObj *pl,VkSoftTexture *out)
    VkDescriptorValue *value=&set->values[bi][0];VkImageView view=value->imageView;VkSampler sampler=value->sampler;
    if(!image_view_ok(view)||!sampler||!image_ok(view->image))continue;
    VkImage im=view->image;
-   if(im->device!=c->device||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||
+   if(im->device!=c->device||im->virgl_backed||!mem_ok(im->memory)||!(im->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||
       (im->format==VK_FORMAT_D32_SFLOAT?view->aspect!=VK_IMAGE_ASPECT_DEPTH_BIT:view->aspect!=VK_IMAGE_ASPECT_COLOR_BIT)||
       (im->layout!=VK_IMAGE_LAYOUT_GENERAL&&im->layout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)||
       (value->imageLayout!=VK_IMAGE_LAYOUT_GENERAL&&value->imageLayout!=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)||im->layout!=value->imageLayout||im->size/4u>VK_MEMORY_BYTES/4u)continue;
-   uint8_t *src=&im->memory->bytes[im->offset];
+   uint8_t *src=vk_image_pixels(im);
    for(uint64_t px=0;px<im->size/4u;px++){
     uint8_t r,g,b,a;if(im->format==VK_FORMAT_D32_SFLOAT){uint32_t zbits;vk_copy(&zbits,src+px*4u,4);r=g=b=vksoft_float_to_u8(zbits);a=255;}
     else if(im->format==VK_FORMAT_B8G8R8A8_UNORM){b=src[px*4u];g=src[px*4u+1u];r=src[px*4u+2u];a=src[px*4u+3u];}
@@ -1343,7 +1468,7 @@ static int vk_pipeline_texture(VkCmdObj *c,VkPipelineObj *pl,VkSoftTexture *out)
  }
  return 0;
 }
-static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;VkBufferImageCopy *r=&c->ops[i].buffer_image_copy;uint64_t pitch,row_bytes;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||!mem_ok(im->memory)||b->device!=c->device||im->device!=c->device||im->layout!=c->ops[i].layout||!vk_copy_region_ok(r,im,b,&pitch,&row_bytes))return VK_ERROR_DEVICE_LOST;uint8_t *bp=&b->memory->bytes[b->offset+r->bufferOffset];uint8_t *ip=&im->memory->bytes[im->offset+((uint64_t)(uint32_t)r->imageOffset.y*im->width+(uint32_t)r->imageOffset.x)*4u];uint64_t image_pitch=(uint64_t)im->width*4u;for(uint32_t y=0;y<r->imageExtent.height;y++){if(c->ops[i].op==5)vk_copy(ip+(uint64_t)y*image_pitch,bp+(uint64_t)y*pitch,(size_t)row_bytes);else vk_copy(bp+(uint64_t)y*pitch,ip+(uint64_t)y*image_pitch,(size_t)row_bytes);}}else if(c->ops[i].op==7){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory)||c->ops[i].offset>b->size||c->ops[i].size>b->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset],c->ops[i].data,(size_t)c->ops[i].size);}else if(c->ops[i].op==8){VkImageObj *src=(VkImageObj*)c->ops[i].image,*dst=(VkImageObj*)c->ops[i].b;VkImageCopy *r=&c->ops[i].image_copy;if(!image_ok((VkImage)src)||!image_ok((VkImage)dst)||!mem_ok(src->memory)||!mem_ok(dst->memory)||src->device!=c->device||dst->device!=c->device||src->format!=dst->format||src->layout!=c->ops[i].layout||dst->layout!=c->ops[i].value||r->srcOffset.x<0||r->srcOffset.y<0||r->dstOffset.x<0||r->dstOffset.y<0||(uint32_t)r->srcOffset.x>src->width||r->extent.width>src->width-(uint32_t)r->srcOffset.x||(uint32_t)r->srcOffset.y>src->height||r->extent.height>src->height-(uint32_t)r->srcOffset.y||(uint32_t)r->dstOffset.x>dst->width||r->extent.width>dst->width-(uint32_t)r->dstOffset.x||(uint32_t)r->dstOffset.y>dst->height||r->extent.height>dst->height-(uint32_t)r->dstOffset.y)return VK_ERROR_DEVICE_LOST;uint64_t row=(uint64_t)r->extent.width*4u;uint8_t *sp=&src->memory->bytes[src->offset+((uint64_t)(uint32_t)r->srcOffset.y*src->width+(uint32_t)r->srcOffset.x)*4u];uint8_t *dp=&dst->memory->bytes[dst->offset+((uint64_t)(uint32_t)r->dstOffset.y*dst->width+(uint32_t)r->dstOffset.x)*4u];for(uint32_t y=0;y<r->extent.height;y++)vk_copy(dp+(uint64_t)y*dst->width*4u,sp+(uint64_t)y*src->width*4u,(size_t)row);}else if(c->ops[i].op==14){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory))return VK_ERROR_DEVICE_LOST;if(c->ops[i].value==VK_ATTACHMENT_LOAD_OP_CLEAR){uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);}im->layout=c->ops[i].layout;}else if(c->ops[i].op==17){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->format!=VK_FORMAT_D32_SFLOAT)return VK_ERROR_DEVICE_LOST;if(c->ops[i].value==VK_ATTACHMENT_LOAD_OP_CLEAR){uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t off=0;off+sizeof(float)<=im->size;off+=sizeof(float))vk_copy(p+off,&c->ops[i].color[0],sizeof(float));}}else if(c->ops[i].op==15){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im))return VK_ERROR_DEVICE_LOST;im->layout=c->ops[i].layout;}else if(c->ops[i].op==9){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->layout!=VK_IMAGE_LAYOUT_GENERAL||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_DEVICE_LOST;VkSoftVertex v[3];vk_copy(v,c->ops[i].data,sizeof(v));uint8_t *bytes=&((VkMemoryObj*)im->memory)->bytes[im->offset];VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1,0};int pixels=vksoft_triangle(&target,&v[0],&v[1],&v[2],0);if(pixels<0)return VK_ERROR_INITIALIZATION_FAILED;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}else if(c->ops[i].op==13){VkBufferObj *vb=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;VkPipelineObj *pl=(VkPipelineObj*)(uintptr_t)c->ops[i].offset2;if(!buf_ok((VkBuffer)vb)||!image_ok((VkImage)im)||!pipeline_ok(pl)||!mem_ok(vb->memory)||!mem_ok(im->memory)||pl->device!=c->device||im->device!=c->device||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->ops[i].offset>vb->size||((VkDeviceSize)c->ops[i].value+3u)*sizeof(VkSoftVertex)>vb->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;uint32_t vmain=vk_spirv_main_id(pl->vertex->words,pl->vertex->wordCount),fmain=vk_spirv_main_id(pl->fragment->words,pl->fragment->wordCount),vbits=0,fbits=0;if(!vk_spirv_execute_pipeline_u32(pl->vertex->words,pl->vertex->wordCount,vmain,pl->vertex_result,&vbits))return VK_ERROR_FEATURE_NOT_PRESENT;if(!pl->texture_sampling&&!vk_spirv_execute_pipeline_u32(pl->fragment->words,pl->fragment->wordCount,fmain,pl->fragment_result,&fbits))return VK_ERROR_FEATURE_NOT_PRESENT;VkSoftVertex tri[3];vk_copy(tri,&((VkMemoryObj*)vb->memory)->bytes[vb->offset+c->ops[i].offset+(VkDeviceSize)c->ops[i].value*sizeof(VkSoftVertex)],sizeof(tri));static const float shades[4]={0.0f,0.33333334f,0.66666669f,1.0f};float shade=shades[(vbits?fbits:0u)&3u];for(unsigned k=0;k<3;k++)tri[k].r=tri[k].g=tri[k].b=shade,tri[k].a=1.0f;uint8_t *bytes=&((VkMemoryObj*)im->memory)->bytes[im->offset];VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1,0};VkImageObj *zim=(VkImageObj*)c->ops[i].depth_image;if(pl->depth_test||pl->depth_write){if(!image_ok((VkImage)zim)||zim->format!=VK_FORMAT_D32_SFLOAT||!mem_ok(zim->memory)||zim->layout!=VK_IMAGE_LAYOUT_GENERAL)return VK_ERROR_DEVICE_LOST;target.depth=(float*)&((VkMemoryObj*)zim->memory)->bytes[zim->offset];target.depth_test=pl->depth_test;target.depth_write=pl->depth_write;target.depth_compare=(uint8_t)pl->depth_compare;}VkSoftTexture sampledTexture;VkSoftTexture *texturePtr=vk_pipeline_texture(c,pl,&sampledTexture)?&sampledTexture:0;if(pl->texture_sampling&&!texturePtr)return VK_ERROR_FEATURE_NOT_PRESENT;int rasterResult;if(pl->texture_sampling){VkFragmentContext fragmentContext={pl->fragment,texturePtr};rasterResult=vksoft_triangle_fragment(&target,&tri[0],&tri[1],&tri[2],vk_fragment_execute,&fragmentContext);}else rasterResult=vksoft_triangle(&target,&tri[0],&tri[1],&tri[2],texturePtr);if(rasterResult<0)return VK_ERROR_FEATURE_NOT_PRESENT;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}}return VK_SUCCESS;}
+static VkResult execute_cmd(VkCmdObj *c) { if(c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<c->count;i++){if(c->ops[i].op==1){VkBufferObj *b=c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *p=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset];for(uint64_t k=0;k+4<=c->ops[i].size;k+=4)vk_copy(p+k,&c->ops[i].value,4);}else if(c->ops[i].op==2){VkBufferObj *a=c->ops[i].a,*b=c->ops[i].b;if(!buf_ok((VkBuffer)a)||!buf_ok((VkBuffer)b)||!mem_ok(a->memory)||!mem_ok(b->memory))return VK_ERROR_DEVICE_LOST;uint8_t *sp=&((VkMemoryObj*)a->memory)->bytes[a->offset+c->ops[i].offset];uint8_t *dp=&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset2];vk_copy(dp,sp,(size_t)c->ops[i].size);}else if(c->ops[i].op==4){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||im->layout!=c->ops[i].value)return VK_ERROR_INITIALIZATION_FAILED;im->layout=c->ops[i].layout;}else if(c->ops[i].op==3){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||(!im->virgl_backed&&!mem_ok(im->memory))||im->layout!=c->ops[i].layout)return VK_ERROR_DEVICE_LOST;uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=vk_image_pixels(im);for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);im->layout=c->ops[i].layout;}else if(c->ops[i].op==5||c->ops[i].op==6){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;VkBufferImageCopy *r=&c->ops[i].buffer_image_copy;uint64_t pitch,row_bytes;if(!buf_ok((VkBuffer)b)||!image_ok((VkImage)im)||!mem_ok(b->memory)||(!im->virgl_backed&&!mem_ok(im->memory))||b->device!=c->device||im->device!=c->device||im->layout!=c->ops[i].layout||!vk_copy_region_ok(r,im,b,&pitch,&row_bytes))return VK_ERROR_DEVICE_LOST;uint8_t *bp=&b->memory->bytes[b->offset+r->bufferOffset];uint8_t *ip=vk_image_pixels(im)+((uint64_t)(uint32_t)r->imageOffset.y*im->width+(uint32_t)r->imageOffset.x)*4u;uint64_t image_pitch=(uint64_t)im->width*4u;for(uint32_t y=0;y<r->imageExtent.height;y++){if(c->ops[i].op==5)vk_copy(ip+(uint64_t)y*image_pitch,bp+(uint64_t)y*pitch,(size_t)row_bytes);else vk_copy(bp+(uint64_t)y*pitch,ip+(uint64_t)y*image_pitch,(size_t)row_bytes);}}else if(c->ops[i].op==7){VkBufferObj *b=(VkBufferObj*)c->ops[i].a;if(!buf_ok((VkBuffer)b)||!mem_ok(b->memory)||c->ops[i].offset>b->size||c->ops[i].size>b->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;vk_copy(&((VkMemoryObj*)b->memory)->bytes[b->offset+c->ops[i].offset],c->ops[i].data,(size_t)c->ops[i].size);}else if(c->ops[i].op==8){VkImageObj *src=(VkImageObj*)c->ops[i].image,*dst=(VkImageObj*)c->ops[i].b;VkImageCopy *r=&c->ops[i].image_copy;if(!image_ok((VkImage)src)||!image_ok((VkImage)dst)||(!src->virgl_backed&&!mem_ok(src->memory))||(!dst->virgl_backed&&!mem_ok(dst->memory))||src->device!=c->device||dst->device!=c->device||src->format!=dst->format||src->layout!=c->ops[i].layout||dst->layout!=c->ops[i].value||r->srcOffset.x<0||r->srcOffset.y<0||r->dstOffset.x<0||r->dstOffset.y<0||(uint32_t)r->srcOffset.x>src->width||r->extent.width>src->width-(uint32_t)r->srcOffset.x||(uint32_t)r->srcOffset.y>src->height||r->extent.height>src->height-(uint32_t)r->srcOffset.y||(uint32_t)r->dstOffset.x>dst->width||r->extent.width>dst->width-(uint32_t)r->dstOffset.x||(uint32_t)r->dstOffset.y>dst->height||r->extent.height>dst->height-(uint32_t)r->dstOffset.y)return VK_ERROR_DEVICE_LOST;uint64_t row=(uint64_t)r->extent.width*4u;uint8_t *sp=vk_image_pixels(src)+((uint64_t)(uint32_t)r->srcOffset.y*src->width+(uint32_t)r->srcOffset.x)*4u;uint8_t *dp=vk_image_pixels(dst)+((uint64_t)(uint32_t)r->dstOffset.y*dst->width+(uint32_t)r->dstOffset.x)*4u;for(uint32_t y=0;y<r->extent.height;y++)vk_copy(dp+(uint64_t)y*dst->width*4u,sp+(uint64_t)y*src->width*4u,(size_t)row);}else if(c->ops[i].op==14){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||(!im->virgl_backed&&!mem_ok(im->memory)))return VK_ERROR_DEVICE_LOST;if(c->ops[i].value==VK_ATTACHMENT_LOAD_OP_CLEAR){uint8_t rgba[4];for(unsigned k=0;k<4;k++)rgba[k]=vk_unorm8(&c->ops[i].color[k]);if(im->format==VK_FORMAT_B8G8R8A8_UNORM){uint8_t t=rgba[0];rgba[0]=rgba[2];rgba[2]=t;}uint8_t *p=vk_image_pixels(im);for(uint64_t px=0;px<im->size;px+=4)vk_copy(p+px,rgba,4);}im->layout=c->ops[i].layout;}else if(c->ops[i].op==17){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||!mem_ok(im->memory)||im->format!=VK_FORMAT_D32_SFLOAT)return VK_ERROR_DEVICE_LOST;if(c->ops[i].value==VK_ATTACHMENT_LOAD_OP_CLEAR){uint8_t *p=&((VkMemoryObj*)im->memory)->bytes[im->offset];for(uint64_t off=0;off+sizeof(float)<=im->size;off+=sizeof(float))vk_copy(p+off,&c->ops[i].color[0],sizeof(float));}}else if(c->ops[i].op==15){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im))return VK_ERROR_DEVICE_LOST;im->layout=c->ops[i].layout;}else if(c->ops[i].op==9){VkImageObj *im=(VkImageObj*)c->ops[i].image;if(!image_ok((VkImage)im)||(!im->virgl_backed&&!mem_ok(im->memory))||im->layout!=VK_IMAGE_LAYOUT_GENERAL||!(im->usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return VK_ERROR_DEVICE_LOST;VkSoftVertex v[3];vk_copy(v,c->ops[i].data,sizeof(v));uint8_t *bytes=vk_image_pixels(im);VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1,0};int pixels=vksoft_triangle(&target,&v[0],&v[1],&v[2],0);if(pixels<0)return VK_ERROR_INITIALIZATION_FAILED;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}else if(c->ops[i].op==13){VkBufferObj *vb=(VkBufferObj*)c->ops[i].a;VkImageObj *im=(VkImageObj*)c->ops[i].image;VkPipelineObj *pl=(VkPipelineObj*)(uintptr_t)c->ops[i].offset2;if(!buf_ok((VkBuffer)vb)||!image_ok((VkImage)im)||!pipeline_ok(pl)||!mem_ok(vb->memory)||(!im->virgl_backed&&!mem_ok(im->memory))||pl->device!=c->device||im->device!=c->device||im->layout!=VK_IMAGE_LAYOUT_GENERAL||c->ops[i].offset>vb->size||((VkDeviceSize)c->ops[i].value+3u)*sizeof(VkSoftVertex)>vb->size-c->ops[i].offset)return VK_ERROR_DEVICE_LOST;uint32_t vmain=vk_spirv_main_id(pl->vertex->words,pl->vertex->wordCount),fmain=vk_spirv_main_id(pl->fragment->words,pl->fragment->wordCount),vbits=0,fbits=0;if(!vk_spirv_execute_pipeline_u32(pl->vertex->words,pl->vertex->wordCount,vmain,pl->vertex_result,&vbits))return VK_ERROR_FEATURE_NOT_PRESENT;if(!pl->texture_sampling&&!vk_spirv_execute_pipeline_u32(pl->fragment->words,pl->fragment->wordCount,fmain,pl->fragment_result,&fbits))return VK_ERROR_FEATURE_NOT_PRESENT;VkSoftVertex tri[3];vk_copy(tri,&((VkMemoryObj*)vb->memory)->bytes[vb->offset+c->ops[i].offset+(VkDeviceSize)c->ops[i].value*sizeof(VkSoftVertex)],sizeof(tri));static const float shades[4]={0.0f,0.33333334f,0.66666669f,1.0f};float shade=shades[(vbits?fbits:0u)&3u];for(unsigned k=0;k<3;k++)tri[k].r=tri[k].g=tri[k].b=shade,tri[k].a=1.0f;uint8_t *bytes=vk_image_pixels(im);VkSoftTarget target={(uint32_t*)bytes,0,im->width,im->height,im->width,0,0,0,1,0};VkImageObj *zim=(VkImageObj*)c->ops[i].depth_image;if(pl->depth_test||pl->depth_write){if(!image_ok((VkImage)zim)||zim->format!=VK_FORMAT_D32_SFLOAT||!mem_ok(zim->memory)||zim->layout!=VK_IMAGE_LAYOUT_GENERAL)return VK_ERROR_DEVICE_LOST;target.depth=(float*)&((VkMemoryObj*)zim->memory)->bytes[zim->offset];target.depth_test=pl->depth_test;target.depth_write=pl->depth_write;target.depth_compare=(uint8_t)pl->depth_compare;}VkSoftTexture sampledTexture;VkSoftTexture *texturePtr=vk_pipeline_texture(c,pl,&sampledTexture)?&sampledTexture:0;if(pl->texture_sampling&&!texturePtr)return VK_ERROR_FEATURE_NOT_PRESENT;int rasterResult;if(pl->texture_sampling){VkFragmentContext fragmentContext={pl->fragment,texturePtr};rasterResult=vksoft_triangle_fragment(&target,&tri[0],&tri[1],&tri[2],vk_fragment_execute,&fragmentContext);}else rasterResult=vksoft_triangle(&target,&tri[0],&tri[1],&tri[2],texturePtr);if(rasterResult<0)return VK_ERROR_FEATURE_NOT_PRESENT;if(im->format==VK_FORMAT_R8G8B8A8_UNORM){for(uint64_t px=0;px<im->size;px+=4){uint8_t tmp=bytes[px];bytes[px]=bytes[px+2];bytes[px+2]=tmp;}}}}return VK_SUCCESS;}
 
 /* Experimental SentinelOS-only draw bridge; not core Vulkan vkCmdDraw.
  * Records a pre-transformed triangle for the CPU rasterizer in a color image. */
@@ -1385,16 +1510,29 @@ VKAPI_EXPORT VkResult VKAPI_CALL vkQueueSubmit(VkQueue q,uint32_t n,const VkSubm
   }
   for(uint32_t j=0;j<sub[i].commandBufferCount;j++) {
    VkCommandBuffer c=sub[i].pCommandBuffers[j];
-   if(!cmd_ok(c)||c->device!=d||c->state!=2)return VK_ERROR_INITIALIZATION_FAILED;
+   if(!cmd_ok(c)||c->device!=d||c->state!=2||c->in_flight)return VK_ERROR_INITIALIZATION_FAILED;
   }
  }
  for(uint32_t i=0;i<n;i++) {
   for(uint32_t j=0;j<sub[i].waitSemaphoreCount;j++)sub[i].pWaitSemaphores[j]->signaled=0;
   for(uint32_t j=0;j<sub[i].commandBufferCount;j++) {
-   VkResult r=execute_cmd(sub[i].pCommandBuffers[j]);
+   VkCommandBuffer c=sub[i].pCommandBuffers[j];
+   c->in_flight=1;
+   VkResult r=execute_cmd(c);
+   c->in_flight=0;
    if(r)return r;
   }
   for(uint32_t j=0;j<sub[i].signalSemaphoreCount;j++)sub[i].pSignalSemaphores[j]->signaled=1;
+ }
+ /* Present virgl-backed images through the GPU after command execution.
+  * CPU-rendered output already lands in the kernel-mapped surface VA
+  * (vk_image_pixels returns external_pixels for virgl-backed images); this
+  * makes it visible via the GPU presentation path. Rendering remains CPU,
+  * presentation is GPU. */
+ {
+  uint8_t any_virgl=0;
+  for(unsigned k=0;k<32;k++)if(g_images[k].magic&&g_images[k].virgl_backed){any_virgl=1;break;}
+  if(any_virgl){VkResult r=SentinelVulkanPresentVirGL();if(r)return r;}
  }
  if(fence)fence->signaled=1;
  return VK_SUCCESS;
@@ -1501,10 +1639,22 @@ VKAPI_EXPORT void VKAPI_CALL vkDestroyShaderModule(VkDevice d,VkShaderModule m,c
 }
 VKAPI_EXPORT VkResult VKAPI_CALL vkCreateSemaphore(VkDevice d,const VkSemaphoreCreateInfo *ci,const void *alloc,VkSemaphore *out) { if(!dev_ok(d)||!ci||!out||ci->sType!=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)return VK_ERROR_INITIALIZATION_FAILED;*out=0;if(alloc)return VK_ERROR_INITIALIZATION_FAILED;for(unsigned i=0;i<VK_MAX_SEMAPHORES;i++)if(!g_semaphores[i].magic){g_semaphores[i].magic=VK_OBJECT_MAGIC;g_semaphores[i].device=d;g_semaphores[i].signaled=0;*out=(VkSemaphore)&g_semaphores[i];return VK_SUCCESS;}return VK_ERROR_TOO_MANY_OBJECTS; }
 VKAPI_EXPORT void VKAPI_CALL vkDestroySemaphore(VkDevice d,VkSemaphore s,const void *alloc) { if(!alloc&&dev_ok(d)&&sem_ok(s)&&s->device==d)s->magic=0; }
+
+/* Forward declarations for VK_KHR_swapchain (used by DPROC/IPROC below). */
+typedef struct VkSurfaceKHR_T *VkSurfaceKHR;
+typedef struct VkSwapchainKHR_T *VkSwapchainKHR;
+typedef uint32_t VkImageUsageFlags;
+struct VkSwapchainCreateInfoKHR;
+struct VkPresentInfoKHR;
+VKAPI_EXPORT VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice, const struct VkSwapchainCreateInfoKHR *, const void *, VkSwapchainKHR *);
+VKAPI_EXPORT void VKAPI_CALL vkDestroySwapchainKHR(VkDevice, VkSwapchainKHR, const void *);
+VKAPI_EXPORT VkResult VKAPI_CALL vkGetSwapchainImagesKHR(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
+VKAPI_EXPORT VkResult VKAPI_CALL vkAcquireNextImageKHR(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t *);
+VKAPI_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue, const struct VkPresentInfoKHR *);
 VKAPI_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice d,const char *name) {
  if(!dev_ok(d)||!name)return (PFN_vkVoidFunction)0;
 #define DPROC(n) if(vk_eq(name,#n))return (PFN_vkVoidFunction)&n
- DPROC(vkGetDeviceProcAddr);DPROC(vkCreateSampler);DPROC(vkDestroySampler);DPROC(vkCreateDescriptorSetLayout);DPROC(vkDestroyDescriptorSetLayout);DPROC(vkCreatePipelineLayout);DPROC(vkDestroyPipelineLayout);DPROC(vkCreateDescriptorPool);DPROC(vkDestroyDescriptorPool);DPROC(vkResetDescriptorPool);DPROC(vkAllocateDescriptorSets);DPROC(vkFreeDescriptorSets);DPROC(vkUpdateDescriptorSets);DPROC(vkCmdBindDescriptorSets);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);DPROC(SentinelVulkanGpuStatus);DPROC(SentinelVulkanSubmitVirGLStream);DPROC(SentinelVulkanUploadVirGLBuffer);DPROC(SentinelVulkanPresentVirGL);
+ DPROC(vkGetDeviceProcAddr);DPROC(vkCreateSampler);DPROC(vkDestroySampler);DPROC(vkCreateDescriptorSetLayout);DPROC(vkDestroyDescriptorSetLayout);DPROC(vkCreatePipelineLayout);DPROC(vkDestroyPipelineLayout);DPROC(vkCreateDescriptorPool);DPROC(vkDestroyDescriptorPool);DPROC(vkResetDescriptorPool);DPROC(vkAllocateDescriptorSets);DPROC(vkFreeDescriptorSets);DPROC(vkUpdateDescriptorSets);DPROC(vkCmdBindDescriptorSets);DPROC(vkCreateImageView);DPROC(vkDestroyImageView);DPROC(vkCreateRenderPass);DPROC(vkDestroyRenderPass);DPROC(vkCreateFramebuffer);DPROC(vkDestroyFramebuffer);DPROC(vkCmdBeginRenderPass);DPROC(vkCmdEndRenderPass);DPROC(vkResetCommandPool);DPROC(vkCmdUpdateBuffer);DPROC(vkCmdCopyImage);DPROC(vkCmdCopyImageToBuffer);DPROC(vkCmdCopyBufferToImage);DPROC(vkCreateImage);DPROC(vkDestroyImage);DPROC(vkGetImageMemoryRequirements);DPROC(vkBindImageMemory);DPROC(vkCmdClearColorImage);DPROC(vkCmdPipelineBarrier);DPROC(vkDestroyDevice);DPROC(vkGetDeviceQueue);DPROC(vkDeviceWaitIdle);DPROC(vkQueueWaitIdle);DPROC(vkCreateBuffer);DPROC(vkDestroyBuffer);DPROC(vkGetBufferMemoryRequirements);DPROC(vkAllocateMemory);DPROC(vkFreeMemory);DPROC(vkBindBufferMemory);DPROC(vkMapMemory);DPROC(vkUnmapMemory);DPROC(vkFlushMappedMemoryRanges);DPROC(vkInvalidateMappedMemoryRanges);DPROC(vkCreateCommandPool);DPROC(vkDestroyCommandPool);DPROC(vkAllocateCommandBuffers);DPROC(vkFreeCommandBuffers);DPROC(vkBeginCommandBuffer);DPROC(vkEndCommandBuffer);DPROC(vkResetCommandBuffer);DPROC(vkCmdFillBuffer);DPROC(vkCmdCopyBuffer);DPROC(vkQueueSubmit);DPROC(vkCreateFence);DPROC(vkDestroyFence);DPROC(vkGetFenceStatus);DPROC(vkWaitForFences);DPROC(vkResetFences);DPROC(vkCreateSemaphore);DPROC(vkDestroySemaphore);DPROC(vkCreateShaderModule);DPROC(vkDestroyShaderModule);DPROC(vkCreateGraphicsPipelines);DPROC(vkDestroyPipeline);DPROC(vkCmdBindPipeline);DPROC(vkCmdBindVertexBuffers);DPROC(vkCmdDraw);DPROC(SentinelVulkanCmdBindColorTarget);DPROC(SentinelVulkanCreateVirGLImage);DPROC(SentinelVulkanGpuStatus);DPROC(SentinelVulkanSubmitVirGLStream);DPROC(SentinelVulkanUploadVirGLBuffer);DPROC(SentinelVulkanPresentVirGL);DPROC(vkCreateSwapchainKHR);DPROC(vkDestroySwapchainKHR);DPROC(vkGetSwapchainImagesKHR);DPROC(vkAcquireNextImageKHR);DPROC(vkQueuePresentKHR);
 #undef DPROC
  return (PFN_vkVoidFunction)0;
 }
@@ -1558,8 +1708,136 @@ VKAPI_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst
  IPROC(vkCreateShaderModule);IPROC(vkDestroyShaderModule);
  IPROC(vkCreateGraphicsPipelines);IPROC(vkDestroyPipeline);
  IPROC(vkCmdBindPipeline);IPROC(vkCmdBindVertexBuffers);IPROC(vkCmdDraw);
- IPROC(SentinelVulkanCmdBindColorTarget);IPROC(SentinelVulkanGpuStatus);IPROC(SentinelVulkanSubmitVirGLStream);IPROC(SentinelVulkanUploadVirGLBuffer);IPROC(SentinelVulkanPresentVirGL);
+ IPROC(SentinelVulkanCmdBindColorTarget);IPROC(SentinelVulkanCreateVirGLImage);IPROC(SentinelVulkanGpuStatus);IPROC(SentinelVulkanSubmitVirGLStream);IPROC(SentinelVulkanUploadVirGLBuffer);IPROC(SentinelVulkanPresentVirGL);
+	IPROC(vkCreateSwapchainKHR);IPROC(vkDestroySwapchainKHR);IPROC(vkGetSwapchainImagesKHR);IPROC(vkAcquireNextImageKHR);IPROC(vkQueuePresentKHR);
 #undef IPROC
  return (PFN_vkVoidFunction)0;
 }
+/* ---------------- VK_KHR_swapchain (minimal VirGL-backed swapchain) ---------------- */
+
+#define VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR 1000001000u
+#define VK_STRUCTURE_TYPE_PRESENT_INFO_KHR 1000001002u
+#define VK_SHARING_MODE_EXCLUSIVE 0u
+#define VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR 1u
+#define VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR 1u
+#define VK_PRESENT_MODE_FIFO_KHR 0u
+#define VK_PRESENT_MODE_IMMEDIATE_KHR 1u
+#define VK_MAX_SWAPCHAINS 4u
+
+typedef struct { uint32_t width, height; } VkExtent2D;
+
+typedef struct VkSwapchainKHR_T {
+    uint32_t magic;
+    VkDevice device;
+    VkSurfaceKHR surface;
+    VkImage image;
+    uint32_t width, height;
+    uint32_t format;
+} VkSwapchainKHR_T;
+
+typedef struct VkSwapchainCreateInfoKHR {
+    VkStructureType sType;
+    const void *pNext;
+    VkFlags flags;
+    VkSurfaceKHR surface;
+    uint32_t minImageCount;
+    uint32_t imageFormat;
+    uint32_t imageColorSpace;
+    VkExtent2D imageExtent;
+    uint32_t imageArrayLayers;
+    VkImageUsageFlags imageUsage;
+    VkSharingMode imageSharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    uint32_t preTransform;
+    uint32_t compositeAlpha;
+    uint32_t presentMode;
+    VkBool32 clipped;
+    VkSwapchainKHR oldSwapchain;
+} VkSwapchainCreateInfoKHR;
+
+typedef struct VkPresentInfoKHR {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t waitSemaphoreCount;
+    const VkSemaphore *pWaitSemaphores;
+    uint32_t swapchainCount;
+    const VkSwapchainKHR *pSwapchains;
+    const uint32_t *pImageIndices;
+    VkResult *pResults;
+} VkPresentInfoKHR;
+
+static VkSwapchainKHR_T g_swapchains[VK_MAX_SWAPCHAINS];
+
+VKAPI_EXPORT VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice d, const struct VkSwapchainCreateInfoKHR *ci, const void *alloc, VkSwapchainKHR *out) {
+    if (!dev_ok(d) || !ci || !out || ci->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR) return VK_ERROR_INITIALIZATION_FAILED;
+    *out = 0;
+    if (alloc) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!ci->surface) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!sentinel_virgl_init()) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!g_virgl_info.width || !g_virgl_info.height) return VK_ERROR_INITIALIZATION_FAILED;
+    uint32_t width = ci->imageExtent.width ? ci->imageExtent.width : g_virgl_info.width;
+    uint32_t height = ci->imageExtent.height ? ci->imageExtent.height : g_virgl_info.height;
+    uint32_t format = ci->imageFormat ? ci->imageFormat : VK_FORMAT_B8G8R8A8_UNORM;
+    if (format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_B8G8R8A8_UNORM) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    for (unsigned i = 0; i < VK_MAX_SWAPCHAINS; i++) {
+        if (!g_swapchains[i].magic) {
+            VkSwapchainKHR_T *sc = &g_swapchains[i];
+            vk_zero(sc, sizeof(*sc));
+            sc->magic = VK_OBJECT_MAGIC;
+            sc->device = d;
+            sc->surface = ci->surface;
+            sc->width = width;
+            sc->height = height;
+            sc->format = format;
+            VkResult r = SentinelVulkanCreateVirGLImage(d, width, height, format, &sc->image);
+            if (r != VK_SUCCESS) { sc->magic = 0; return r; }
+            *out = (VkSwapchainKHR)sc;
+            return VK_SUCCESS;
+        }
+    }
+    return VK_ERROR_TOO_MANY_OBJECTS;
+}
+
+VKAPI_EXPORT void VKAPI_CALL vkDestroySwapchainKHR(VkDevice d, VkSwapchainKHR sc, const void *alloc) {
+    if (alloc || !dev_ok(d) || !sc || sc->magic != VK_OBJECT_MAGIC || sc->device != d) return;
+    sc->magic = 0;
+    sc->image = 0;
+}
+
+VKAPI_EXPORT VkResult VKAPI_CALL vkGetSwapchainImagesKHR(VkDevice d, VkSwapchainKHR sc, uint32_t *count, VkImage *images) {
+    if (!dev_ok(d) || !sc || sc->magic != VK_OBJECT_MAGIC || sc->device != d || !count) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!sc->image) { *count = 0; return VK_SUCCESS; }
+    if (!images) { *count = 1; return VK_SUCCESS; }
+    if (*count < 1) return VK_INCOMPLETE;
+    images[0] = sc->image;
+    *count = 1;
+    return VK_SUCCESS;
+}
+
+VKAPI_EXPORT VkResult VKAPI_CALL vkAcquireNextImageKHR(VkDevice d, VkSwapchainKHR sc, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t *image_index) {
+    (void)timeout; (void)semaphore; (void)fence;
+    if (!dev_ok(d) || !sc || sc->magic != VK_OBJECT_MAGIC || sc->device != d || !image_index) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!sc->image) return VK_ERROR_INITIALIZATION_FAILED;
+    *image_index = 0;
+    return VK_SUCCESS;
+}
+
+VKAPI_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue q, const struct VkPresentInfoKHR *pPresentInfo) {
+    if (!pPresentInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    VkDevice d = 0;
+    for (unsigned i = 0; i < VK_MAX_QUEUES; i++) {
+        if (q == (VkQueue)&g_queues[i] && g_queues[i].magic == VK_OBJECT_MAGIC) { d = g_queues[i].device; break; }
+    }
+    if (!d || !dev_ok(d)) return VK_ERROR_DEVICE_LOST;
+    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
+        VkSwapchainKHR sc = pPresentInfo->pSwapchains[i];
+        if (!sc || sc->magic != VK_OBJECT_MAGIC || sc->device != d) continue;
+        if (!sc->image) continue;
+        VkResult r = SentinelVulkanPresentVirGL();
+        if (r != VK_SUCCESS) return r;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_EXPORT uint32_t VKAPI_CALL SentinelVulkanLoaderStatus(void) { return 0x7u; }

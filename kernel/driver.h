@@ -171,3 +171,44 @@ static SENTINEL_DRIVER_OBJECT *SentinelDriverFind(const char *name) {
             return &SentinelDriverRegistry[i].object;
     return 0;
 }
+
+/* ---------------------------------------------------------------
+ * Kernel export table — functions drivers can import by name
+ * via PE imports. Populated by SentinelKernelInitializeExports()
+ * during boot before any driver is loaded.
+ * --------------------------------------------------------------- */
+#define SENTINEL_KERNEL_EXPORT_MAX 256
+
+typedef struct SENTINEL_KERNEL_EXPORT {
+    const char *name;
+    void *address;
+} SENTINEL_KERNEL_EXPORT;
+
+static SENTINEL_KERNEL_EXPORT SentinelKernelExports[SENTINEL_KERNEL_EXPORT_MAX];
+static uint32_t SentinelKernelExportCount;
+
+static int SentinelKernelExportNameEqual(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+static void SentinelKernelRegisterExport(const char *name, void *address) {
+    if (!name || !address) return;
+    if (SentinelKernelExportCount >= SENTINEL_KERNEL_EXPORT_MAX) return;
+    for (uint32_t i = 0; i < SentinelKernelExportCount; ++i)
+        if (SentinelKernelExportNameEqual(name, SentinelKernelExports[i].name)) return;
+    SentinelKernelExports[SentinelKernelExportCount].name = name;
+    SentinelKernelExports[SentinelKernelExportCount].address = address;
+    ++SentinelKernelExportCount;
+}
+
+static void *SentinelKernelFindExport(const char *name) {
+    if (!name) return 0;
+    for (uint32_t i = 0; i < SentinelKernelExportCount; ++i)
+        if (SentinelKernelExportNameEqual(name, SentinelKernelExports[i].name))
+            return SentinelKernelExports[i].address;
+    return 0;
+}
+
+void SentinelKernelInitializeExports(void);

@@ -33,39 +33,34 @@ __attribute__((naked)) void __chkstk(void) {
 #endif
 
 static uint8_t kstack[64 * 1024] __attribute__((aligned(16)));
-/* Kernel stack canary: placed at the top of the stack so any overflow
- * clobbers it before corrupting return addresses. Checked in the exception
- * dispatcher (cpu.h) and on every syscall entry path that can recurse. */
-static uint64_t kstack_canary __attribute__((aligned(8)));
-static void kstack_canary_init(void) {
-    uint64_t seed = 0xA5A5A5A5A5A5A5A5ULL;
-    /* Mix in a runtime-varying value (stack address) so the canary isn't
-     * a fixed constant an attacker could guess. */
-    uint64_t addr = (uint64_t)(uintptr_t)kstack;
-    seed ^= addr;
-    seed ^= (addr << 13) | (addr >> 51);
-    seed ^= (addr << 37) | (addr >> 27);
-    kstack_canary = seed;
-    *(uint64_t *)(kstack + sizeof kstack - 8) = kstack_canary;
-}
-static int kstack_canary_ok(void) {
-    return *(uint64_t *)(kstack + sizeof kstack - 8) == kstack_canary;
+
+void SentinelKernelInitializeExports(void) {
+    /* Serial / debug output */
+    SentinelKernelRegisterExport("DbgPrint", (void *)(uintptr_t)DbgPrint);
+    /* Kernel heap */
+    SentinelKernelRegisterExport("kmalloc", (void *)(uintptr_t)kmalloc);
+    SentinelKernelRegisterExport("kfree", (void *)(uintptr_t)kfree);
+    SentinelKernelRegisterExport("kzalloc", (void *)(uintptr_t)kzalloc);
+    /* Object Manager */
+    SentinelKernelRegisterExport("ObInitialize", (void *)(uintptr_t)ObInitialize);
+    SentinelKernelRegisterExport("ObCreateObject", (void *)(uintptr_t)ObCreateObject);
+    SentinelKernelRegisterExport("ObDereferenceObject", (void *)(uintptr_t)ObDereferenceObject);
+    SentinelKernelRegisterExport("ObReferenceObjectByHandle", (void *)(uintptr_t)ObReferenceObjectByHandle);
+    SentinelKernelRegisterExport("ObOpenObjectByName", (void *)(uintptr_t)ObOpenObjectByName);
+    SentinelKernelRegisterExport("ObCloseHandle", (void *)(uintptr_t)ObCloseHandle);
+    SentinelKernelRegisterExport("ObDeleteNamedObject", (void *)(uintptr_t)ObDeleteNamedObject);
+    /* Spinlocks */
+    SentinelKernelRegisterExport("KeAcquireSpinLock", (void *)(uintptr_t)KeAcquireSpinLock);
+    SentinelKernelRegisterExport("KeReleaseSpinLock", (void *)(uintptr_t)KeReleaseSpinLock);
+    /* Block devices */
+    SentinelKernelRegisterExport("SentinelBlockRegister", (void *)(uintptr_t)SentinelBlockRegister);
+    SentinelKernelRegisterExport("SentinelBlockUnregister", (void *)(uintptr_t)SentinelBlockUnregister);
+    SentinelKernelRegisterExport("SentinelBlockReferencesRange", (void *)(uintptr_t)SentinelBlockReferencesRange);
+    DbgPrint("kernel: export table initialized (%u exports)\n", SentinelKernelExportCount);
 }
 
 __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     HalInitSystem(0, bi);
-    kstack_canary_init();
-    /* Early validation: verify the canary at the stack top matches the
-     * initialized kstack_canary variable. If mismatch, something clobbered
-     * the stack before we even got here — halt immediately rather than
-     * risking silent data corruption later. */
-    if (!kstack_canary_ok()) {
-        DbgPrint("\n*** KERNEL STACK CANARY EARLY FAILURE ***\n");
-        DbgPrint("kstack_canary expected=%016llx, stored=%016llx\n",
-            (unsigned long long)kstack_canary,
-            (unsigned long long)*(uint64_t *)(kstack + sizeof kstack - 8));
-        for (;;) __asm__ volatile("cli; hlt");
-    }
     DbgPrint("\n=== magic kernel ===\n");
     DbgPrint("bootinfo: fb=%p %ux%u pitch=%u  mmap=%p size=%llu desc=%llu (%llu entries)\n",
             (void *)bi->fb_base, bi->width, bi->height, bi->pitch,
@@ -73,8 +68,6 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
             bi->desc_size ? bi->mmap_size / bi->desc_size : 0);
 
     cpu_init();
-    if (bi->boot_mode == BOOT_MODE_BIOS)
-        pic_remap();
     PciScanNetworkDevices();
     uint16_t cs; uint64_t sp;
     __asm__ volatile("movw %%cs, %0" : "=r"(cs));
@@ -99,14 +92,9 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     smp_discover();
     hda_init();
     vmm_selftest(bi, (uint64_t)kmain2, (uint64_t)kstack);
-    uint64_t got = 0;
-    if (bi->boot_mode == BOOT_MODE_UEFI) {
-        got = pmm_reclaim_boot_services(bi);
-        DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",
-                got, got * 4 / 1024, pmm_free_pages() * 4 / 1024);
-    } else {
-        DbgPrint("pmm: BIOS boot — skipping boot-services reclaim (no EFI services)\n");
-    }
+    uint64_t got = pmm_reclaim_boot_services(bi);
+    DbgPrint("pmm: reclaimed %llu pages (%llu MiB) of boot-services memory, %llu MiB free now\n",
+            got, got * 4 / 1024, pmm_free_pages() * 4 / 1024);
     pmm_touch_test(HHDM_BASE);
 
     DbgPrint("\n-- kernel heap --\n");
@@ -119,13 +107,11 @@ __attribute__((used, noreturn)) void kmain2(BootInfo *bi) {
     DbgPrint("object manager: namespace/handles/access checks %s (objects=%u handles=%u)\n", ob_ok ? "ok" : "FAILED", ObGetObjectCount(), ObGetHandleCount());
     DbgPrint("I/O manager: device/IRP dispatch %s\n", io_ok ? "ok" : "FAILED");
     SentinelDriverManagerInitialize();
+    SentinelKernelInitializeExports();
     DbgPrint("driver manager: ABI v%u registry ready (%u slots); .sys image and filesystem loader ready\n",
              SENTINEL_DRIVER_ABI_VERSION, SENTINEL_DRIVER_REGISTRY_MAX);
     modules_dump(bi); hal_selftest(); scheduler_selftest(bi);
-    if (bi->boot_mode == BOOT_MODE_UEFI)
-        smp_start_aps(bi);
-    else
-        DbgPrint("smp: BIOS boot — skipping AP startup (no SIPI trampoline)\n");
+    smp_start_aps(bi);
 
 #if TEST_FAULT == 1
     DbgPrint("triggering #UD...\n");

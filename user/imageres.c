@@ -109,16 +109,16 @@ static int imageres_equal_name(const char *path, const char *name) {
        basename (icon_001.bmp). Windows callers may use either slash. */
     const char *base = path;
     for (const char *p = path; *p; ++p)
-        if (*p == '/' || *p == '\\') base = p + 1;
+        if (*p == '/' || *p == '\\\\') base = p + 1;
 
     const char *candidate = name;
     for (const char *p = name; *p; ++p)
-        if (*p == '/' || *p == '\\') candidate = p + 1;
+        if (*p == '/' || *p == '\\\\') candidate = p + 1;
 
     while (*base && *candidate) {
         char a = *base++, b = *candidate++;
-        if (a == '/') a = '\\';
-        if (b == '/') b = '\\';
+        if (a == '/') a = '\\\\';
+        if (b == '/') b = '\\\\';
         if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
         if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
         if (a != b) return 0;

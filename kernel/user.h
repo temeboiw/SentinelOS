@@ -37,8 +37,9 @@
 #define SYS_WmQuery                 18
 #define SYS_WmRestore               19
 #define SYS_WmSetRect                20
-#define SYS_Yield                  21
+#define SYS_NtYield                  21
 #define SYS_WmGetDirty               53
+#define SYS_WmCursor                54
 #define SYS_NtGetSystemTime           23
 #define SYS_NtGetTickCount             24
 #define SYS_NtFreeVirtualMemory        27
@@ -46,8 +47,7 @@
 #define SYS_NtQueryVirtualMemory       29
 #define SYS_NtQueryFileMetadata        30
 #define SYS_NtQueryVolumeMetadata       31
-#define SYS_DeleteFile                    32
-#define SYS_NtInitializeGraphics        54
+#define SYS_NtInitializeGraphics        32
 #define SYS_NtFlushGraphics              33
 #define SYS_NtSubmit3D                    34
 #define SYS_NtPresent3D                   35
@@ -266,6 +266,7 @@ static void up_save(Frame *f, int idx) {
     up_tab[idx].rip = f->rip;
     up_tab[idx].rsp = f->rsp;
     up_tab[idx].rflags = f->rflags;
+    up_tab[idx].rax = f->rax;
     up_snap(f, &up_tab[idx]);
 }
 
@@ -1957,6 +1958,9 @@ static uint32_t *wm_shared_windows[WM_MAX];
 static uint32_t *wm_shared_local_windows[WM_MAX];
 static uint32_t wm_shared_local_width[WM_MAX],wm_shared_local_height[WM_MAX];
 static uint32_t wm_shared_width, wm_shared_height;
+/* Set once the desktop has published the full wallpaper layer; until then the
+ * kernel compositor does not own the pointer (login/boot screens draw directly). */
+static int wm_shared_bg_published;
 static uint32_t wm_shared_alpha(uint32_t dst, uint32_t src) {
     uint32_t a=src>>24;
     if(!a)return dst;
@@ -1976,6 +1980,7 @@ static int wm_shared_ensure(uint32_t width,uint32_t height) {
     if(wm_shared_background)kfree(wm_shared_background);
     if(wm_shared_desktop)kfree(wm_shared_desktop);
     if(wm_shared_taskbar)kfree(wm_shared_taskbar);
+    wm_shared_bg_published=0;
     wm_shared_background=kzalloc((size_t)bytes);
     wm_shared_desktop=kzalloc((size_t)bytes);
     wm_shared_taskbar=kzalloc((size_t)bytes);
@@ -2013,6 +2018,129 @@ static void wm_dbg_input(int pid,int type,int x,int y,int btn,char key) {
     else
         DbgPrint("[input] #%llu pid=%d %s mouse=(%d,%d) buttons=%d\n",
                  (unsigned long long)n,pid,type==3?"click":"move",x,y,btn);
+}
+
+/* ------------------------------------------------------------------
+ * Kernel-owned system pointer.
+ *
+ * Every USER32 process used to paint its own CPU cursor straight into the
+ * shared scanout with a private save-under buffer.  When focus moved to
+ * another window, the previous process never erased its pointer and the new
+ * process saved that stale pointer as its "background", so each window left
+ * a ghost mouse behind.  The pointer now lives here, next to the compositor
+ * that already rebuilds every damaged rectangle from the persistent layers:
+ * it is blended last on every compose, so there is exactly one pointer and
+ * nothing to restore, and therefore nothing to trail.
+ * ------------------------------------------------------------------ */
+#define WM_CURSOR_W 16
+#define WM_CURSOR_H 16
+static const char wm_cursor_default_shape[WM_CURSOR_H][WM_CURSOR_W+1] = {
+    "##..............",
+    "#w#.............",
+    "#ww#............",
+    "#www#...........",
+    "#wwww#..........",
+    "#wwwww#.........",
+    "#wwwwww#........",
+    "#wwwwwww#.......",
+    "#wwwwwwww#......",
+    "#wwwwwwwwww#....",
+    "#wwwwwwwwwwww#..",
+    "#wwwwwwwwwwww#..",
+    "#wwwwwwwwww#....",
+    "#ww#wwwwww#.....",
+    "#w#..#wwww#.....",
+    "##.............."
+};
+static uint32_t wm_cursor_pixels[WM_CURSOR_W*WM_CURSOR_H]; /* ARGB, alpha 0 = clear */
+static int wm_cursor_ready;              /* wm_cursor_pixels holds a bitmap */
+static uint32_t wm_cursor_shape_id=32512u; /* IDC_ARROW until USER32 says otherwise */
+static int wm_cursor_x=-64, wm_cursor_y=-64; /* where the pointer is composed */
+static int wm_cursor_hidden, wm_cursor_hidden_pid;
+static int wm_cursor_suspended;          /* shutdown screen etc.: never draw */
+static int wm_cursor_app_owned;          /* a fullscreen app owns the scanout */
+
+static void wm_cursor_init_default(void) {
+    if(wm_cursor_ready)return;
+    for(int j=0;j<WM_CURSOR_H;j++)
+        for(int i=0;i<WM_CURSOR_W;i++) {
+            char c=wm_cursor_default_shape[j][i];
+            wm_cursor_pixels[j*WM_CURSOR_W+i]=
+                c=='#'?0xFF000000u:(c=='w'?0xFFF1F3F6u:0u);
+        }
+    wm_cursor_ready=1;
+}
+/* A process that hid the pointer (games) only hides it while it is the
+ * active window, so a crashed or minimized game can never leave the desktop
+ * without a pointer. */
+static int wm_cursor_effective_hidden(void) {
+    if(wm_cursor_suspended)return 1;
+    if(!wm_cursor_hidden)return 0;
+    return wm_cursor_hidden_pid==wm_get_active_pid();
+}
+/* Blend the pointer over the part of [x,x+w)x[y,y+h) it covers. */
+static void wm_cursor_overlay(uint32_t *out,uint32_t pitch,uint32_t x,uint32_t y,
+                              uint32_t w,uint32_t h,uint32_t width,uint32_t height) {
+    if(!wm_shared_bg_published||wm_cursor_effective_hidden())return;
+    wm_cursor_init_default();
+    int64_t x0=wm_cursor_x,y0=wm_cursor_y;
+    int64_t x1=x0+WM_CURSOR_W,y1=y0+WM_CURSOR_H;
+    if(x0<(int64_t)x)x0=x;
+    if(y0<(int64_t)y)y0=y;
+    if(x1>(int64_t)x+w)x1=(int64_t)x+w;
+    if(y1>(int64_t)y+h)y1=(int64_t)y+h;
+    if(x1>(int64_t)width)x1=width;
+    if(y1>(int64_t)height)y1=height;
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1<=x0||y1<=y0)return;
+    for(int64_t yy=y0;yy<y1;yy++) {
+        uint32_t *dstrow=out+(uint32_t)yy*pitch;
+        const uint32_t *srcrow=&wm_cursor_pixels[(yy-wm_cursor_y)*WM_CURSOR_W];
+        for(int64_t xx=x0;xx<x1;xx++) {
+            uint32_t px=srcrow[xx-wm_cursor_x];
+            if(px>>24)dstrow[xx]=wm_shared_alpha(dstrow[xx],px);
+        }
+    }
+}
+static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h);
+/* Recompose the pointer-sized rectangle at (px,py); the compositor redraws
+ * the scene there and blends the pointer on top, so the old footprint is
+ * erased from the real layers rather than from a saved copy. */
+static void wm_cursor_compose_at(int px,int py,int pw,int ph) {
+    int64_t x0=px,y0=py,x1=(int64_t)px+pw,y1=(int64_t)py+ph;
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>(int64_t)wm_shared_width)x1=wm_shared_width;
+    if(y1>(int64_t)wm_shared_height)y1=wm_shared_height;
+    if(x1<=x0||y1<=y0)return;
+    wm_shared_compose((uint32_t)x0,(uint32_t)y0,(uint32_t)(x1-x0),(uint32_t)(y1-y0));
+}
+static void wm_cursor_refresh(void) {
+    wm_cursor_compose_at(wm_cursor_x,wm_cursor_y,WM_CURSOR_W,WM_CURSOR_H);
+}
+/* Follow the hardware pointer.  Called from the input syscall, so it runs
+ * no matter which process happens to poll; ownership never changes hands. */
+static void wm_cursor_track(int nx,int ny) {
+    if(!wm_shared_bg_published||!wm_shared_width||!wm_shared_height)return;
+    if(nx<0)nx=0;
+    if(ny<0)ny=0;
+    if(nx>=(int)wm_shared_width)nx=(int)wm_shared_width-1;
+    if(ny>=(int)wm_shared_height)ny=(int)wm_shared_height-1;
+    if(nx==wm_cursor_x&&ny==wm_cursor_y)return;
+    int ox=wm_cursor_x,oy=wm_cursor_y;
+    wm_cursor_x=nx;
+    wm_cursor_y=ny;
+    if(wm_cursor_effective_hidden())return;
+    int dx=nx>ox?nx-ox:ox-nx,dy=ny>oy?ny-oy:oy-ny;
+    if(dx<WM_CURSOR_W&&dy<WM_CURSOR_H) {
+        /* Old and new footprints overlap: one compose, one flush. */
+        int ux=nx<ox?nx:ox,uy=ny<oy?ny:oy;
+        wm_cursor_compose_at(ux,uy,WM_CURSOR_W+dx,WM_CURSOR_H+dy);
+    } else {
+        wm_cursor_compose_at(nx,ny,WM_CURSOR_W,WM_CURSOR_H);
+        wm_cursor_compose_at(ox,oy,WM_CURSOR_W,WM_CURSOR_H);
+    }
 }
 
 static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
@@ -2061,7 +2189,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
                 break;
             }
         }
-        if(!covered_by_newer&&!wm_shared_force_compose)return;
+        if(!covered_by_newer&&!wm_shared_force_compose){wm_cursor_app_owned=1;return;}
     }
     if(w>width-x)w=width-x;if(h>height-y)h=height-y;
     KPROCESS *old=MmCurrentProcess;
@@ -2096,6 +2224,7 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             }
         }
         if(!covered&&!wm_shared_force_compose) {
+            wm_cursor_app_owned=1;
             uint32_t *src=wm_shared_local_windows[local_fullscreen];
             uint32_t sw=wm_shared_local_width[local_fullscreen];
             for(uint32_t yy=y;yy<y+h;yy++) {
@@ -2105,12 +2234,14 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             }
             int flush_ok=gfx_flush(x,y,w,h);
     (void)flush_ok;
+    (void)flush_ok;
             (void)flush_ok;
             if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
             return;
         }
     }
 
+    wm_cursor_app_owned=0;
     /* Consume the window manager's canonical back-to-front order.
      * Surface slots are process-owned; resolve each copied entry back to its
      * slot only after the order snapshot has been obtained. */
@@ -2206,10 +2337,13 @@ static void wm_shared_compose(uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
             dstrow[xx]=wm_shared_alpha(dstrow[xx],wm_shared_taskbar[at]);
         }
     }
+    /* The system pointer is the topmost layer: blended after the taskbar and
+     * before the flush, so every repaint of this rectangle is pointer-correct. */
+    wm_cursor_overlay(out,pitch,x,y,w,h,width,height);
     int flush_ok=gfx_flush(x,y,w,h);
+    (void)flush_ok;
     if(wm_dbg_sample(dbg_n))
         SENTINEL_GFX_LOG("[gfx] flush damage=(%u,%u %ux%u) result=%d\n",x,y,w,h,flush_ok);
-    (void)flush_ok;
     if(old&&old!=PspSystemProcess)MmSwitchToProcess(old);
 }
 
@@ -2635,6 +2769,8 @@ socket_close_done:
         for(uint32_t yy=a.y;yy<a.y+a.h;yy++)
             for(uint32_t xx=a.x;xx<a.x+a.w;xx++)
                 dst[yy*a.width+xx]=src[yy*a.width+xx];
+        if(a.layer==WM_LAYER_BACKGROUND&&a.x==0&&a.y==0&&a.w==a.width&&a.h==a.height)
+            wm_shared_bg_published=1;
         /* The desktop publishes its desktop/window/taskbar layers in order.
          * Composing the window layer here and then composing the taskbar layer
          * immediately afterwards sends the same damaged rectangle to the GPU
@@ -3273,32 +3409,6 @@ socket_close_done:
         f->rax = vfs_close_user_file(f->rdi);
         return f;
 
-    case SYS_DeleteFile: {
-        KPROCESS *proc = MmCurrentProcess;
-        OB_OBJECT *obj = proc ? ObReferenceObjectByHandle((uintptr_t)proc->Pid,
-            (OB_HANDLE)f->rdi, ObTypeFile, OB_ACCESS_WRITE) : NULL;
-        if (!obj) { f->rax = (uint64_t)-1LL; return f; }
-        VfsUserHandle *vh = (VfsUserHandle *)obj->body;
-        if (!vh->used || !vh->writable) {
-            ObDereferenceObject(obj);
-            f->rax = (uint64_t)-1LL;
-            return f;
-        }
-        int result;
-        if (vh->ntfs) {
-            result = ntfsk_unlink_file(&g_ntfsk_volume, vh->ino);
-        } else if (g_ext4_ok) {
-            result = e4_dir_remove(&g_ext4, vh->ino, (const char *)f->rsi);
-        } else {
-            ObDereferenceObject(obj);
-            f->rax = (uint64_t)-1LL;
-            return f;
-        }
-        ObDereferenceObject(obj);
-        f->rax = (uint64_t)result;
-        return f;
-    }
-
     case SYS_NtQueryFileSize: {
         KPROCESS *proc=MmCurrentProcess;
         OB_OBJECT *obj=proc?ObReferenceObjectByHandle((uintptr_t)proc->Pid,
@@ -3713,6 +3823,10 @@ socket_close_done:
         if (vi_ok)
             virtio_input_poll();
 
+        /* The kernel owns the one system pointer: move it here, whichever
+         * process polled, instead of letting each process paint its own. */
+        wm_cursor_track(vi_ok ? vi_x : mouse_x, vi_ok ? vi_y : mouse_y);
+
         /* Mouse wheel: route notches to the window under the pointer, queue
          * them for that process, and deliver as input type 4 (btn = delta*120,
          * positive = scroll up). Only the target process consumes them. */
@@ -3922,8 +4036,9 @@ socket_close_done:
     }
 
     case SYS_WmSetMin: {
-        int pid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
-        wm_set_min(pid, (int)f->rdi);
+        int pid = (int)f->rdi;
+        int min = (int)f->rsi;
+        wm_set_min(pid, min);
         f->rax = 0;
         return f;
     }
@@ -3999,6 +4114,23 @@ socket_close_done:
         return f;
     }
 
+    case SYS_WmRestore: {
+        /* Restore (un-minimize) a window owned by another process.
+         * The taskbar passes the target pid in rdi. wm_restore_pid clears
+         * the minimized flag, bumps the Z-order, and marks it active;
+         * we then force a full scanout recompose so the restored window
+         * becomes visible. */
+        int pid = (int)f->rdi;
+        wm_restore_pid(pid);
+        if (wm_shared_width && wm_shared_height) {
+            wm_shared_force_compose = 1;
+            wm_shared_compose(0, 0, wm_shared_width, wm_shared_height);
+            wm_shared_force_compose = 0;
+        }
+        f->rax = 1;
+        return f;
+    }
+
     case SYS_WmSetRect: {
         int rect[4];
         int *src = (int *)f->rdi;
@@ -4033,7 +4165,58 @@ socket_close_done:
         wm_scene_dirty = 0;
         return f;
     }
-    case SYS_Yield: {
+    case SYS_WmCursor: {
+        /* rdi = op.  0: does the kernel compositor own the pointer now?
+         *            1: rsi=1 hide / rsi=0 show for the calling process.
+         *            2: rsi=shape id, rdx=256 ARGB pixels (or 0 to just ask
+         *               whether that shape is already current).
+         *            3: stop drawing the pointer (shutdown screen). */
+        int cpid = MmCurrentProcess ? (int)MmCurrentProcess->Pid : 0;
+        switch (f->rdi) {
+        case 0:
+            f->rax = (wm_shared_bg_published && !wm_cursor_app_owned &&
+                      !wm_cursor_suspended) ? 1 : 0;
+            return f;
+        case 1: {
+            int changed = 0;
+            if (f->rsi) {
+                if (!wm_cursor_hidden || wm_cursor_hidden_pid != cpid) changed = 1;
+                wm_cursor_hidden = 1;
+                wm_cursor_hidden_pid = cpid;
+            } else if (wm_cursor_hidden && wm_cursor_hidden_pid == cpid) {
+                wm_cursor_hidden = 0;
+                changed = 1;
+            }
+            if (changed) wm_cursor_refresh();
+            f->rax = 1;
+            return f;
+        }
+        case 2: {
+            wm_cursor_init_default();
+            if (wm_cursor_shape_id == (uint32_t)f->rsi) { f->rax = 1; return f; }
+            if (!f->rdx ||
+                !MmValidateUserRange(MmCurrentProcess, f->rdx, sizeof wm_cursor_pixels, 0)) {
+                f->rax = 0;
+                return f;
+            }
+            const uint32_t *src = (const uint32_t *)f->rdx;
+            for (int i = 0; i < WM_CURSOR_W * WM_CURSOR_H; i++)
+                wm_cursor_pixels[i] = src[i];
+            wm_cursor_shape_id = (uint32_t)f->rsi;
+            wm_cursor_refresh();
+            f->rax = 1;
+            return f;
+        }
+        case 3:
+            wm_cursor_suspended = 1;
+            f->rax = 1;
+            return f;
+        default:
+            f->rax = 0;
+            return f;
+        }
+    }
+    case SYS_NtYield: {
         int me = up_find_proc(MmCurrentProcess);
         if (me >= 0) {
             up_save(f, me);

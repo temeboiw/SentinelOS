@@ -93,6 +93,13 @@ __attribute__((dllexport)) void ExitProcess(DWORD code) {
     sy3(SYS_Exit, code, 0, 0);
     for(;;) __asm__ volatile("hlt");
 }
+__attribute__((dllexport)) void ExitThread(DWORD exitCode) {
+    /* SentinelOS does not track per-thread exit codes; the calling thread
+       terminates by invoking the process exit syscall. There is no separate
+       thread-exit syscall in this kernel model. */
+    sy3(SYS_Exit, exitCode, 0, 0);
+    for(;;) __asm__ volatile("hlt");
+}
 static HANDLE k32_std_overrides[3];
 __attribute__((dllexport)) HANDLE GetStdHandle(DWORD n) {
     unsigned int slot;
@@ -301,9 +308,19 @@ static DWORD k32_copy_wide_path(const char *src, K32_LPWSTR out, DWORD cap) {
 }
 
 __attribute__((dllexport)) DWORD GetCurrentProcessId(void) { return (DWORD)sy3(2,0,0,0); }
-__attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return 1; }
+__attribute__((dllexport)) DWORD GetCurrentThreadId(void) { return GetCurrentProcessId(); }
 __attribute__((dllexport)) HANDLE GetCurrentProcess(void) { return (HANDLE)(i64)-1; }
 __attribute__((dllexport)) HANDLE GetCurrentThread(void) { return (HANDLE)(i64)-2; }
+__attribute__((dllexport)) DWORD SuspendThread(HANDLE thread) {
+    (void)thread;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return (DWORD)-1;
+}
+__attribute__((dllexport)) DWORD ResumeThread(HANDLE thread) {
+    (void)thread;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return (DWORD)-1;
+}
 static const char *k32_module_leaf(const char *name) {
     const char *leaf=name;
     if(!name)return 0;
@@ -455,10 +472,18 @@ __attribute__((dllexport)) BOOL CreateDirectoryA(LPCSTR path, void *security) {
 __attribute__((dllexport)) BOOL RemoveDirectoryA(LPCSTR path) { if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) BOOL DeleteFileA(LPCSTR path) { if(!path||!*path){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
 __attribute__((dllexport)) BOOL MoveFileA(LPCSTR from, LPCSTR to) { if(!from||!*from||!to||!*to){k32_last_error=87;return 0;} k32_last_error=50; return 0; }
+__attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path);
 __attribute__((dllexport)) BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
-    (void)fail_if_exists;
     if(!from||!*from||!to||!*to){k32_last_error=87;return 0;}
-    k32_last_error=50; return 0;
+    if(fail_if_exists&&GetFileAttributesA(to)!=0xFFFFFFFFu){k32_last_error=80;return 0;}
+    HANDLE hsrc=CreateFileA(from,0,0,0,3,0,0);
+    if(hsrc==INVALID_HANDLE_VALUE)return 0;
+    HANDLE hdst=CreateFileA(to,0,0,0,3,0,0);
+    if(hdst==INVALID_HANDLE_VALUE){CloseHandle(hsrc);return 0;}
+    char buf[4096];DWORD rd,wr;BOOL ok=1;
+    while(ok){if(!ReadFile(hsrc,buf,sizeof(buf),&rd,0)){ok=0;break;}if(!rd)break;if(!WriteFile(hdst,buf,rd,&wr,0)||wr<rd){ok=0;break;}}
+    CloseHandle(hsrc);CloseHandle(hdst);
+    k32_last_error=ok?0:5;return ok;
 }
 __attribute__((dllexport)) DWORD GetFileAttributesA(LPCSTR path) {
     if(!path||!*path){k32_last_error=87;return 0xFFFFFFFFu;}
@@ -560,10 +585,23 @@ __attribute__((dllexport)) BOOL QueryPerformanceFrequency(K32_LARGE_INTEGER *out
 }
 __attribute__((dllexport)) DWORD GetTickCount(void) { return (DWORD)GetTickCount64(); }
 __attribute__((dllexport)) BOOL GetExitCodeProcess(HANDLE process, DWORD *code) {
-    (void)process; if (!code) return 0; *code=259; return 1;
+    if (!code) { k32_last_error = 87; return 0; }
+    /* SentinelOS does not track process exit codes for other processes.
+       The current process is known to be running, so report STILL_ACTIVE. */
+    if (process == GetCurrentProcess() || process == (HANDLE)1) {
+        *code = 259; /* STILL_ACTIVE */
+        k32_last_error = 0;
+        return 1;
+    }
+    k32_last_error = 87; /* ERROR_INVALID_PARAMETER */
+    return 0;
 }
 __attribute__((dllexport)) BOOL TerminateProcess(HANDLE process, DWORD code) {
     if(process!=GetCurrentProcess()&&process!=(HANDLE)1){k32_last_error=50;return 0;}
+    sy3(SYS_Exit,code,0,0);for(;;)__asm__ volatile("hlt");
+}
+__attribute__((dllexport)) BOOL TerminateThread(HANDLE thread, DWORD code) {
+    if(thread!=GetCurrentThread()&&thread!=(HANDLE)-2&&thread!=(HANDLE)1){k32_last_error=87;return 0;}
     sy3(SYS_Exit,code,0,0);for(;;)__asm__ volatile("hlt");
 }
 typedef struct { void *ptr; K32_SIZE_T size; int freed; } K32_MEMENTRY;
@@ -891,6 +929,87 @@ __attribute__((dllexport)) BOOL PeekNamedPipe(HANDLE pipe,void *buffer,DWORD cap
     if(buffer&&n) { unsigned char *dst=(unsigned char*)buffer;for(DWORD i=0;i<n;i++)dst[i]=p->data[(p->read_pos+i)%sizeof(p->data)]; }
     if(read)*read=n;if(available)*available=p->used;if(left)*left=0;k32_last_error=0;return 1;
 }
+__attribute__((dllexport)) HANDLE CreateNamedPipeA(LPCSTR name,DWORD open_mode,DWORD pipe_mode,DWORD max_instances,DWORD out_buf_size,DWORD in_buf_size,DWORD default_timeout,void *security) {
+    (void)open_mode;(void)pipe_mode;(void)max_instances;(void)out_buf_size;(void)in_buf_size;(void)default_timeout;(void)security;
+    if(!name||!*name){k32_last_error=87;return INVALID_HANDLE_VALUE;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return INVALID_HANDLE_VALUE;
+}
+__attribute__((dllexport)) HANDLE CreateNamedPipeW(K32_LPCWSTR name,DWORD open_mode,DWORD pipe_mode,DWORD max_instances,DWORD out_buf_size,DWORD in_buf_size,DWORD default_timeout,void *security) {
+    char n[512];if(!name){k32_last_error=87;return INVALID_HANDLE_VALUE;}k32_wide_to_ansi(n,sizeof(n),name);return CreateNamedPipeA(n,open_mode,pipe_mode,max_instances,out_buf_size,in_buf_size,default_timeout,security);
+}
+__attribute__((dllexport)) BOOL ConnectNamedPipe(HANDLE pipe,void *overlapped) {
+    (void)overlapped;
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL DisconnectNamedPipe(HANDLE pipe) {
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) HANDLE CreateMailslotA(LPCSTR name,DWORD max_message_size,DWORD read_timeout,void *security) {
+    (void)max_message_size;(void)read_timeout;(void)security;
+    if(!name||!*name){k32_last_error=87;return INVALID_HANDLE_VALUE;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel mailslot support */
+    return INVALID_HANDLE_VALUE;
+}
+__attribute__((dllexport)) HANDLE CreateMailslotW(K32_LPCWSTR name,DWORD max_message_size,DWORD read_timeout,void *security) {
+    char n[512];if(!name){k32_last_error=87;return INVALID_HANDLE_VALUE;}k32_wide_to_ansi(n,sizeof(n),name);return CreateMailslotA(n,max_message_size,read_timeout,security);
+}
+__attribute__((dllexport)) BOOL GetMailslotInfo(HANDLE slot,DWORD *max_message_size,DWORD *next_size,DWORD *message_count,DWORD *read_timeout) {
+    if(!slot||slot==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel mailslot support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL SetMailslotInfo(HANDLE slot,DWORD read_timeout) {
+    (void)read_timeout;
+    if(!slot||slot==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel mailslot support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL WaitNamedPipeA(LPCSTR name,DWORD timeout) {
+    (void)timeout;
+    if(!name||!*name){k32_last_error=87;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL WaitNamedPipeW(K32_LPCWSTR name,DWORD timeout) {
+    char n[512];if(!name){k32_last_error=87;return 0;}k32_wide_to_ansi(n,sizeof(n),name);return WaitNamedPipeA(n,timeout);
+}
+__attribute__((dllexport)) BOOL GetNamedPipeInfo(HANDLE pipe,DWORD *flags,DWORD *out_buf_size,DWORD *in_buf_size,DWORD *max_instances) {
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL GetNamedPipeHandleStateA(HANDLE pipe,DWORD *state,DWORD *cur_instances,DWORD *max_collection_count,DWORD *collect_data_timeout,LPSTR user_name,DWORD max_user_name_size) {
+    (void)state;(void)cur_instances;(void)max_collection_count;(void)collect_data_timeout;(void)user_name;(void)max_user_name_size;
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL GetNamedPipeHandleStateW(HANDLE pipe,DWORD *state,DWORD *cur_instances,DWORD *max_collection_count,DWORD *collect_data_timeout,K32_LPWSTR user_name,DWORD max_user_name_size) {
+    (void)user_name;(void)max_user_name_size;
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) BOOL TransactNamedPipe(HANDLE pipe,void *in_buf,DWORD in_size,void *out_buf,DWORD out_size,DWORD *read,void *overlapped) {
+    (void)in_buf;(void)in_size;(void)out_buf;(void)out_size;(void)read;(void)overlapped;
+    if(!pipe||pipe==INVALID_HANDLE_VALUE){k32_last_error=6;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) DWORD CallNamedPipeA(LPCSTR name,void *in_buf,DWORD in_size,void *out_buf,DWORD out_size,DWORD *read,DWORD timeout) {
+    (void)in_buf;(void)in_size;(void)out_buf;(void)out_size;(void)read;(void)timeout;
+    if(!name||!*name){k32_last_error=87;return 0;}
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED: no kernel named-pipe support */
+    return 0;
+}
+__attribute__((dllexport)) DWORD CallNamedPipeW(K32_LPCWSTR name,void *in_buf,DWORD in_size,void *out_buf,DWORD out_size,DWORD *read,DWORD timeout) {
+    char n[512];if(!name){k32_last_error=87;return 0;}k32_wide_to_ansi(n,sizeof(n),name);return CallNamedPipeA(n,in_buf,in_size,out_buf,out_size,read,timeout);
+}
 __attribute__((dllexport)) BOOL SetHandleInformation(HANDLE h,DWORD mask,DWORD flags){if(!h||h==INVALID_HANDLE_VALUE)return 0;for(int i=0;i<32;i++){if(k32_handle_flags[i].handle==h){k32_handle_flags[i].flags=(k32_handle_flags[i].flags&~mask)|(flags&mask);return 1;}}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=flags&mask;return 1;}return 0;}
 __attribute__((dllexport)) BOOL GetHandleInformation(HANDLE h,DWORD *flags){if(!h||h==INVALID_HANDLE_VALUE||!flags)return 0;for(int i=0;i<32;i++)if(k32_handle_flags[i].handle==h){*flags=k32_handle_flags[i].flags;return 1;}for(int i=0;i<32;i++)if(!k32_handle_flags[i].handle){k32_handle_flags[i].handle=h;k32_handle_flags[i].flags=0;*flags=0;return 1;}return 0;}
 __attribute__((dllexport)) BOOL DuplicateHandle(HANDLE source_process,HANDLE source,HANDLE target_process,HANDLE *target,DWORD access,BOOL inherit,DWORD options){(void)access;(void)inherit;(void)options;if((source_process==GetCurrentProcess()||source_process==(HANDLE)1)&&(target_process==GetCurrentProcess()||target_process==(HANDLE)1)&&source&&target){*target=source;return 1;}k32_last_error=50;return 0;}
@@ -1022,6 +1141,16 @@ __attribute__((dllexport)) BOOL GetModuleHandleExA(DWORD flags,LPCSTR name,HANDL
 __attribute__((dllexport)) BOOL GetModuleHandleExW(DWORD flags,K32_LPCWSTR name,HANDLE *module){char n[256];if(!name)return GetModuleHandleExA(flags,0,module);k32_wide_to_ansi(n,sizeof(n),name);return GetModuleHandleExA(flags,n,module);}
 typedef struct { DWORD cb; K32_LPWSTR lpReserved,lpDesktop,lpTitle; DWORD dwX,dwY,dwXSize,dwYSize,dwXCountChars,dwYCountChars,dwFillAttribute,dwFlags; unsigned short wShowWindow,cbReserved2; unsigned char *lpReserved2; HANDLE hStdInput,hStdOutput,hStdError; } K32_STARTUPINFOW;
 __attribute__((dllexport)) void GetStartupInfoW(K32_STARTUPINFOW *si){if(!si)return;si->cb=sizeof(*si);si->lpReserved=si->lpDesktop=si->lpTitle=0;si->dwX=si->dwY=si->dwXSize=si->dwYSize=0;si->dwXCountChars=80;si->dwYCountChars=25;si->dwFillAttribute=7;si->dwFlags=0;si->wShowWindow=1;si->cbReserved2=0;si->lpReserved2=0;si->hStdInput=(HANDLE)0;si->hStdOutput=(HANDLE)1;si->hStdError=(HANDLE)2;}
+typedef struct { K32_STARTUPINFOW StartupInfo; unsigned char *lpAttributeList; } K32_STARTUPINFOEXW;
+__attribute__((dllexport)) void GetStartupInfoExW(K32_STARTUPINFOEXW *siEx){
+    if(!siEx){k32_last_error=87;return;}
+    GetStartupInfoW(&siEx->StartupInfo);
+    siEx->StartupInfo.cb=(DWORD)sizeof(K32_STARTUPINFOEXW);
+    siEx->lpAttributeList=0;
+    /* SentinelOS has no per-thread attribute-list kernel support; the
+       attribute list is not available. Report the limitation honestly. */
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+}
 __attribute__((dllexport)) DWORD GetProcessId(HANDLE process) { return process==GetCurrentProcess() ? GetCurrentProcessId() : 0; }
 __attribute__((dllexport)) DWORD GetThreadId(HANDLE thread) { if (thread==GetCurrentThread()) return GetCurrentThreadId(); return (u64)thread>0 && (u64)thread<0xFFFFFFFFULL ? (DWORD)(u64)thread : 0; }
 __attribute__((dllexport)) DWORD GetProcessIdOfThread(HANDLE thread) { return GetThreadId(thread) ? GetCurrentProcessId() : 0; }
@@ -1047,6 +1176,7 @@ __attribute__((dllexport)) DWORD GetSystemDefaultLCID(void){return 0x0409;}
 __attribute__((dllexport)) DWORD GetConsoleTitleA(LPSTR out,DWORD cap){DWORD n=0;while(k32_console_title[n])n++;if(!out||!cap)return n;if(cap<=n){for(DWORD i=0;i+1<cap;i++)out[i]=k32_console_title[i];out[cap-1]=0;return 0;}for(DWORD i=0;i<=n;i++)out[i]=k32_console_title[i];return n;}
 __attribute__((dllexport)) DWORD GetConsoleTitleW(K32_LPWSTR out,DWORD cap){DWORD n=0;while(k32_console_title[n])n++;if(!out||!cap)return n;k32_ansi_to_wide(out,cap,k32_console_title);return cap<=n?0:n;}
 __attribute__((dllexport)) BOOL SetConsoleTitleW(K32_LPCWSTR title){if(!title){k32_last_error=87;return 0;}k32_wide_to_ansi(k32_console_title,sizeof(k32_console_title),title);return 1;}
+__attribute__((dllexport)) BOOL SetConsoleTitleA(LPCSTR title){if(!title){k32_last_error=87;return 0;}DWORD i=0;while(title[i]&&i+1<sizeof(k32_console_title)){k32_console_title[i]=title[i];i++;}k32_console_title[i]=0;return 1;}
 typedef struct { short X,Y; } K32_COORD;
 typedef struct { short Left,Top,Right,Bottom; } K32_SMALL_RECT;
 typedef struct { K32_COORD dwSize,dwCursorPosition; unsigned short wAttributes; K32_SMALL_RECT srWindow; K32_COORD dwMaximumWindowSize; } K32_CONSOLE_SCREEN_BUFFER_INFO;
@@ -1716,6 +1846,70 @@ __attribute__((dllexport)) BOOL GetVolumeInformationByHandleW(HANDLE file,K32_LP
     return GetVolumeInformationW((K32_LPCWSTR)0,name,cap,serial,max_component,flags,fs,fs_cap);
 }
 
+/* Win32 advanced file-system APIs not supported by the SentinelOS kernel.
+ * These return honest failure codes rather than pretending kernel services
+ * that do not exist are available. */
+
+/* Directory change notification has no kernel backing in SentinelOS. */
+__attribute__((dllexport)) HANDLE FindFirstChangeNotificationA(LPCSTR path,BOOL watch_subtree,DWORD notify_filter) {
+    (void)path;(void)watch_subtree;(void)notify_filter;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return INVALID_HANDLE_VALUE;
+}
+__attribute__((dllexport)) HANDLE FindFirstChangeNotificationW(K32_LPCWSTR path,BOOL watch_subtree,DWORD notify_filter) {
+    char p[512];if(!path){k32_last_error=87;return INVALID_HANDLE_VALUE;}
+    k32_wide_to_ansi(p,sizeof(p),path);return FindFirstChangeNotificationA(p,watch_subtree,notify_filter);
+}
+__attribute__((dllexport)) BOOL FindNextChangeNotification(HANDLE handle) {
+    (void)handle;k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+__attribute__((dllexport)) BOOL FindCloseChangeNotification(HANDLE handle) {
+    (void)handle;k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+/* DOS device mapping is not managed by the SentinelOS kernel. */
+__attribute__((dllexport)) DWORD DefineDosDeviceA(DWORD flags,LPCSTR device,LPCSTR target) {
+    (void)flags;(void)device;(void)target;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+__attribute__((dllexport)) DWORD DefineDosDeviceW(DWORD flags,K32_LPCWSTR device,K32_LPCWSTR target) {
+    char d[128],t[260];if(!device){k32_last_error=87;return 0;}
+    k32_wide_to_ansi(d,sizeof(d),device);if(target)k32_wide_to_ansi(t,sizeof(t),target);else t[0]=0;
+    return DefineDosDeviceA(flags,d[0]?d:0,t[0]?t:0);
+}
+__attribute__((dllexport)) DWORD QueryDosDeviceA(LPCSTR device,LPSTR target,DWORD cap) {
+    (void)device;(void)target;(void)cap;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+__attribute__((dllexport)) DWORD QueryDosDeviceW(K32_LPCWSTR device,K32_LPWSTR target,DWORD cap) {
+    (void)device;(void)target;(void)cap;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+/* Extended file attributes are not supported by the SentinelOS file system. */
+__attribute__((dllexport)) BOOL SetFileAttributesEx(LPCSTR path,int level,void *info) {
+    (void)path;(void)level;(void)info;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+/* Security descriptors and ACLs are not supported by the SentinelOS kernel. */
+__attribute__((dllexport)) BOOL GetFileSecurity(LPCSTR path,void *sec_info,void *sec_desc,DWORD len,DWORD *needed) {
+    (void)path;(void)sec_info;(void)sec_desc;(void)len;(void)needed;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+__attribute__((dllexport)) BOOL SetFileSecurity(LPCSTR path,void *sec_info,void *sec_desc) {
+    (void)path;(void)sec_info;(void)sec_desc;
+    k32_last_error=50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
 __attribute__((dllexport)) BOOL GetFirmwareType(DWORD *type){if(!type)return 0;*type=2;return 1;}
 
 __attribute__((dllexport)) DWORD GetFirmwareEnvironmentVariableA(LPCSTR name,LPCSTR guid,LPVOID buffer,DWORD size){(void)name;(void)guid;(void)buffer;(void)size;k32_last_error=1;return 0;}
@@ -1804,6 +1998,23 @@ typedef struct { BYTE ACLineStatus,BatteryFlag,BatteryLifePercent,Reserved1; DWO
 __attribute__((dllexport)) BOOL GetSystemPowerStatus(K32_SYSTEM_POWER_STATUS *s){if(!s)return 0;s->ACLineStatus=1;s->BatteryFlag=128;s->BatteryLifePercent=255;s->Reserved1=0;s->BatteryLifeTime=0xFFFFFFFFu;s->BatteryFullLifeTime=0xFFFFFFFFu;return 1;}
 
 __attribute__((dllexport)) BOOL SetSystemPowerState(BOOL suspend,BOOL force){(void)suspend;(void)force;k32_last_error=50;return 0;}
+
+typedef struct { DWORD cb; DWORD CommitTotal,CommitLimit,CommitPeak; DWORD PhysicalTotal,PhysicalAvailable,SystemCache; DWORD KernelTotal,KernelPaged,KernelNonpaged; DWORD PageSize; DWORD HandleCount,ProcessCount,ThreadCount; } K32_PERFORMANCE_INFORMATION;
+__attribute__((dllexport)) BOOL GetPerformanceInfo(K32_PERFORMANCE_INFORMATION *info,DWORD cb){if(!info||cb<sizeof(*info)){k32_last_error=87;return 0;}k32_last_error=50;return 0;}
+
+typedef struct { K32_SIZE_T CommitCount,WorkingSetSize,PeakWorkingSetSize,PageFileUsage,PeakPageFileUsage,PrivatePageCount; } K32_PROCESS_PERFORMANCE_INFO;
+__attribute__((dllexport)) BOOL GetProcessPerformanceInfo(HANDLE process,K32_PROCESS_PERFORMANCE_INFO *info,DWORD cb){(void)process;if(!info||cb<sizeof(*info)){k32_last_error=87;return 0;}k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL GetSystemRegistryQuotaA(DWORD *allowed,DWORD *used){if(allowed)*allowed=0;if(used)*used=0;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL GetSystemRegistryQuotaW(DWORD *allowed,DWORD *used){if(allowed)*allowed=0;if(used)*used=0;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) DWORD GetSystemMetrics(int index){(void)index;k32_last_error=50;return 0;}
+__attribute__((dllexport)) DWORD GetSystemMetricsForDpi(int index,DWORD dpi){(void)index;(void)dpi;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL SetSystemTimeAdjustment(DWORD adjustment,BOOL disabled){(void)adjustment;(void)disabled;k32_last_error=50;return 0;}
+
+__attribute__((dllexport)) BOOL QueryUnbiasedInterruptTime(unsigned long long *t){if(!t){k32_last_error=87;return 0;}*t=0;k32_last_error=50;return 0;}
+__attribute__((dllexport)) BOOL GetUnbiasedInterruptTime(unsigned long long *t){if(!t){k32_last_error=87;return 0;}*t=0;k32_last_error=50;return 0;}
 
 __attribute__((dllexport)) int GetSystemDefaultLocaleName(K32_LPWSTR name,int cap){if(!name||cap<6)return 6;const char *s="en-US";for(int i=0;i<5;i++)name[i]=s[i];name[5]=0;return 6;}
 
@@ -2388,9 +2599,12 @@ __attribute__((dllexport)) void RtlCaptureContext(void *context) {
     p[1]=(unsigned long long)__builtin_return_address(0);
     p[2]=(unsigned long long)__builtin_frame_address(0);
 }
-__attribute__((dllexport)) DWORD GetExitCodeThread(HANDLE thread,DWORD *code) {
-    if(!code|| (thread!=GetCurrentThread()&&thread!=(HANDLE)1)){k32_last_error=87;return 0;}
-    *code=259u;k32_last_error=0;return 1;
+__attribute__((dllexport)) BOOL GetExitCodeThread(HANDLE thread,DWORD *code) {
+    if(!code){k32_last_error=87;return 0;}
+    if(thread==GetCurrentThread()||thread==(HANDLE)-2||thread==(HANDLE)1){
+        *code=259u;k32_last_error=0;return 1;
+    }
+    k32_last_error=87;return 0;
 }
 
 
@@ -2679,3 +2893,291 @@ __attribute__((dllexport)) HANDLE LoadResource(HANDLE module,void *resource) {
 }
 __attribute__((dllexport)) void *LockResource(HANDLE resource){return resource;}
 __attribute__((dllexport)) DWORD SizeofResource(HANDLE module,void *resource){(void)module;K32_RES_HANDLE *h=(K32_RES_HANDLE *)resource;if(!h||!h->entry){k32_last_error=6;return 0;}k32_last_error=0;return h->entry->size;}
+
+/* -------------------------------------------------------------------------
+ * Cryptographic API stubs.
+ *
+ * SentinelOS has no kernel crypto support. These stubs follow Win32 calling
+ * conventions and return honest failure codes. CryptGenRandom is the one
+ * exception: it delegates to advapi32's SystemFunction036 (RDRAND-based)
+ * when that export is available.
+ * ------------------------------------------------------------------------- */
+typedef HANDLE K32_HCRYPTPROV;
+typedef HANDLE K32_HCRYPTKEY;
+typedef HANDLE K32_HCRYPTHASH;
+typedef DWORD  K32_ALG_ID;
+
+#define K32_NTE_BAD_UID         5000u
+#define K32_NTE_BAD_ALGID       5010u
+#define K32_NTE_BAD_KEY         5017u
+#define K32_NTE_BAD_HASH        5009u
+#define K32_NTE_BAD_TYPE        5001u
+#define K32_NTE_BAD_KEY_STATE   5012u
+#define K32_NTE_BAD_HASH_STATE  5013u
+#define K32_NTE_NO_KEY          5016u
+#define K32_NTE_BAD_DATA        5005u
+#define K32_NTE_BAD_SIGNATURE   5007u
+#define K32_NTE_FAIL            5008u
+
+__attribute__((dllexport)) BOOL CryptAcquireContextA(LPCSTR szContainer, LPCSTR szProvider, DWORD dwProvType, DWORD dwFlags, K32_HCRYPTPROV *phProv) {
+    (void)szContainer; (void)szProvider; (void)dwProvType; (void)dwFlags;
+    if (!phProv) { k32_last_error = 87; return 0; }
+    *phProv = 0;
+    k32_last_error = K32_NTE_BAD_UID;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptAcquireContextW(K32_LPCWSTR szContainer, K32_LPCWSTR szProvider, DWORD dwProvType, DWORD dwFlags, K32_HCRYPTPROV *phProv) {
+    char c[260], p[260];
+    if (szContainer) k32_wide_to_ansi(c, sizeof(c), szContainer); else c[0] = 0;
+    if (szProvider) k32_wide_to_ansi(p, sizeof(p), szProvider); else p[0] = 0;
+    return CryptAcquireContextA(c[0] ? c : 0, p[0] ? p : 0, dwProvType, dwFlags, phProv);
+}
+
+__attribute__((dllexport)) BOOL CryptReleaseContext(K32_HCRYPTPROV hProv, DWORD dwFlags) {
+    (void)hProv; (void)dwFlags;
+    k32_last_error = 0;
+    return 1;
+}
+
+__attribute__((dllexport)) BOOL CryptGenKey(K32_HCRYPTPROV hProv, K32_ALG_ID Algid, DWORD dwFlags, K32_HCRYPTKEY *phKey) {
+    (void)hProv; (void)Algid; (void)dwFlags;
+    if (!phKey) { k32_last_error = 87; return 0; }
+    *phKey = 0;
+    k32_last_error = K32_NTE_BAD_ALGID;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptDestroyKey(K32_HCRYPTKEY hKey) {
+    (void)hKey;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptGenRandom(K32_HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
+    typedef BOOL (*K32_SystemFunction036)(void *, unsigned long);
+    (void)hProv;
+    if (!pbBuffer && dwLen) { k32_last_error = 87; return 0; }
+    if (!dwLen) { k32_last_error = 0; return 1; }
+    HANDLE advapi = LoadLibraryA("advapi32.dll");
+    if (!advapi) { k32_last_error = 50; return 0; }
+    K32_SystemFunction036 sf = (K32_SystemFunction036)GetProcAddress(advapi, "SystemFunction036");
+    if (!sf) { k32_last_error = 127; return 0; }
+    if (!sf(pbBuffer, dwLen)) { k32_last_error = 50; return 0; }
+    k32_last_error = 0;
+    return 1;
+}
+
+__attribute__((dllexport)) BOOL CryptCreateHash(K32_HCRYPTPROV hProv, K32_ALG_ID Algid, K32_HCRYPTKEY hKey, DWORD dwFlags, K32_HCRYPTHASH *phHash) {
+    (void)hProv; (void)Algid; (void)hKey; (void)dwFlags;
+    if (!phHash) { k32_last_error = 87; return 0; }
+    *phHash = 0;
+    k32_last_error = K32_NTE_BAD_ALGID;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptHashData(K32_HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags) {
+    (void)hHash; (void)pbData; (void)dwDataLen; (void)dwFlags;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptDestroyHash(K32_HCRYPTHASH hHash) {
+    (void)hHash;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptDeriveKey(K32_HCRYPTPROV hProv, K32_ALG_ID Algid, K32_HCRYPTHASH hBaseData, DWORD dwFlags, K32_HCRYPTKEY *phKey) {
+    (void)hProv; (void)Algid; (void)hBaseData; (void)dwFlags;
+    if (!phKey) { k32_last_error = 87; return 0; }
+    *phKey = 0;
+    k32_last_error = K32_NTE_BAD_ALGID;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptEncrypt(K32_HCRYPTKEY hKey, K32_HCRYPTHASH hHash, BOOL Final, DWORD dwFlags, BYTE *pbData, DWORD *pdwDataLen, DWORD dwBufLen) {
+    (void)hKey; (void)hHash; (void)Final; (void)dwFlags; (void)pbData; (void)pdwDataLen; (void)dwBufLen;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptDecrypt(K32_HCRYPTKEY hKey, K32_HCRYPTHASH hHash, BOOL Final, DWORD dwFlags, BYTE *pbData, DWORD *pdwDataLen) {
+    (void)hKey; (void)hHash; (void)Final; (void)dwFlags; (void)pbData; (void)pdwDataLen;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptSignHashA(K32_HCRYPTHASH hHash, DWORD dwKeySpec, LPCSTR szDescription, DWORD dwFlags, BYTE *pbSignature, DWORD *pdwSigLen) {
+    (void)hHash; (void)dwKeySpec; (void)szDescription; (void)dwFlags; (void)pbSignature; (void)pdwSigLen;
+    k32_last_error = K32_NTE_BAD_SIGNATURE;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptSignHashW(K32_HCRYPTHASH hHash, DWORD dwKeySpec, K32_LPCWSTR szDescription, DWORD dwFlags, BYTE *pbSignature, DWORD *pdwSigLen) {
+    char desc[260];
+    if (szDescription) k32_wide_to_ansi(desc, sizeof(desc), szDescription); else desc[0] = 0;
+    return CryptSignHashA(hHash, dwKeySpec, desc[0] ? desc : 0, dwFlags, pbSignature, pdwSigLen);
+}
+
+__attribute__((dllexport)) BOOL CryptVerifySignatureA(K32_HCRYPTKEY hPubKey, const BYTE *pbSignature, DWORD dwSigLen, const BYTE *pbData, DWORD dwDataLen, LPCSTR szDescription) {
+    (void)hPubKey; (void)pbSignature; (void)dwSigLen; (void)pbData; (void)dwDataLen; (void)szDescription;
+    k32_last_error = K32_NTE_BAD_SIGNATURE;
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptVerifySignatureW(K32_HCRYPTKEY hPubKey, const BYTE *pbSignature, DWORD dwSigLen, const BYTE *pbData, DWORD dwDataLen, K32_LPCWSTR szDescription) {
+    char desc[260];
+    if (szDescription) k32_wide_to_ansi(desc, sizeof(desc), szDescription); else desc[0] = 0;
+    return CryptVerifySignatureA(hPubKey, pbSignature, dwSigLen, pbData, dwDataLen, desc[0] ? desc : 0);
+}
+
+__attribute__((dllexport)) BOOL CryptGetHashParam(K32_HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD *pdwDataLen, DWORD dwFlags) {
+    (void)hHash; (void)dwParam; (void)pbData; (void)pdwDataLen; (void)dwFlags;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptSetHashParam(K32_HCRYPTHASH hHash, DWORD dwParam, const BYTE *pbData, DWORD dwFlags) {
+    (void)hHash; (void)dwParam; (void)pbData; (void)dwFlags;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptGetKeyParam(K32_HCRYPTKEY hKey, DWORD dwParam, BYTE *pbData, DWORD *pdwDataLen, DWORD dwFlags) {
+    (void)hKey; (void)dwParam; (void)pbData; (void)pdwDataLen; (void)dwFlags;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptSetKeyParam(K32_HCRYPTKEY hKey, DWORD dwParam, const BYTE *pbData, DWORD dwFlags) {
+    (void)hKey; (void)dwParam; (void)pbData; (void)dwFlags;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptExportKey(K32_HCRYPTKEY hKey, K32_HCRYPTKEY hExpKey, DWORD dwBlobType, DWORD dwFlags, BYTE *pbData, DWORD *pdwDataLen) {
+    (void)hKey; (void)hExpKey; (void)dwBlobType; (void)dwFlags; (void)pbData; (void)pdwDataLen;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL CryptImportKey(K32_HCRYPTPROV hProv, const BYTE *pbData, DWORD dwDataLen, K32_HCRYPTKEY hPubKey, DWORD dwFlags, K32_HCRYPTKEY *phKey) {
+    (void)hProv; (void)pbData; (void)dwDataLen; (void)hPubKey; (void)dwFlags;
+    if (!phKey) { k32_last_error = 87; return 0; }
+    *phKey = 0;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Security & access control APIs.
+ *
+ * SentinelOS has no token/SID/privilege subsystem. These exports provide
+ * compatible entry points but report the limitation honestly instead of
+ * fabricating identities, account-to-SID mappings or privileges.
+ * ------------------------------------------------------------------------- */
+typedef struct { DWORD LowPart; LONG HighPart; } K32_LUID;
+
+__attribute__((dllexport)) BOOL ImpersonateSelf(DWORD level) {
+    (void)level;
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL RevertToSelf(void) {
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL GetUserNameExA(DWORD name_format, LPSTR name, DWORD *size) {
+    (void)name_format; (void)name;
+    if (!size) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL GetUserNameExW(DWORD name_format, K32_LPWSTR name, DWORD *size) {
+    (void)name_format; (void)name;
+    if (!size) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 50; /* ERROR_NOT_SUPPORTED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupAccountSidA(LPCSTR system, void *sid, LPSTR name, DWORD *name_len, LPSTR domain, DWORD *domain_len, DWORD *use) {
+    (void)system; (void)sid; (void)name; (void)domain; (void)use;
+    if (!name_len || !domain_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupAccountSidW(K32_LPCWSTR system, void *sid, K32_LPWSTR name, DWORD *name_len, K32_LPWSTR domain, DWORD *domain_len, DWORD *use) {
+    (void)system; (void)sid; (void)name; (void)domain; (void)use;
+    if (!name_len || !domain_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupAccountNameA(LPCSTR system, LPCSTR name, void *sid, DWORD *sid_len, LPSTR domain, DWORD *domain_len, DWORD *use) {
+    (void)system; (void)name; (void)sid; (void)domain; (void)use;
+    if (!sid_len || !domain_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupAccountNameW(K32_LPCWSTR system, K32_LPCWSTR name, void *sid, DWORD *sid_len, K32_LPWSTR domain, DWORD *domain_len, DWORD *use) {
+    (void)system; (void)name; (void)sid; (void)domain; (void)use;
+    if (!sid_len || !domain_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeValueA(LPCSTR system, LPCSTR name, K32_LUID *luid) {
+    (void)system; (void)name;
+    if (!luid) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeValueW(K32_LPCWSTR system, K32_LPCWSTR name, K32_LUID *luid) {
+    (void)system; (void)name;
+    if (!luid) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeNameA(LPCSTR system, K32_LUID *luid, LPSTR name, DWORD *name_len) {
+    (void)system; (void)luid; (void)name;
+    if (!name_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeNameW(K32_LPCWSTR system, K32_LUID *luid, K32_LPWSTR name, DWORD *name_len) {
+    (void)system; (void)luid; (void)name;
+    if (!name_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeDisplayNameA(LPCSTR name, LPSTR display, DWORD *display_len, DWORD *lang_id) {
+    (void)name; (void)display; (void)lang_id;
+    if (!display_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    if (lang_id) *lang_id = 0;
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL LookupPrivilegeDisplayNameW(K32_LPCWSTR name, K32_LPWSTR display, DWORD *display_len, DWORD *lang_id) {
+    (void)name; (void)display; (void)lang_id;
+    if (!display_len) { k32_last_error = 87; return 0; } /* ERROR_INVALID_PARAMETER */
+    if (lang_id) *lang_id = 0;
+    k32_last_error = 1173; /* ERROR_NONE_MAPPED */
+    return 0;
+}
+
+__attribute__((dllexport)) BOOL SetTokenInformation(HANDLE token, DWORD token_info_class, void *info, DWORD length) {
+    (void)token; (void)token_info_class; (void)info; (void)length;
+    k32_last_error = 1008; /* ERROR_NO_TOKEN */
+    return 0;
+}

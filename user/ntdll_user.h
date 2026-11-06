@@ -118,6 +118,22 @@ static inline u64 NtQueryProcessList(NT_PROCESS_SNAPSHOT *rows, u64 capacity) {
     return sy3(SYS_NtQueryProcessList, (u64)rows, capacity, 0);
 }
 
+static inline u64 NtWmRegister(const char *title) {
+    return sy3(SYS_WmRegister, 0, (u64)title, 0);
+}
+static inline u64 NtWmUnregister(void) {
+    return sy3(SYS_WmUnregister, 0, 0, 0);
+}
+static inline u64 NtWmQuery(u64 index, char *name_out, int *min_out) {
+    return sy3(SYS_WmQuery, index, (u64)name_out, (u64)min_out);
+}
+static inline u64 NtWmRestore(u64 pid) {
+    return sy3(SYS_WmRestore, pid, 0, 0);
+}
+static inline u64 NtWmSetMin(u64 pid, int min) {
+    return sy3(SYS_WmSetMin, pid, min, 0);
+}
+
 typedef struct { u64 pixels; u32 layer,x,y,w,h,width,height; } NT_PRESENT_LAYER;
 static inline u64 NtPresentLayer(const NT_PRESENT_LAYER *layer) {
     return sy3(SYS_PresentLayer, (u64)layer, 0, 0);

@@ -1,4 +1,4 @@
-# Launch SentinelOS from the expandable GPT VHDX built by scripts/build.ps1.
+# Launch SentinelOS from the VHDX disk image built by scripts/build.ps1.
 # Disk layout: FAT32 EFI System Partition + NTFS magic system partition.
 # Host CPU and host-rendered VirtIO GPU are requested explicitly.
 [CmdletBinding()]
@@ -23,17 +23,9 @@ if (-not $qemuCommand) {
 }
 if (-not $qemuCommand) { throw "qemu-system-x86_64 was not found. Install a Windows QEMU build and add its bin directory to PATH." }
 $qemu = if ($qemuCommand.Source) { $qemuCommand.Source } else { $qemuCommand.FullName }
-if (-not (Test-Path $disk -PathType Leaf)) { throw "SentinelOS VHDX is missing: $disk. Run .\scripts\build.ps1 first to create the GPT disk with a FAT32 ESP and NTFS system partition." }
+if (-not (Test-Path $disk -PathType Leaf)) { throw "SentinelOS disk image is missing: $disk. Run .\scripts\build.ps1 first to create the GPT VHDX with a FAT32 ESP and NTFS system partition." }
 $diskInfo = Get-Item $disk
-if ($diskInfo.Length -lt 1MB) { throw "SentinelOS VHDX is unexpectedly small ($($diskInfo.Length) bytes): $disk. Rebuild it with .\scripts\build.ps1." }
-
-# The host must not have the disk mounted while the VM boots from it.
-$img = Get-DiskImage -ImagePath $disk -ErrorAction SilentlyContinue
-if ($img -and $img.Attached) {
-    Write-Warning "VHDX is still mounted on the host; dismounting it before boot."
-    try { [void](Dismount-DiskImage -ImagePath $disk) }
-    catch { throw "Could not dismount $disk. From an Administrator PowerShell run: .\scripts\vhd.ps1 Dismount" }
-}
+if ($diskInfo.Length -lt 1MB) { throw "SentinelOS disk image is unexpectedly small ($($diskInfo.Length) bytes): $disk. Rebuild it with .\scripts\build.ps1." }
 if ($Verify) {
     $v = Join-Path $PSScriptRoot "vhd.ps1"
     if (Test-Path -LiteralPath $v) { & $v Verify } else { Write-Warning "vhd.ps1 not found; skipping -Verify." }
@@ -72,7 +64,7 @@ if ($NoGpuAcceleration) {
     $displayArgs = @("-display", "sdl,gl=on")
     Write-Host "SentinelOS: requesting NVIDIA-backed host OpenGL/VirGL on VirtIO VGA"
 }
-Write-Host "SentinelOS: boot disk: $disk (GPT / FAT32 ESP + NTFS system volume)"
+Write-Host "SentinelOS: boot disk: $disk (VHDX GPT image / FAT32 ESP + NTFS system volume)"
 Write-Host "SentinelOS: starting QEMU. Firmware failures before SentinelOS starts should be isolated with -NoHostCpu -NoGpuAcceleration."
 # The platform switch isolates firmware/QEMU compatibility from the default q35 + VirtIO setup.
 $machineArgs = @("-machine", "q35")
@@ -84,7 +76,8 @@ $argsQemu = $machineArgs + $accelArgs + $cpuArgs + @(
     "-m", "$($ramMb)M",
     "-bios", "$firmware",
     "-drive", "file=$disk,format=vhdx,if=none,id=d0",
-    "-device", "virtio-blk-pci,drive=d0",
+    "-device", "virtio-blk-pci,drive=d0,bootindex=1",
+    "-boot", "order=c",
     "-netdev", "user,id=net0",
     "-device", "e1000,netdev=net0"
 ) + $gpuArgs + $displayArgs + @("-serial", "stdio", "-no-reboot")

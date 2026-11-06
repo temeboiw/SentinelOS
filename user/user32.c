@@ -3046,16 +3046,16 @@ BOOL GetMessageA(MSG *msg, void *hwnd, u32 min, u32 max) {
                             g_drag=0;
                             g_drag_moved=0;
                         }
-                    }
-                    if (g_resizing) {
-                        g_resizing = 0;
-                        /* Deliver one final WM_SIZE with the committed size after
-                         * the drag ends, so the app proc cannot re-enter the input
-                         * loop and clear resize state mid-drag. */
-                        u32_send_size();
-                        /* Final clean paint of the window at its committed size. */
-                        compose_region(g_wnd.x-6, g_wnd.y-6,
-                                       g_wnd.x+g_wnd.w+10, g_wnd.y+g_wnd.h+14);
+                        if (g_resizing) {
+                            g_resizing = 0;
+                            /* Deliver one final WM_SIZE with the committed size after
+                             * the drag ends, so the app proc cannot re-enter the input
+                             * loop and clear resize state mid-drag. */
+                            u32_send_size();
+                            /* Final clean paint of the window at its committed size. */
+                            compose_region(g_wnd.x-6, g_wnd.y-6,
+                                           g_wnd.x+g_wnd.w+10, g_wnd.y+g_wnd.h+14);
+                        }
                     }
                 }
 

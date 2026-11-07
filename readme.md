@@ -39,7 +39,7 @@ API coverage is not equivalent to complete Windows compatibility. Individual exp
 ### Registry and system tools
 
 - Persistent registry-hive work in `advapi32`.
-- Native `regedit.exe) work for browsing and editing registry keys and values.
+- Native `regedit.exe` work for browsing and editing registry keys and values.
 - Basic `.reg` import/export code is present. The current implementation has format and buffer limitations, and end-to-end execution inside a booted SentinelOS environment has not yet been verified.
 - User-system and UAC/elevation work are part of the V11 system-services implementation.
 

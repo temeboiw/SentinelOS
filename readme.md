@@ -1,100 +1,137 @@
-# magic OS
+# SentinelOS V11 — SOVEREIGN
 
-magic OS is an experimental x86-64 operating system project. It boots through UEFI from a single GPT disk with a FAT32 EFI System Partition and an ext4 system partition, and runs in QEMU for development and testing.
+SentinelOS is an independent **x86-64 operating system** project focused on a native Windows-style desktop, a real kernel and user-mode runtime, and broad Win32 application compatibility. It is built from native components rather than being a Windows installation or a Linux distribution with a themed desktop.
 
-## Current features
+V11 is the current development line. The project is actively evolving: features described as implemented below may still need end-to-end boot and runtime verification. This README distinguishes current implementation from the compatibility and product goals still being developed.
 
-- Three-stage UEFI boot chain with a firmware fallback loader and NVRAM boot entry.
-- UEFI loader for x64 PE images, including base relocations and imports between loaded modules.
-- Kernel and `hal.dll` loaded from `magic/System32` on ext4.
-- Kernel initialization for CPU tables and exceptions, physical and virtual memory, and the kernel heap.
-- HAL and kernel-thread scheduler self-tests, with serial diagnostics.
-- Single-disk GPT image with a FAT32 EFI System Partition and ext4 system partition.
-- QEMU run configuration with persistent UEFI variables under `build/`.
+## Project direction
 
-This is an early development project, not a general-purpose operating system. The kernel currently runs its tests, paints the framebuffer, and halts.
+The goal is a cohesive desktop operating system with familiar Windows workflows and a native implementation:
 
-## Build prerequisites
+- UEFI-first x86-64 boot and a GPT system disk.
+- A native kernel, hardware abstraction layer, user-mode process/thread support, and PE32+ executable loading.
+- A Windows-like filesystem layout and native system applications.
+- Win32-compatible APIs and runtime services so existing Windows software can be brought up without bundling copied Windows system binaries.
+- GPU-backed desktop and application rendering, with Vulkan as the graphics foundation and DXVK as a route toward Direct3D compatibility.
+- User accounts, access control, elevation, system settings, and familiar administration tools.
 
-The build scripts target Windows and expect:
+## Current implementation snapshot
 
-- Administrator PowerShell for `scripts/build.ps1` (`diskpart` creates the GPT disk and FAT32 EFI System Partition).
-- `clang`, `lld-link`, `qemu-img`, and `qemu-system-x86_64` available on `PATH`.
-- EDK II headers in `C:\edk2`, or set the `EDK2` environment variable to their location.
-- `mke2fs.exe` at `C:\msys64\usr\bin\mke2fs.exe`, or WSL with `mke2fs` installed.
-- QEMU UEFI firmware under `C:\Program Files\qemu\share` for `scripts/run.ps1`.
+The repository contains active V11 implementation work in these areas:
+
+### Boot, kernel, and hardware
+
+- x86-64 UEFI boot chain and GPT disk-image build.
+- FAT32 EFI System Partition and NTFS system partition in the Windows-host VHDX build.
+- PE32+ loading infrastructure for boot and user-mode components.
+- Kernel CPU, memory-management, executive, and scheduling subsystems.
+- Hardware abstraction and device/graphics work, including VirtIO-GPU support.
+
+### Win32 and user mode
+
+- Native PE32+ user applications and DLLs.
+- Expanding implementations of core Win32 libraries, including `kernel32`, `user32`, `advapi32`, and `ws2_32`.
+- Window creation, message handling, text rendering, input, menus, and desktop-shell work.
+- Ongoing API coverage and application-compatibility testing.
+
+API coverage is not equivalent to complete Windows compatibility. Individual exports and behaviors still require implementation and testing against real applications.
+
+### Registry and system tools
+
+- Persistent registry-hive work in `advapi32`.
+- Native `regedit.exe) work for browsing and editing registry keys and values.
+- Basic `.reg` import/export code is present. The current implementation has format and buffer limitations, and end-to-end execution inside a booted SentinelOS environment has not yet been verified.
+- User-system and UAC/elevation work are part of the V11 system-services implementation.
+
+### Graphics
+
+- VirtIO-GPU and userspace graphics work are present.
+- The longer-term graphics direction is real GPU-backed Vulkan rendering, followed by a Direct3D compatibility path using DXVK.
+- Do not interpret API presence or a software fallback as proof of a complete hardware Vulkan driver. Intel, AMD, and NVIDIA support and real application workloads require separate validation.
+
+## V11 roadmap
+
+The following are product and compatibility goals, not claims that every item is already finished.
+
+### Shell and desktop
+
+- **One unified `explorer.exe`:** desktop, taskbar, and file-browsing experiences should be parts of the same shell process. The intended architecture uses modular components such as DesktopView, FileBrowser, Taskbar, and shell services; a separate `fileexplorer.exe` should not be the final design.
+- **System-wide right-click context menus** for files, folders, desktop items, and supported shell objects.
+- Consistent window management, drag/resize behavior, icons, cursors, and desktop interactions.
+
+### Registry and configuration
+
+- Robust native `.reg` file association, import, and export.
+- Compatibility with the Windows Registry Editor Version 5.00 format, including correct escaping, Unicode, supported registry value types, deletion entries, and multiline data.
+- Validation and safe failure handling for imports, with clear error reporting.
+
+### Command-line environments
+
+- A full native **CMD** environment, including command execution, batch files, environment variables, pipes/redirection, and common built-in commands.
+- A full native **PowerShell** environment with a compatible command/runtime model and scripting support.
+- These are substantial compatibility projects; a basic command prompt or a limited command subset is not the finished target.
+
+### Application compatibility
+
+- Continue expanding Win32 API coverage based on real application requirements.
+- Improve process, thread, memory, file, registry, networking, windowing, GDI, COM, and graphics compatibility.
+- Validate against real applications and document known blockers instead of treating export counts as a compatibility percentage.
+
+### Security and system services
+
+- Complete user and permission infrastructure, elevation/UAC behavior, and system-wide security policy.
+- Continue native service, driver, and security infrastructure work.
+- Sentinel Defender is a future planned subsystem; it is not represented as implemented.
 
 ## Build and run
 
-From the repository root in an Administrator PowerShell:
+The current checked-in Windows build entry point is `scripts/build.ps1`. Run it from an **Administrator PowerShell** on a Windows host with the required native LLVM, EDK II, and QEMU tooling available.
+
+Build:
 
 ```powershell
 .\scripts\build.ps1
 ```
 
-Build and launch the result in QEMU:
+Build and launch in QEMU:
 
 ```powershell
 .\scripts\build.ps1 -Run
 ```
 
-To launch an already-built image without rebuilding:
+Launch an existing build:
 
 ```powershell
 .\scripts\run.ps1
 ```
 
-QEMU connects the guest serial port to the PowerShell terminal. Kernel diagnostics and self-test results appear there. On a normal run, the framebuffer is painted and the kernel halts.
+Available build switches:
 
-## Build options
+- `-Run` — launch QEMU after a successful build.
+- `-Clean` — remove generated build output and detach generated disk images.
+- `-KeepFallback` — retain the fallback UEFI bootloader.
+- `-ResetNvram` — reset saved QEMU UEFI variables before rebuilding.
 
-- `-Run`: launch QEMU after a successful build.
-- `-KeepFallback`: do not remove `EFI\BOOT\BOOTX64.EFI` after registering the UEFI boot entry.
-- `-ResetNvram`: remove the saved `build\vars.fd` before rebuilding, resetting QEMU's UEFI boot variables.
-- `-Clean`: detach the generated virtual disk if needed and remove `build\`.
+The build creates an expandable GPT VHDX with a FAT32 EFI System Partition and an NTFS system partition. Build artifacts are placed under `build\`.
 
-## Building on Linux
+> Build success, PE validation, and source-level tests do not by themselves prove that the complete OS boots or that an application works correctly. Runtime claims should be backed by an actual SentinelOS/QEMU or hardware test.
 
-`scripts/build.sh` and `scripts/run.sh` do the same job on Linux. Required tools: `clang`, `lld`, `qemu-img`, `qemu-system-x86_64`, `sfdisk`, `mkfs.vfat`, `mke2fs`, and `mtools` (`mmd`, `mcopy`). EDK II headers are found via the `EDK2` environment variable (needs `MdePkg/Include`), falling back to `/usr/include/efi`.
+## Repository guide
 
-```bash
-./scripts/build.sh
-./scripts/build.sh --run
-./scripts/run.sh
-```
+- `boot/` — UEFI boot stages, image loading, and executable-loading code.
+- `kernel/` — kernel, memory, process/thread, executive, and graphics subsystems.
+- `hal/` — hardware abstraction layer.
+- `drivers/` — device-driver code.
+- `user/` — native user-mode libraries, shell, and system applications.
+- `shared/` — shared ABI and system definitions.
+- `scripts/` — Windows build and QEMU launch scripts.
+- `tests/` — source-contract and integration tests.
+- `docs/` and root-level status reports — architecture notes, audits, and implementation tracking.
 
-Linux options:
+## Development status
 
-- `--run`: launch QEMU after a successful build.
-- `--keep-fallback`: keep `EFI/BOOT/BOOTX64.EFI`.
-- `--reset-nvram`: remove the saved `build/vars.fd`.
-- `--clean`: remove `build/`.
+SentinelOS V11 is under active development and is not yet a finished, general-purpose Windows replacement. Compatibility is incremental: each subsystem needs implementation, integration, and runtime testing. Status reports such as [V11 architecture coordination](V11_ARCH_COORDINATION.md), [kernel audit](KERNEL_AUDIT_REPORT.md), and [Registry Editor status](REGEDIT_SECTION13_STATUS.md) provide deeper technical detail and should be read with their stated scope and verification limits in mind.
 
-For example, rebuild with the fallback loader retained:
+## Project history
 
-```powershell
-.\scripts\build.ps1 -KeepFallback -Run
-```
-
-## Boot flow
-
-1. Firmware starts `EFI\BOOT\BOOTX64.EFI` from the FAT EFI System Partition.
-2. `bootx64.efi` starts `EFI\magic\bootuni.efi`.
-3. `bootuni.efi` registers the `magic OS` UEFI boot entry and starts `EFI\magic\loadufi.efi`.
-4. `loadufi.efi` scans UEFI block devices for the ext4 partition, reads `magic/System32/hal.dll` and `krnl.exe`, exits UEFI boot services, and transfers control to the kernel.
-
-## Generated files
-
-Build artifacts are written under `build/`:
-
-- `magic-disk.img`: GPT disk image with the FAT32 EFI System Partition and ext4 system partition.
-- `vars.fd`: persistent QEMU UEFI variables.
-- `esp/`, `rootfs/`, and `obj/`: staged files and intermediate objects.
-
-## Source layout
-
-- `boot/`: UEFI boot stages, ext4 reader, and PE loader.
-- `kernel/`: kernel entry point, CPU setup, memory managers, heap, and executive routines.
-- `hal/`: hardware abstraction layer.
-- `shared/`: boot information and shared type definitions.
-- `scripts/`: Windows (`.ps1`) and Linux (`.sh`) build and QEMU launch scripts.
+SentinelOS V10 was the first kernel-era milestone. V11 SOVEREIGN continues from that foundation with a larger focus on native user mode, desktop integration, system services, graphics, and application compatibility.
